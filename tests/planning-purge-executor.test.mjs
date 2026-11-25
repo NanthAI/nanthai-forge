@@ -18,6 +18,7 @@ import { setup, actions } from './hosted-planning-fixture.mjs';
 import { workRecordRows } from './hosted-fixture.mjs';
 import { meterWorkIO } from './hosted-read-set.mjs';
 import { moduleUrl } from './convex-module.mjs';
+import { defaultR2Config, defaultR2Objects } from './default-r2.mjs';
 import { replayFailedDelete, replayLateUpload } from './artifact-delete-replay.mjs';
 
 const SECRET = 'quokka-executor-fixture';
@@ -1022,6 +1023,14 @@ function storage(t) {
   const original = globalThis.fetch;
   t.mock.method(globalThis, 'fetch', async (url, init) => {
     const path = new URL(url).pathname;
+    // A project object (the base archive) lives in the process's default bucket.
+    const stored = /^\/[^/]+\/(v1\/p\/[^/]+\/o\/[0-9a-f]{64})$/.exec(path);
+    if (stored && defaultR2Objects.has(`${defaultR2Config.bucket}/${stored[1]}`)) {
+      const bytes = defaultR2Objects.get(`${defaultR2Config.bucket}/${stored[1]}`);
+      return new Response((init?.method ?? 'GET') === 'HEAD' ? null : bytes, {
+        headers: { 'content-length': String(bytes.length) },
+      });
+    }
     const discussion = path.indexOf('/v1/p/');
     const key = path.includes('/journal-segments/')
       ? path.split('/').at(-1)

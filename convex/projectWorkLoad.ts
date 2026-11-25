@@ -43,7 +43,7 @@ export async function source(
   );
   invariant(
     original.backup.status === 'stored' &&
-      (original.backup.transport === 'objects' || original.backup.storageId || original.backup.r2Committed),
+      (original.backup.transport === 'objects' || original.backup.r2Committed),
     'PROJECT_UNAVAILABLE',
     'Select a stored source and Work backup.',
   );

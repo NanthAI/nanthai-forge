@@ -34,42 +34,6 @@ test('100 MiB acquisition streams bounded physical windows with memory margin', 
   t.diagnostic(JSON.stringify(result));
 });
 
-test('batched completion refuses old Convex file storage (F6) and current access is rechecked', async () => {
-  const s = pagedFixture(),
-    projectId = await s.ctx.db.insert('hostedProjects', {
-      owner: 'owner',
-      key: 'negative',
-      name: 'negative',
-      currentBackup: null,
-      revision: 0,
-    });
-  const digest = createHash('sha256').update('expected').digest('hex');
-  const [pin] = await s.ctx.runMutation(makeFunctionReference('projectGithubImportBatch:prepare'), {
-    projectId,
-    actor: 'owner',
-    objects: [{ digest, size: 8 }],
-  });
-  const storageId = await s.ctx.storage.store(new Blob(['changed!'], { type: pin.contentType }));
-  await assert.rejects(
-    s.ctx.runMutation(makeFunctionReference('projectGithubImportBatch:complete'), {
-      projectId,
-      actor: 'owner',
-      objects: [{ id: pin.id, storageId }],
-      recipes: [],
-    }),
-    e => e.code === 'R2_REQUIRED',
-  );
-  await assert.rejects(
-    s.ctx.runMutation(makeFunctionReference('projectGithubImportBatch:prepare'), {
-      projectId,
-      actor: 'outsider',
-      objects: [{ digest, size: 8 }],
-    }),
-    e => e.code === 'PROJECT_UNAVAILABLE',
-  );
-  assert.equal(s.tables.projectObjects.get(pin.id).storageId, undefined);
-});
-
 test('multiple chunked files share one byte window before recipes bind atomically', async () => {
   const s = pagedFixture(),
     projectId = await s.ctx.db.insert('hostedProjects', {

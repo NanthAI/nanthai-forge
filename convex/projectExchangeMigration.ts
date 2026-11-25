@@ -52,7 +52,7 @@ export const migrate = action({
           backup.digest === input.originalDigest &&
           backup.status === 'stored' &&
           backup.preview.format === 'native' &&
-          (backup.transport === 'objects' || backup.storageId || backup.r2Committed),
+          (backup.transport === 'objects' || backup.r2Committed),
         'INVALID_WORK_BACKUP',
         'Select your exact stored native archive.',
       );
@@ -137,7 +137,6 @@ export const migrate = action({
       await ctx.runMutation(internal.projectExchange.migrateArchive, {
         ...input,
         owner: user.subject,
-        ...(backup.storageId ? { originalStorageId: backup.storageId } : {}),
         ...(backup.r2Key ? { originalR2Key: backup.r2Key } : {}),
       });
       return retire();

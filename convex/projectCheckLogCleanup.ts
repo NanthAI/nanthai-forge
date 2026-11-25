@@ -178,7 +178,7 @@ export async function planProjectCheckLogs(
   const planned = checkLogStoragePlan(snapshots, edges, protectedPins);
   const selected = planned.digests.flatMap(pin => {
     const row = rows.get(pin);
-    return row && !row.removed && (row.storageId || row.recipe || row.r2Committed) ? [row] : [];
+    return row && !row.removed && (row.recipe || row.r2Committed) ? [row] : [];
   });
   const scope = { guard, logs: planned.logs, digests: planned.digests, archives, hostedOutputs };
   return {

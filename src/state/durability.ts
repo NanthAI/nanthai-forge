@@ -49,14 +49,6 @@ export function syncFile(path: string) {
     closeSync(fd);
   }
 }
-export async function syncFileAsync(path: string) {
-  const handle = await open(path, fileFlushFlags());
-  try {
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
-}
 /** Flush through a descriptor opened read-only to verify it first. On Windows the bytes rely on
  * the writer's own flush: a read-only handle cannot flush there. */
 export function syncReadOnlyDescriptor(fd: number) {

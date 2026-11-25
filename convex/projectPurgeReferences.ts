@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-import { getDocumentSize, v, type Infer } from 'convex/values';
+import { v, type Infer } from 'convex/values';
 import type { PaginationOptions, PaginationResult } from 'convex/server';
 import type { Id } from './_generated/dataModel';
 import type { QueryCtx } from './server';
@@ -9,45 +9,9 @@ import { projectPrefix } from './r2Operations';
 import { invariant } from '../src/errors';
 
 type ProjectId = Id<'hostedProjects'>;
-type StorageId = Id<'_storage'>;
 type PageQuery<Row> = { paginate: (options: PaginationOptions) => Promise<PaginationResult<Row>> };
-type StorageRow = { storageId?: StorageId; archiveReceipt?: { storageId?: StorageId } };
 type KeyRow = { r2Key?: string; archiveReceipt?: { r2Key?: string } };
-type AliasRow = { projectId: ProjectId };
-type AliasQuery = PageQuery<AliasRow> & { take: (count: number) => Promise<AliasRow[]> };
 type KeyedRow = { projectId: ProjectId } & KeyRow;
-
-const candidates = {
-  objects: (ctx, projectId) =>
-    ctx.db
-      .query('projectObjects')
-      .withIndex('by_project_and_storage_and_removed', q =>
-        q.eq('projectId', projectId).gt('storageId', undefined),
-      ),
-  backups: (ctx, projectId) =>
-    ctx.db.query('projectBackups').withIndex('by_project', q => q.eq('projectId', projectId)),
-  proposals: (ctx, projectId) =>
-    ctx.db.query('projectProposals').withIndex('by_project_and_operation', q => q.eq('projectId', projectId)),
-} satisfies Record<string, (ctx: QueryCtx, projectId: ProjectId) => PageQuery<StorageRow>>;
-
-// Existing cleanup indexes, including the oldest archive receipt alias path.
-const aliases = {
-  objects: (ctx, id) => ctx.db.query('projectObjects').withIndex('by_storage', q => q.eq('storageId', id)),
-  backups: (ctx, id) => ctx.db.query('projectBackups').withIndex('by_storage', q => q.eq('storageId', id)),
-  archives: (ctx, id) =>
-    ctx.db.query('projectBackups').withIndex('by_archive_storage', q => q.eq('archiveReceipt.storageId', id)),
-  proposals: (ctx, id) =>
-    ctx.db.query('projectProposals').withIndex('by_storage', q => q.eq('storageId', id)),
-} satisfies Record<string, (ctx: QueryCtx, id: StorageId) => AliasQuery>;
-type Alias = keyof typeof aliases;
-const aliasKinds = Object.keys(aliases) as Alias[];
-const aliasTable = {
-  objects: 'projectObjects',
-  backups: 'projectBackups',
-  archives: 'projectBackups',
-  proposals: 'projectProposals',
-};
-
 // Every stored key under the selected project's prefix, from any project, on an index of the stored
 // key itself (Item 411727ba): Convex maintains it, so no writer can miss a row. The page reads the
 // selected project's own key-bearing rows plus real matches, never every other project's rows.
@@ -82,8 +46,8 @@ function keyRange(ctx: Pick<QueryCtx, 'db'>, section: keyof typeof keyRows, pref
   return ranges[section]() as PageQuery<KeyedRow>;
 }
 
-type Section = keyof typeof candidates | (typeof r2Sections)[number];
-const sections = [...Object.keys(candidates), ...r2Sections] as Section[];
+type Section = (typeof r2Sections)[number];
+const sections: Section[] = [...r2Sections];
 const cursor = v.union(v.string(), v.null());
 const scan = v.object({
   section: v.union(...sections.map(section => v.literal(section))),
@@ -91,27 +55,13 @@ const scan = v.object({
   side: r2ReferencePosition.fields.side,
   single: r2ReferencePosition.fields.single,
 });
-const alias = v.object({
-  id: v.string(),
-  kind: v.union(...aliasKinds.map(kind => v.literal(kind))),
-  cursor,
-});
-const checks = v.object({
-  section: v.literal('fileChecks'),
-  remaining: v.array(v.string()),
-  aliases: v.array(alias),
-  resume: v.union(scan, v.null()),
-});
-const continuation = v.union(scan, checks);
 const reference = v.object({ key: v.string(), table: v.string() });
 type Reference = Infer<typeof reference>;
-type AliasPosition = Infer<typeof alias>;
-type FileChecks = Infer<typeof checks>;
-type Position = Infer<typeof continuation>;
-export const referenceArgs = { projectId: v.id('hostedProjects'), next: v.optional(continuation) };
+type Position = Infer<typeof scan>;
+export const referenceArgs = { projectId: v.id('hostedProjects'), next: v.optional(scan) };
 export const referenceResult = v.object({
-  section: v.union(scan.fields.section, checks.fields.section),
-  next: v.union(continuation, v.null()),
+  section: scan.fields.section,
+  next: v.union(scan, v.null()),
   references: v.array(reference),
   documentBytes: v.number(),
   documentsRead: v.number(),
@@ -135,88 +85,12 @@ async function importReference(ctx: Pick<QueryCtx, 'db'>, key: string) {
   if (artifacts.length) return 'importArtifacts';
 }
 
-function nextChecks(state: FileChecks): Position | null {
-  return state.remaining.length || state.aliases.length ? state : state.resume;
-}
-
-/** Continuations carry index keys as strings. Normalize only for the metadata lookup. */
-function fileKey(ctx: QueryCtx, raw: string) {
-  const id = ctx.db.system.normalizeId('_storage', raw);
-  invariant(id, 'BAD_ARGUMENT', 'Use the returned reference cursor.');
-  return id;
-}
-
-async function checkFiles(ctx: QueryCtx, projectId: ProjectId, state: FileChecks, references: Reference[]) {
-  const pending = state.aliases[0];
-  if (pending) {
-    const id = fileKey(ctx, pending.id);
-    const page = await readPage<AliasRow>(aliases[pending.kind](ctx, id), pending.cursor, 100);
-    if (page.page.some(row => row.projectId !== projectId)) {
-      references.push({ key: pending.id, table: aliasTable[pending.kind] });
-      state.aliases = state.aliases.filter(entry => entry.id !== pending.id);
-    } else if (page.isDone) state.aliases.shift();
-    else pending.cursor = page.continueCursor;
-    return nextChecks(state);
-  }
-
-  let bytes = (await ctx.meta.getTransactionMetrics()).bytesRead.used;
-  const limit = 4 * 1024 * 1024;
-  const remaining = state.remaining;
-  // Each id can read two documents on four indexes and one import witness.
-  // Start below 4 MiB to leave room for nine maximum-size documents.
-  while (remaining.length && bytes < limit) {
-    const id = fileKey(ctx, remaining.shift()!);
-    let table: string | undefined;
-    const saturated: AliasPosition[] = [];
-    for (const kind of aliasKinds) {
-      const rows = await aliases[kind](ctx, id).take(2);
-      for (const row of rows) bytes += getDocumentSize(row);
-      if (rows.some(row => row.projectId !== projectId)) {
-        table = aliasTable[kind];
-        break;
-      }
-      if (rows.length === 2) saturated.push({ id, kind, cursor: null });
-    }
-    if (!table) {
-      table = await importReference(ctx, id);
-      // One import witness may have been read. Reserve a full document.
-      if (table) bytes += 1024 * 1024;
-    }
-    if (table) references.push({ key: id, table });
-    else state.aliases.push(...saturated);
-  }
-  return nextChecks(state);
-}
-
-const isStorage = (section: Section): section is keyof typeof candidates =>
-  Object.hasOwn(candidates, section);
-
 async function scanSection(
   ctx: QueryCtx,
   projectId: ProjectId,
   { section, cursor, side, single }: Infer<typeof scan>,
   references: Reference[],
 ): Promise<Position | null> {
-  const following = sections[sections.indexOf(section) + 1];
-  const resume = following ? { section: following, cursor: null } : null;
-  if (isStorage(section)) {
-    const page = await readPage<StorageRow>(candidates[section](ctx, projectId), cursor, 4);
-    const keys = new Set(
-      page.page.flatMap(row => [row.storageId, row.archiveReceipt?.storageId]).filter(id => id !== undefined),
-    );
-    return checkFiles(
-      ctx,
-      projectId,
-      {
-        section: 'fileChecks',
-        remaining: [...keys],
-        aliases: [],
-        resume: page.isDone ? resume : { section, cursor: page.continueCursor },
-      },
-      references,
-    );
-  }
-
   return (
     await scanR2References(
       ctx,
@@ -287,7 +161,7 @@ export async function scanR2References(
 
 export async function referencePage(
   ctx: QueryCtx,
-  { projectId, next = { section: 'objects', cursor: null } }: { projectId: ProjectId; next?: Position },
+  { projectId, next = { section: 'objectKeys', cursor: null } }: { projectId: ProjectId; next?: Position },
 ) {
   invariant(
     await ctx.db.get(projectId),
@@ -295,16 +169,7 @@ export async function referencePage(
     'This project has no retained project record.',
   );
   const references: Reference[] = [];
-  if (next.section === 'fileChecks')
-    invariant(
-      next.remaining.length <= 8 && next.aliases.length <= 32,
-      'BAD_ARGUMENT',
-      'Use the returned reference cursor.',
-    );
-  const position =
-    next.section === 'fileChecks'
-      ? await checkFiles(ctx, projectId, next, references)
-      : await scanSection(ctx, projectId, next, references);
+  const position = await scanSection(ctx, projectId, next, references);
   const metrics = await ctx.meta.getTransactionMetrics();
   return {
     section: next.section,

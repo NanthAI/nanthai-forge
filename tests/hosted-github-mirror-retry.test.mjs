@@ -19,13 +19,12 @@ import { hostedMirrorStatusText } from '../dist/hosted-github-mirror-status.js';
 import { agentFixture } from './hosted-agent-fixture.mjs';
 import { readHostedCliStatus } from '../dist/hosted-cli-status.js';
 
-import { interceptDefaultR2 } from './default-r2.mjs';
+import { interceptDefaultR2, defaultR2Config, defaultR2Objects } from './default-r2.mjs';
 import { workflowTreeRefusal } from './github-api-fake.mjs';
 const agent = await import(moduleUrl('../convex/projectHostedAgent.ts'));
 const queue = await import(moduleUrl('../convex/projectGithubMirrorQueue.ts'));
 const store = await import(moduleUrl('../convex/projectGithubMirrorStore.ts'));
 const action = await import(moduleUrl('../convex/projectGithubMirror.ts'));
-const ownership = await import(moduleUrl('../convex/projectConvexSourceOwnership.ts'));
 const { githubMirrorStatus } = await import(moduleUrl('../convex/projectGithubMirrorStatus.idle.ts'));
 const { stoppedMirror, mirrorRow } = await import(moduleUrl('../convex/projectGithubMirrorRows.ts'));
 const { retargetGithubMirror } = await import(moduleUrl('../convex/projectGithubMirrorRetarget.ts'));
@@ -89,22 +88,20 @@ async function fixture(t, fail, source, respond = () => undefined) {
         candidate: { head: github.head },
       }),
   });
-  const input = scheduled[0].args,
-    cursor = 'retained-cursor';
-  f.patch('projectGithubMirrorJobs', input.jobId, { cursor });
+  const input = scheduled[0].args;
   const cursorBytes = Buffer.from(JSON.stringify(await prepareMirror(github.seed, github.io)));
-  const cursorOwnerId = f.insert('projectObjects', {
-    projectId,
-    digest: digest(cursorBytes),
-    size: cursorBytes.length,
-    nonce: 'synthetic-mirror',
-    storageId: cursor,
-    removed: false,
-  });
-  const storage = new Map([[cursor, new Blob([cursorBytes])]]),
-    storageReads = [];
-  assert.equal(await run(ownership.owns, { projectId, ref: cursor }), true);
-  for (const [id, bytes] of github.objects) storage.set(id, new Blob([bytes]));
+  // Source bytes are R2 objects in the default bucket; the retained cursor is an R2 source reference.
+  const objectUrl = sha =>
+    `https://${defaultR2Config.accountId}.r2.cloudflarestorage.com/${defaultR2Config.bucket}/v1/p/${projectId}/o/${sha}`;
+  const objectSizes = new Map();
+  const put = (sha, bytes) => {
+    defaultR2Objects.set(`${defaultR2Config.bucket}/v1/p/${projectId}/o/${sha}`, Buffer.from(bytes));
+    objectSizes.set(sha, bytes.length);
+  };
+  put(digest(cursorBytes), cursorBytes);
+  const cursor = `r2source:${digest(cursorBytes)}:${cursorBytes.length}`;
+  f.patch('projectGithubMirrorJobs', input.jobId, { cursor });
+  for (const [id, bytes] of github.objects) put(id, bytes);
   const originalFetch = globalThis.fetch,
     tokenPermissions = [];
   const values = {
@@ -157,26 +154,13 @@ async function fixture(t, fail, source, respond = () => undefined) {
     runMutation: (ref, args) => run(methods[getFunctionName(ref).split(':')[1]], args),
     runQuery: async (ref, args) => {
       const name = getFunctionName(ref);
-      if (name === 'projectConvexSourceOwnership:owns') return run(ownership.owns, args);
       assert.equal(name, 'projectGithubMirrorObjects:resolve');
       return JSON.stringify(
         args.digests.map(id => ({
-          descriptor: { object: { sha256: id, size: storage.get(id).size }, recipe: null },
-          storageId: id,
-          url: null,
+          descriptor: { object: { sha256: id, size: objectSizes.get(id) }, recipe: null },
+          url: objectUrl(id),
         })),
       );
-    },
-    storage: {
-      get: async id => {
-        storageReads.push(id);
-        return storage.get(id);
-      },
-      store: async blob => {
-        const id = `cursor-${storage.size}`;
-        storage.set(id, blob);
-        return id;
-      },
     },
   };
   const job = () => f.tables.projectGithubMirrorJobs.get(input.jobId);
@@ -189,8 +173,6 @@ async function fixture(t, fail, source, respond = () => undefined) {
     run,
     input,
     cursor,
-    cursorOwnerId,
-    storageReads,
     scheduled,
     tasks,
     ctx,
@@ -451,21 +433,6 @@ test('real action: a persistent tree 422 for a SHA outside this job, or any othe
   assert.equal(other.job().status, 'failed');
   assert.equal(other.scheduled.length, 1);
 });
-
-for (const kind of ['foreign', 'unknown']) {
-  test(`real action refuses ${kind} legacy continuation before reading bytes`, async t => {
-    const f = await fixture(t, () => assert.fail('unowned cursor reached GitHub writes'));
-    const githubCalls = f.github.calls.length;
-    if (kind === 'foreign') f.patch('projectObjects', f.cursorOwnerId, { projectId: 'other-project' });
-    else f.tables.projectObjects.delete(f.cursorOwnerId);
-    await f.step();
-    assert.equal(f.job().status, 'failed');
-    assert.equal(f.job().error, 'SOURCE_REF_UNOWNED');
-    assert.deepEqual(f.storageReads, []);
-    assert.equal(f.scheduled.length, 1, 'unowned progress schedules no retry');
-    assert.equal(f.github.calls.length, githubCalls);
-  });
-}
 
 test('a 500 after verified blob replies checkpoints partial progress instead of repeating the whole window', async t => {
   let requests = 0;

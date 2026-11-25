@@ -74,8 +74,6 @@ export const generationFields = {
   returnPrepareCursor: v.optional(v.string()),
   returnMetadataCursor: v.optional(v.string()),
   returnMetadataSnapshot: v.optional(v.string()),
-  returnCursor: v.optional(v.id('_storage')),
-  returnSnapshot: v.optional(v.id('_storage')),
   returnStep: v.optional(v.number()),
   returnOperationId: v.optional(v.string()),
   returnAt: v.optional(v.string()),

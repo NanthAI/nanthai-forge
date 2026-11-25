@@ -41,7 +41,6 @@ export type ObjectLocation = {
   stateSize?: StateSize;
   stateParents?: string[];
   statePhysical?: WorkerPin;
-  storageId: Id<'_storage'> | null;
   url: string | null;
   range?: PackRange;
   closure?: SignedDownload[];
@@ -145,7 +144,6 @@ export function convexSourceTransport(
     locations.set(binding.sha256, {
       ...locations.get(binding.sha256),
       descriptor: { object: { sha256: binding.sha256, size: binding.size }, recipe: null },
-      storageId: null,
       url: null,
       ...(binding.pack ? { range: { offset: binding.pack.offset, total: binding.pack.size } } : {}),
     });
@@ -245,7 +243,6 @@ export function convexSourceTransport(
   const manifests = new Map<string, Promise<PhysicalManifestReader>>();
   const manifestLocation = async (entry: PhysicalEntry): Promise<ObjectLocation> => ({
     descriptor: { object: { sha256: entry.sha256, size: entry.size }, recipe: entry.recipe ?? null },
-    storageId: null,
     url: entry.recipe
       ? null
       : await presignGet(
@@ -531,7 +528,6 @@ export function convexSourceTransport(
         const physical = { sha256: leaf.digest, size: leaf.size };
         const row: ObjectLocation = {
           descriptor: { object: physical, recipe: null },
-          storageId: null,
           url: leaf.url,
           ...(leaf.range ? { range: leaf.range } : {}),
         };
@@ -568,20 +564,6 @@ export function convexSourceTransport(
     );
     reads.objects++;
     reads.bytes += pin.size;
-    const blob = !row.url && row.storageId ? await ctx.storage.get(row.storageId) : null;
-    if (blob)
-      return (async function* () {
-        const reader = blob.stream().getReader();
-        try {
-          for (;;) {
-            const part = await reader.read();
-            if (part.done) break;
-            yield part.value;
-          }
-        } finally {
-          await reader.cancel();
-        }
-      })();
     invariant(row.url, 'SOURCE_UNAVAILABLE', 'Exact source bytes are unavailable.');
     let response: Response;
     try {
@@ -706,7 +688,6 @@ export function convexSourceTransport(
           remember([
             {
               descriptor: { object: pin, recipe: projected.recipe! },
-              storageId: null,
               url: null,
               closure: projected.recipeClosure!.map(leaf => byDigest.get(leaf.sha256)!),
               ...(stateGeneration === undefined ? {} : { stateGeneration }),
@@ -741,7 +722,6 @@ export function convexSourceTransport(
             ...(stateParents === undefined ? {} : { stateParents }),
             ...(manifest?.statePhysical ? { statePhysical: manifest.statePhysical } : {}),
             ...dimensions,
-            storageId: r2 ? null : (ref as Id<'_storage'>),
             url: null,
           },
         ]);
@@ -751,7 +731,7 @@ export function convexSourceTransport(
           ...(stateParents === undefined ? {} : { stateParents }),
           ...(manifest ?? {}),
           ...dimensions,
-          ...(r2 ? { r2Key: r2Key(projectId, r2.sha256) } : { storageId: ref as Id<'_storage'> }),
+          r2Key: r2Key(projectId, r2!.sha256),
         };
       },
     };

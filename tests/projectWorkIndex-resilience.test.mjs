@@ -23,15 +23,20 @@ const complete = async f => {
   return result;
 };
 function injectSummary(f, error, failures = Infinity) {
-  const get = f.s.ctx.storage.get;
+  const prior = globalThis.fetch;
   let calls = 0,
     target;
-  f.s.ctx.storage.get = async id => {
-    const cursor = generation(f)?.ensureCursor;
-    const selected = cursor && JSON.parse(cursor);
-    if (!target && selected?.phase === 'summaries' && selected.field === 1) target = id;
-    if (id === target && calls++ < failures) throw error;
-    return get(id);
+  // Objects are R2 objects: the fault is thrown by the GET of the first summary object.
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(String(input));
+    if (url.hostname.endsWith('.r2.cloudflarestorage.com') && (init?.method ?? 'GET') === 'GET') {
+      const id = decodeURIComponent(url.pathname).split('/').at(-1);
+      const cursor = generation(f)?.ensureCursor;
+      const selected = cursor && JSON.parse(cursor);
+      if (!target && selected?.phase === 'summaries' && selected.field === 1) target = id;
+      if (id === target && calls++ < failures) throw error;
+    }
+    return prior(input, init);
   };
   return {
     get calls() {
@@ -39,6 +44,9 @@ function injectSummary(f, error, failures = Infinity) {
     },
     get target() {
       return target;
+    },
+    restore: () => {
+      globalThis.fetch = prior;
     },
   };
 }
@@ -60,6 +68,7 @@ test('summaries retry ECONNRESET in-place with no extra successful RPCs', async 
     }),
     1,
   );
+  t.after(fault.restore);
   await complete(f);
   assert(fault.calls >= 2);
   assert.deepEqual(f.metrics.calls, baseline.metrics.calls, 'storage retry adds no Convex calls');
@@ -67,9 +76,10 @@ test('summaries retry ECONNRESET in-place with no extra successful RPCs', async 
   t.diagnostic(JSON.stringify({ targetAttempts: fault.calls, calls: f.metrics.calls }));
 });
 
-test('typed summary failures retain their code and are never retried', async () => {
+test('typed summary failures retain their code and are never retried', async t => {
   const f = progressFixture(0.02);
   const fault = injectSummary(f, new ForgeError('INVALID_WORK_BACKUP', 'ECONNRESET in invalid source'));
+  t.after(fault.restore);
   await assert.rejects(
     complete(f),
     error => error.code === 'INVALID_WORK_BACKUP' || error.data?.code === 'INVALID_WORK_BACKUP',
@@ -78,7 +88,7 @@ test('typed summary failures retain their code and are never retried', async () 
   assert.equal(generation(f).ensureRetry, undefined);
 });
 
-test('permanent summary fault retains progress, fails after five resumes, and names its pin', async () => {
+test('permanent summary fault retains progress, fails after five resumes, and names its pin', async t => {
   const f = progressFixture(0.02);
   const fault = injectSummary(
     f,
@@ -86,6 +96,7 @@ test('permanent summary fault retains progress, fails after five resumes, and na
       code: 'ECONNRESET',
     }),
   );
+  t.after(fault.restore);
   let result;
   do {
     result = await f.drive();
@@ -117,12 +128,13 @@ test('permanent summary fault retains progress, fails after five resumes, and na
   assert.equal(f.s.scheduled.length, 0);
 });
 
-test('internal compatibility reads never start a full build when the index is absent', async () => {
+test('internal compatibility reads never start a full build when the index is absent', async t => {
   const { ensureInternal } = await import(moduleUrl('../convex/projectWorkIndexActions.ts'));
   const f = progressFixture(0.02, undefined, (ctx, { projectId }) =>
     ensureInternal._handler(ctx, { projectId, owner: 'owner' }),
   );
   const fault = injectSummary(f, new Error('ECONNRESET'));
+  t.after(fault.restore);
   await assert.rejects(f.drive(), error => error.code === 'PROJECT_WORK_INDEX_MISSING');
   assert.equal(fault.calls, 0);
   assert.equal(f.s.tables.projectWorkGenerations.size, 0);
@@ -221,54 +233,6 @@ test('lookup reads retry but typed access errors do not', async () => {
   };
   await assert.rejects(buildLookups(ctx, {}, [{ collection: 'views', key: 'one' }]));
   assert.equal(calls, 1);
-});
-
-test('raw object failures name the exact pin and nested read actions stay at three attempts', async () => {
-  let calls = 0;
-  const pin = { sha256: 'a'.repeat(64), size: 4 };
-  const child = indexReadContext({
-    storage: {
-      get: async () => {
-        calls++;
-        throw new Error('ECONNRESET');
-      },
-    },
-  });
-  const parent = indexReadContext({
-    storage: {},
-    runAction: () => rawContent(child, { storageId: 'storage' }, pin),
-  });
-  await assert.rejects(parent.runAction('child', {}), e => e.data.pin.sha256 === pin.sha256);
-  assert.equal(calls, 3);
-});
-
-test('diffstat and State child actions retry the same read rather than repeating mutations', async () => {
-  const f = progressFixture(0.02, undefined, undefined, { treeFiles: 40 });
-  const get = f.s.ctx.storage.get;
-  const target = f.filePins[0].sha256;
-  let calls = 0;
-  f.s.ctx.storage.get = async id => {
-    if (id === target && ++calls === 1) throw new Error('ECONNRESET');
-    return get(id);
-  };
-  await buildDiffstats.compare._handler(f.s.ctx, {
-    projectId: 'project',
-    actor: 'owner',
-    files: [{ before: f.filePins[0], after: f.filePins[1] }],
-  });
-  assert.equal(calls, 2);
-  const treePin = f.sourcePins[0];
-  calls = 0;
-  f.s.ctx.storage.get = async id => {
-    if (id === treePin.sha256 && ++calls === 1) throw new Error('ECONNRESET');
-    return get(id);
-  };
-  await buildStates.tree._handler(f.s.ctx, {
-    projectId: 'project',
-    actor: 'owner',
-    pin: treePin,
-  });
-  assert.equal(calls, 2);
 });
 
 test('R2 index reads share the three-attempt budget for HTTP and connection faults', async t => {

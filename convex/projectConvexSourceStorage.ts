@@ -3,7 +3,6 @@
 import { convexFetch, networkTimeout } from './networkFetch';
 import type { ActionCtx } from './server';
 import type { Id } from './_generated/dataModel';
-import { makeFunctionReference } from 'convex/server';
 import { digest } from '../src/state/hash';
 import { invariant } from '../src/errors';
 import { r2Config, r2Key, presignGet } from './r2';
@@ -64,27 +63,7 @@ export function sourceStorage(
   };
   const read = async (ref: string): Promise<Uint8Array> => {
     const pin = sourceR2Pin(ref);
-    if (!pin) {
-      invariant(!ref.startsWith('r2source:'), 'SOURCE_HASH_MISMATCH', 'Source storage reference changed.');
-      const owns = () =>
-        ctx.runQuery(makeFunctionReference<'query'>('projectConvexSourceOwnership:owns'), {
-          projectId,
-          ref,
-        });
-      const owned = await (clock ? clock.call(owns) : owns());
-      invariant(
-        owned,
-        'SOURCE_REF_UNOWNED',
-        'Durable source reference has no owner in this project, so this saved continuation cannot resume. ' +
-          'Start the operation again from its input; Forge never reads an unowned legacy reference.',
-      );
-      const get = async () => {
-        const blob = await ctx.storage.get(ref as Id<'_storage'>);
-        invariant(blob, 'SOURCE_UNAVAILABLE', 'Durable source data is absent.');
-        return new Uint8Array(await blob.arrayBuffer());
-      };
-      return clock ? clock.readBytes(get) : get();
-    }
+    invariant(pin, 'SOURCE_HASH_MISMATCH', 'Source storage reference changed.');
     const load = () => fetchBytes(pin);
     const bytes = await (clock ? clock.readBytes(load) : load());
     invariant(
@@ -100,8 +79,8 @@ export function sourceStorage(
       const pin = verified ?? { sha256: hash(bytes), size: bytes.length };
       const put = () =>
         storeSourceBytes(ctx, projectId, bytes, pin, reuse, undefined, observe, clock?.request);
-      const stored = await (clock ? clock.write(put) : put());
-      return 'r2Key' in stored ? `r2source:${pin.sha256}:${pin.size}` : stored.storageId;
+      await (clock ? clock.write(put) : put());
+      return `r2source:${pin.sha256}:${pin.size}`;
     },
     read,
   };

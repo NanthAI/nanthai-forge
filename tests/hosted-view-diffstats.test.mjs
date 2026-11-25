@@ -2,6 +2,7 @@
 // Copyright 2026 Ferdinando Valsecchi
 import { getWorkRecord, setWorkRecord, workRecordRows } from './hosted-fixture.mjs';
 import test from 'node:test';
+import { interceptDefaultR2 } from './default-r2.mjs';
 import assert from 'node:assert/strict';
 import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
@@ -100,11 +101,11 @@ test('opening a missing View diffstat computes once, saves it and makes the seco
   const { s, input, calls } = await setup();
   checkArgs(compute, input, 'projectViewDiffstats:compute');
   let reads = 0;
-  const get = s.ctx.storage.get;
-  s.ctx.storage.get = async id => {
-    reads++;
-    return get(id);
-  };
+  const restoreCount = interceptDefaultR2(async (input, init, serve) => {
+    if ((init?.method ?? 'GET') === 'GET') reads++;
+    return serve(input, init);
+  });
+  t.after(restoreCount);
   const stats = JSON.parse(await compute._handler(s.ctx, input));
   assert.deepEqual(stats, { files: 1, add: 2, del: 1, exact: true, provenance: 'server-computed' });
   assert(reads >= 4);
@@ -139,10 +140,9 @@ test('owner counts retain their label until an explicit server comparison replac
     position: 0,
     value: JSON.stringify(value),
   });
-  const get = s.ctx.storage.get;
-  s.ctx.storage.get = () => assert.fail('owner counts need no source bytes');
+  const restore = interceptDefaultR2(() => assert.fail('owner counts need no source bytes'));
   assert.deepEqual(JSON.parse(await compute._handler(s.ctx, input)), value);
-  s.ctx.storage.get = get;
+  restore();
   assert.equal(JSON.parse(await compute._handler(s.ctx, { ...input, recomputeOwner: true })).add, 2);
   assert.equal(JSON.parse(getWorkRecord(s.tables, 'stats').value).provenance, 'server-computed');
 });
@@ -158,13 +158,13 @@ test('lazy reads and saves recheck actor, project and current generation, includ
   s.tables.hostedProjects.set('other', { ...s.tables.hostedProjects.get('project'), _id: 'other' });
   await assert.rejects(compute._handler(s.ctx, { ...input, projectId: 'other' }), code('WORK_STALE'));
   await assert.rejects(compute._handler(s.ctx, { ...input, generationId: 'different' }), code('WORK_STALE'));
-  const get = s.ctx.storage.get;
-  s.ctx.storage.get = async id => {
-    const bytes = await get(id);
+  const restore = interceptDefaultR2(async (url, init, serve) => {
+    const bytes = await serve(url, init);
     s.tables.hostedProjects.get('project').removal = 'deleting';
     return bytes;
-  };
+  });
   await assert.rejects(compute._handler(s.ctx, input), code('PROJECT_UNAVAILABLE'));
+  restore();
   assert.equal(
     [...workRecordRows(s.tables)].some(row => row.collection === 'diffstats'),
     false,

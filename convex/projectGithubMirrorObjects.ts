@@ -23,7 +23,6 @@ export async function resolveObjects(ctx: QueryCtx, projectId: Id<'hostedProject
     };
     result.push({
       descriptor,
-      storageId: row.location === 'r2' && row.r2Key ? null : (row.storageId ?? null),
       url:
         row.location === 'r2' && row.r2Key
           ? await presignGet(r2Config(), row.r2Key, packHeaders(packRange(row), row.size))

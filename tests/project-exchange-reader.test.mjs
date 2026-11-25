@@ -4,11 +4,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
-// These checks hook Convex storage reads (memo, metadata, tampering), which still serve legacy
-// rows; R2 reads are covered by tests/r2-read-path.test.mjs.
-import { fixture, legacyObject as upload } from './project-exchange-fixture.mjs';
+// These checks count and tamper with the R2 reads of raw objects (memo, tampering, availability).
+import { fixture, upload } from './project-exchange-fixture.mjs';
+import { defaultR2Config, defaultR2Objects, interceptDefaultR2 } from './default-r2.mjs';
 import { readHosted } from './hosted-read.mjs';
 const { exchangeObjectReader } = await import(moduleUrl('../convex/projectExchangeReader.ts'));
+const objectPath = row => `${defaultR2Config.bucket}/${row.r2Key}`;
 const code = expected => error => (error.data?.code ?? error.code) === expected;
 
 test('one action reuses verified immutable bytes but preserves current access and storage checks on every use', async () => {
@@ -16,24 +17,17 @@ test('one action reuses verified immutable bytes but preserves current access an
     bytes = Buffer.from('unchanged metadata'),
     pin = await upload(s, bytes),
     reader = exchangeObjectReader(s.ctx);
-  const run = s.ctx.runQuery,
-    metadata = s.ctx.storage.getMetadata;
-  let resolutions = 0,
-    metadataReads = 0;
+  const run = s.ctx.runQuery;
+  let resolutions = 0;
   s.ctx.runQuery = async (...args) => {
     if (getFunctionName(args[0]) === 'projectObjects:resolve') resolutions++;
     return run(...args);
-  };
-  s.ctx.storage.getMetadata = async (...args) => {
-    metadataReads++;
-    return metadata(...args);
   };
   const first = (await reader.read('project', 'owner', [pin]))[0];
   first.fill(0);
   assert.deepEqual(await reader.read('project', 'owner', [pin]), [bytes]);
   assert.equal(s.reads(), 1);
   assert.equal(resolutions, 4);
-  assert.equal(metadataReads, 2);
   assert.deepEqual(await exchangeObjectReader(s.ctx).read('project', 'owner', [pin]), [bytes]);
   assert.equal(s.reads(), 2, 'a new action does not inherit memoized bytes');
   await assert.rejects(reader.read('project', 'stranger', [pin]), code('PROJECT_UNAVAILABLE'));
@@ -68,7 +62,7 @@ test('logical State pins use bounded initial and final resolve windows without c
   );
 });
 
-test('memoized bytes are isolated by project, exact pin and storage identity; removed storage is not hidden', async () => {
+test('memoized bytes are isolated by project and exact pin; a removed object is not hidden', async () => {
   const s = fixture(),
     bytes = Buffer.from('shared bytes'),
     pin = await upload(s, bytes),
@@ -82,12 +76,15 @@ test('memoized bytes are isolated by project, exact pin and storage identity; re
     reader.read('project', 'owner', [{ ...pin, size: pin.size + 1 }]),
     code('INVALID_WORK_BACKUP'),
   );
-  const row = [...s.tables.projectObjects.values()].find(row => row.projectId === 'project');
-  row.storageId = await s.ctx.storage.store(new Blob([bytes]));
+  // A different physical key is a different identity: the same bytes at a rebound key are read again.
+  const row = [...s.tables.projectObjects.values()].find(row => row.projectId === 'project'),
+    path = objectPath(row),
+    original = defaultR2Objects.get(path);
   await reader.read('project', 'owner', [pin]);
-  assert.equal(s.reads(), 3);
-  s.files.delete(row.storageId);
-  await assert.rejects(reader.read('project', 'owner', [pin]), code('INVALID_WORK_BACKUP'));
+  assert.equal(s.reads(), 2, 'the same project, pin and key is memoized');
+  defaultR2Objects.delete(path);
+  await assert.rejects(exchangeObjectReader(s.ctx).read('project', 'owner', [pin]));
+  defaultR2Objects.set(path, original);
 });
 
 test('concurrent equal reads share only successful bytes, settle failures and recheck grants after retrieval', async () => {
@@ -99,25 +96,25 @@ test('concurrent equal reads share only successful bytes, settle failures and re
   assert.equal(s.reads(), 1);
   const row = [...s.tables.projectObjects.values()][0],
     broken = exchangeObjectReader(s.ctx),
-    saved = s.files.get(row.storageId).blob;
-  s.files.get(row.storageId).blob = new Blob(['wrong']);
-  await assert.rejects(broken.read('project', 'owner', [pin]), code('INVALID_WORK_BACKUP'));
-  s.files.get(row.storageId).blob = saved;
+    path = objectPath(row),
+    saved = defaultR2Objects.get(path);
+  defaultR2Objects.set(path, Buffer.from('wrong'));
+  await assert.rejects(broken.read('project', 'owner', [pin]), code('BLOB_DIGEST_MISMATCH'));
+  defaultR2Objects.set(path, saved);
   assert.deepEqual(await broken.read('project', 'owner', [pin]), [bytes]);
-  const get = s.ctx.storage.get,
-    during = exchangeObjectReader(s.ctx);
+  const during = exchangeObjectReader(s.ctx);
   s.tables.projectContributors.set('grant', {
     _id: 'grant',
     projectId: 'project',
     contributor: 'contributor',
   });
-  s.ctx.storage.get = async id => {
-    const value = await get(id);
+  const restore = interceptDefaultR2(async (input, init, serve) => {
+    const value = await serve(input, init);
     s.tables.projectContributors.delete('grant');
     return value;
-  };
+  });
   await assert.rejects(during.read('project', 'contributor', [pin]), code('PROJECT_UNAVAILABLE'));
-  s.ctx.storage.get = get;
+  restore();
   // Failed authority is never memoized: the current grant is checked again.
   await assert.rejects(during.read('project', 'contributor', [pin]), code('PROJECT_UNAVAILABLE'));
   assert.deepEqual(await during.read('project', 'owner', [pin]), [bytes]);
@@ -231,28 +228,6 @@ test('State windows batch parent/provenance reads and retain the diff when an op
   );
 });
 
-test('uncached digest reads own their verified raw buffer without copying or sharing later reads', async () => {
-  const s = fixture(),
-    bytes = Buffer.from('Owned digest buffer'),
-    pin = await upload(s, bytes);
-  const buffers = [];
-  s.ctx.storage.get = async () => ({
-    arrayBuffer: async () => {
-      const value = Uint8Array.from(bytes).buffer;
-      buffers.push(value);
-      return value;
-    },
-  });
-  const reader = exchangeObjectReader(s.ctx, false, 0);
-  const [first] = await reader.read('project', 'owner', [pin]);
-  assert.equal(first.buffer, buffers[0]);
-  first.fill(0);
-  const [second] = await reader.read('project', 'owner', [pin]);
-  assert.equal(second.buffer, buffers[1]);
-  assert.notEqual(second.buffer, first.buffer);
-  assert.deepEqual(second, bytes);
-});
-
 test('return metadata resolves 1000 small pins in two bounded authority calls and rejects a mid-read revocation', async () => {
   const s = fixture(),
     pins = [];
@@ -268,15 +243,15 @@ test('return metadata resolves 1000 small pins in two bounded authority calls an
   assert.equal(values.length, 1000);
   assert.deepEqual(windows, [1000, 1000]);
   assert.equal(values[999].toString(), 'Synthetic metadata 999');
-  const get = s.ctx.storage.get;
   let revoked = false;
-  s.ctx.storage.get = async id => {
-    const result = await get(id);
-    if (!revoked) {
+  const restore = interceptDefaultR2(async (input, init, serve) => {
+    const result = await serve(input, init);
+    if (!revoked && (init?.method ?? 'GET') === 'GET') {
       revoked = true;
       s.tables.hostedProjects.get('project').owner = 'replacement';
     }
     return result;
-  };
+  });
   await assert.rejects(reader.read('project', 'owner', pins), code('PROJECT_UNAVAILABLE'));
+  restore();
 });

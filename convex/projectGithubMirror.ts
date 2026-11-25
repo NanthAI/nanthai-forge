@@ -41,10 +41,9 @@ export const mirrorSource = (ctx: ActionCtx, input: { jobId: Id<'projectGithubMi
     }),
   );
 /** The verified reader over any resolver that returns resolveObjects windows. */
-export function projectSource(ctx: ActionCtx, resolve: (digests: string[]) => Promise<string>) {
+export function projectSource(_ctx: ActionCtx, resolve: (digests: string[]) => Promise<string>) {
   type Location = {
     descriptor: WorkerObject;
-    storageId: Id<'_storage'> | null;
     url: string | null;
     range?: PackRange;
   };
@@ -70,8 +69,6 @@ export function projectSource(ctx: ActionCtx, resolve: (digests: string[]) => Pr
         'SOURCE_HASH_MISMATCH',
         'Mirror source size changed.',
       );
-      const blob = !row.url && row.storageId ? await ctx.storage.get(row.storageId) : null;
-      if (blob) return blob.stream() as unknown as AsyncIterable<Uint8Array>;
       invariant(row.url, 'SOURCE_UNAVAILABLE', 'Mirror source bytes are unavailable.');
       const response = await convexFetch(row.url, {
         headers: packHeaders(row.range, pin.size),

@@ -5,10 +5,8 @@ import { v, type Infer } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { internalMutation, internalAction, internalQuery, type MutationCtx } from './server';
 import type { Doc, Id } from './_generated/dataModel';
-import type { Pin } from './r2BackfillRows';
-import { backfillKind } from './r2BackfillFields';
-import { verifiedPass, maintenanceEnabled } from './r2Maintenance';
-import { r2Config, r2Key, headObject, checksumOf } from './r2';
+import { maintenanceEnabled } from './r2Maintenance';
+import { r2Config } from './r2';
 import { deleteR2Object, listR2Prefix, projectPrefix } from './r2Operations';
 import { ForgeError, invariant } from '../src/errors';
 import { scheduleR2Purge } from './projectPurgeScheduling';
@@ -26,67 +24,6 @@ const result = v.object({
   cursor: v.string(),
   isDone: v.boolean(),
   dryRun: v.boolean(),
-});
-export const purgePage = internalAction({
-  args: {
-    projectId: v.id('hostedProjects'),
-    pass: verifiedPass,
-    kind: backfillKind,
-    cursor: v.union(v.string(), v.null()),
-    dryRun: v.optional(v.boolean()),
-  },
-  returns: result,
-  handler: async (
-    ctx,
-    { dryRun = true, ...args },
-  ): Promise<{
-    scanned: number;
-    eligible: number;
-    deleted: number;
-    skipped: number;
-    cursor: string;
-    isDone: boolean;
-    dryRun: boolean;
-  }> => {
-    if (!dryRun) maintenanceEnabled();
-    const page: { pins: Pin[]; scanned: number; cursor: string; isDone: boolean } = await ctx.runQuery(
-      ref('projectR2Purge:page'),
-      args,
-    );
-    if (page.pins.length) {
-      const config = r2Config();
-      // Check the complete page before any deletes. Missing, failed, size/checksum mismatch all refuse.
-      const heads = await Promise.all(
-        page.pins.map(pin => headObject(config, r2Key(args.projectId, pin.digest))),
-      );
-      invariant(
-        heads.every(
-          (head, i) =>
-            head.status === 'ok' &&
-            head.size === page.pins[i]!.size &&
-            head.checksum === checksumOf(page.pins[i]!.digest),
-        ),
-        'R2_PURGE_HEAD_FAILED',
-        'An R2 object could not be verified; no Convex copy in this page was deleted.',
-      );
-    }
-    const counts: { deleted: number; skipped: number } =
-      dryRun || !page.pins.length
-        ? { deleted: 0, skipped: 0 }
-        : await ctx.runMutation(mutation('projectR2Purge:removeCopies'), {
-            projectId: args.projectId,
-            pass: args.pass,
-            pins: page.pins,
-          });
-    return {
-      scanned: page.scanned,
-      eligible: page.pins.length,
-      ...counts,
-      cursor: page.cursor,
-      isDone: page.isDone,
-      dryRun,
-    };
-  },
 });
 export const sweepPage = internalAction({
   args: {

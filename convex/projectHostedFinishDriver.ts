@@ -111,7 +111,6 @@ export const resume = internalMutation({
     ...stepIdentity,
     command: v.string(),
     page: v.optional(v.string()),
-    storageId: v.optional(v.id('_storage')),
     key: v.optional(v.string()),
   },
   returns: v.null(),

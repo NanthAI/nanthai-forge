@@ -4,7 +4,6 @@ import { v } from 'convex/values';
 import { internalMutation } from './server';
 import { authorizeActionsTransfer } from './projectHostedActionsTransfers';
 import { saveObject } from './projectHostedSaveStore';
-import { blobStore } from './blobStore';
 import { presignGet, r2Config } from './r2';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
@@ -40,9 +39,7 @@ export const describeAndGrant = internalMutation({
         const url =
           row?.location === 'r2' && row.r2Key
             ? await presignGet(r2Config(), row.r2Key, packHeaders(packRange(row), row.size))
-            : row?.storageId
-              ? await blobStore(ctx).getUrl(row.storageId)
-              : null;
+            : null;
         invariant(url, 'SOURCE_UNAVAILABLE', 'Read the exact raw source or its recipe leaves.');
         target = { url, headers: packHeaders(packRange(row ?? {}), descriptor.object.size) };
       }

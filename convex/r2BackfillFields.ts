@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import { v } from 'convex/values';
-/** Optional on existing rows; Convex storage ids remain available for explicit recovery. */
+/** Markers an earlier move of Convex files to R2 left on old rows; nothing writes or reads them now. */
 export const backfillFields = {
   location: v.optional(v.union(v.literal('convex'), v.literal('r2'))),
   r2Key: v.optional(v.string()),
@@ -10,17 +10,3 @@ export const backfillFields = {
   r2BackfilledAt: v.optional(v.number()),
   r2BackfillOperationId: v.optional(v.string()),
 };
-export const backfillKind = v.union(
-  v.literal('objects'),
-  v.literal('backups'),
-  v.literal('proposals'),
-  v.literal('archives'),
-);
-export const backfillPin = v.object({
-  kind: backfillKind,
-  id: v.union(v.id('projectObjects'), v.id('projectBackups'), v.id('projectProposals')),
-  storageId: v.id('_storage'),
-  digest: v.string(),
-  size: v.number(),
-  location: v.union(v.literal('convex'), v.literal('r2'), v.null()),
-});

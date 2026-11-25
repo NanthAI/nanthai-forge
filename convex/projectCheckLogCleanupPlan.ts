@@ -280,7 +280,7 @@ export async function planStep(
       }
       digests.push(n.key);
       const object: Doc<'projectObjects'> | null = row.object;
-      if (object && !object.removed && (object.storageId || object.recipe || object.r2Committed)) {
+      if (object && !object.removed && (object.recipe || object.r2Committed)) {
         objects.push(object);
         if (!object.recipe) state.bytes += object.size;
       }

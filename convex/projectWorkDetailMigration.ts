@@ -166,7 +166,6 @@ export const discardBatch = internalMutation({
       if (!object?._id || object._creationTime === undefined || object._creationTime < saved.staged.at)
         continue;
       if (object.pack || object.recipe || object.purged || object.packMembers) continue;
-      if (object.storageId) await ctx.storage.delete(object.storageId);
       if (object.r2Key) deletes.add(object.r2Key);
       await ctx.db.delete(object._id);
     }

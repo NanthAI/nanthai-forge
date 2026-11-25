@@ -13,7 +13,6 @@ import { invariant } from '../src/errors';
 import { report } from './errors';
 import { backupItem } from './projectBackups';
 import { archiveDownload, directDownloadFields, type DirectDownload } from './archiveDownload';
-import { projectArchivePart } from './projectArchivePart';
 
 async function caller(ctx: ActionCtx) {
   const user = await ctx.auth.getUserIdentity();
@@ -37,43 +36,14 @@ type Owned = {
     at: number;
   };
 };
-async function reconcile(
-  ctx: ActionCtx,
-  id: Id<'projectBackups'>,
-  owner: string,
-  cleanupStored = false,
-): Promise<Owned['item']> {
+async function reconcile(ctx: ActionCtx, id: Id<'projectBackups'>, owner: string): Promise<Owned['item']> {
   const original: Owned = await ctx.runQuery(internal.projectBackups.get, { id, owner });
-  if (original.backup.transport === 'objects') return original.item;
-  if (original.backup.location === 'r2') {
-    if (original.backup.status === 'stored') return original.item;
-    if (await verifyArchiveUpload(original.backup))
-      return ctx.runMutation(internal.projectBackups.completeR2, { id, owner, key: original.backup.r2Key! });
+  const { backup } = original;
+  if (backup.transport === 'objects' || backup.location !== 'r2' || backup.status === 'stored')
     return original.item;
-  }
-  if (original.backup.status === 'stored') {
-    if (!cleanupStored) return original.item;
-    let cleanupCursor: string | null = null;
-    while (true) {
-      const observed: { cursor: string; isDone: boolean } = await ctx.runMutation(
-        internal.projectBackups.reconcileDuplicates,
-        { id, owner, cursor: cleanupCursor },
-      );
-      if (observed.isDone) break;
-      cleanupCursor = observed.cursor;
-    }
-    return original.item;
-  }
-  let cursor: string | null = null;
-  while (true) {
-    const page: { id: Id<'_storage'> | null; isDone: boolean; cursor: string } = await ctx.runQuery(
-      internal.projectBackups.findUpload,
-      { id, owner, cursor },
-    );
-    if (page.id) return ctx.runMutation(internal.projectBackups.complete, { id, owner, storageId: page.id });
-    if (page.isDone) return original.item;
-    cursor = page.cursor;
-  }
+  if (await verifyArchiveUpload(backup))
+    return ctx.runMutation(internal.projectBackups.completeR2, { id, owner, key: backup.r2Key! });
+  return original.item;
 }
 export const prepare = action({
   args: backupTransferArgs,
@@ -111,41 +81,24 @@ export const prepare = action({
   },
 });
 export const complete = action({
-  args: { id: v.id('projectBackups'), storageId: v.optional(v.id('_storage')) },
+  args: { id: v.id('projectBackups') },
   returns: backupItem,
-  handler: async (ctx, { id, storageId }): Promise<Owned['item']> => {
+  handler: async (ctx, { id }): Promise<Owned['item']> => {
     try {
       const owner = await caller(ctx),
         original: Owned = await ctx.runQuery(internal.projectBackups.get, { id, owner });
-      if (original.backup.location === 'r2') {
-        invariant(
-          await verifyArchiveUpload(original.backup),
-          'R2_OBJECT_MISSING',
-          'Uploaded archive is missing.',
-        );
-        return await ctx.runMutation(internal.projectBackups.completeR2, {
-          id,
-          owner,
-          key: original.backup.r2Key!,
-        });
-      }
-      invariant(storageId, 'INVALID_WORK_BACKUP', 'Select the original legacy upload.');
-      return await ctx.runMutation(internal.projectBackups.complete, {
+      invariant(original.backup.location === 'r2', 'R2_REQUIRED', 'Backups upload to R2 only.');
+      invariant(
+        await verifyArchiveUpload(original.backup),
+        'R2_OBJECT_MISSING',
+        'Uploaded archive is missing.',
+      );
+      return await ctx.runMutation(internal.projectBackups.completeR2, {
         id,
-        owner: await caller(ctx),
-        storageId,
+        owner,
+        key: original.backup.r2Key!,
       });
     } catch (error) {
-      try {
-        if (storageId)
-          await ctx.runMutation(internal.projectLifecycle.cleanupUpload, {
-            uploadId: id,
-            actor: await caller(ctx),
-            storageId,
-          });
-      } catch {
-        /* Foreign/unattributable files remain untouched. */
-      }
       return report(error);
     }
   },
@@ -155,7 +108,7 @@ export const reconcileUpload = action({
   returns: backupItem,
   handler: async (ctx, { id }): Promise<Owned['item']> => {
     try {
-      return await reconcile(ctx, id, await caller(ctx), true);
+      return await reconcile(ctx, id, await caller(ctx));
     } catch (error) {
       return report(error);
     }
@@ -185,7 +138,8 @@ export const downloadPart = action({
       );
       invariant(
         backup.status === 'stored' &&
-          (backup.storageId || (backup.location === 'r2' && backup.r2Committed)) &&
+          backup.location === 'r2' &&
+          backup.r2Committed &&
           digest === backup.digest,
         'PROJECT_CHANGED',
         'Select the original stored archive and digest.',
@@ -196,11 +150,8 @@ export const downloadPart = action({
         'Invalid archive offset.',
       );
       const direct = await archiveDownload(ctx, backup);
-      const data = direct
-        ? direct.data
-        : await projectArchivePart(ctx, backup.storageId!, backup.size, backup.digest, offset, () =>
-            ctx.runQuery(internal.projectBackups.get, { id, owner }),
-          );
+      invariant(direct, 'R2_OBJECT_UNAVAILABLE', 'The stored archive is unavailable.');
+      const data = direct.data;
       await ctx.runQuery(internal.projectBackups.get, { id, owner });
       return {
         ...direct,

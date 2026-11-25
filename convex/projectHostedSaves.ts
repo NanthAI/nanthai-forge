@@ -71,7 +71,7 @@ async function refuseRecipeUploads(
     const row = await findObject(ctx, projectId, pin.digest);
     known.set(pin.digest, row);
     invariant(
-      !row || !isStored(row) || row.removed || isR2Object(row) || !!row.storageId,
+      !row || !isStored(row) || row.removed || isR2Object(row),
       'SAVE_CONTENT_RECIPE',
       'A changed file is stored as a recipe; describe it before saving.',
     );

@@ -7,7 +7,6 @@ import { activeOwnedProject } from './projectAuthority';
 import { isStored } from './projectObjectFields';
 
 import { invariant } from '../src/errors';
-import { removeExclusive } from './projectStorage';
 import { report } from './errors';
 import { findObject } from './projectObjectFind';
 
@@ -17,7 +16,6 @@ export const migrateArchive = internalMutation({
     owner: v.string(),
     operationId: v.string(),
     originalDigest: v.string(),
-    originalStorageId: v.optional(v.id('_storage')),
     originalR2Key: v.optional(v.string()),
     manifestDigest: v.string(),
     manifestSize: v.number(),
@@ -38,9 +36,9 @@ export const migrateArchive = internalMutation({
         return null;
       }
       invariant(
-        backup.storageId === input.originalStorageId &&
-          (!input.originalR2Key || (backup.r2Key === input.originalR2Key && backup.r2Committed)) &&
-          (input.originalStorageId || input.originalR2Key) &&
+        input.originalR2Key &&
+          backup.r2Key === input.originalR2Key &&
+          backup.r2Committed &&
           backup.digest === input.originalDigest &&
           backup.preview.format === 'native' &&
           backup.status === 'stored',
@@ -55,8 +53,7 @@ export const migrateArchive = internalMutation({
       );
       await ctx.db.patch(backup._id, {
         transport: 'objects',
-        // The manifest object row holds the bytes; a backup never copies an old storage pointer.
-        storageId: undefined,
+        // The manifest object row holds the bytes.
         location: undefined,
         r2Key: undefined,
         r2Committed: undefined,
@@ -65,7 +62,6 @@ export const migrateArchive = internalMutation({
         archiveReceipt: {
           digest: backup.digest,
           size: backup.size,
-          ...(input.originalStorageId ? { storageId: input.originalStorageId } : {}),
           ...(backup.location ? { location: backup.location } : {}),
           ...(backup.r2Key ? { r2Key: backup.r2Key, r2Committed: backup.r2Committed } : {}),
           operationId: input.operationId,
@@ -99,14 +95,31 @@ export const retireArchive = internalMutation({
         'WORK_OPERATION_CHANGED',
         'Reconcile this original migration.',
       );
-      const retired = backup.archiveReceipt.storageId
-        ? await removeExclusive(ctx, backup.archiveReceipt.storageId)
-        : true;
+      // The original container may be deleted only while no other row names its R2 key.
+      const key = backup.archiveReceipt.r2Key;
+      const shared = key
+        ? (
+            await Promise.all([
+              ctx.db
+                .query('projectBackups')
+                .withIndex('by_r2Key', q => q.eq('r2Key', key))
+                .take(2),
+              ctx.db
+                .query('projectBackups')
+                .withIndex('by_archive_r2Key', q => q.eq('archiveReceipt.r2Key', key))
+                .take(2),
+              ctx.db
+                .query('projectProposals')
+                .withIndex('by_r2Key', q => q.eq('r2Key', key))
+                .take(2),
+            ])
+          ).some(rows => rows.some(row => row._id !== backup._id))
+        : false;
       return {
         backupId: backup._id,
         manifestDigest: backup.objectManifest.digest,
         originalArchiveDigest: backup.archiveReceipt.digest,
-        retired,
+        retired: !shared,
       };
     } catch (error) {
       return report(error);

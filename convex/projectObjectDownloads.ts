@@ -5,8 +5,6 @@ import { requireSourceProtocol } from './projectSourceProtocol';
 import { v } from 'convex/values';
 import { mutation, type MutationCtx } from './cliServer';
 import type { Doc, Id } from './_generated/dataModel';
-import { blobStore } from './blobStore';
-import { storageDigest } from './projectStorage';
 import { isStored } from './projectObjectFields';
 import type { DownloadRow } from '../src/blob-download-format';
 import { selectedGeneration, readRecord, recordPartition } from './projectWorkIndexStore';
@@ -260,15 +258,6 @@ export async function describeObjects(
             ? { url: await presignGet(r2Config(), row.r2Key!, packHeaders(packRange(row), row.size)) }
             : {}),
         });
-      } else if (row.storageId) {
-        const metadata = await blobStore(ctx).getMetadata(row.storageId),
-          url = await blobStore(ctx).getUrl(row.storageId);
-        invariant(
-          metadata && metadata.size === row.size && storageDigest(metadata.sha256) === digest && url,
-          'INVALID_WORK_BACKUP',
-          'Stored content differs from its original binding.',
-        );
-        result.push({ ...pin, location: 'convex', url });
       } else {
         invariant(row.recipe, 'INVALID_WORK_BACKUP', 'Stored content representation is unavailable.');
         const node = signed ? await findObject(ctx, projectId, row.recipe.digest) : null;

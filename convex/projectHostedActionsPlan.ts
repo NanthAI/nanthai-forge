@@ -25,10 +25,8 @@ export const prepare = internalMutation({
     recipe: v.string(),
     lockfile: v.string(),
     controlBuildKey: v.optional(v.string()),
-    selectionStorage: v.optional(v.id('_storage')),
-    selectionR2Key: v.optional(v.string()),
-    recipeStorage: v.optional(v.id('_storage')),
-    recipeR2Key: v.optional(v.string()),
+    selectionR2Key: v.string(),
+    recipeR2Key: v.string(),
     /** The plan starts the optional source-pack job (friction 0064c3b2). */
     packRefresh: v.optional(v.literal(true)),
     resultsBatch: v.optional(v.literal(true)),
@@ -176,11 +174,11 @@ export const prepare = internalMutation({
       await storeSourceOutputs(ctx, input.projectId, run.executionId!, [
         {
           ...selection,
-          ...(input.selectionR2Key ? { r2Key: input.selectionR2Key } : { storageId: input.selectionStorage }),
+          r2Key: input.selectionR2Key,
         },
         {
           ...manifest,
-          ...(input.recipeR2Key ? { r2Key: input.recipeR2Key } : { storageId: input.recipeStorage }),
+          r2Key: input.recipeR2Key,
         },
       ]);
       run.plan = plan;

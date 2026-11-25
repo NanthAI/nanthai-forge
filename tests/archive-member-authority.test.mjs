@@ -67,6 +67,7 @@ test('owner and contributor keep archive metadata access', async () => {
 
 test('checkpoint reads recheck membership after object IO even when source is public', async () => {
   const { fixture: exchangeFixture, legacyObject } = await import('./project-exchange-fixture.mjs');
+  const { interceptDefaultR2 } = await import('./default-r2.mjs');
   const s = exchangeFixture(),
     bytes = Buffer.from('{"synthetic":"work metadata"}');
   const pin = await legacyObject(s, bytes);
@@ -83,14 +84,14 @@ test('checkpoint reads recheck membership after object IO even when source is pu
     }),
   );
   s.caller('writer');
-  const read = s.ctx.storage.get;
-  s.ctx.storage.get = async id => {
-    const result = await read(id);
+  const restore = interceptDefaultR2(async (input, init, serve) => {
+    const result = await serve(input, init);
     s.tables.projectContributors.delete('writer');
     return result;
-  };
+  });
   await assert.rejects(
     modules.projectExchangeActions.checkpoint._handler(s.ctx, { backupId: 'backup' }),
     denied,
   );
+  restore();
 });

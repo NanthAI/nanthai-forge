@@ -45,19 +45,31 @@ function synthetic(count, width) {
       if (getFunctionName(ref) === 'projectObjects:resolve')
         return args.digests.map(id => ({
           projectId: 'project',
-          storageId: id,
           digest: id,
           size: pins[indexes.get(id)].size,
+          nonce: id,
+          removed: false,
+          location: 'r2',
+          r2Committed: true,
+          r2Key: `v1/p/project/o/${id}`,
         }));
       return {};
     },
-    storage: {
-      getMetadata: async id => ({ size: pins[indexes.get(id)].size, sha256: id }),
-      get: async id => {
-        reads++;
-        return new Blob([bytes(indexes.get(id))]);
-      },
-    },
+  };
+  // Objects are R2 objects; their reads are GETs of the default bucket.
+  const priorFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(String(input)),
+      id = decodeURIComponent(url.pathname).split('/').at(-1);
+    if (
+      url.hostname.endsWith('.r2.cloudflarestorage.com') &&
+      indexes.has(id) &&
+      (init?.method ?? 'GET') === 'GET'
+    ) {
+      reads++;
+      return new Response(bytes(indexes.get(id)));
+    }
+    return priorFetch(input, init);
   };
   ctx.runAction = (ref, args) => {
     invocations++;

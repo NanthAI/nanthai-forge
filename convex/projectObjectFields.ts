@@ -38,7 +38,6 @@ export const objectFields = {
   /** Trusted State-bound physical recipe root; absent until the writer is enabled. */
   statePhysical: v.optional(v.object({ sha256: v.string(), size: v.number() })),
   nonce: v.string(),
-  storageId: v.optional(v.id('_storage')),
   ...backfillFields,
   r2SweepKey: v.optional(v.string()),
   /** A pending reservation whose ID is private to a catalog seed upload. */
@@ -60,14 +59,10 @@ export const objectFields = {
    * rows a writer created directly and on copies made before the stamp. */
   materializedBy: v.optional(v.union(...objectRowReasons.map(reason => v.literal(reason)))),
 };
-/** Readable bytes exist: Convex storage, a recipe, or an R2 object a HEAD check confirmed. */
-export const isStored = (row: {
-  storageId?: unknown;
-  recipe?: unknown;
-  location?: string;
-  r2Committed?: boolean;
-}) => !!(row.storageId || row.recipe || (row.location === 'r2' && row.r2Committed));
-/** A committed object in R2 (as opposed to Convex storage or a recipe). */
+/** Readable bytes exist: a recipe, or an R2 object a HEAD check confirmed. */
+export const isStored = (row: { recipe?: unknown; location?: string; r2Committed?: boolean }) =>
+  !!(row.recipe || (row.location === 'r2' && row.r2Committed));
+/** A committed object in R2 (as opposed to a recipe). */
 export const isR2Object = (row: { location?: string; r2Committed?: boolean; r2Key?: string }) =>
   row.location === 'r2' && !!row.r2Committed && !!row.r2Key;
 /** A stored object as resolved: its row, or a catalog entry (no `_id`). */
@@ -100,8 +95,6 @@ export const objectTables = {
   projectObjects: defineTable(objectFields)
     .index('by_project_and_digest', ['projectId', 'digest'])
     .index('by_project_and_removed', ['projectId', 'removed'])
-    .index('by_storage', ['storageId'])
-    .index('by_project_and_storage_and_removed', ['projectId', 'storageId', 'removed'])
     .index('by_nonce', ['nonce'])
     // Purge reference proof by key prefix (Item 411727ba, convex/projectPurgeReferences.ts).
     .index('by_r2Key', ['r2Key']),

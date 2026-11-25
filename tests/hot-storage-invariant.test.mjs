@@ -20,62 +20,16 @@ const { blobStore } = await import(moduleUrl('../convex/blobStore.ts'));
 //   read   storage.get / getUrl / getMetadata (Convex file-storage reads)
 //   handle a ctx.storage handle passed on, which could write or read elsewhere
 //   field  v.id('_storage') (a record that names a Convex file)
-const legacy =
-  'Convex file storage cleanup (Issue 40dad5e0): legacy Convex copies stay readable until moved and deleted.';
+// Item c0af6cfa removed every `storageId` pointer on objects, backups and proposals. What stays reads an
+// import or derived artifact reference when it is not an `r2blob:` id; dev holds none.
+const reason =
+  'An artifact reference that is not an r2blob id, from an import or a derived artifact; dev holds none (Item c0af6cfa, next slice).';
 const storageAllowlist = {
-  'blobStore.ts handle': [
-    4,
-    'Reads and deletes existing legacy copies; every upload goes to R2. Removed with the storageId field.',
-    '2026-12-31',
-  ],
-  'projectConvexSourceStorage.ts read': [
-    1,
-    'Reads a legacy source continuation reference. Removed with the storageId field.',
-    '2026-12-31',
-  ],
-  'projectConvexSourceTransport.ts read': [
-    1,
-    'Reads a legacy source object copy. Removed with the storageId field.',
-    '2026-12-31',
-  ],
-  'projectGithubMirror.ts read': [
-    1,
-    'Reads a legacy mirror source copy. Removed with the storageId field.',
-    '2026-12-31',
-  ],
-  'storageMeter.ts read': [1, 'Meters legacy reads. Removed with the storageId field.', '2026-12-31'],
-  'projectR2Backfill.ts read': [1, 'Backfill must read the native copy source.', '2027-01-31'],
-  'projectWorkIndexRetry.ts read': [3, 'Preserves the native Work index copy source.', '2027-01-31'],
-  'projectWorkIndexRetry.ts handle': [
-    1,
-    'Wraps the storage reader with retry for legacy Work index reads.',
-    '2027-01-31',
-  ],
-  'storageMeter.ts handle': [1, 'Wraps the storage reader to meter legacy reads.', '2027-01-31'],
-  'projectBackupActions.ts field': [1, legacy, '2027-01-31'],
-  'projectBackups.ts field': [2, legacy, '2027-01-31'],
-  'projectBootstrapStore.ts field': [
-    1,
-    'Legacy storageId result beside r2Key; nothing new writes it.',
-    '2027-01-31',
-  ],
-  'projectExchange.ts field': [1, legacy, '2027-01-31'],
-  'projectGithubImportBatch.ts field': [
-    1,
-    'Legacy storageId import receipts beside R2 keys; nothing new writes them.',
-    '2027-01-31',
-  ],
-  'projectHostedActionsPlan.ts field': [2, legacy, '2027-01-31'],
-  'projectHostedFinishDriver.ts field': [1, legacy, '2027-01-31'],
-  'projectLifecycle.ts field': [1, legacy, '2027-01-31'],
-  'projectObjectFields.ts field': [1, legacy, '2027-01-31'],
-  'projectProposalActions.ts field': [1, legacy, '2027-01-31'],
-  'projectProposals.ts field': [3, legacy, '2027-01-31'],
-  'projectR2Backfill.ts field': [1, 'Backfill maps each legacy Convex id to its moved R2 row.', '2027-01-31'],
-  'projectSourceStepFields.ts field': [1, legacy, '2027-01-31'],
-  'projectWorkIndexFields.ts field': [2, legacy, '2027-01-31'],
-  'r2BackfillFields.ts field': [1, 'Backfill pins name the legacy Convex id they move.', '2027-01-31'],
-  'schema.ts field': [4, legacy, '2027-01-31'],
+  'blobStore.ts handle': [4, reason, '2026-12-31'],
+  'projectWorkIndexRetry.ts read': [3, reason, '2026-12-31'],
+  'projectWorkIndexRetry.ts handle': [1, reason, '2026-12-31'],
+  'storageMeter.ts read': [1, reason, '2026-12-31'],
+  'storageMeter.ts handle': [1, reason, '2026-12-31'],
 };
 const storageCalls = new Set(['store', 'generateUploadUrl', 'get', 'getUrl', 'getMetadata']);
 const member = node => {

@@ -11,10 +11,9 @@ import { digest } from '../src/hash';
 import { invariant } from '../src/errors';
 import { backupRootPin } from '../src/work-backup-root';
 
-import { projectArchivePart } from './projectArchivePart';
-import { isStored, isR2Object } from './projectObjectFields';
+import { isStored } from './projectObjectFields';
 import { report } from './errors';
-import { exchangeObjectReader, bytesFromRow, type ExchangeObjectReader } from './projectExchangeReader';
+import { exchangeObjectReader, type ExchangeObjectReader } from './projectExchangeReader';
 import { resolveExchangeRoot, isExchangeRoot } from '../src/native-exchange-tree';
 
 import { CUTOVER_UPGRADE } from '../src/cutover-version';
@@ -67,17 +66,7 @@ export const downloadBatch = action({
         'BAD_ARGUMENT',
         'Use ranged downloads for content larger than the small-content batch.',
       );
-      const result = await Promise.all(
-        rows.map(async row => {
-          if (isR2Object(row) || !row.storageId) return directReply(row);
-          return {
-            data: new Uint8Array(await bytesFromRow(ctx, row, { sha256: row.digest, size: row.size }, actor))
-              .buffer,
-            digest: row.digest,
-            size: row.size,
-          };
-        }),
-      );
+      const result = rows.map(row => directReply(row));
       await ctx.runQuery(internal.projectObjects.resolve, { projectId, actor, memberOnly: true, digests });
       return result;
     } catch (error) {
@@ -239,26 +228,8 @@ export const downloadPart = action({
         'BAD_ARGUMENT',
         'Use an offset inside the selected content.',
       );
-      // Recipes can contain mixed Convex/R2 leaves: resolve them in the client, too.
-      if (isR2Object(row) || !row.storageId) return directReply(row);
-      const data =
-        row.size === 0
-          ? new ArrayBuffer(0)
-          : await projectArchivePart(ctx, row.storageId, row.size, digest, offset, () =>
-              ctx.runQuery(internal.projectObjects.resolve, {
-                projectId,
-                actor,
-                memberOnly: true,
-                digests: [digest],
-              }),
-            );
-      await ctx.runQuery(internal.projectObjects.resolve, {
-        projectId,
-        actor,
-        memberOnly: true,
-        digests: [digest],
-      });
-      return { data, digest, size: row.size };
+      // Recipes resolve their R2 leaves in the client.
+      return directReply(row);
     } catch (error) {
       return report(error);
     }

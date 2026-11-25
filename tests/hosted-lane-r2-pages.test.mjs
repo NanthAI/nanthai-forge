@@ -418,34 +418,6 @@ for (const mode of ['revoked', 'removed', 'rebound', 'corrupt', 'expired']) {
   });
 }
 
-test('mixed R2 and Convex-only Lane pages keep the real legacy byte path', async t => {
-  const { setup, client, legacyObject } = await import('./r2-harness.mjs');
-  const { s, fake } = await setup(t);
-  const exchange = client(s),
-    values = [Buffer.from('legacy'), Buffer.from('modern'), Buffer.alloc(0)];
-  const pins = values.map(bytes => ({ sha256: digest(bytes), size: bytes.length }));
-  await legacyObject(s, values[0]);
-  await exchange.uploadBatch(pins.slice(1).map((pin, index) => ({ pin, bytes: values[index + 1] })));
-  const directory = mkdtempSync(join(tmpdir(), 'forge-lane-mixed-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
-  const files = pins.map((pin, index) => ({ pin, path: join(directory, String(index)) }));
-  const run = exchange.client.action,
-    actions = [];
-  exchange.client.action = (ref, args) => {
-    actions.push(getFunctionName(ref));
-    return run(ref, args);
-  };
-  const transport = new ConvexLaneTransport(exchange);
-  await transport.objects(pins.map(pin => pin.sha256));
-  await transport.downloadFiles(files);
-  assert.deepEqual(
-    files.map(file => readFileSync(file.path)),
-    values,
-  );
-  assert.deepEqual(actions, ['projectExchangeActions:downloadBatch']);
-  assert.equal(fake.requests.filter(request => request.method === 'GET').length, 2);
-});
-
 test('removing a reader during an R2 GET prevents exposing the downloaded page', async t => {
   const s = fixture(t),
     bytes = Buffer.from('reader source'),

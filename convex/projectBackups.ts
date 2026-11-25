@@ -39,7 +39,6 @@ export const item = (backup: Doc<'projectBackups'>, project: Doc<'hostedProjects
   current: project.currentBackup === backup._id,
   at: backup._creationTime,
 });
-import { storageDigest, scanComplete, duplicatePage, removeDuplicate } from './projectStorage';
 export { storageDigest } from './projectStorage';
 export const backupItem = v.object({
   objectManifest: v.optional(v.object({ digest: v.string(), size: v.number() })),
@@ -271,74 +270,6 @@ export const uploadUrl = internalMutation({
     }
   },
 });
-export const findUpload = internalQuery({
-  args: { id: v.id('projectBackups'), owner: v.string(), cursor: v.union(v.string(), v.null()) },
-  returns: v.object({ id: v.union(v.id('_storage'), v.null()), isDone: v.boolean(), cursor: v.string() }),
-  handler: async (ctx, { id, owner, cursor }) => {
-    try {
-      const backup = await ctx.db.get(id);
-      invariant(backup, 'PROJECT_UNAVAILABLE', 'This Forge backup is unavailable.');
-      await activeOwnedProject(ctx, backup.projectId, owner);
-      if (backup.location === 'r2') return { id: null, isDone: true, cursor: '' };
-      // ponytail: scan native file metadata on unknown uploads; use a bound streaming upload endpoint if measured storage volume warrants it.
-      const page = await ctx.db.system.query('_storage').order('desc').paginate({ numItems: 100, cursor });
-      const file = page.page.find(
-        file =>
-          file.contentType === `application/x-forge-backup-${backup.nonce}` &&
-          file.size === backup.size &&
-          storageDigest(file.sha256) === backup.digest,
-      );
-      return {
-        id: file?._id ?? null,
-        isDone: scanComplete(page, backup._creationTime),
-        cursor: page.continueCursor,
-      };
-    } catch (error) {
-      return report(error);
-    }
-  },
-});
-export const complete = internalMutation({
-  args: { id: v.id('projectBackups'), owner: v.string(), storageId: v.id('_storage') },
-  returns: backupItem,
-  handler: async (ctx, { id, owner, storageId }) => {
-    try {
-      const backup = await ctx.db.get(id);
-      invariant(backup, 'PROJECT_UNAVAILABLE', 'This Forge backup is unavailable.');
-      const project = await activeOwnedProject(ctx, backup.projectId, owner);
-      if (backup.status === 'stored') {
-        if (storageId !== backup.storageId) await removeDuplicate(ctx, backup, 'backup', storageId);
-        return item(backup, project);
-      }
-      // A Convex upload can no longer complete a backup (Item c0af6cfa); R2 uploads use completeR2.
-      return invariant(
-        false,
-        'R2_REQUIRED',
-        'Old Convex file storage is retired; Forge stores these bytes in R2 only.',
-      ) as never;
-    } catch (error) {
-      return report(error);
-    }
-  },
-});
-
-export const reconcileDuplicates = internalMutation({
-  args: { id: v.id('projectBackups'), owner: v.string(), cursor: v.union(v.string(), v.null()) },
-  returns: v.object({ cursor: v.string(), isDone: v.boolean() }),
-  handler: async (ctx, { id, owner, cursor }) => {
-    try {
-      const row = await ctx.db.get(id);
-      invariant(row && row.status === 'stored', 'PROJECT_UNAVAILABLE', 'Select this original stored upload.');
-
-      await activeOwnedProject(ctx, row.projectId, owner);
-      if (row.location === 'r2') return { cursor: '', isDone: true };
-      return await duplicatePage(ctx, row, 'backup', cursor);
-    } catch (error) {
-      return report(error);
-    }
-  },
-});
-
 /** Only the owning action calls this after HEAD verification of this exact key. */
 export const completeR2 = internalMutation({
   args: {

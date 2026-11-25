@@ -11,7 +11,7 @@ import { sourceWorkerPlan } from '../dist/convex-source-provider.js';
 import { sourceDispatch } from '../dist/hosted-source-job-controller.js';
 import { digest } from '../dist/hash.js';
 import { convexStoreBlob } from './convex-storage-fake.mjs';
-import { interceptDefaultR2, storedBytes } from './default-r2.mjs';
+import { interceptDefaultR2, storedBytes, defaultR2Objects, defaultR2Config } from './default-r2.mjs';
 const store = await import(moduleUrl('../convex/projectConvexSourceStore.ts'));
 const worker = await import(moduleUrl('../convex/projectConvexSource.ts'));
 const nodeWorker = await import(moduleUrl('../convex/projectConvexSourceNode.ts'));
@@ -112,18 +112,6 @@ async function fixture() {
       return call(name, functions[name], input);
     };
   });
-  const convert = () => {
-    for (const row of s.tables.projectObjects.values()) {
-      const id = `source-${row.digest}`;
-      blobs.set(id, new Blob([s.objects.get(row.digest)]));
-      s.patch('projectObjects', row._id, {
-        storageId: id,
-        location: undefined,
-        r2Key: undefined,
-        r2Committed: undefined,
-      });
-    }
-  };
   const changes = Array.from({ length: 10 }, (_, i) =>
     i === 0
       ? s.change('changed 0')
@@ -145,7 +133,9 @@ async function fixture() {
     }),
   );
   s.put(saveBytes(progress.input));
-  convert();
+  // The save's objects are R2 objects the source worker reads over their URLs.
+  for (const row of s.tables.projectObjects.values())
+    if (row.r2Key) defaultR2Objects.set(`${defaultR2Config.bucket}/${row.r2Key}`, s.objects.get(row.digest));
   const savedEnv = {};
   for (const key of [
     'FORGE_SOURCE_PROVIDER',

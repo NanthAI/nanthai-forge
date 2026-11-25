@@ -10,7 +10,6 @@ import { findStoredObject as findObject, isRegisteredState, readablePhysical } f
 import { isStored } from './projectObjectFields';
 import { describeObjects } from './projectObjectDownloads';
 import { downloadProject } from './projectDownloadAccess';
-import { blobStore } from './blobStore';
 import { sourceObjectLocation } from './projectSourceBeginReads';
 import { invariant } from '../src/errors';
 import type { HostedCheckRun } from '../src/hosted-check';
@@ -50,7 +49,6 @@ async function selection(
     return JSON.stringify({
       descriptor: { object, recipe: null },
       ...(physical ? { statePhysical: physical } : {}),
-      storageId: null,
       url: null,
     } satisfies Awaited<ReturnType<typeof sourceObjectLocation>>);
   const value = await sourceObjectLocation(
@@ -59,7 +57,6 @@ async function selection(
     object,
     physical ? row : { ...row, statePhysical: undefined },
   );
-  if (!value.url && value.storageId) value.url = await blobStore(ctx).getUrl(value.storageId);
   return JSON.stringify(value);
 }
 export const runner = internalMutation({

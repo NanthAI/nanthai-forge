@@ -27,7 +27,9 @@ function fixture() {
       size: bytes.length,
       nonce: 'synthetic',
       removed: false,
-      storageId: `blob-${i}`,
+      location: 'r2',
+      r2Committed: true,
+      r2Key: `v1/p/${projectId}/o/${sha256}`,
     });
     return { path: `f${i}`, blob: sha256, mode: 'file' };
   });
@@ -38,7 +40,9 @@ function fixture() {
     size: state.length,
     nonce: 'synthetic',
     removed: false,
-    storageId: 'state',
+    location: 'r2',
+    r2Committed: true,
+    r2Key: `v1/p/${projectId}/o/${digest(state)}`,
   });
   for (let i = 0; i < 600; i++)
     s.insert('projectHostedRecordHeads', {

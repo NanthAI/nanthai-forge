@@ -497,19 +497,11 @@ test('the abuse review purges a reported comment: one audit row, the report purg
   );
 });
 
-/** R2 for journal segments, in memory: every request is listed. */
+/** R2 for journal segments, in memory: every request is listed. The other objects stay in the default bucket. */
 function segmentStorage(t) {
   const objects = new Map(),
     requests = [],
     refused = { deletes: 0 };
-  const keys = ['R2_ACCOUNT_ID', 'R2_BUCKET', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY'];
-  const prior = new Map(keys.map(key => [key, process.env[key]]));
-  for (const key of keys) process.env[key] = 'synthetic';
-  t.after(() => {
-    for (const [key, value] of prior)
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
-  });
   const original = globalThis.fetch;
   t.mock.method(globalThis, 'fetch', async (url, init) => {
     const path = new URL(url).pathname;

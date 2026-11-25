@@ -14,7 +14,6 @@ import { enqueueSourceJob, loadSourceJob } from './projectSourceJobs';
 import { publishSyncJob } from './projectHostedSyncPublish';
 import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operation';
 import { savePin } from '../src/hosted-save';
-import { blobStore } from './blobStore';
 import { presignGet, r2Config } from './r2';
 import { invariant } from '../src/errors';
 import { refuseScopedRevert } from './projectAuthority';
@@ -167,9 +166,7 @@ export const resultDownload = internalMutation({
     const url =
       object?.location === 'r2' && object.r2Key
         ? await presignGet(r2Config(), object.r2Key, packHeaders(packRange(object), object.size))
-        : object?.storageId
-          ? await blobStore(ctx).getUrl(object.storageId)
-          : null;
+        : null;
     invariant(url, 'SOURCE_UNAVAILABLE', 'The exact worker result is unavailable.');
     return { url, size: job.output.size, ...(object?.pack ? { range: packRange(object)! } : {}) };
   },

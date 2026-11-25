@@ -9,6 +9,7 @@ import { invariant } from '../src/errors';
 export const directDownloadFields = { direct: v.optional(v.boolean()), url: v.optional(v.string()) };
 export type DirectDownload = { data: ArrayBuffer; direct?: boolean; url?: string };
 type Archive = {
+  /** An import artifact reference (`r2blob:`); backups and proposals carry none. */
   storageId?: string;
   location?: string;
   r2Committed?: boolean;
@@ -17,7 +18,7 @@ type Archive = {
   digest: string;
 };
 /** Owning authorization and pin checks precede this call. Only committed R2
- * bindings issue URLs; legacy Convex bytes retain their old action-only path. */
+ * bindings and artifact references issue URLs. */
 export async function archiveDownload(ctx: ActionCtx, row: Archive): Promise<DirectDownload | null> {
   if (row.location === 'r2' && row.r2Committed && row.r2Key)
     return { data: new ArrayBuffer(0), direct: true, url: await presignGet(r2Config(), row.r2Key) };

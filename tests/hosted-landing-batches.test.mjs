@@ -718,36 +718,18 @@ test('a stacked changed-path manifest larger than 4 KiB passes the real source f
   assert.equal(f.runs().length, 1);
 });
 
-test('incident storage replay: eight eligible landings reuse a Convex-stored empty page and share one check', async t => {
+test('incident storage replay: eight eligible landings reuse a stored empty page and share one check', async t => {
   const f = await batchesFixture(t, { count: 8 });
   const { buildComposePages } = await import('../dist/hosted-compose.js');
   const { saveBytes } = await import('../dist/hosted-save.js');
   const page = buildComposePages([]).pages[0];
   const pin = f.c.put(saveBytes(page.value));
-  const object = [...f.tables.projectObjects.values()].find(row => row.digest === pin.sha256);
-  await f.transaction(
-    'seed-convex-metadata',
-    {
-      _handler: async ctx => {
-        const storageId = await ctx.storage.store(
-          new Blob([saveBytes(page.value)], { type: 'application/json' }),
-        );
-        await ctx.db.patch(object._id, {
-          storageId,
-          location: undefined,
-          r2Key: undefined,
-          r2Committed: undefined,
-        });
-      },
-    },
-    {},
-  );
   await f.drain();
   assert.equal(f.runs().length, 1);
   assert(states(f).every(s => !s.batchSolo && s.phase === 'checking'));
   assert.equal(
     [...f.tables.projectObjects.values()].find(row => row.digest === pin.sha256).location,
-    undefined,
+    'r2',
     'valid stored bytes keep their existing location',
   );
   await f.passChecks();

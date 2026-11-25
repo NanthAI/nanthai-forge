@@ -42,7 +42,6 @@ Usage:
   nforge logout [DEPLOYMENT_URL]
   nforge auth status [DEPLOYMENT_URL]
   nforge maintenance check-logs ROOT --dry-run|--apply --plan FILE [--hosted]
-  nforge maintenance r2-backfill <root> [--dry-run|--verify] [--resume] [--state FILE]
   nforge hosted-work <deployment-url> <project-id> JSON
   nforge make-editable <deployment-url> <project-id> [operation-uuid]
   nforge coordination <deployment-url> <project-id> JSON

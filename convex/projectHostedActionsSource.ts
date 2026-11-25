@@ -7,7 +7,6 @@ import { actionsSourceStates } from './projectStateSourceSelection';
 import { actionsSession, sessionArgs } from './projectHostedActionsSession';
 import { isStored } from './projectObjectFields';
 import { presignGet, r2Config } from './r2';
-import { blobStore } from './blobStore';
 import { directSourceWindow, directSourceBatch } from '../src/hosted-actions-direct';
 import { invariant } from '../src/errors';
 import { findStoredObjects as findObjects, readablePhysical } from './projectObjectFind';
@@ -123,9 +122,7 @@ export const resolve = internalMutation({
             ? null
             : row.location === 'r2' && row.r2Key
               ? await presignGet(r2Config(), row.r2Key, packHeaders(packRange(row), row.size))
-              : row.storageId
-                ? await blobStore(ctx).getUrl(row.storageId)
-                : null;
+              : null;
         invariant(
           url || row.recipe || (input.runs && row.pack && row.r2Key),
           'SOURCE_UNAVAILABLE',

@@ -293,9 +293,6 @@
     "tests/publication.test.mjs": {
       "sleep": 1
     },
-    "tests/r2-backfill.test.mjs": {
-      "sleep": 1
-    },
     "tests/r2-bytepaths.test.mjs": {
       "elapsed": 1
     },

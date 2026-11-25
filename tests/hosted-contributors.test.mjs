@@ -23,6 +23,7 @@ import { readHosted } from './hosted-read.mjs';
 const modules = {};
 for (const name of [
   'projectWork',
+  'r2ArchiveSource',
   'projectBackups',
   'projectContributors',
   'projectProposals',
@@ -153,9 +154,20 @@ async function setup(t, { retained = false, r2Ready = false } = {}) {
     size: bytes.length,
     preview,
     status: 'stored',
-    storageId: 'base',
+    location: 'r2',
+    r2Committed: true,
+    r2Key: `v1/p/project/o/${digest(bytes)}`,
   });
-  s.files.set('base', { blob: new Blob([bytes]) });
+  {
+    // The base archive is an R2 object, written like any upload.
+    const { presignPut, r2Config } = await import(moduleUrl('../convex/r2.ts'));
+    const target = await presignPut(r2Config(), `v1/p/project/o/${digest(bytes)}`, {
+      digest: digest(bytes),
+      size: bytes.length,
+    });
+    const put = await fetch(target.url, { method: 'PUT', headers: target.headers, body: bytes });
+    assert.ok(put.ok || put.status === 412);
+  }
   await actions.initialize._handler(s.ctx, {
     projectId: 'project',
     backupId: 'backup',
@@ -308,7 +320,8 @@ test('native contributor grant discovers full project and source without GitHub 
     offset: 0,
     digest: digest(s.bytes),
   });
-  assert.deepEqual(Buffer.from(part.data), s.bytes);
+  assert.equal(part.direct, true, 'the base archive downloads straight from R2');
+  assert.ok(part.url);
 
   assert.equal(s.tables.hostedProjects.get('project').currentBackup, before.currentBackup);
   s.caller('owner');
@@ -363,126 +376,6 @@ test('contributor retries are actor-bound, grant revocation during final append 
     );
   }
 });
-test('F6: a native proposal completion refuses; a stored legacy proposal replays, downloads and cleans up preserving canonical backup and Channels', async t => {
-  const s = await setup(t),
-    c = await candidate(t, s),
-    before = structuredClone(s.tables.hostedProjects.get('project'));
-  const prepared = await proposals.prepare._handler(s.ctx, c.input);
-  assert.equal(prepared.proposal.status, 'uploading');
-  // A fresh upload has no stored bytes yet; reconciliation returns its original record.
-  const nativeQuery = s.ctx.runQuery;
-  s.ctx.runQuery = async (ref, args) =>
-    getFunctionName(ref) === 'projectProposals:findUpload'
-      ? { id: null, isDone: true, cursor: '' }
-      : nativeQuery(ref, args);
-  assert.equal(
-    (await proposals.reconcileUpload._handler(s.ctx, { id: prepared.proposal._id })).status,
-    'uploading',
-  );
-  s.ctx.runQuery = nativeQuery;
-  // F6: a late native upload never completes into old Convex file storage.
-  upload(s, prepared, c.bytes, 'late-native');
-  await assert.rejects(
-    proposals.complete._handler(s.ctx, { id: prepared.proposal._id, storageId: 'late-native' }),
-    r2Required,
-  );
-  const storageId = upload(s, prepared, c.bytes);
-  const stored = storedNative(s, prepared, storageId);
-  assert.equal(stored.status, 'stored');
-  assert.equal(stored.head, c.view.head);
-  assert.equal(stored.actor, 'contributor');
-  assert.deepEqual(s.tables.hostedProjects.get('project'), before);
-  const old = await proposals.prepare._handler(s.ctx, c.input);
-  assert.equal(old.proposal._id, stored._id);
-  assert.equal(old.uploadUrl, undefined);
-  await assert.rejects(
-    proposals.prepare._handler(s.ctx, { ...c.input, head: 'f'.repeat(64) }),
-    e => e.data.code === 'WORK_OPERATION_CHANGED',
-  );
-  s.caller('owner');
-  await assert.rejects(
-    proposals.prepare._handler(s.ctx, c.input),
-    e => e.data.code === 'WORK_OPERATION_CHANGED',
-  );
-  await assert.rejects(proposals.complete._handler(s.ctx, { id: stored._id, storageId }), unavailable);
-  const part = await proposals.downloadPart._handler(s.ctx, {
-    id: stored._id,
-    offset: 0,
-    digest: stored.digest,
-  });
-  assert.deepEqual(Buffer.from(part.data), c.bytes);
-  await modules.projectContributors.remove._handler(s.ctx, {
-    projectId: 'project',
-    contributor: 'contributor',
-  });
-  s.caller('contributor');
-  await assert.rejects(
-    proposals.downloadPart._handler(s.ctx, { id: stored._id, offset: 0, digest: stored.digest }),
-    unavailable,
-  );
-  s.caller('owner');
-  const derivativeIds = [...s.tables.derivedArtifacts.values()]
-    .filter(row => row.original === storageId)
-    .map(row => row.storageId)
-    .filter(Boolean);
-  await modules.projectProposals.remove._handler(s.ctx, { id: stored._id });
-  assert.deepEqual(s.deleted, [storageId, ...derivativeIds.filter(id => !id.startsWith('r2blob:'))]);
-  const { blobStore } = await import(moduleUrl('../convex/blobStore.ts'));
-  const artifactStorage = await import(moduleUrl('../convex/artifactStorage.ts'));
-  for (const ref of derivativeIds.filter(id => id.startsWith('r2blob:'))) {
-    assert.equal(
-      await blobStore(s.ctx).getMetadata(ref),
-      null,
-      'R2 derivative is tombstoned before byte cleanup',
-    );
-    await artifactStorage.deleteBytes._handler(s.ctx, { ref });
-  }
-  assert.ok(s.files.has('base'));
-  assert.deepEqual(s.tables.hostedProjects.get('project'), before);
-});
-test('proposal final completion rechecks grant after asynchronous archive read; changed source pins never become canonical', async t => {
-  const s = await setup(t),
-    c = await candidate(t, s),
-    prepared = await proposals.prepare._handler(s.ctx, c.input),
-    storageId = upload(s, prepared, c.bytes),
-    before = structuredClone(s.tables.hostedProjects.get('project'));
-  const native = s.ctx.runMutation;
-  s.ctx.runMutation = async (ref, args) => {
-    if (getFunctionName(ref) === 'projectProposals:complete') s.tables.projectContributors.clear();
-    return native(ref, args);
-  };
-  await assert.rejects(
-    proposals.complete._handler(s.ctx, { id: prepared.proposal._id, storageId }),
-    unavailable,
-  );
-  assert.equal(s.tables.projectProposals.get(prepared.proposal._id).status, 'uploading');
-  assert.deepEqual(s.tables.hostedProjects.get('project'), before);
-  s.ctx.runMutation = native;
-  s.caller('owner');
-  await grants.invitePerson._handler(s.ctx, {
-    projectId: 'project',
-    person: '@contributor',
-    operationId: randomUUID(),
-  });
-  await acceptContributorInvitation(s);
-  s.caller('contributor');
-  await assert.rejects(
-    proposals.prepare._handler(s.ctx, { ...c.input, operationId: randomUUID(), baseState: 'f'.repeat(64) }),
-    e => e.data.code === 'SOURCE_UNAVAILABLE',
-  );
-  const changed = await proposals.prepare._handler(s.ctx, {
-      ...c.input,
-      operationId: randomUUID(),
-      head: 'f'.repeat(64),
-    }),
-    wrong = upload(s, changed, c.bytes, 'wrong-pins');
-  await assert.rejects(
-    proposals.complete._handler(s.ctx, { id: changed.proposal._id, storageId: wrong }),
-    e => e.data.code === 'INVALID_WORK_BACKUP',
-  );
-  assert.deepEqual(s.tables.hostedProjects.get('project'), before);
-});
-
 test('grant add verifies existing Forge identity and current owner after the account lookup; contributor cannot manage grants', async t => {
   const s = await setup(t);
   await assert.rejects(
@@ -521,140 +414,6 @@ test('grant add verifies existing Forge identity and current owner after the acc
     false,
   );
 });
-test('archive and proposal transfers recheck grant after byte read, and unrelated upload IDs are rejected before storage reads', async t => {
-  const s = await setup(t),
-    c = await candidate(t, s),
-    prepared = await proposals.prepare._handler(s.ctx, c.input),
-    storageId = upload(s, prepared, c.bytes);
-  const reads = s.reads();
-  s.files.set('unrelated', {
-    blob: new Blob([c.bytes]),
-    metadata: { size: c.bytes.length, sha256: digest(c.bytes), contentType: 'application/gzip' },
-  });
-  await assert.rejects(
-    proposals.complete._handler(s.ctx, { id: prepared.proposal._id, storageId: 'unrelated' }),
-    e => e.data.code === 'INVALID_WORK_BACKUP',
-  );
-  assert.equal(s.reads(), reads);
-  storedNative(s, prepared, storageId);
-  const originalFetch = globalThis.fetch;
-  const revokedBody = async (input, init) => {
-    const response = await originalFetch(input, init);
-    if (!String(input).startsWith('data:')) return response;
-    const reader = response.body.getReader();
-    return new Response(
-      new ReadableStream({
-        async pull(controller) {
-          const part = await reader.read();
-          if (part.done) controller.close();
-          else {
-            s.tables.projectContributors.clear();
-            controller.enqueue(part.value);
-          }
-        },
-        cancel: () => reader.cancel(),
-      }),
-      { status: response.status, headers: response.headers },
-    );
-  };
-  globalThis.fetch = revokedBody;
-  try {
-    await assert.rejects(
-      proposals.downloadPart._handler(s.ctx, {
-        id: prepared.proposal._id,
-        offset: 0,
-        digest: prepared.proposal.digest,
-      }),
-      unavailable,
-    );
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-  s.caller('owner');
-  await grants.invitePerson._handler(s.ctx, {
-    projectId: 'project',
-    person: '@contributor',
-    operationId: randomUUID(),
-  });
-  await acceptContributorInvitation(s);
-  s.caller('contributor');
-  globalThis.fetch = revokedBody;
-  try {
-    await assert.rejects(
-      backups.downloadPart._handler(s.ctx, { id: 'backup', offset: 0, digest: digest(s.bytes) }),
-      unavailable,
-    );
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-
-  s.caller('unrelated');
-  s.caller(undefined);
-  const shared = await modules.projectContributors.shared._handler(s.ctx, {
-    paginationOpts: { cursor: null, numItems: 10 },
-  });
-  assert.deepEqual(shared.page, []);
-});
-
-test('owner proposal cleanup preserves recorded shared files and foreign members cannot delete proposal storage', async t => {
-  const s = await setup(t),
-    c = await candidate(t, s),
-    prepared = await proposals.prepare._handler(s.ctx, c.input),
-    storageId = upload(s, prepared, c.bytes);
-  const stored = storedNative(s, prepared, storageId);
-  await assert.rejects(modules.projectProposals.remove._handler(s.ctx, { id: stored._id }), unavailable);
-  s.tables.projectProposals.set('second-reference', {
-    ...stored,
-    _id: 'second-reference',
-    operationId: randomUUID(),
-  });
-  s.caller('owner');
-  await modules.projectProposals.remove._handler(s.ctx, { id: stored._id });
-  assert.deepEqual(s.deleted, []);
-  assert.ok(s.files.has(storageId));
-  const derivativeIds = [...s.tables.derivedArtifacts.values()]
-    .filter(row => row.original === storageId)
-    .map(row => row.storageId)
-    .filter(Boolean);
-  await modules.projectProposals.remove._handler(s.ctx, { id: 'second-reference' });
-  assert.deepEqual(s.deleted, [storageId, ...derivativeIds.filter(id => !id.startsWith('r2blob:'))]);
-  const { blobStore } = await import(moduleUrl('../convex/blobStore.ts'));
-  const artifactStorage = await import(moduleUrl('../convex/artifactStorage.ts'));
-  for (const ref of derivativeIds.filter(id => id.startsWith('r2blob:'))) {
-    assert.equal(
-      await blobStore(s.ctx).getMetadata(ref),
-      null,
-      'R2 derivative is tombstoned before byte cleanup',
-    );
-    await artifactStorage.deleteBytes._handler(s.ctx, { ref });
-  }
-  assert.ok(s.files.has('base'));
-});
-
-test('captured hosted journal identifies its exact source pair across a concurrent canonical return', async t => {
-  const s = await setup(t);
-  const journal = JSON.parse(await actions.exportJournal._handler(s.ctx, { projectId: 'project' }));
-  assert.deepEqual(journal.source, { backupId: 'backup', head: s.preview.head, kind: 'native' });
-  assert.equal(journal.base.archiveSha256, digest(s.bytes));
-  // A subsequent independently accepted return can select a new immutable backup. The saved journal still selects its original bytes.
-  s.tables.projectBackups.set('new-backup', {
-    ...s.tables.projectBackups.get('backup'),
-    _id: 'new-backup',
-    digest: 'f'.repeat(64),
-    storageId: 'new-source',
-  });
-  s.files.set('new-source', { blob: new Blob(['different future archive']) });
-  s.tables.hostedProjects.get('project').work.backupId = 'new-backup';
-  s.tables.hostedProjects.get('project').currentBackup = 'new-backup';
-  const part = await backups.downloadPart._handler(s.ctx, {
-    id: journal.source.backupId,
-    offset: 0,
-    digest: journal.base.archiveSha256,
-  });
-  assert.deepEqual(Buffer.from(part.data), s.bytes);
-  assert.equal(s.tables.hostedProjects.get('project').currentBackup, 'new-backup');
-});
-
 test('legacy email addition creates a private pending invitation without provider lookup and rechecks current ownership', async t => {
   const s = await setup(t),
     previous = globalThis.fetch;
@@ -899,7 +658,6 @@ test('contributor proposals publish and read committed R2 roots while retaining 
     row._id,
   );
   assert.equal(fake.objects.size, count);
-  assert.ok(s.tables.projectBackups.get('backup').storageId, 'the legacy base archive remains readable');
 });
 
 test('opted-in legacy archive metadata sidecars use R2 and preserve exact Work bytes', async t => {

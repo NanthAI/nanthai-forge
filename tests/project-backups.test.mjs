@@ -68,23 +68,3 @@ const input = bytes => ({
     channels: [{ name: 'main', head: 'c'.repeat(40) }],
   },
 });
-
-test('F6: a historical native archive upload never completes into old Convex file storage', async () => {
-  const s = fixture(),
-    bytes = Buffer.from('retained source and Work'),
-    request = input(bytes);
-  const first = await actions.prepare._handler(s.ctx, request);
-  assert.equal(first.backup.status, 'uploading');
-  // The upload finished natively but its reply never reached the client: neither the reply
-  // reconciliation nor an explicit completion may bind the native file.
-  s.put('original', bytes, first.contentType);
-  for (const finish of [
-    () => actions.reconcileUpload._handler(s.ctx, { id: first.backup.id }),
-    () => actions.complete._handler(s.ctx, { id: first.backup.id, storageId: 'original' }),
-  ])
-    await assert.rejects(finish(), e => (e.code ?? e.data?.code) === 'R2_REQUIRED');
-  const row = s.tables.projectBackups.get(first.backup.id);
-  assert.equal(row.status, 'uploading');
-  assert.equal(row.storageId, undefined);
-  assert.equal(s.tables.hostedProjects.get(row.projectId).currentBackup ?? null, null);
-});

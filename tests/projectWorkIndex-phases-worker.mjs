@@ -9,7 +9,11 @@ import { moduleUrl } from './convex-module.mjs';
 // Avoid buffering thousands of expected attribution markers in execFile's stderr.
 const measuredLog = console.log;
 console.log = (...args) => {
-  if (typeof args[0] === 'string' && args[0].startsWith('FORGE_PROJECT_EXECUTION ')) return;
+  if (
+    typeof args[0] === 'string' &&
+    (args[0].startsWith('FORGE_PROJECT_EXECUTION ') || args[0].startsWith('FORGE_R2_COUNT '))
+  )
+    return;
   measuredLog(...args);
 };
 if (process.argv[2] === 'action') {

@@ -13,7 +13,6 @@ import { findStoredObject as findObject, readablePhysical } from './projectObjec
 import { isStored } from './projectObjectFields';
 import { sourceObjectLocation } from './projectSourceBeginReads';
 import { describeObjects } from './projectObjectDownloads';
-import { blobStore } from './blobStore';
 import { deploySmoke, deployStatus, deployTarget } from './projectDeployFields';
 import {
   DEPLOY_COALESCE_MS,
@@ -300,7 +299,6 @@ export const selectState = internalMutation({
       return JSON.stringify({
         descriptor: { object, recipe: null },
         ...(physical ? { statePhysical: physical } : {}),
-        storageId: null,
         url: null,
       });
     const value = await sourceObjectLocation(
@@ -309,7 +307,6 @@ export const selectState = internalMutation({
       object,
       physical ? row : { ...row, statePhysical: undefined },
     );
-    if (!value.url && value.storageId) value.url = await blobStore(ctx).getUrl(value.storageId);
     return JSON.stringify(value);
   },
 });

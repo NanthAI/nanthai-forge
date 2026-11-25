@@ -1,1 +1,0 @@
-| `legacyStorageTombstones` | One retired legacy storage ID and its R2 copy pin. Nothing reads it; `storageTombstoneRetire` empties it and the table leaves the schema in the next State (Item c0af6cfa). No file bytes. | Deleted with its copies |

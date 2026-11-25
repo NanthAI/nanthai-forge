@@ -11,8 +11,7 @@ export async function purgeExchangeObjects(ctx: MutationCtx, project: Doc<'hoste
     .withIndex('by_project_and_removed', q => q.eq('projectId', project._id).eq('removed', false))
     .take(50);
   for (const row of rows) {
-    if (row.storageId) await removeExclusive(ctx, row.storageId, row._id);
-    await ctx.db.patch(row._id, { removed: true, storageId: undefined, recipe: undefined });
+    await ctx.db.patch(row._id, { removed: true, recipe: undefined });
   }
   if (rows.length) return false;
   if (project.exchangeCleanupDone) return true;

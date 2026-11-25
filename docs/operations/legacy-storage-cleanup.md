@@ -9,13 +9,16 @@ step; stop and report on any miss.
 ## Release order
 
 Three pinned States, in this order. Each deploy must succeed and each step's proof must hold before the next
-State goes out.
+State goes out. Dev ran them as main receipts 1e9f7e21 (A), c202d960 (B) and the field-removal landing (C).
 
-1. **State A, converters and readers.** Has `storagePointerRetire`, `storagePointerProof` and every pointer
-   reader. Run [pointer retirement](#pointer-retirement-one-shape) here.
-2. **State B, readers gone.** Has `storageTombstoneRetire` and none of the pointer readers or the read-through.
-   Run [tombstone copies](#tombstone-copies) here.
-3. **State C, main.** The tables, the `storageId` field and both one-off modules are gone.
+1. **State A, converters.** Has `storagePointerRetire`, `storagePointerProof` and the old pointer readers.
+   Run [pointer retirement](#pointer-retirement-one-shape) here.
+2. **State B, read-through and pause gone.** Has `storageTombstoneRetire`; the pointer readers are still
+   there but read R2 first. Run [tombstone copies](#tombstone-copies) here.
+3. **State C, main.** The tables, the `storageId` fields and indexes, the native pointer readers, the R2
+   backfill and both one-off modules are gone. Before it goes out, a read-only check finds no row with a
+   `storageId` and no tombstone, window or retired receipt row (a deploy that removes a field or table still
+   holding data fails schema validation and changes nothing).
 
 ## Pointer retirement (one shape)
 
@@ -74,9 +77,8 @@ miss.
    rows.
 8. **Proof after.** The same ids give the same `sha256` and `size`, `pointer`
    false for every cleared row, and an unchanged `alias` for blocked ones.
-   Only then may State B go out (it deletes the pointer readers and the
-   read-through; the schema field and these two modules go at State C, after
-   the tombstone copies).
+   Only then may State B go out; State C deletes the pointer readers, the
+   schema field and these two modules, after the tombstone copies.
 
 ## Tombstone copies
 

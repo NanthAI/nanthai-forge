@@ -49,7 +49,6 @@ async function signedSourceLocation(object: ObjectView, descriptor: WorkerObject
     ...(object.stateSize === undefined ? {} : { stateSize: object.stateSize }),
     ...(object.stateParents === undefined ? {} : { stateParents: object.stateParents }),
     ...(object.statePhysical === undefined ? {} : { statePhysical: object.statePhysical }),
-    storageId: url ? null : (object.storageId ?? null),
     url,
     ...(object.recipeClosure ? { closure: await signRecipeClosure(object) } : {}),
     ...(object.pack ? { range: packRange(object)! } : {}),

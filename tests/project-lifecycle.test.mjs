@@ -313,100 +313,6 @@ test('M1 phase derive: one row per state, a reason for each purge-blocked code, 
   }
   row({ removal: 'archived-by-a-future-server' }, 'unknown');
 });
-test('permanent project removal batches journals/grants/archives, resumes failure, preserves shared objects and leaves no downloadable project', async () => {
-  const s = fixture();
-  for (let i = 0; i < 121; i++) {
-    s.tables.projectContributors.set(`grant-${i}`, {
-      _id: `grant-${i}`,
-      projectId: 'project',
-      contributor: `member-${i}`,
-    });
-    s.tables.projectWorkEvents.set(`event-${i}`, { _id: `event-${i}`, projectId: 'project', revision: i });
-  }
-  for (let i = 0; i < 121; i++) {
-    setWorkRecord(s.tables, `indexed-${i}`, { _id: `indexed-${i}`, projectId: 'project' });
-    s.tables.projectWorkGenerations.set(`generation-${i}`, { _id: `generation-${i}`, projectId: 'project' });
-  }
-  for (let i = 0; i < 105; i++) s.put(`unrelated-${i}`, 'application/gzip');
-  s.put('duplicate', 'application/x-forge-backup-original-backup');
-  const shared = {
-    ...s.tables.projectBackups.get('backup'),
-    _id: 'foreign-backup',
-    projectId: 'foreign-project',
-  };
-  s.tables.hostedProjects.set('foreign-project', {
-    _id: 'foreign-project',
-    owner: 'other',
-    key: randomUUID(),
-    name: 'Other project',
-    currentBackup: 'foreign-backup',
-    revision: 0,
-  });
-  s.tables.projectBackups.set(shared._id, shared);
-  const proposal = proposalFrom(s, {
-    _id: 'proposal',
-    actor: 'contributor',
-    nonce: 'original-proposal',
-    storageId: 'proposal-file',
-    intentId: 'intent',
-    baseBackupId: 'backup',
-    baseArchiveSha256: sha(bytes),
-    baseState: 'a'.repeat(64),
-    head: 'b'.repeat(64),
-    viewId: 'view',
-  });
-  s.tables.projectProposals.set(proposal._id, proposal);
-  s.put('proposal-file', 'application/x-forge-proposal-original-proposal');
-  const op = s.operation();
-  await modules.projectLifecycle.permanentlyDelete._handler(s.ctx, op);
-  assert.equal(s.tables.hostedProjects.get('project').removal, 'deleting');
-  await assert.rejects(
-    backups.downloadPart._handler(s.ctx, { id: 'backup', offset: 0, digest: sha(bytes) }),
-    unavailable,
-  );
-  const firstTask = s.tables.hostedProjects.get('project').task;
-  s.tasks.set(firstTask, { state: { kind: 'failed' } });
-  await modules.projectLifecycle.permanentlyDelete._handler(s.ctx, op);
-  assert.notEqual(s.tables.hostedProjects.get('project').task, firstTask);
-  const remove = s.ctx.storage.delete;
-  let fail = true;
-  s.ctx.storage.delete = async id => {
-    if (id === 'proposal-file' && fail) {
-      fail = false;
-      throw Error('provider interruption');
-    }
-    return remove(id);
-  };
-  await assert.rejects(s.drain(), /provider interruption/);
-  await s.drain();
-  assert.equal(s.tables.hostedProjects.get('project').removal, 'deleted');
-  assert.equal(s.tables.hostedProjects.get('project').name, '');
-  assert.equal(s.tables.hostedProjects.get('project').work, undefined);
-  assert.equal(s.tables.projectWorkRecords.size, 0);
-  assert.equal(s.tables.projectWorkGenerations.size, 0);
-  assert.equal(s.tables.projectContributors.size, 0);
-  assert.equal(s.tables.projectWorkEvents.size, 0);
-  assert.equal(s.tables.projectProposals.size, 0);
-  assert.equal(s.tables.projectBackups.size, 1);
-  assert.ok(s.files.has('original'), 'another project retains the shared object');
-  assert.ok(!s.files.has('duplicate'));
-  assert.ok(!s.files.has('proposal-file'));
-  assert.equal([...s.files.keys()].filter(x => x.startsWith('unrelated-')).length, 105);
-  assert.equal(s.tables.projectUploadCleanup.size, 0, 'cleanup receipts are purged with the project');
-  await modules.projectLifecycle.permanentlyDelete._handler(s.ctx, op);
-  await assert.rejects(modules.projectLifecycle.restore._handler(s.ctx, s.operation()), unavailable);
-  await assert.rejects(
-    modules.projectWork.initialize._handler(s.ctx, {
-      projectId: 'project',
-      owner: 'owner',
-      backupId: 'backup',
-      operationId: randomUUID(),
-      revision: 0,
-    }),
-    unavailable,
-  );
-  assert.equal(s.reads(), 0, 'cleanup reads metadata rather than source bodies');
-});
 test('permanent removal prevents original initial prepare resurrection and validates known late completion before exclusive cleanup', async () => {
   const s = fixture(),
     project = s.tables.hostedProjects.get('project'),
@@ -451,41 +357,6 @@ test('permanent removal prevents original initial prepare resurrection and valid
   assert.ok(s.files.has('foreign'));
   assert.ok(s.files.has('mismatch'));
 });
-test('same-operation duplicate backup completion and lost-ID reconciliation delete only exact exclusively bound objects', async () => {
-  const s = fixture(),
-    type = 'application/x-forge-backup-original-backup';
-  s.put('first-extra', type);
-  await backups.complete._handler(s.ctx, { id: 'backup', storageId: 'first-extra' });
-  assert.ok(!s.files.has('first-extra'));
-  await backups.complete._handler(s.ctx, { id: 'backup', storageId: 'first-extra' });
-  s.put('foreign', 'application/gzip');
-  await assert.rejects(
-    backups.complete._handler(s.ctx, { id: 'backup', storageId: 'foreign' }),
-    e => e.data.code === 'INVALID_WORK_BACKUP',
-  );
-  assert.ok(s.files.has('foreign'));
-  s.put('shared-extra', type);
-  s.tables.projectProposals.set('foreign-proposal', {
-    _id: 'foreign-proposal',
-    projectId: 'foreign-project',
-    storageId: 'shared-extra',
-  });
-  await backups.complete._handler(s.ctx, { id: 'backup', storageId: 'shared-extra' });
-  assert.ok(s.files.has('shared-extra'));
-  for (let i = 0; i < 130; i++) s.put(`unrelated-${i}`, 'application/gzip');
-  s.put('unknown-extra', type);
-  const observed = await backups.reconcileUpload._handler(s.ctx, { id: 'backup' });
-  assert.equal(observed.id, 'backup');
-  assert.ok(!s.files.has('unknown-extra'));
-  assert.ok(s.files.has('original'));
-  s.caller('contributor');
-  s.put('denied-extra', type);
-  await assert.rejects(
-    backups.complete._handler(s.ctx, { id: 'backup', storageId: 'denied-extra' }),
-    unavailable,
-  );
-  assert.ok(s.files.has('denied-extra'));
-});
 test('F6: two issued native URLs for the same initial backup never complete into old Convex file storage', async () => {
   const s = fixture(),
     request = {
@@ -513,46 +384,6 @@ test('F6: two issued native URLs for the same initial backup never complete into
   assert.equal(row.storageId, undefined);
   assert.equal(s.tables.hostedProjects.get(row.projectId).revision, 0);
   assert.ok(s.files.has('original'), 'the existing stored backup is untouched');
-});
-test('stored proposal duplicate outcomes recheck current grant; removal receipts reconcile original uploader late bytes without source access', async () => {
-  const s = fixture(),
-    original = proposalFrom(s, {
-      _id: 'proposal',
-      actor: 'contributor',
-      nonce: 'original-proposal',
-      storageId: 'proposal-original',
-    });
-  s.tables.projectProposals.set('proposal', original);
-  s.put('proposal-original', 'application/x-forge-proposal-original-proposal');
-  s.put('proposal-extra', 'application/x-forge-proposal-original-proposal');
-  s.caller('contributor');
-  await proposals.complete._handler(s.ctx, { id: 'proposal', storageId: 'proposal-extra' });
-  assert.ok(!s.files.has('proposal-extra'));
-  s.put('lost-id-extra', 'application/x-forge-proposal-original-proposal');
-  await proposals.reconcileUpload._handler(s.ctx, { id: 'proposal' });
-  assert.ok(!s.files.has('lost-id-extra'));
-  s.tables.projectContributors.clear();
-  s.put('revoked-extra', 'application/x-forge-proposal-original-proposal');
-  await assert.rejects(
-    proposals.complete._handler(s.ctx, { id: 'proposal', storageId: 'revoked-extra' }),
-    unavailable,
-  );
-  assert.ok(s.files.has('revoked-extra'));
-  s.caller('owner');
-  await modules.projectLifecycle.permanentlyDelete._handler(s.ctx, s.operation());
-  // A late proposal upload lands while the purge waits for issued uploads to expire.
-  s.put('late-proposal', 'application/x-forge-proposal-original-proposal');
-  s.caller('contributor');
-  await assert.rejects(
-    proposals.complete._handler(s.ctx, { id: 'proposal', storageId: 'late-proposal' }),
-    unavailable,
-  );
-  await s.drain();
-  assert.ok(!s.files.has('late-proposal'));
-  await assert.rejects(
-    proposals.downloadPart._handler(s.ctx, { id: 'proposal', offset: 0, digest: sha(bytes) }),
-    unavailable,
-  );
 });
 test('lifecycle ownership/CAS/reused request denials do not reveal or mutate another project', async () => {
   const s = fixture(),
@@ -584,59 +415,6 @@ test('Trash revokes team links with the direct grants, so a restore starts with 
   await modules.projectLifecycle.trash._handler(s.ctx, s.operation());
   assert.equal(s.tables.projectTeams.size, 0);
   assert.equal(s.tables.hostedProjects.get('project').teamLinks, undefined);
-});
-test('Trash during a contributor byte transfer rejects the final response without disturbing retained owner source', async t => {
-  const s = fixture(),
-    fetch = globalThis.fetch;
-  s.caller('contributor');
-  t.after(() => {
-    globalThis.fetch = fetch;
-  });
-  globalThis.fetch = async (...args) => {
-    const response = await fetch(...args);
-    s.caller('owner');
-    await modules.projectLifecycle.trash._handler(s.ctx, s.operation());
-    s.caller('contributor');
-    return response;
-  };
-  await assert.rejects(
-    backups.downloadPart._handler(s.ctx, { id: 'backup', offset: 0, digest: sha(bytes) }),
-    unavailable,
-  );
-  assert.ok(s.files.has('original'));
-  assert.equal(s.tables.hostedProjects.get('project').currentBackup, 'backup');
-  assert.equal(s.tables.projectContributors.size, 0, 'deletion revokes contributor grants at once');
-});
-test('individual proposal removal retains late cleanup facts and retries a failed original scheduled sweep without recreating source', async () => {
-  const s = fixture(),
-    original = proposalFrom(s, {
-      _id: 'proposal',
-      actor: 'contributor',
-      nonce: 'original-proposal',
-      storageId: 'proposal-original',
-    });
-  s.tables.projectProposals.set('proposal', original);
-  s.put('proposal-original', 'application/x-forge-proposal-original-proposal');
-  s.put('unknown-extra', 'application/x-forge-proposal-original-proposal');
-  await modules.projectProposals.remove._handler(s.ctx, { id: 'proposal' });
-  const receipt = [...s.tables.projectUploadCleanup.values()][0],
-    first = receipt.task;
-  s.tasks.set(first, { state: { kind: 'failed' } });
-  await modules.projectProposals.remove._handler(s.ctx, { id: 'proposal' });
-  assert.notEqual(receipt.task, first);
-  await modules.projectLifecycle.sweepUpload._handler(s.ctx, { id: receipt._id });
-  assert.ok(!s.files.has('unknown-extra'));
-  assert.equal(receipt.pending, false);
-  assert.equal(s.tables.projectProposals.size, 0);
-  assert.ok(s.files.has('original'));
-  assert.equal(s.tables.hostedProjects.get('project').removal, undefined);
-  s.put('late-extra', 'application/x-forge-proposal-original-proposal');
-  s.caller('contributor');
-  await assert.rejects(
-    proposals.complete._handler(s.ctx, { id: 'proposal', storageId: 'late-extra' }),
-    unavailable,
-  );
-  assert.ok(!s.files.has('late-extra'));
 });
 test('project rename preserves source and Work and reconciles retries without overwriting concurrent edits', async () => {
   const s = fixture(),

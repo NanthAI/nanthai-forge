@@ -29,7 +29,6 @@ import {
 } from './projectHostedLandingEarlyRefusal';
 import { publishAcceptance } from './projectHostedAcceptancePublish';
 import { hostedWriteProject } from './projectHostedRecords';
-import { blobStore } from './blobStore';
 import { presignGet, r2Config, r2Key } from './r2';
 import { isStored } from './projectObjectFields';
 import { canonicalPayload } from '../src/hosted-source-operation';
@@ -277,9 +276,7 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
       const url =
         object.location === 'r2' && object.r2Key
           ? await presignGet(r2Config(), object.r2Key, packHeaders(packRange(object), object.size))
-          : object.storageId
-            ? await blobStore(ctx).getUrl(object.storageId)
-            : null;
+          : null;
       invariant(url, 'SOURCE_UNAVAILABLE', 'Exact acceptance metadata is unavailable.');
       await retryFinish(ctx, row, input);
       return {
@@ -387,7 +384,7 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
 /** One exact IO completion; duplicate or delayed generations do nothing. */
 async function resumeFinishIOOnce(
   ctx: MutationCtx,
-  input: FinishIdentity & { command: FinishCommand; page?: unknown; storageId?: string; key?: string },
+  input: FinishIdentity & { command: FinishCommand; page?: unknown; key?: string },
 ) {
   const { row, value } = await loadFinish(ctx, input);
   invariant(
@@ -458,11 +455,7 @@ async function resumeFinishIOOnce(
     );
     await stageAcceptance(ctx, { ...input, ...input.command.selection, page: input.page });
   } else {
-    invariant(
-      value.pending && (input.storageId || input.key),
-      'WORK_STALE',
-      'Resume only the pending composition.',
-    );
+    invariant(value.pending && input.key, 'WORK_STALE', 'Resume only the pending composition.');
     const source = await prepareFinishCompose(ctx, input, value);
     const plan = hostedComposeInput(source.state, source.operation.firstAttempt.at),
       pin = savePin(plan);
@@ -477,12 +470,6 @@ async function resumeFinishIOOnce(
       !old || (!old.removed && old.size === pin.size),
       'SOURCE_HASH_MISMATCH',
       'Source plan binding differs.',
-    );
-    // An already-issued legacy IO callback cannot bind a Convex file any more (Item c0af6cfa).
-    invariant(
-      input.key,
-      'R2_REQUIRED',
-      'Old Convex file storage is retired; Forge stores these bytes in R2 only.',
     );
     {
       invariant(

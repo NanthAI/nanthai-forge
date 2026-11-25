@@ -8,7 +8,6 @@ import { moduleUrl } from './convex-module.mjs';
 import { setup, pinOf } from './r2-harness.mjs';
 const names = [
   'projectR2Maintenance',
-  'projectR2Purge',
   'projectR2Sweep',
   'r2ArchiveSource',
   'projectLifecycle',
@@ -20,11 +19,9 @@ const modules = Object.fromEntries(
 );
 const commit = await import(moduleUrl('../convex/projectObjectCommit.ts'));
 const objects = await import(moduleUrl('../convex/projectObjects.ts'));
-const archive = await import(moduleUrl('../convex/projectArchivePart.ts'));
 const operations = await import(moduleUrl('../convex/r2Operations.ts'));
 const { purgeAuthority, authorizedKeys } = await import(moduleUrl('../convex/projectPurgeAuthority.ts'));
 const { projectRetentionMs } = await import(moduleUrl('../convex/projectRetention.ts'));
-const windowMs = 14 * 86400_000;
 /** The slug-confirmed delete transition's receipt: the project's scoped R2 purge grant. */
 const deleting = (operationId = 'owner-delete') => ({
   removal: 'deleting',
@@ -53,38 +50,18 @@ async function fixture(t) {
           : x.run(name, args)
         : old(ref, args);
     };
-  x.pass = {
-    project: 'project',
-    mode: 'verify',
-    complete: true,
-    operationId: 'verified-pass',
-    verificationRevision: 0,
-    verifiedAt: new Date(Date.now() - windowMs - 10000).toISOString(),
-    safeToPurgeAfter: new Date(Date.now() - 10000).toISOString(),
-  };
-  x.purge = (extra = {}) =>
-    x.run('projectR2Maintenance:purgePage', {
-      projectId: 'project',
-      pass: x.pass,
-      kind: 'objects',
-      cursor: null,
-      ...extra,
-    });
   x.sweep = (extra = {}) =>
     x.run('projectR2Maintenance:sweepPage', { projectId: 'project', cursor: null, ...extra });
   x.row = async (text = 'retained source', changes = {}) => {
     const pin = pinOf(text),
       key = `v1/p/project/o/${pin.digest}`;
-    const storageId = await x.s.ctx.storage.store(new Blob([text]));
     const id = await x.s.ctx.db.insert('projectObjects', {
       projectId: 'project',
       ...pin,
       nonce: 'synthetic',
-      storageId,
       location: 'r2',
       r2Key: key,
       r2Committed: true,
-      r2BackfilledAt: Date.parse(x.pass.verifiedAt) - 1000,
       removed: false,
       ...changes,
     });
@@ -124,153 +101,30 @@ async function fixture(t) {
   return x;
 }
 
-test('purge refuses a missing pass, the 14-day boundary, and changed backfill revision', async t => {
-  const x = await fixture(t);
-  await x.row();
-  for (const pass of [
-    undefined,
-    {
-      ...x.pass,
-      verifiedAt: new Date().toISOString(),
-      safeToPurgeAfter: new Date(Date.now() + windowMs).toISOString(),
-    },
-    { ...x.pass, verifiedAt: 'invalid' },
-    { ...x.pass, verificationRevision: 1 },
-    { ...x.pass, project: 'other' },
-  ])
-    await assert.rejects(x.purge({ pass, dryRun: false }));
-  assert.equal(x.s.deleted.length, 0);
-});
-test('purge dry-run re-HEADs but makes no deletes; apply and replay are idempotent', async t => {
-  const x = await fixture(t),
-    row = await x.row();
-  assert.equal((await x.purge()).eligible, 1);
-  assert.equal(x.s.deleted.length, 0);
-  assert.equal(x.fake.requests.filter(r => r.method === 'HEAD').length, 1);
-  assert.equal((await x.purge({ dryRun: false })).deleted, 1);
-  assert.equal((await x.s.ctx.db.get(row._id)).r2ConvexPurged, true);
-  assert.equal((await x.purge({ dryRun: false })).deleted, 0);
-  assert.deepEqual(x.s.deleted, [row.storageId]);
-});
-test('missing R2 HEAD and wrong-size/checksum pages delete nothing', async t => {
-  const x = await fixture(t);
-  await x.row('good');
-  const bad = await x.row('bad');
-  x.fake.objects.delete(x.fake.key(bad.r2Key));
-  await assert.rejects(x.purge({ dryRun: false }), /R2 object could not be verified/);
-  x.fake.objects.set(x.fake.key(bad.r2Key), Buffer.from('BAD'));
-  await assert.rejects(x.purge({ dryRun: false }));
-  x.fake.objects.set(x.fake.key(bad.r2Key), Buffer.from('wrong size'));
-  await assert.rejects(x.purge({ dryRun: false }));
-  assert.equal(x.s.deleted.length, 0);
-});
-test('only migrated committed rows verified before the pass qualify; shared copies are preserved', async t => {
-  const x = await fixture(t);
-  await x.row('only convex', { location: 'convex' });
-  await x.row('not committed', { r2Committed: false });
-  await x.row('too new', { r2BackfilledAt: Date.now() });
-  await x.row('not migrated', { r2BackfilledAt: undefined });
-  await x.row('foreign key', { r2Key: 'v1/p/other/o/key' });
-  const shared = await x.row('shared');
-  await x.s.ctx.db.insert('projectObjects', {
-    ...shared,
-    _id: undefined,
-    _creationTime: undefined,
-    projectId: 'other',
-    location: 'convex',
-  });
-  const result = await x.purge({ dryRun: false });
-  assert.equal(result.eligible, 1);
-  assert.equal(result.skipped, 1);
-  assert.equal(result.deleted, 0);
-});
-test('mutation rechecks current row pins after HEAD before deleting', async t => {
-  const x = await fixture(t),
-    row = await x.row();
-  const original = x.s.ctx.runMutation;
-  x.s.ctx.runMutation = async (ref, args) => {
-    if (getFunctionName(ref) === 'projectR2Purge:removeCopies')
-      await x.s.ctx.db.patch(row._id, { r2Committed: false });
-    return original(ref, args);
-  };
-  assert.equal((await x.purge({ dryRun: false })).skipped, 1);
-  assert.equal(x.s.deleted.length, 0);
-});
-test('paged purge has bounded document reads below 4096 and reaches the final page', async t => {
-  const x = await fixture(t);
-  for (let i = 0; i < 103; i++) await x.row(`page ${i}`);
-  let maxReads = 0;
-  const run = x.s.ctx.runMutation;
-  x.s.ctx.runMutation = async (ref, args) => {
-    if (getFunctionName(ref) !== 'projectR2Purge:removeCopies') return run(ref, args);
-    let reads = 0;
-    const db = x.s.ctx.db,
-      oldGet = db.get,
-      oldSystemGet = db.system.get,
-      oldQuery = db.query;
-    db.get = async id => {
-      reads++;
-      return oldGet(id);
-    };
-    db.system.get = async id => {
-      reads++;
-      return oldSystemGet(id);
-    };
-    db.query = table => {
-      const q = oldQuery(table),
-        take = q.take;
-      q.take = async count => {
-        const result = await take(count);
-        reads += result.length;
-        return result;
-      };
-      return q;
-    };
-    try {
-      return await run(ref, args);
-    } finally {
-      maxReads = Math.max(maxReads, reads);
-      db.get = oldGet;
-      db.system.get = oldSystemGet;
-      db.query = oldQuery;
-    }
-  };
-  const first = await x.purge({ dryRun: false });
-  assert.equal(first.scanned, 100);
-  assert.equal(first.isDone, false);
-  assert.equal(first.deleted, 100);
-  const last = await x.purge({ cursor: first.cursor, dryRun: false });
-  assert.equal(last.deleted, 3);
-  assert.equal(last.isDone, true);
-  assert.ok(maxReads > 0 && maxReads <= 1401, `observed ${maxReads} reads`);
-});
 test('sweep only removes old uncommitted project-prefixed uploads and dry-run changes nothing', async t => {
   const x = await fixture(t),
     oldTime = Date.now() - 86400_001;
   const pending = await x.row('abandoned', {
-    storageId: undefined,
     r2Committed: false,
     r2PreparedAt: oldTime,
   });
-  await x.row('fresh', { storageId: undefined, r2Committed: false, r2PreparedAt: Date.now() });
+  await x.row('fresh', { r2Committed: false, r2PreparedAt: Date.now() });
   await x.row('committed');
   await x.row('foreign', {
-    storageId: undefined,
     r2Committed: false,
     r2PreparedAt: oldTime,
     r2Key: 'v1/p/other/o/key',
   });
-  await x.row('fallback', { r2Committed: false, r2PreparedAt: oldTime });
   assert.equal((await x.sweep()).eligible, 1);
   assert.equal((await x.s.ctx.db.get(pending._id)).r2SweepKey, undefined);
   assert.equal(x.fake.requests.filter(r => r.method === 'DELETE').length, 0);
   assert.equal((await x.sweep({ dryRun: false })).deleted, 1);
   assert.equal(x.fake.objects.has(x.fake.key(pending.r2Key)), false);
-  assert.equal(x.fake.objects.size, 4);
+  assert.equal(x.fake.objects.size, 3);
 });
 test('a concurrent commit before sweep claim preserves the only copy', async t => {
   const x = await fixture(t),
-    row = await x.row('racing', { storageId: undefined, r2Committed: false, r2PreparedAt: 1 });
+    row = await x.row('racing', { r2Committed: false, r2PreparedAt: 1 });
   const run = x.s.ctx.runMutation;
   x.s.ctx.runMutation = async (ref, args) => {
     if (getFunctionName(ref) === 'projectR2Sweep:claim')
@@ -282,7 +136,7 @@ test('a concurrent commit before sweep claim preserves the only copy', async t =
 });
 test('failed DELETE retains the pending key; reprepare rotates so retry cannot delete new committed bytes', async t => {
   const x = await fixture(t),
-    row = await x.row('retry', { storageId: undefined, r2Committed: false, r2PreparedAt: 1 });
+    row = await x.row('retry', { r2Committed: false, r2PreparedAt: 1 });
   x.fake.failDeletes = 1;
   await assert.rejects(x.sweep({ dryRun: false }));
   assert.equal((await x.s.ctx.db.get(row._id)).r2SweepKey, row.r2Key);
@@ -304,7 +158,7 @@ test('failed DELETE retains the pending key; reprepare rotates so retry cannot d
 });
 test('stale HEAD result cannot commit a sweep-claimed key', async t => {
   const x = await fixture(t),
-    row = await x.row('stale head', { storageId: undefined, r2Committed: false, r2PreparedAt: 1 });
+    row = await x.row('stale head', { r2Committed: false, r2PreparedAt: 1 });
   const rows = await commit.pendingRows._handler(x.s.ctx, { actor: 'owner', ids: [row._id] });
   await x.run('projectR2Sweep:claim', { projectId: 'project', ids: [row._id], dryRun: false });
   await assert.rejects(commit.markCommitted._handler(x.s.ctx, { rows }));
@@ -312,10 +166,9 @@ test('stale HEAD result cannot commit a sweep-claimed key', async t => {
 });
 test('maintenance is disabled by default for writes; dry-run still works', async t => {
   const x = await fixture(t);
-  await x.row();
+  await x.row('abandoned', { r2Committed: false, r2PreparedAt: 1 });
   delete process.env.FORGE_R2_MAINTENANCE;
-  assert.equal((await x.purge()).eligible, 1);
-  await assert.rejects(x.purge({ dryRun: false }));
+  assert.equal((await x.sweep()).eligible, 1);
   await assert.rejects(x.sweep({ dryRun: false }));
   assert.equal(x.s.deleted.length, 0);
 });
@@ -473,52 +326,6 @@ test('R2 list rejects provider keys outside the requested project prefix and err
   });
   await assert.rejects(operations.listR2Prefix(x.fake.config, 'v1/p/project/', null));
 });
-test('purged legacy archives retain their ID alias and serve authorized R2 bytes', async t => {
-  const x = await fixture(t),
-    bytes = 'legacy archive',
-    pin = pinOf(bytes),
-    key = `v1/p/project/o/${pin.digest}`;
-  const storageId = await x.s.ctx.storage.store(new Blob([bytes]));
-  const id = await x.s.ctx.db.insert('projectBackups', {
-    ...backupFields(),
-    projectId: 'project',
-    ...pin,
-    storageId,
-    status: 'stored',
-    location: 'r2',
-    r2Key: key,
-    r2Committed: true,
-    r2BackfilledAt: Date.parse(x.pass.verifiedAt) - 1000,
-  });
-  x.fake.objects.set(x.fake.key(key), Buffer.from(bytes));
-  assert.equal((await x.purge({ kind: 'backups', dryRun: false })).deleted, 1);
-  assert.equal((await x.s.ctx.db.get(id)).storageId, storageId);
-  const part = await archive.projectArchivePart(
-    x.s.ctx,
-    storageId,
-    pin.size,
-    pin.digest,
-    0,
-    async () => null,
-  );
-  assert.equal(Buffer.from(part).toString(), bytes);
-  x.s.caller('stranger');
-  await assert.rejects(
-    archive.projectArchivePart(x.s.ctx, storageId, pin.size, pin.digest, 0, async () => null),
-  );
-  x.s.caller(null);
-  await assert.rejects(
-    archive.projectArchivePart(x.s.ctx, storageId, pin.size, pin.digest, 0, async () => null),
-  );
-  await x.s.ctx.db.patch('project', { visibility: 'public' });
-  assert.equal(
-    Buffer.from(
-      await archive.projectArchivePart(x.s.ctx, storageId, pin.size, pin.digest, 0, async () => null),
-    ).toString(),
-    bytes,
-  );
-});
-
 test('permanent project deletion discovers pre-existing R2 rows and waits for prefix cleanup before its tombstone', async t => {
   const x = await fixture(t);
   await x.row();
@@ -706,144 +513,6 @@ test('deleted, active, trashed, missing and legacy unfenced deliveries do no R2 
   await x.step(task);
   assert.equal(x.s.scheduled.length, count);
   assert.equal(x.fake.requests.length, requests);
-});
-
-const earlyPass = x => {
-  const now = Date.now();
-  return {
-    ...x.pass,
-    fullDigest: true,
-    kind: 4,
-    failureCount: 0,
-    count: 1,
-    digestChecks: 1,
-    verifiedAt: new Date(now - 3600_000).toISOString(),
-    safeToPurgeAfter: new Date(now + windowMs).toISOString(),
-    early: {
-      ownerApproval: 'Owner approved after current-data verification',
-      backup: {
-        complete: true,
-        includeFileStorage: true,
-        operationId: 'backup',
-        deployment: 'synthetic',
-        time: new Date(now - 86400_000).toISOString(),
-        manifestKey: 'hosted-backups/dev/run/manifest.json',
-        size: 10,
-        sha256: 'a'.repeat(64),
-      },
-    },
-  };
-};
-for (const [label, change] of [
-  [
-    'no full digest',
-    pass => {
-      delete pass.fullDigest;
-    },
-  ],
-  [
-    'failures',
-    pass => {
-      pass.failureCount = 1;
-    },
-  ],
-  [
-    'stale pass',
-    pass => {
-      pass.verifiedAt = new Date(Date.now() - 86400_001).toISOString();
-    },
-  ],
-  [
-    'future pass',
-    pass => {
-      pass.verifiedAt = new Date(Date.now() + 86400_000).toISOString();
-    },
-  ],
-  [
-    'incomplete kinds',
-    pass => {
-      pass.kind = 3;
-    },
-  ],
-  [
-    'incomplete digests',
-    pass => {
-      pass.digestChecks = 0;
-    },
-  ],
-  [
-    'changed revision',
-    pass => {
-      pass.verificationRevision = 1;
-    },
-  ],
-  [
-    'no backup',
-    pass => {
-      delete pass.early.backup;
-    },
-  ],
-  [
-    'database-only backup',
-    pass => {
-      pass.early.backup.includeFileStorage = false;
-    },
-  ],
-  [
-    'stale backup',
-    pass => {
-      pass.early.backup.time = new Date(Date.now() - 8 * 86400_000).toISOString();
-    },
-  ],
-  [
-    'no flag',
-    pass => {
-      delete pass.early;
-    },
-  ],
-  [
-    'blank approval',
-    pass => {
-      pass.early.ownerApproval = ' ';
-    },
-  ],
-])
-  test(`early purge refuses ${label}`, async t => {
-    const x = await fixture(t);
-    x.pass = earlyPass(x);
-    const row = await x.row();
-    x.s.tables.projectObjects.get(row._id)._creationTime = Date.parse(x.pass.verifiedAt) - 1000;
-    change(x.pass);
-    await assert.rejects(x.purge({ dryRun: false }));
-    assert.equal(x.s.deleted.length, 0);
-  });
-
-test('approved early purge re-HEADs, dry-run deletes nothing, and rows created after verification are excluded', async t => {
-  const x = await fixture(t);
-  x.pass = earlyPass(x);
-  const old = await x.row('eligible'),
-    fresh = await x.row('created after');
-  x.s.tables.projectObjects.get(old._id)._creationTime = Date.parse(x.pass.verifiedAt) - 1000;
-  assert.equal((await x.purge()).eligible, 1);
-  assert.equal(x.s.deleted.length, 0);
-  assert.equal((await x.purge({ dryRun: false })).deleted, 1);
-  assert.deepEqual(x.s.deleted, [old.storageId]);
-  assert.equal((await x.s.ctx.db.get(fresh._id)).r2ConvexPurged, undefined);
-});
-
-test('early purge mutation rechecks receipt age after HEAD', async t => {
-  const x = await fixture(t);
-  x.pass = earlyPass(x);
-  const row = await x.row();
-  x.s.tables.projectObjects.get(row._id)._creationTime = 1;
-  const run = x.s.ctx.runMutation;
-  x.s.ctx.runMutation = (ref, args) => {
-    if (getFunctionName(ref) === 'projectR2Purge:removeCopies')
-      args.pass.verifiedAt = new Date(Date.now() - 86400_001).toISOString();
-    return run(ref, args);
-  };
-  await assert.rejects(x.purge({ dryRun: false }));
-  assert.equal(x.s.deleted.length, 0);
 });
 
 test('scoped purge grant: refused for live, trashed, restored, early and unreceipted projects; allowed for an expired tombstone or confirmed delete', () => {

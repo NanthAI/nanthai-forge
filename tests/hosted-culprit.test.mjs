@@ -334,28 +334,34 @@ async function fixture(
   f.inspect = async () => {
     const source = await import(moduleUrl('../convex/projectHostedCulpritSource.ts'));
     const input = { projectId: f.projectId, runId: f.recoveryId() };
-    return source.inspect._handler(
-      {
-        runQuery: async (_, args) => {
-          if (!args.digests) return f.transaction('sourcePlan', culprit.source, args);
-          const rows = JSON.parse(await f.transaction('sourceDescriptors', culprit.source, args));
-          f.sourceReads ??= { windows: 0, bytes: 0 };
-          f.sourceReads.windows++;
-          return JSON.stringify(
-            rows.map(row => ({ ...row, storageId: row.descriptor.object.sha256, url: null })),
-          );
-        },
-        storage: {
-          get: async id => {
-            const bytes = f.objectBytes.get(id);
-            f.sourceReads.bytes += bytes.length;
-            return new Blob([bytes]);
+    const original = globalThis.fetch;
+    // Source objects are R2 objects: each descriptor carries a URL and the bytes come over it.
+    globalThis.fetch = async (url, init) => {
+      const text = String(url);
+      if (!text.startsWith('https://synthetic.invalid/')) return original(url, init);
+      const bytes = f.objectBytes.get(text.split('/').at(-1));
+      f.sourceReads.bytes += bytes.length;
+      return new Response(bytes);
+    };
+    try {
+      return await source.inspect._handler(
+        {
+          runQuery: async (_, args) => {
+            if (!args.digests) return f.transaction('sourcePlan', culprit.source, args);
+            const rows = JSON.parse(await f.transaction('sourceDescriptors', culprit.source, args));
+            f.sourceReads ??= { windows: 0, bytes: 0 };
+            f.sourceReads.windows++;
+            return JSON.stringify(
+              rows.map(row => ({ ...row, url: `https://synthetic.invalid/${row.descriptor.object.sha256}` })),
+            );
           },
+          runMutation: (_, args) => f.transaction('sourceEvidence', culprit.sourceEvidence, args),
         },
-        runMutation: (_, args) => f.transaction('sourceEvidence', culprit.sourceEvidence, args),
-      },
-      input,
-    );
+        input,
+      );
+    } finally {
+      globalThis.fetch = original;
+    }
   };
   f.recovery = () => [...f.tables.projectHostedOperations.values()].find(r => r.recovery);
   return f;

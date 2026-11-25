@@ -39,8 +39,7 @@ export async function tombstoneObject(
   purged: { at: number; operationId: string },
 ) {
   if (row.purged) return undefined;
-  if (row.storageId) await ctx.storage.delete(row.storageId);
-  await ctx.db.patch(row._id, { purged, storageId: undefined });
+  await ctx.db.patch(row._id, { purged });
   // A sweep-rotated pack keeps its own key on every member row.
   if (row.pack)
     return {

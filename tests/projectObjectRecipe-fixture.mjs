@@ -75,7 +75,7 @@ export function recipeObjects(objects, sizes, sources, deepTrees = false) {
       projectId: 'project',
       digest: key,
       size: sizes.get(key) ?? bytes(key).length,
-      ...(recipe ? { recipe } : { storageId: key }),
+      ...(recipe ? { recipe } : { location: 'r2', r2Committed: true, r2Key: `v1/p/project/o/${key}` }),
       nonce: key,
       removed: false,
     };

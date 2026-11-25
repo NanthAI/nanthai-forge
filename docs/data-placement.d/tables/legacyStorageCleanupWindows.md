@@ -1,1 +1,0 @@
-| `legacyStorageCleanupWindows` | One metadata fence per retired dev cleanup window. Nothing reads it; `storageTombstoneRetire` empties it and the table leaves the schema in the next State (Item c0af6cfa). No source or file bytes. | Deleted |

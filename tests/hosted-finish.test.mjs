@@ -627,43 +627,6 @@ test('landing cancellation stops its unused check, preserves its Lane and refuse
   assert.equal(f.pending().length, 0);
 });
 
-test('cancellation during metadata IO fences its delayed resume and retains pending source selection', async t => {
-  const f = await finishFixture(t),
-    { state } = await begin(f);
-  f.moveMain();
-  await f.passChecks();
-  while (!(await f.current(state.id)).pendingAttempt) await f.execute();
-  const first = f.pending().find(task => task.name === 'projectHostedFinishDriver:settle'),
-    input = first.args[0];
-  f.advanceClock(first.scheduledTime - Date.now());
-  // The settle mutation runs the step and hands its IO to the drive action, which
-  // rebuilds the plan bytes from the compose row before the IO.
-  let { command } = await finishIOTask(f);
-  assert.equal(command.kind, 'plan');
-  const { source, ...plan } = command;
-  command = {
-    ...plan,
-    value: await f.tx('finishPlanValue', driver.planValue, { projectId: f.projectId, ...source }),
-  };
-  const pending = (await f.current(state.id)).pendingAttempt;
-  await f.tx('finishLandingCancel', landingApi.cancel, {
-    projectId: f.projectId,
-    request: JSON.stringify({ operationId: randomUUID(), submissionId: state.id, authorityEpoch: 1 }),
-  });
-  await f.tx('finishLateIO', driver.resume, {
-    ...input,
-    command: JSON.stringify(command),
-    storageId: 'ignored-late-upload',
-  });
-  await f.drain();
-  const current = await f.current(state.id);
-  assert.equal(current.submission.error.code, 'LANDING_CANCELLED');
-  assert.deepEqual(current.pendingAttempt, pending);
-  assert.equal(f.metrics.sourceJobs, 0);
-  assert.equal(f.tables.projectHostedCheckRuns.size, 1);
-  assert.equal(f.tables.projectHostedAcceptances.size, 0);
-});
-
 test('a source completion after landing cancellation cannot install a child attempt or check', async t => {
   const f = await finishFixture(t),
     { state } = await begin(f);

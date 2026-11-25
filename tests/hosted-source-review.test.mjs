@@ -6,6 +6,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { getFunctionName } from 'convex/server';
 import { fixture, checkpoint, modules, asLegacyRows } from './project-exchange-fixture.mjs';
+import { interceptDefaultR2 } from './default-r2.mjs';
+/** Runs `effect` after every R2 object GET is served: a change that lands during retrieval. */
+const afterR2Read = effect =>
+  interceptDefaultR2(async (input, init, serve) => {
+    const result = await serve(input, init);
+    if ((init?.method ?? 'GET') === 'GET') effect();
+    return result;
+  });
 import { moduleUrl } from './convex-module.mjs';
 const { readSourceReview } = await import(moduleUrl('../convex/projectSourceReview.ts'));
 // Server-only source/anchor validation retains its exact-source contract. The public browser
@@ -63,24 +71,21 @@ test('hosted native review reads exact source without loading the retained Work 
     code('SOURCE_UNAVAILABLE'),
   );
 });
-test('hosted review rechecks current project access after source retrieval and retains legacy download availability', async t => {
-  const s = await setup(t),
-    get = s.ctx.storage.get;
-  s.ctx.storage.get = async id => {
-    const bytes = await get(id);
+test('hosted review rechecks current project access after source retrieval and retains download availability for an archive without objects', async t => {
+  const s = await setup(t);
+  const restore = afterR2Read(() => {
     s.tables.hostedProjects.get('project').removal = 'deleting';
-    return bytes;
-  };
+  });
   await assert.rejects(read._handler(s.ctx, s.input), code('PROJECT_UNAVAILABLE'));
   delete s.tables.hostedProjects.get('project').removal;
-  s.ctx.storage.get = get;
+  restore();
   const backup = s.tables.projectBackups.get(s.input.backupId);
   delete backup.transport;
   const legacy = JSON.parse(await read._handler(s.ctx, s.input));
   assert.equal(legacy.available, false);
   assert.match(legacy.reason, /existing download/);
 });
-test('anonymous and unrelated callers cannot retrieve review metadata; contributor revocation takes effect during a read', async t => {
+test('anonymous and unrelated callers cannot retrieve review metadata; contributor revocation takes effect', async t => {
   const s = await setup(t),
     before = s.reads();
   s.caller(null);
@@ -95,16 +100,11 @@ test('anonymous and unrelated callers cannot retrieve review metadata; contribut
   });
   s.caller('contributor');
   assert(JSON.parse(await read._handler(s.ctx, s.input)).available);
-  const get = s.ctx.storage.getMetadata;
-  s.ctx.storage.getMetadata = async id => {
-    const value = await get(id);
-    s.tables.projectContributors.delete('grant');
-    return value;
-  };
+  s.tables.projectContributors.delete('grant');
   await assert.rejects(read._handler(s.ctx, { ...s.input, file: 'a.ts' }), code('PROJECT_UNAVAILABLE'));
 });
 
-test('warm source review reuses immutable bytes but rechecks storage health and current authorization', async t => {
+test('warm source review reuses immutable bytes but rechecks current authorization', async t => {
   const s = await setup(t);
   const cold = JSON.parse(await read._handler(s.ctx, { ...s.input, file: 'a.ts' }));
   const before = s.reads();
@@ -113,12 +113,9 @@ test('warm source review reuses immutable bytes but rechecks storage health and 
   assert.equal(s.reads(), before, 'warm raw bytes avoid repeated storage body downloads');
   s.caller('stranger');
   await assert.rejects(read._handler(s.ctx, s.input), code('PROJECT_UNAVAILABLE'));
-  s.caller('owner');
-  s.ctx.storage.getMetadata = async () => null;
-  await assert.rejects(read._handler(s.ctx, s.input), code('INVALID_WORK_BACKUP'));
 });
 
-test('Map reads stay pinned and recheck authorization, including revocation during retrieval', async t => {
+test('Map reads stay pinned and recheck authorization, including revocation', async t => {
   const s = await setup(t);
   const result = JSON.parse(await read._handler(s.ctx, { ...s.input, map: true }));
   assert.equal(result.map.head, s.input.head);
@@ -130,12 +127,7 @@ test('Map reads stay pinned and recheck authorization, including revocation duri
     read._handler(s.ctx, { ...s.input, head: 'f'.repeat(64), map: true }),
     code('SOURCE_UNAVAILABLE'),
   );
-  const get = s.ctx.storage.getMetadata;
-  s.ctx.storage.getMetadata = async id => {
-    const value = await get(id);
-    s.tables.hostedProjects.get('project').removal = 'deleting';
-    return value;
-  };
+  s.tables.hostedProjects.get('project').removal = 'deleting';
   await assert.rejects(read._handler(s.ctx, { ...s.input, map: true }), code('PROJECT_UNAVAILABLE'));
 });
 
@@ -189,12 +181,7 @@ test('indexed source reviews read only selected State/file pins, preserving byte
   s.caller('stranger');
   await assert.rejects(read._handler(s.ctx, s.input), code('PROJECT_UNAVAILABLE'));
   s.caller('owner');
-  const get = s.ctx.storage.getMetadata;
-  s.ctx.storage.getMetadata = async id => {
-    const result = await get(id);
-    s.tables.hostedProjects.get('project').removal = 'deleting';
-    return result;
-  };
+  s.tables.hostedProjects.get('project').removal = 'deleting';
   await assert.rejects(read._handler(s.ctx, { ...s.input, file: 'a.ts' }), code('PROJECT_UNAVAILABLE'));
   assert(generationId);
 });

@@ -18,7 +18,7 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { internalMutation, type MutationCtx } from './server';
 import type { Doc, Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
-import { matchesUpload, scanComplete, removeDuplicate, removeExclusive } from './projectStorage';
+import { matchesUpload, scanComplete, removeExclusive } from './projectStorage';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { projectExecution } from './projectExecution';
@@ -418,7 +418,7 @@ export async function retainUploadCleanup(
     .withIndex('by_upload', q => q.eq('uploadId', row._id))
     .unique();
   if (old) return old;
-  const r2Only = row.location === 'r2' && !row.storageId;
+  const r2Only = row.location === 'r2';
   if (r2Only && project.removal !== 'deleting') {
     const artifact = await ctx.db
       .query('artifactBlobs')
@@ -530,8 +530,7 @@ export const purge = internalMutation({
           row,
           table === 'projectBackups' ? 'backup' : 'proposal',
         );
-      // Remove this row's exclusive recorded object first, then sweep any nonce-bound duplicates.
-      if (row.storageId) await removeExclusive(ctx, row.storageId, row._id);
+      // Sweep any nonce-bound duplicates of this row's upload.
       await ctx.db.delete(row._id);
       if (!(await sweep(ctx, binding))) {
         // Remaining pages are handled below even though the source record has been erased.
@@ -591,23 +590,6 @@ export const purge = internalMutation({
       purgeBlocked: undefined,
     });
     await noteDeleteOutcome(ctx, finished, 'deleted');
-    return null;
-  },
-});
-export const cleanupUpload = internalMutation({
-  args: { uploadId: v.string(), actor: v.string(), storageId: v.id('_storage') },
-  returns: v.null(),
-  handler: async (ctx, { uploadId, actor, storageId }) => {
-    const binding = await ctx.db
-      .query('projectUploadCleanup')
-      .withIndex('by_upload', q => q.eq('uploadId', uploadId))
-      .unique();
-    invariant(
-      binding && (binding.owner === actor || binding.actor === actor),
-      'PROJECT_UNAVAILABLE',
-      'This original upload is unavailable.',
-    );
-    await removeDuplicate(ctx, binding, binding.kind, storageId);
     return null;
   },
 });

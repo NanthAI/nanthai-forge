@@ -2,7 +2,6 @@
 // Copyright 2026 Ferdinando Valsecchi
 'use node';
 import { randomUUID } from 'node:crypto';
-import { blobStore } from './blobStore';
 import { v } from 'convex/values';
 import { accountAction } from './cliServer';
 import type { Id } from './_generated/dataModel';
@@ -45,9 +44,6 @@ export const create = accountAction('write')({
         objects,
         ...(projectId ? { projectId } : {}),
       });
-      if (!result.created)
-        for (const object of objects)
-          if ('storageId' in object) await blobStore(ctx).delete(object.storageId);
       return result.projectId;
     } catch (error) {
       return report(error);

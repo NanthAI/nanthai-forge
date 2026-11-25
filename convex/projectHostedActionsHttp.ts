@@ -210,10 +210,8 @@ export const handle = httpAction(async (ctx, request) => {
           ...(command.packRefresh ? { packRefresh: true } : {}),
           ...(command.resultsBatch ? { resultsBatch: true } : {}),
           ...(command.resultsPacked ? { resultsPacked: true } : {}),
-          ...('storageId' in selection
-            ? { selectionStorage: selection.storageId }
-            : { selectionR2Key: selection.r2Key }),
-          ...('storageId' in recipe ? { recipeStorage: recipe.storageId } : { recipeR2Key: recipe.r2Key }),
+          selectionR2Key: selection.r2Key,
+          recipeR2Key: recipe.r2Key,
         }),
       );
       if (command.resultsBatch)

@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { fixture, modules, upload, legacyObject } from './project-exchange-fixture.mjs';
+import { defaultR2Config, defaultR2Objects, interceptDefaultR2 } from './default-r2.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { buildObjectRecipe } from '../dist/object-chunks.js';
 import { digest } from '../dist/hash.js';
@@ -33,7 +34,7 @@ function setup() {
   return s;
 }
 // Leaves are legacy Convex copies so the fault tests can damage their bytes in place;
-// recipes over R2 leaves are covered by r2-read-path, r2-backfill and r2-head-identity.
+// recipes over R2 leaves are covered by r2-read-path and r2-head-identity.
 async function prepare(s, bytes, projectId = 'project') {
   const built = buildObjectRecipe(bytes);
   for (const content of built.objects.values()) await legacyObject(s, content, projectId);
@@ -110,15 +111,19 @@ test('recipe binds original logical bytes; direct-download redirects, internal r
   assert.deepEqual(response.recipe, bound.recipe);
 });
 
-test('missing, corrupt and whole-digest mismatch recipe content never creates a logical binding', async () => {
+test('missing, corrupt and whole-digest mismatch recipe content never creates a logical binding', async t => {
   for (const fault of ['missing', 'corrupt', 'wrong hash']) {
     const s = setup(),
       bytes = randomBytes(3 * 1024 * 1024),
       built = await prepare(s, bytes);
     const leaf = [...built.objects].find(([, value]) => value.length > 10000),
       leafRow = row(s, leaf[0]);
-    if (fault === 'missing') s.files.delete(leafRow.storageId);
-    if (fault === 'corrupt') s.files.get(leafRow.storageId).blob = new Blob(['changed']);
+    const leafPath = `${defaultR2Config.bucket}/${leafRow.r2Key}`,
+      leafBytes = defaultR2Objects.get(leafPath);
+    // The default bucket is shared by every fixture in the process: restore what a fault changed.
+    t.after(() => defaultR2Objects.set(leafPath, leafBytes));
+    if (fault === 'missing') defaultR2Objects.delete(leafPath);
+    if (fault === 'corrupt') defaultR2Objects.set(leafPath, Buffer.from('changed'));
     if (fault === 'wrong hash') {
       const changed = { ...built.recipe, object: { ...built.recipe.object, sha256: 'f'.repeat(64) } };
       const root = await legacyObject(s, Buffer.from(JSON.stringify(changed)));
@@ -126,7 +131,12 @@ test('missing, corrupt and whole-digest mismatch recipe content never creates a 
       built.input.recipeDigest = root.sha256;
       built.input.recipeSize = root.size;
     }
-    await assert.rejects(recipes.complete._handler(s.ctx, built.input), code('INVALID_WORK_BACKUP'));
+    await assert.rejects(
+      recipes.complete._handler(s.ctx, built.input),
+      code(
+        { missing: 'R2_OBJECT_UNAVAILABLE', corrupt: 'BLOB_DIGEST_MISMATCH' }[fault] ?? 'INVALID_WORK_BACKUP',
+      ),
+    );
     assert.equal(row(s, built.input.digest), undefined);
   }
 });
@@ -220,7 +230,7 @@ test('project cleanup removes recipe/chunk bindings without deleting another pro
   );
 });
 
-test('recipe ranges recheck current chunk bytes and access after transfer, including previously successful readers', async () => {
+test('recipe ranges recheck current chunk bytes and access after transfer, including previously successful readers', async t => {
   const s = setup(),
     bytes = randomBytes(3 * 1024 * 1024),
     built = await prepare(s, bytes);
@@ -230,18 +240,20 @@ test('recipe ranges recheck current chunk bytes and access after transfer, inclu
   await reader.read('project', 'owner', [pin]);
   const leaf = [...built.objects].find(([, content]) => content.length > 10000),
     bound = row(s, leaf[0]),
-    saved = s.files.get(bound.storageId);
-  s.files.delete(bound.storageId);
-  await assert.rejects(reader.read('project', 'owner', [pin]), code('INVALID_WORK_BACKUP'));
-  s.files.set(bound.storageId, saved);
+    boundPath = `${defaultR2Config.bucket}/${bound.r2Key}`,
+    saved = defaultR2Objects.get(boundPath);
+  defaultR2Objects.delete(boundPath);
+  await assert.rejects(reader.read('project', 'owner', [pin]), code('R2_OBJECT_UNAVAILABLE'));
+  defaultR2Objects.set(boundPath, saved);
   s.tables.projectContributors.set('grant', { _id: 'grant', projectId: 'project', contributor: 'reader' });
   s.caller('reader');
-  const get = s.ctx.storage.get;
-  s.ctx.storage.get = async id => {
-    const value = await get(id);
-    if (id === bound.storageId) s.tables.projectContributors.delete('grant');
+  const restore = interceptDefaultR2(async (input, init, serve) => {
+    const value = await serve(input, init);
+    if (decodeURIComponent(new URL(input).pathname).endsWith(`/${bound.r2Key}`))
+      s.tables.projectContributors.delete('grant');
     return value;
-  };
+  });
+  t.after(restore);
   await assert.rejects(objectRange(s.ctx, row(s, pin.sha256), 'reader', 0), code('PROJECT_UNAVAILABLE'));
 });
 
@@ -312,9 +324,6 @@ test('warm recipe reads reuse immutable leaves while rechecking current closure 
     exchangeObjectReader(s.ctx, true).read('project', 'stranger', [pin]),
     code('PROJECT_UNAVAILABLE'),
   );
-  const leaf = [...built.objects.keys()][0];
-  s.files.delete(row(s, leaf).storageId);
-  await assert.rejects(read(), code('INVALID_WORK_BACKUP'));
 });
 
 test('recipe validation batches descriptor frontiers and rechecks access after IO', async t => {

@@ -10,7 +10,7 @@ import type { SourceRequestCounter } from '../src/source-step-clock';
 import { retryR2Lag } from '../src/hosted-r2-retry';
 
 /** One byte-write seam for trusted source producers in either Convex runtime. Bytes go
- * to R2 only; the `storageId` result shape remains for callers that still read legacy rows.
+ * to R2 only.
  * The caller supplies hash-pinned bytes. R2 enforces the signed checksum on the create-only PUT.
  * A 200 that echoes that exact SHA-256 checksum is R2's own confirmation that this key now holds
  * exactly these bytes (the checksum fixes the size too), so no HEAD follows. A 412 (the key already
@@ -25,7 +25,7 @@ export async function storeSourceBytes(
   created?: (wrote: boolean) => void,
   observe?: (event: 'put' | 'refused' | 'reused', pin: { sha256: string; size: number }) => void,
   count?: SourceRequestCounter,
-): Promise<{ storageId: Id<'_storage'> } | { r2Key: string }> {
+): Promise<{ r2Key: string }> {
   invariant(bytes.length === pin.size, 'SOURCE_HASH_MISMATCH', 'Source output size changed.');
   invariant(projectId, 'SOURCE_JOB_INVALID', 'R2 source needs its exact project binding.');
   const config = r2Config(),

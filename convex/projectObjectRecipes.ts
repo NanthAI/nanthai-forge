@@ -72,7 +72,7 @@ export const representation = action({
         'INVALID_WORK_BACKUP',
         'Content size differs from its original pin.',
       );
-      return { recipe: rows[0].storageId ? null : (rows[0].recipe ?? null) };
+      return { recipe: rows[0].recipe ?? null };
     } catch (error) {
       return report(error);
     }

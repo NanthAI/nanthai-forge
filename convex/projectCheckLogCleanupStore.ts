@@ -8,7 +8,6 @@ import { query } from './cliServer';
 import { internalMutation, internalQuery } from './server';
 import type { Doc, Id } from './_generated/dataModel';
 import { activeOwnedProject } from './projectAuthority';
-import { removeExclusive } from './projectStorage';
 import { r2Key } from './r2';
 import { invariant } from '../src/errors';
 const address = { projectId: v.id('hostedProjects'), actor: v.string() };
@@ -114,17 +113,8 @@ export const claim = internalMutation({
         'EVIDENCE_CHANGED',
         'A selected physical key is retained source; re-observe the cleanup scope.',
       );
-      if (row.storageId) {
-        const removed = await removeExclusive(ctx, row.storageId, row._id);
-        invariant(
-          removed,
-          'EVIDENCE_CHANGED',
-          'A stored log has another storage owner; its bytes were preserved.',
-        );
-      }
       if (row.r2Key && row.r2Committed) jobs.push({ id: row._id, key: row.r2Key });
       await ctx.db.patch(row._id, {
-        storageId: undefined,
         recipe: undefined,
         r2Committed: false,
         nonce: crypto.randomUUID(),

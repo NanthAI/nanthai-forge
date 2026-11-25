@@ -167,10 +167,7 @@ test('inventory guard: every table that stores a hosted-project id is covered by
     assert.ok(schema.tables[table], `${table} special purge step names a missing table`);
   assert.deepEqual(projectFields('hostedProjects'), [], 'the root row has no owner field');
   // Files and scheduled functions are found from the schema, so new references are covered too.
-  assert.deepEqual(inventory.rowReferences('projectWorkGenerations').files, [
-    'returnCursor',
-    'returnSnapshot',
-  ]);
+  assert.deepEqual(inventory.rowReferences('projectWorkGenerations').files, []);
   assert.ok(inventory.rowReferences('projectHostedLandingDesired').tasks.includes('wake.taskId'));
   assert.deepEqual(inventory.valuesAt({ a: [{ b: 'x' }, { b: 'y' }], c: { d: 'z' } }, 'a[].b'), ['x', 'y']);
   assert.deepEqual(inventory.valuesAt({ c: { d: 'z' } }, 'c.d'), ['z']);
@@ -244,10 +241,6 @@ function fixture() {
       for (const path of inventory.rowReferences(table).tasks.filter(path => !path.includes('.'))) {
         extra[path] = `task-${table}-${projectId}`;
         s.tasks.set(extra[path], { state: { kind: 'pending' } });
-      }
-      if (table === 'projectWorkGenerations') {
-        extra.returnSnapshot = `file-${projectId}-snapshot`;
-        s.file(extra.returnSnapshot, new Blob(['synthetic snapshot']));
       }
       if (table === 'projectObjects') Object.assign(extra, { removed: false, size: 300 });
       if (table === 'projectBackups') extra.size = 700;
@@ -404,10 +397,6 @@ test('project deletion purges project-owned rows at day 90 and preserves account
   assert.equal(count(s, 'project'), 0, 'zero project rows remain');
   assert.equal(count(s, 'foreign'), foreignRows, 'other projects keep every row');
   assert.ok(!s.tables.artifactBlobs.has('blob-project') && s.tables.artifactBlobs.has('blob-foreign'));
-  assert.deepEqual(
-    [s.files.has('file-project-snapshot'), s.files.has('file-foreign-snapshot')],
-    [false, true],
-  );
   assert.ok(!s.tables.projectSlugs.has('slug-project'), 'the slug is released after the purge');
   assert.equal(project().slug, undefined);
   assert.equal(project().name, '');

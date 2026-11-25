@@ -17,11 +17,7 @@ import { mapExchange } from '../src/exchange-parallel';
 import { invariant } from '../src/errors';
 import { importPageBytes, importPageFiles } from '../src/github-import-pages';
 import type { CatalogEntry } from '../src/import-catalog-table';
-export type Completions = {
-  id: Id<'projectObjects'>;
-  storageId?: Id<'_storage'>;
-  key?: string;
-}[];
+export type Completions = { id: Id<'projectObjects'>; key: string }[];
 export type Recipes = {
   digest: string;
   size: number;

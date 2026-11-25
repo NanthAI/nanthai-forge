@@ -235,7 +235,11 @@ s.ctx.runQuery = async (ref, args) => {
       projectId: 'project',
       digest: sha256,
       size: statSync(join(directory, sha256)).size,
-      storageId: sha256,
+      nonce: sha256,
+      removed: false,
+      location: 'r2',
+      r2Committed: true,
+      r2Key: `v1/p/project/o/${sha256}`,
     }));
   if (name === 'projectWork:get') return project;
   if (name === 'projectWork:events') return { page: [], isDone: true, continueCursor: '' };
@@ -248,14 +252,22 @@ s.ctx.db.system.get = async id =>
   /^[a-f0-9]{64}$/.test(id) && existsSync(join(directory, id))
     ? { _id: id, sha256: id, size: statSync(join(directory, id)).size }
     : metadata(id);
-s.ctx.storage.getMetadata = async id => ({ sha256: id, size: statSync(join(directory, id)).size });
-s.ctx.storage.get = async id => {
-  if (/^[a-f0-9]{64}$/.test(id) && existsSync(join(directory, id))) {
+// Objects are R2 objects: their reads are GETs of the default bucket.
+const priorFetch = globalThis.fetch;
+globalThis.fetch = async (input, init) => {
+  const url = new URL(String(input)),
+    id = decodeURIComponent(url.pathname).split('/').at(-1);
+  if (
+    url.hostname.endsWith('.r2.cloudflarestorage.com') &&
+    /^[a-f0-9]{64}$/.test(id) &&
+    existsSync(join(directory, id)) &&
+    (init?.method ?? 'GET') === 'GET'
+  ) {
     const bytes = readFileSync(join(directory, id));
     readBytes += bytes.length;
-    return new Blob([bytes]);
+    return new Response(bytes);
   }
-  return storage(id);
+  return priorFetch(input, init);
 };
 const mutate = s.ctx.runMutation;
 s.ctx.runMutation = async (ref, args) => {

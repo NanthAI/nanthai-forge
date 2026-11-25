@@ -345,7 +345,10 @@ test('transient storage failures retry three times, retain the cursor, and resum
   const expectedId = await complete(baseline);
   const resumed = progressFixture(0.02, saved, undefined, options);
   const action = resumed.s.ctx.runAction,
-    get = resumed.s.ctx.storage.get;
+    priorFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = priorFetch;
+  });
   let failures = 0,
     armed = true,
     inBatch = false,
@@ -368,12 +371,12 @@ test('transient storage failures retry three times, retain the cursor, and resum
       }
     }
   };
-  resumed.s.ctx.storage.get = async id => {
-    if (inBatch) {
+  globalThis.fetch = async (input, init) => {
+    if (inBatch && new URL(String(input)).hostname.endsWith('.r2.cloudflarestorage.com')) {
       failures++;
-      throw new Error('Transient error while running storage get url');
+      return new Response(null, { status: 503 });
     }
-    return get(id);
+    return priorFetch(input, init);
   };
   let result;
   do {

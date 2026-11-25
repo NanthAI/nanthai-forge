@@ -27,7 +27,6 @@ export type SourceOutput = {
   statePhysical?: { sha256: string; size: number };
   statePhysicalRebind?: boolean;
   statePhysicalPrevious?: { sha256: string; size: number } | null;
-  storageId?: Id<'_storage'>;
   r2Key?: string;
   recipe?: { sha256: string; size: number };
   recipeClosure?: { sha256: string; size: number; pack?: ObjectPack }[];
@@ -49,14 +48,9 @@ export async function storeSourceOutputs(
   const staged: SourceOutput[] = objects.flatMap(pin => [...(pin.physical ?? []), pin]);
   for (const pin of staged) {
     invariant(
-      [pin.storageId, pin.recipe, pin.r2Key].filter(Boolean).length === 1,
+      [pin.recipe, pin.r2Key].filter(Boolean).length === 1,
       'SOURCE_JOB_INVALID',
       'Output needs one physical encoding.',
-    );
-    invariant(
-      !pin.storageId,
-      'R2_REQUIRED',
-      'Old Convex file storage is retired; Forge stores these bytes in R2 only.',
     );
     if (pin.r2Key) {
       // The fixed action supplies checksum-confirmed bodies or hash-verified
@@ -93,10 +87,7 @@ export async function storeSourceOutputs(
     } else {
       const recipe = await findStoredObject(ctx, projectId, pin.recipe!.sha256);
       invariant(
-        recipe &&
-          !recipe.removed &&
-          recipe.size === pin.recipe!.size &&
-          (recipe.storageId || recipe.r2Committed),
+        recipe && !recipe.removed && recipe.size === pin.recipe!.size && recipe.r2Committed,
         'SOURCE_HASH_MISMATCH',
         'Worker recipe is not staged.',
       );
@@ -130,7 +121,7 @@ export async function storeSourceOutputs(
     }
     const encoding = pin.r2Key
       ? { location: 'r2' as const, r2Key: pin.r2Key, r2Committed: true, recipe: undefined, pack: pin.pack }
-      : { storageId: undefined, recipe: { digest: pin.recipe!.sha256, size: pin.recipe!.size } };
+      : { recipe: { digest: pin.recipe!.sha256, size: pin.recipe!.size } };
     const old = await findObject(ctx, projectId, pin.sha256);
     if (old?.sourceReferenced && isR2Object(old) && pin.r2Key && old.r2Key !== pin.r2Key) {
       await retainSourceKey(ctx, projectId, {
@@ -256,7 +247,7 @@ export async function storeSourceOutputs(
     else if (
       (pin.r2Key && (!isR2Object(old) || old.r2Key !== pin.r2Key || old.recipe || old.removed)) ||
       old.removed ||
-      (!old.storageId && !old.recipe && !old.r2Committed)
+      (!old.recipe && !old.r2Committed)
     )
       await ctx.db.patch((await objectRow(ctx, old, 'source-output-encoding'))._id, {
         ...encoding,

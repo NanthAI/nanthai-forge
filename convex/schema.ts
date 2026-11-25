@@ -516,7 +516,6 @@ const projectBackupFields = {
     v.object({
       digest: v.string(),
       size: v.number(),
-      storageId: v.optional(v.id('_storage')),
       ...backfillFields,
       operationId: v.string(),
       at: v.number(),
@@ -532,7 +531,6 @@ const projectBackupFields = {
   size: v.number(),
   preview: projectBackupPreview,
   status: v.union(v.literal('uploading'), v.literal('stored')),
-  storageId: v.optional(v.id('_storage')),
 };
 export const projectDocument = v.object({
   _id: v.id('hostedProjects'),
@@ -571,7 +569,6 @@ export const projectProposalFields = {
   size: v.number(),
   preview: projectBackupPreview,
   status: v.union(v.literal('uploading'), v.literal('stored')),
-  storageId: v.optional(v.id('_storage')),
 };
 export const projectProposalDocument = v.object({
   _id: v.id('projectProposals'),
@@ -589,24 +586,6 @@ export default defineSchema({
   ...landingReadTables,
   ...statsTables,
   ...personDayTables,
-  // Both tables below are read only by convex/storageTombstoneRetire.ts, which empties them on every
-  // deployment; they leave the schema with it (Item c0af6cfa F6, dated 2026-12-31).
-  legacyStorageTombstones: defineTable({
-    storageId: v.id('_storage'),
-    digest: v.string(),
-    size: v.number(),
-    copyKey: v.string(),
-    operationId: v.string(),
-    contentType: v.optional(v.string()),
-  }),
-  legacyStorageCleanupWindows: defineTable({
-    operationId: v.string(),
-    deployment: v.string(),
-    startedAt: v.number(),
-    expiresAt: v.number(),
-    active: v.boolean(),
-    endedAt: v.optional(v.number()),
-  }),
   legacyStorageCleanupPages: defineTable({
     operationId: v.string(),
     part: v.string(),
@@ -847,7 +826,6 @@ export default defineSchema({
     .index('by_contributor', ['contributor']),
   projectProposals: defineTable(projectProposalFields)
     .index('by_project_and_operation', ['projectId', 'operationId'])
-    .index('by_storage', ['storageId'])
     .index('by_r2Key', ['r2Key']),
   projectItemRetention: defineTable({
     projectId: v.id('hostedProjects'),
@@ -893,11 +871,9 @@ export default defineSchema({
     .index('by_owner_and_key', ['owner', 'key']),
   ...publicationTables,
   projectBackups: defineTable(projectBackupFields)
-    .index('by_archive_storage', ['archiveReceipt.storageId'])
     // index-order: caller: convex/projectBackups.ts#history; order: backup history exposes newest-first creation-time pages.
     .index('by_project', ['projectId'])
     .index('by_project_and_operation', ['projectId', 'operationId'])
-    .index('by_storage', ['storageId'])
     .index('by_r2Key', ['r2Key'])
     .index('by_archive_r2Key', ['archiveReceipt.r2Key']),
   projectInterests: defineTable(interestFields)

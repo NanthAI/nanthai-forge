@@ -16,6 +16,7 @@ import { digest } from '../dist/hash.js';
 import { metadataRequest, applyHostedEvent, workBytes, parseWorkBytes } from '../dist/work-metadata.js';
 import { fixture, git, code } from './helpers.mjs';
 import { moduleUrl } from './convex-module.mjs';
+import { defaultR2Config, defaultR2Objects } from './default-r2.mjs';
 import { state } from './hosted-fixture.mjs';
 import { establishedAccount } from './account-tier-fixture.mjs';
 import { readHosted } from './hosted-read.mjs';
@@ -62,9 +63,11 @@ function hosted(bytes, preview) {
     size: bytes.length,
     preview,
     status: 'stored',
-    storageId: 'source',
+    location: 'r2',
+    r2Committed: true,
+    r2Key: `v1/p/${projectId}/o/${digest(bytes)}`,
   });
-  s.files.set('source', { blob: new Blob([bytes], { type: 'application/gzip' }) });
+  defaultR2Objects.set(`${defaultR2Config.bucket}/v1/p/${projectId}/o/${digest(bytes)}`, bytes);
   return { ...s, projectId, backupId };
 }
 

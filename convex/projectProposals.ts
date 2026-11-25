@@ -9,13 +9,6 @@ import { projectProposalDocument, projectBackupPreview } from './schema';
 import { intentAuthority } from './projectContributors';
 import { accessibleProject, activeProject } from './projectAuthority';
 import { ownedProject } from './projectAuthority';
-import {
-  storageDigest,
-  scanComplete,
-  duplicatePage,
-  removeDuplicate,
-  removeExclusive,
-} from './projectStorage';
 import { invariant } from '../src/errors';
 import { retainUploadCleanup, scheduleUploadSweep, retryRemovedUpload } from './projectLifecycle';
 import { report } from './errors';
@@ -125,56 +118,6 @@ export const uploadUrl = internalMutation({
     }
   },
 });
-export const findUpload = internalQuery({
-  args: { id: v.id('projectProposals'), actor: v.string(), cursor: v.union(v.string(), v.null()) },
-  returns: v.object({ id: v.union(v.id('_storage'), v.null()), isDone: v.boolean(), cursor: v.string() }),
-  handler: async (ctx, { id, actor, cursor }) => {
-    try {
-      const proposal = await ctx.db.get(id);
-      invariant(proposal?.actor === actor, 'PROJECT_UNAVAILABLE', 'This upload belongs to another actor.');
-      await activeProject(ctx, proposal.projectId, actor);
-      if (proposal.location === 'r2') return { id: null, isDone: true, cursor: '' };
-      const page = await ctx.db.system.query('_storage').order('desc').paginate({ cursor, numItems: 100 });
-      const file = page.page.find(
-        file =>
-          file.contentType === `application/x-forge-proposal-${proposal.nonce}` &&
-          file.size === proposal.size &&
-          storageDigest(file.sha256) === proposal.digest,
-      );
-      return {
-        id: file?._id ?? null,
-        isDone: scanComplete(page, proposal._creationTime),
-        cursor: page.continueCursor,
-      };
-    } catch (error) {
-      return report(error);
-    }
-  },
-});
-export const complete = internalMutation({
-  args: { id: v.id('projectProposals'), actor: v.string(), storageId: v.id('_storage') },
-  returns: projectProposalDocument,
-  handler: async (ctx, { id, actor, storageId }) => {
-    try {
-      const proposal = await ctx.db.get(id);
-      invariant(proposal?.actor === actor, 'PROJECT_UNAVAILABLE', 'This upload belongs to another actor.');
-      await activeProject(ctx, proposal.projectId, actor);
-      if (proposal.status === 'stored') {
-        if (storageId !== proposal.storageId) await removeDuplicate(ctx, proposal, 'proposal', storageId);
-        return proposal;
-      }
-      await intentAuthority(ctx, proposal.projectId, actor, proposal.intentId);
-      // A Convex upload can no longer complete a proposal (Item c0af6cfa); R2 uploads use completeR2.
-      return invariant(
-        false,
-        'R2_REQUIRED',
-        'Old Convex file storage is retired; Forge stores these bytes in R2 only.',
-      ) as never;
-    } catch (error) {
-      return report(error);
-    }
-  },
-});
 // Explicit owner cleanup covers recorded stored proposal objects only, never arbitrary IDs.
 export const remove = mutation({
   args: { id: v.id('projectProposals') },
@@ -190,51 +133,9 @@ export const remove = mutation({
       }
       const project = await ownedProject(ctx, proposal.projectId, user.subject);
       const cleanup = await retainUploadCleanup(ctx, project, proposal, 'proposal');
-      if (proposal.storageId) await removeExclusive(ctx, proposal.storageId, id);
       await ctx.db.delete(id);
       await scheduleUploadSweep(ctx, cleanup);
       return null;
-    } catch (error) {
-      return report(error);
-    }
-  },
-});
-
-export const validateUpload = internalQuery({
-  args: { id: v.id('projectProposals'), actor: v.string(), storageId: v.id('_storage') },
-  returns: v.null(),
-  handler: async (ctx, { id, actor, storageId }) => {
-    try {
-      const proposal = await ctx.db.get(id);
-      invariant(proposal?.actor === actor, 'PROJECT_UNAVAILABLE', 'This upload belongs to another actor.');
-      await activeProject(ctx, proposal.projectId, actor);
-      const file = await ctx.db.system.get(storageId);
-      invariant(
-        file &&
-          file.contentType === `application/x-forge-proposal-${proposal.nonce}` &&
-          file.size === proposal.size &&
-          storageDigest(file.sha256) === proposal.digest,
-        'INVALID_WORK_BACKUP',
-        'Uploaded bytes differ from this actor-bound proposal.',
-      );
-      return null;
-    } catch (error) {
-      return report(error);
-    }
-  },
-});
-
-export const reconcileDuplicates = internalMutation({
-  args: { id: v.id('projectProposals'), actor: v.string(), cursor: v.union(v.string(), v.null()) },
-  returns: v.object({ cursor: v.string(), isDone: v.boolean() }),
-  handler: async (ctx, { id, actor, cursor }) => {
-    try {
-      const row = await ctx.db.get(id);
-      invariant(row && row.status === 'stored', 'PROJECT_UNAVAILABLE', 'Select this original stored upload.');
-      invariant(row.actor === actor, 'PROJECT_UNAVAILABLE', 'This upload belongs to another actor.');
-      await activeProject(ctx, row.projectId, actor);
-      if (row.location === 'r2') return { cursor: '', isDone: true };
-      return await duplicatePage(ctx, row, 'proposal', cursor);
     } catch (error) {
       return report(error);
     }

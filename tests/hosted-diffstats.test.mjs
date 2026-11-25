@@ -4,9 +4,27 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
+import { interceptDefaultR2 } from './default-r2.mjs';
 const { addDiffstats } = await import(moduleUrl('../convex/projectDiffstatProjection.ts'));
 const { compare } = await import(moduleUrl('../convex/projectDiffstats.ts'));
 const file = (path, blob) => ({ path, blob, mode: 'file' });
+/** A committed R2 object row for a digest, and the default bucket serving its bytes. */
+const r2Row = (id, blobs) => ({
+  digest: id,
+  size: blobs.get(id).length,
+  nonce: id,
+  removed: false,
+  location: 'r2',
+  r2Committed: true,
+  r2Key: `v1/p/project/o/${id}`,
+});
+function serveR2(t, blobs) {
+  const restore = interceptDefaultR2(async (input, init, serve) => {
+    const id = decodeURIComponent(new URL(input).pathname).split('/').at(-1);
+    return blobs.has(id) ? new Response(blobs.get(id)) : serve(input, init);
+  });
+  t.after(restore);
+}
 
 test('hosted diffstats compare only new immutable pairs and reuse prior totals', async () => {
   let reads = 0,
@@ -75,7 +93,7 @@ test('oversized blobs keep aggregate line counts unknown without downloading byt
   assert.deepEqual(result, { add: 0, del: 0, exact: false, storageReads: 0, storageBytes: 0 });
 });
 
-test('hosted comparisons count text changes and whole-file lines from authorized exact blobs', async () => {
+test('hosted comparisons count text changes and whole-file lines from authorized exact blobs', async t => {
   const { digest } = await import('../dist/hash.js');
   const blobs = new Map();
   const pin = text => {
@@ -89,14 +107,9 @@ test('hosted comparisons count text changes and whole-file lines from authorized
     added = pin('one\ntwo\n');
   const ctx = {
     runQuery: async (ref, args) =>
-      getFunctionName(ref) === 'projectObjects:resolve'
-        ? args.digests.map(id => ({ storageId: id, digest: id, size: blobs.get(id).length }))
-        : {},
-    storage: {
-      getMetadata: async id => ({ size: blobs.get(id).length, sha256: id }),
-      get: async id => new Blob([blobs.get(id)]),
-    },
+      getFunctionName(ref) === 'projectObjects:resolve' ? args.digests.map(id => r2Row(id, blobs)) : {},
   };
+  serveR2(t, blobs);
   const input = {
     projectId: 'project',
     actor: 'owner',
@@ -107,8 +120,8 @@ test('hosted comparisons count text changes and whole-file lines from authorized
     add: 3,
     del: 1,
     exact: true,
-    storageReads: 3,
-    storageBytes: 16,
+    storageReads: 0,
+    storageBytes: 0,
   });
   ctx.runQuery = async () => {
     throw new Error('revoked');
@@ -116,7 +129,7 @@ test('hosted comparisons count text changes and whole-file lines from authorized
   await assert.rejects(compare._handler(ctx, input), /revoked/);
 });
 
-test('changed-file windows resolve unique pins together and remain bounded by bytes and pin count', async () => {
+test('changed-file windows resolve unique pins together and remain bounded by bytes and pin count', async t => {
   const { digest } = await import('../dist/hash.js');
   const blobs = new Map(),
     batches = [];
@@ -130,19 +143,16 @@ test('changed-file windows resolve unique pins together and remain bounded by by
   const ctx = {
     runQuery: async (_ref, args) => {
       batches.push(args.digests);
-      return args.digests.map(id => ({ storageId: id, digest: id, size: blobs.get(id).length }));
-    },
-    storage: {
-      getMetadata: async id => ({ size: blobs.get(id).length, sha256: id }),
-      get: async id => new Blob([blobs.get(id)]),
+      return args.digests.map(id => r2Row(id, blobs));
     },
   };
+  serveR2(t, blobs);
   assert.deepEqual(await compare._handler(ctx, { projectId: 'project', actor: 'owner', files }), {
     add: 120,
     del: 120,
     exact: true,
-    storageReads: 123,
-    storageBytes: [...blobs.values()].reduce((n, b) => n + b.length, 0) + 2 * before.size,
+    storageReads: 0,
+    storageBytes: 0,
   });
   assert.equal(batches.length, 6, 'two authority/availability resolutions per 50-file window');
   assert(batches.every(pins => pins.length <= 100));

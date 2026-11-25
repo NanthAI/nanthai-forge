@@ -334,13 +334,9 @@ These commands are lead-only live qualification, not local fixture results.
 
 ## R6 lead-run backfill
 
-`nforge maintenance r2-backfill` streams project files through verified private
-CLI spool files, resumes by page, and flips rows only after R2 HEAD verification
-and a location/storage-id CAS. Convex copies remain intact. `--dry-run` reads
-metadata only; `--verify` checks every backfilled object and downloads a digest
-sample; `--verify --full-digest` downloads every migrated object and verifies its size and SHA-256. Both modes report the normal 14-day date. See the
-[operator runbook](operations/r2-backfill.md) for opt-in, commands, recovery, cost
-and verification details. No real deployment run is implied by local tests.
+The backfill that copied legacy Convex files to R2 ran on dev and is deleted with Convex file
+storage (Item c0af6cfa); prod converts in the P8 prod release ([retirement
+runbook](operations/legacy-storage-cleanup.md)).
 
 ## R7 storage maintenance
 

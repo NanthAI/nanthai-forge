@@ -19,7 +19,9 @@ function owner() {
       projectId: 'project',
       digest: sha256,
       size,
-      storageId: `stored-${i}`,
+      location: 'r2',
+      r2Committed: true,
+      r2Key: `v1/p/project/o/${sha256}`,
       nonce: `nonce-${i}`,
     });
     pins.push({ sha256, size });

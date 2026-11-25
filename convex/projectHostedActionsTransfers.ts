@@ -15,7 +15,6 @@ import { saveObjectSchema } from '../src/hosted-save';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { r2Config, r2Key, presignGet, presignPut, headObject, checksumOf } from './r2';
-import { blobStore } from './blobStore';
 import { isStored } from './projectObjectFields';
 import { findObject, findStoredObject, ownRow } from './projectObjectFind';
 import { packHeaders, packRange } from '../src/object-pack-range';
@@ -86,9 +85,7 @@ export const grant = internalMutation({
       const url =
         object?.location === 'r2' && object.r2Key
           ? await presignGet(r2Config(), object.r2Key, packHeaders(packRange(object), object.size))
-          : object?.storageId
-            ? await blobStore(ctx).getUrl(object.storageId)
-            : null;
+          : null;
       invariant(url, 'SOURCE_UNAVAILABLE', 'Read a raw source object or its exact recipe leaves.');
       return { url, headers: packHeaders(packRange(object ?? {}), pin.size) };
     }

@@ -4,6 +4,7 @@ import { atOneInstant } from './still-clock.mjs';
 import { testDeploymentOrigin } from './trusted-origin.mjs';
 import { captureNativeArchive } from './native-archive-fixture.mjs';
 import test from 'node:test';
+import { interceptDefaultR2 } from './default-r2.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
@@ -165,7 +166,9 @@ async function seeded(t, runs = 1, objectCount = 0) {
         projectId: 'project',
         digest: pin.sha256,
         size: pin.size,
-        storageId: id,
+        location: 'r2',
+        r2Committed: true,
+        r2Key: `v1/p/project/o/${pin.sha256}`,
         nonce: randomUUID(),
         removed: false,
       });
@@ -261,7 +264,9 @@ test('paged cleanup resumes after a lost durable step, applies only the reviewed
   const dry = await drive(s, input);
   assert.equal(dry.objects, 10);
   assert.equal(
-    [...s.tables.projectObjects.values()].filter(row => row.storageId?.startsWith('log-')).length,
+    [...s.tables.projectObjects.values()].filter(
+      row => row._id.startsWith('log-') && !row.removed && row.r2Committed,
+    ).length,
     10,
   );
   await assert.rejects(
@@ -621,7 +626,7 @@ test('server cleanup preserves structured INTERNAL_ERROR diagnostics', async () 
   );
 });
 
-test('E3 dogfood State closure parses 2,500 3,000-file States once within 15,000 calls', async () => {
+test('E3 dogfood State closure parses 2,500 3,000-file States once within 15,000 calls', async t => {
   const { resumePlan, planStep } = await import(moduleUrl('../convex/projectCheckLogCleanupPlan.ts'));
   const s = fixture();
   indexCleanupPages(s);
@@ -656,23 +661,22 @@ test('E3 dogfood State closure parses 2,500 3,000-file States once within 15,000
       projectId: 'project',
       digest: head,
       size: bytes.length,
-      storageId: `state-${i}`,
+      location: 'r2',
+      r2Committed: true,
+      r2Key: `v1/p/project/o/state-${i}`,
       nonce: `state-${i}`,
       removed: false,
     });
   }
-  const metadata = s.ctx.storage.getMetadata,
-    get = s.ctx.storage.get;
-  s.ctx.storage.getMetadata = async id =>
-    id.startsWith('state-')
-      ? { size: sizes[Number(id.slice(6))], sha256: heads[Number(id.slice(6))] }
-      : metadata(id);
-  s.ctx.storage.get = async id => {
-    if (!id.startsWith('state-')) return get(id);
-    const i = Number(id.slice(6));
-    reads.set(i, (reads.get(i) ?? 0) + 1);
-    return new Blob([bytesAt(i)]);
-  };
+  // The States are R2 objects served by the default bucket's interceptor, counted per State.
+  const restoreR2 = interceptDefaultR2(async (input, init, serve) => {
+    const match = /\/o\/state-(\d+)$/.exec(decodeURIComponent(new URL(input).pathname));
+    if (!match) return serve(input, init);
+    const i = Number(match[1]);
+    if ((init?.method ?? 'GET') === 'GET') reads.set(i, (reads.get(i) ?? 0) + 1);
+    return new Response(bytesAt(i));
+  });
+  t.after(restoreR2);
   let state = await resumePlan(s.ctx, input);
   const original = JSON.stringify(state);
   state.phase = 'closure';
@@ -1066,7 +1070,7 @@ test('E3 heavily repeated digests complete the existing paged safety scan rather
 
 test('E3 a State-only source reference protects a log candidate without relying on source projections', async t => {
   const { s } = await seeded(t, 1);
-  const source = [...s.tables.projectObjects.values()].find(row => row.storageId === 'log-0-stdout');
+  const source = [...s.tables.projectObjects.values()].find(row => row._id === 'log-0-stdout');
   const pin = await upload(
     s,
     Buffer.from(
@@ -1087,5 +1091,6 @@ test('E3 a State-only source reference protects a log candidate without relying 
   assert.equal(dry.counts.shared, 1);
   const applied = await drive(s, { ...input, apply: true, expectedPlan: dry.planDigest });
   assert.equal(applied.complete, true);
-  assert.equal(s.tables.projectObjects.get(source._id).storageId, source.storageId);
+  assert.equal(s.tables.projectObjects.get(source._id).r2Key, source.r2Key);
+  assert.equal(s.tables.projectObjects.get(source._id).r2Committed, true);
 });

@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
 import { checkArgs } from './convex-args.mjs';
+import { interceptDefaultR2 } from './default-r2.mjs';
 import { digest } from '../dist/hash.js';
 import { viewIndexEntries } from '../dist/view-hosted-index.js';
 import { ownerDiffstatPages } from '../dist/owner-diffstats.js';
@@ -216,17 +217,18 @@ export function callsFixture(scale = 1, ownerStats = true) {
       checkArgs(action, args, name);
       return action._handler(ctx, args);
     },
-    storage: {
-      getMetadata: async key => ({ sha256: key, size: sizes.get(key) }),
-      get: async key => {
-        const value = stored.get(key);
-        if ([old.sha256, ...changed.map(p => p.sha256)].includes(key)) metrics.sourceFileReads++;
-        metrics.storageReads++;
-        metrics.storageBytes += value.length;
-        return new Blob([value]);
-      },
-    },
   };
+  // The stored objects are R2 objects: the default bucket answers each GET from this fixture's bytes.
+  interceptDefaultR2(async (input, init, serve) => {
+    const url = new URL(typeof input === 'string' || input instanceof URL ? input : input.url),
+      key = url.pathname.split('/').at(-1),
+      value = (init?.method ?? 'GET').toUpperCase() === 'GET' ? stored.get(key) : undefined;
+    if (!value) return serve(input, init);
+    if ([old.sha256, ...changed.map(p => p.sha256)].includes(key)) metrics.sourceFileReads++;
+    metrics.storageReads++;
+    metrics.storageBytes += value.length;
+    return new Response(value, { status: 200, headers: { 'content-length': String(value.length) } });
+  });
   const exchange = {
     root: { schema: 2, ownerViews, ...(ownerStats ? { ownerDiffstats: companion.pages } : {}) },
     records: built.root,

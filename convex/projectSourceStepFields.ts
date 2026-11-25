@@ -20,7 +20,6 @@ export const sourceOutput = v.object({
   statePhysicalPrevious: v.optional(v.union(v.object({ sha256: v.string(), size: v.number() }), v.null())),
   sha256: v.string(),
   size: v.number(),
-  storageId: v.optional(v.id('_storage')),
   r2Key: v.optional(v.string()),
   pack: v.optional(objectPack),
   physical: v.optional(

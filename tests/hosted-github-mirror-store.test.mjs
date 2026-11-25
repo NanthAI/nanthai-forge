@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { generateKeyPairSync, randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
+import { defaultR2Config, defaultR2Objects } from './default-r2.mjs';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';
 import { effectivePolicy, policyPreset } from '../dist/autonomy-policy.js';
 import { mirrorFixture } from './hosted-github-mirror-fixture.mjs';
@@ -534,7 +535,9 @@ test('source resolution batches 100 descriptors with bounded document reads, fai
       digest,
       size: 4,
       nonce: 'synthetic',
-      storageId: `storage-${i}`,
+      location: 'r2',
+      r2Committed: true,
+      r2Key: `v1/p/${f.projectId}/o/${digest}`,
       removed: false,
     });
   }
@@ -600,7 +603,12 @@ test('source action verifies raw hashes and reconstructs recipes using project-b
   const data = Buffer.alloc(3 * 1024 * 1024, 77),
     built = buildObjectRecipe(data);
   const raw = new Map(built.objects);
-  raw.set(digest(built.bytes), built.bytes);
+  const store = (id, bytes) => {
+    raw.set(id, bytes);
+    defaultR2Objects.set(`${defaultR2Config.bucket}/v1/p/project/o/${id}`, Buffer.from(bytes));
+  };
+  for (const [id, bytes] of [...raw]) store(id, bytes);
+  store(digest(built.bytes), built.bytes);
   const logical = { sha256: digest(data), size: data.length };
   const calls = [];
   const reader = action.mirrorSource(
@@ -613,19 +621,17 @@ test('source action verifies raw hashes and reconstructs recipes using project-b
               id === logical.sha256
                 ? { object: logical, recipe: { sha256: digest(built.bytes), size: built.bytes.length } }
                 : { object: { sha256: id, size: raw.get(id).length }, recipe: null },
-            storageId: id,
-            url: null,
+            url: `https://${defaultR2Config.accountId}.r2.cloudflarestorage.com/${defaultR2Config.bucket}/v1/p/project/o/${id}`,
           })),
         );
       },
-      storage: { get: async id => new Blob([raw.get(id)]) },
     },
     { jobId: 'synthetic', step: 0 },
   );
   const [blob] = await reader.blobs([logical.sha256]);
   assert.deepEqual(await blob.read(), data);
   assert(calls.every(n => n <= 100));
-  raw.set(digest(built.bytes), Buffer.from('wrong bytes'));
+  store(digest(built.bytes), Buffer.from('wrong bytes'));
   const [bad] = await reader.blobs([logical.sha256]);
   await assert.rejects(bad.read(), e => e.code === 'SOURCE_HASH_MISMATCH');
 });
@@ -696,18 +702,23 @@ for (const { files, gitlinks = false } of [
     });
     const queueRow = [...f.tables.projectGithubMirrors.values()][0];
     f.patch('projectGithubMirrors', queueRow._id, { mapping: JSON.stringify(github.root) });
-    const storage = new Map();
-    for (const [id, value] of github.states) storage.set(id, new Blob([JSON.stringify(value)]));
-    for (const [id, value] of github.objects) storage.set(id, new Blob([value]));
-    for (const [id, blob] of storage)
+    const stored = new Map();
+    for (const [id, value] of github.states) stored.set(id, Buffer.from(JSON.stringify(value)));
+    for (const [id, value] of github.objects) stored.set(id, Buffer.from(value));
+    for (const [id, bytes] of stored) {
+      const key = `v1/p/${f.projectId}/o/${id}`;
+      defaultR2Objects.set(`${defaultR2Config.bucket}/${key}`, bytes);
       f.insert('projectObjects', {
         projectId: f.projectId,
         digest: id,
-        size: blob.size,
+        size: bytes.length,
         removed: false,
         nonce: 'synthetic',
-        storageId: id,
+        location: 'r2',
+        r2Committed: true,
+        r2Key: key,
       });
+    }
     const keys = generateKeyPairSync('rsa', { modulusLength: 2048 });
     const names = [
       'GITHUB_APP_ID',
@@ -788,14 +799,6 @@ for (const { files, gitlinks = false } of [
           },
           args,
         );
-      },
-      storage: {
-        get: async id => storage.get(id),
-        store: async blob => {
-          const id = `cursor-${storage.size}`;
-          storage.set(id, blob);
-          return id;
-        },
       },
     };
     const start = performance.now();

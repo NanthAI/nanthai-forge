@@ -143,32 +143,6 @@ test('missing R2 settings fail closed only when an R2 row has to be signed', asy
   assert.deepEqual(await sign(s, ['not an r2 object']), []);
 });
 
-test('mixed-location pull: convex and r2 rows come back verified, r2 bytes straight from R2', async t => {
-  const { s, fake, exchange } = await mixed(t),
-    all = ['legacy-a', 'modern-a', 'legacy-b', 'modern-b', 'modern-c'],
-    before = fake.requests.length;
-  assert.deepEqual(
-    rows(s).map(r => r.location ?? 'convex'),
-    ['convex', 'convex', 'r2', 'r2', 'r2'],
-  );
-  const reader = client(s),
-    result = await reader.downloadBatch(pins(all));
-  assert.deepEqual(
-    result.map(b => b.toString()),
-    all,
-  );
-  const gets = fake.requests.slice(before).filter(r => r.method === 'GET');
-  assert.equal(gets.length, 3, 'only the r2 rows touch the bucket');
-  // A single large-ish read also dispatches per row.
-  assert.equal((await reader.download(pins(['modern-b'])[0])).toString(), 'modern-b');
-  assert.equal((await exchange.download(pins(['legacy-a'])[0])).toString(), 'legacy-a');
-  // downloadToFile reads r2 content too.
-  const dir = mkdtempSync(join(tmpdir(), 'forge-r2-read-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
-  await client(s).downloadToFile(pins(['modern-c'])[0], join(dir, 'c.txt'));
-  assert.equal(readFileSync(join(dir, 'c.txt'), 'utf8'), 'modern-c');
-});
-
 test('GETs run at least eight at a time and signing is batched at 100 digests', async t => {
   const { s, fake } = await setup(t),
     values = Array.from({ length: 130 }, (_, i) => `object number ${i}`),
@@ -309,13 +283,6 @@ test('pending r2 rows are not readable until committed', async t => {
     }),
     code('INVALID_WORK_BACKUP'),
   );
-});
-
-test('legacy Convex rows: signDownloads signs nothing and the bytes still read', async t => {
-  const { s } = await setup(t);
-  await legacyObject(s, Buffer.from('plain'));
-  assert.deepEqual(await sign(s, ['plain']), []);
-  assert.equal((await client(s).downloadBatch(pins(['plain'])))[0].toString(), 'plain');
 });
 
 test('exported archive objects round trip through opted-in storage with verification', async t => {

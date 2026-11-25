@@ -13,8 +13,7 @@ import { findObject, findObjects, ownRow } from './projectObjectFind';
 export const objectPin = v.object({ digest: v.string(), size: v.number() });
 export const completion = v.object({
   id: v.id('projectObjects'),
-  storageId: v.optional(v.id('_storage')),
-  key: v.optional(v.string()),
+  key: v.string(),
 });
 export const recipePin = v.object({
   ...objectPin.fields,
@@ -90,7 +89,7 @@ export const prepare = internalMutation({
 export async function completeObjects(
   ctx: MutationCtx,
   projectId: Id<'hostedProjects'>,
-  objects: { id: Id<'projectObjects'>; storageId?: Id<'_storage'>; key?: string }[],
+  objects: { id: Id<'projectObjects'>; key: string }[],
   recipes: {
     digest: string;
     size: number;
@@ -112,19 +111,12 @@ export async function completeObjects(
       'INVALID_WORK_BACKUP',
       'Original object binding changed.',
     );
-    if (object.key) {
-      invariant(
-        row.location === 'r2' && row.r2Key === object.key && !object.storageId,
-        'INVALID_WORK_BACKUP',
-        'R2 binding changed.',
-      );
-      if (!isStored(row)) await ctx.db.patch(row._id, { r2Committed: true });
-    } else
-      invariant(
-        false,
-        'R2_REQUIRED',
-        'Old Convex file storage is retired; Forge stores these bytes in R2 only.',
-      );
+    invariant(
+      row.location === 'r2' && row.r2Key === object.key,
+      'INVALID_WORK_BACKUP',
+      'R2 binding changed.',
+    );
+    if (!isStored(row)) await ctx.db.patch(row._id, { r2Committed: true });
   }
   for (const pin of recipes) {
     const recipe = await findObject(ctx, projectId, pin.recipeDigest);

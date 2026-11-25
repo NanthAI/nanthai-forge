@@ -3,14 +3,12 @@
 'use node';
 import type { ActionCtx } from './_generated/server';
 import { indexObjectRead, isIndexReadContext } from './projectWorkIndexRetry';
-import { blobStore } from './blobStore';
 import type { Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
 import { exchangeFetch } from '../src/exchange-request';
 import { invariant } from '../src/errors';
 import { copyRecipeClosure } from '../src/object-pack-range';
 import { digest } from '../src/hash';
-import { storageDigest } from './projectStorage';
 import { isR2Object } from './projectObjectFields';
 import { r2Config, presignGet, r2Key } from './r2';
 import { readRecipeTrees } from './projectObjectTreeRead';
@@ -18,10 +16,10 @@ import { objectRecipeSchema, objectChunkPageBytes, type ChunkPin } from '../src/
 import type { ObjectView } from './projectObjectFind';
 import { packRange, packHeaders, verifyPackRange } from '../src/object-pack-range';
 
-/** Raw bytes live in Convex storage or a committed R2 object (not a recipe). */
-export const isRaw = (row: ObjectView) => !!row.storageId || isR2Object(row);
+/** Raw bytes live in a committed R2 object (not a recipe). */
+export const isRaw = (row: ObjectView) => isR2Object(row);
 /** Where raw bytes are cached by identity. */
-export const rawKey = (row: ObjectView) => row.storageId ?? row.r2Key;
+export const rawKey = (row: ObjectView) => row.r2Key;
 
 /** Server-side read of an R2 object by signed GET. Used only where Convex itself needs the bytes
  * (publication, derived views); clients read R2 directly. Verifies size and sha256. */
@@ -67,7 +65,7 @@ async function r2Content(ctx: ActionCtx, row: ObjectView, pin: ChunkPin, destina
   return data;
 }
 
-async function readMetadata(ctx: ActionCtx, row: ObjectView, pin: ChunkPin) {
+async function readMetadata(row: ObjectView, pin: ChunkPin) {
   if (isR2Object(row)) {
     // Existence and bytes are proven by the verified read itself; there is no separate metadata read.
     invariant(
@@ -77,32 +75,14 @@ async function readMetadata(ctx: ActionCtx, row: ObjectView, pin: ChunkPin) {
     );
     return;
   }
-  invariant(
-    row.size === pin.size && row.storageId && row.digest === pin.sha256,
-    'INVALID_WORK_BACKUP',
-    'Stored content size differs from its checkpoint.',
-  );
-  const value = await blobStore(ctx).getMetadata(row.storageId);
-  invariant(
-    value && value.size === row.size && storageDigest(value.sha256) === row.digest,
-    'INVALID_WORK_BACKUP',
-    'Stored content differs from its digest.',
-  );
+  invariant(false, 'INVALID_WORK_BACKUP', 'Stored content is unavailable.');
 }
 async function readContent(ctx: ActionCtx, row: ObjectView, pin: ChunkPin, destination?: Uint8Array) {
   if (isR2Object(row)) return r2Content(ctx, row, pin, destination);
-  const blob = await blobStore(ctx).get(row.storageId!);
-  invariant(blob, 'INVALID_WORK_BACKUP', 'Stored content is unavailable.');
-  const bytes = Buffer.from(await blob.arrayBuffer());
-  invariant(
-    bytes.length === pin.size && digest(bytes) === pin.sha256,
-    'INVALID_WORK_BACKUP',
-    'Stored content differs from its original bytes.',
-  );
-  return bytes;
+  invariant(false, 'INVALID_WORK_BACKUP', 'Stored content is unavailable.');
 }
 export const rawMetadata = (ctx: ActionCtx, row: ObjectView, pin: ChunkPin) =>
-  indexObjectRead(ctx, pin, () => readMetadata(ctx, row, pin));
+  indexObjectRead(ctx, pin, () => readMetadata(row, pin));
 export const rawContent = (ctx: ActionCtx, row: ObjectView, pin: ChunkPin, destination?: Uint8Array) =>
   indexObjectRead(ctx, pin, () => readContent(ctx, row, pin, destination));
 type RawReader = typeof rawContent;

@@ -25,15 +25,6 @@ export async function setup(t, { credentials = true } = {}) {
     fake = await startFakeR2(),
     restore = fake.install(),
     s = fixture();
-  // Legacy Convex-stored objects (written before R2 was the only path) upload to the fixture's upload URL.
-  const r2Fetch = globalThis.fetch;
-  globalThis.fetch = async (url, init) => {
-    if (url !== 'https://fixture.invalid/upload') return r2Fetch(url, init);
-    const storageId = await s.ctx.storage.store(
-      new Blob([init.body], { type: init.headers['Content-Type'] }),
-    );
-    return Response.json({ storageId });
-  };
   process.env.CONVEX_CLOUD_URL = 'https://example.convex.cloud';
   const env = {
     R2_ACCOUNT_ID: fakeR2Config.accountId,
@@ -45,7 +36,6 @@ export async function setup(t, { credentials = true } = {}) {
     if (credentials) process.env[name] = value;
     else delete process.env[name];
   t.after(async () => {
-    globalThis.fetch = r2Fetch;
     restore();
     await fake.close();
     for (const [name, value] of Object.entries(saved))

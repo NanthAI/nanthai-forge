@@ -224,18 +224,6 @@ async function retainLegacyInput(s, args) {
   return { ...args, at, objects };
 }
 
-test('F6: publication refuses an old Convex storage receipt and creates nothing', async () => {
-  const s = setup(),
-    retained = await retainLegacyInput(s, input());
-  await assert.rejects(
-    s.transaction(() => modules.projectBootstrapStore.publish._handler(s.ctx, retained)),
-    code('R2_REQUIRED'),
-  );
-  assert.equal(s.tables.hostedProjects.size, 0);
-  assert.equal(s.tables.projectBackups.size, 0);
-  assert.equal(s.tables.projectObjects.size, 0);
-});
-
 test('a second prepared publisher reconciles the winner and reuses its content-addressed R2 bytes', async () => {
   const s = setup(),
     args = input(),

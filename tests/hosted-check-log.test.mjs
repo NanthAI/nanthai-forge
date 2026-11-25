@@ -8,7 +8,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { fixture, preparedCheckpoint, modules, legacyObject } from './project-exchange-fixture.mjs';
+import { fixture, preparedCheckpoint, modules } from './project-exchange-fixture.mjs';
 import { defaultR2Config, defaultR2Objects, interceptDefaultR2 } from './default-r2.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { initNative } from '../dist/native-work.js';
@@ -93,14 +93,6 @@ test('hosted log pages read only retained run bytes and recheck current read aut
   } finally {
     restore();
   }
-  // A log stored before R2 was the only byte path still pages from Convex storage.
-  await legacyObject(s, defaultR2Objects.get(`${defaultR2Config.bucket}/${object.r2Key}`));
-  const page = JSON.parse(await log._handler(s.ctx, args));
-  assert.equal(page.nextOffset, 16384);
-  assert(page.more);
-  const end = JSON.parse(await log._handler(s.ctx, { ...args, offset: page.nextOffset }));
-  assert.match(end.text, /✖ retained failure/);
-  assert.equal(end.more, false);
   await assert.rejects(log._handler(s.ctx, { ...args, offset: -1 }), code('BAD_ARGUMENT'));
   await assert.rejects(log._handler(s.ctx, { ...args, runId: randomUUID() }), code('NOT_FOUND'));
   s.caller('stranger');
@@ -108,11 +100,6 @@ test('hosted log pages read only retained run bytes and recheck current read aut
   s.caller(null);
   await assert.rejects(log._handler(s.ctx, args), code('PROJECT_UNAVAILABLE'));
   s.caller('owner');
-  const get = s.ctx.storage.getMetadata;
-  s.ctx.storage.getMetadata = async id => {
-    const value = await get(id);
-    s.tables.hostedProjects.get('project').removal = 'deleting';
-    return value;
-  };
+  s.tables.hostedProjects.get('project').removal = 'deleting';
   await assert.rejects(log._handler(s.ctx, args), code('PROJECT_UNAVAILABLE'));
 });

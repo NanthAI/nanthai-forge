@@ -2,9 +2,6 @@
 // Copyright 2026 Ferdinando Valsecchi
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { createServer } from 'node:http';
 import { gzipSync } from 'node:zlib';
 import { moduleUrl } from './convex-module.mjs';
@@ -12,7 +9,6 @@ import { fakeR2Config } from './fake-r2.mjs';
 import { setup } from './r2-harness.mjs';
 import { digest } from '../dist/hash.js';
 import { getSigned } from '../dist/exchange-r2-read.js';
-import { spoolBackfill, sampleBackfill } from '../dist/r2-backfill-transfer.js';
 import { ConvexExchangeBlobs } from '../dist/exchange-blobs.js';
 import { ObjectDownloadReader } from '../dist/blob-download.js';
 import { getFunctionName } from 'convex/server';
@@ -55,12 +51,9 @@ test('identity HEAD returns the stored length and checksum, including empty cont
   }
 });
 
-test('CLI direct download and backfill spool/sample request identity and verify actual bytes', async t => {
+test('CLI direct download requests identity and verifies actual bytes', async t => {
   const bytes = Buffer.from('synthetic compressible font/text '.repeat(100)),
-    pin = { digest: digest(bytes), size: bytes.length },
-    directory = mkdtempSync(join(tmpdir(), 'forge-identity-')),
-    file = join(directory, 'spool');
-  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+    pin = { digest: digest(bytes), size: bytes.length };
   let calls = 0;
   t.mock.method(globalThis, 'fetch', async (_url, init) => {
     identity(init);
@@ -71,15 +64,8 @@ test('CLI direct download and backfill spool/sample request identity and verify 
     await getSigned('https://synthetic.invalid/object', { sha256: pin.digest, size: pin.size }),
     bytes,
   );
-  await spoolBackfill('https://synthetic.invalid/object', file, pin);
-  assert.deepEqual(readFileSync(file), bytes);
-  await sampleBackfill('https://synthetic.invalid/object', pin);
-  assert.equal(calls, 3);
+  assert.equal(calls, 1);
   const wrong = { ...pin, digest: '0'.repeat(64) };
-  await assert.rejects(
-    sampleBackfill('https://synthetic.invalid/object', wrong),
-    e => e.code === 'BLOB_DIGEST_MISMATCH',
-  );
   await assert.rejects(
     getSigned('https://synthetic.invalid/object', { sha256: wrong.digest, size: pin.size }),
     e => e.code === 'BLOB_DIGEST_MISMATCH',

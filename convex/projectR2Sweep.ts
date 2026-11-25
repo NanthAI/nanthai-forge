@@ -34,14 +34,12 @@ export const page = internalQuery({
 const abandoned = (row: {
   location?: string;
   r2Committed?: boolean;
-  storageId?: unknown;
   recipe?: unknown;
   r2PreparedAt?: number;
   _creationTime: number;
 }) =>
   row.location === 'r2' &&
   !row.r2Committed &&
-  !row.storageId &&
   !row.recipe &&
   Date.now() - (row.r2PreparedAt ?? row._creationTime) > abandonedWindow;
 export const claim = internalMutation({

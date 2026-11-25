@@ -109,7 +109,10 @@ export function installDefaultR2Fetch() {
   const base = globalThis.fetch;
   globalThis.fetch = (input, init) => {
     const url = new URL(typeof input === 'string' || input instanceof URL ? input : input.url);
-    if (url.host !== host) return base(input, init);
+    // The default bucket's host, and the host of whatever R2 account the test points the environment at
+    // (a test that sets synthetic settings still gets the in-memory bucket unless it replaces fetch).
+    const current = process.env.R2_ACCOUNT_ID && `${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`;
+    if (url.host !== host && url.host !== current) return base(input, init);
     return interceptor ? interceptor(input, init, serve) : serve(input, init);
   };
   return () => {
@@ -123,8 +126,7 @@ export function settleR2Purge(project) {
   if (project?.r2Purge && !project.r2PrefixPurged) project.r2PrefixPurged = true;
 }
 
-/** The stored bytes of a project object row: R2 (this bucket) or a legacy Convex copy. */
+/** The stored bytes of a project object row, read from this bucket. */
 export async function storedBytes(s, row) {
-  if (row.storageId) return Buffer.from(await (await s.ctx.storage.get(row.storageId)).arrayBuffer());
   return defaultR2Objects.get(`${defaultR2Config.bucket}/${row.r2Key}`) ?? null;
 }

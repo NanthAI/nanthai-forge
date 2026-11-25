@@ -9,7 +9,7 @@ import { r2Config, presignGet } from './r2';
 import { blobStore, type BlobId } from './blobStore';
 import { invariant } from '../src/errors';
 
-/** Retained storage IDs are immutable aliases after a legacy archive's Convex copy is purged. */
+/** A committed R2 archive named by `r2archive:<row id>`; the row's own R2 record is the only source. */
 export const resolve = internalQuery({
   args: { storageId: v.string(), actor: v.union(v.string(), v.null()) },
   returns: v.union(
@@ -17,40 +17,11 @@ export const resolve = internalQuery({
     v.object({ digest: v.string(), size: v.number(), url: v.string(), purged: v.boolean() }),
   ),
   handler: async (ctx, { storageId, actor }) => {
-    const direct = storageId.startsWith('r2archive:')
-      ? await ctx.db.get(storageId.slice(10) as Id<'projectBackups'> | Id<'projectProposals'>)
-      : null;
-    if (storageId.startsWith('r2archive:'))
-      invariant(direct, 'PROJECT_UNAVAILABLE', 'Original archive is unavailable.');
-    const [backup] = direct
-      ? []
-      : await ctx.db
-          .query('projectBackups')
-          .withIndex('by_storage', q => q.eq('storageId', storageId as Id<'_storage'>))
-          .take(1);
-    const [proposal] =
-      direct || backup
-        ? []
-        : await ctx.db
-            .query('projectProposals')
-            .withIndex('by_storage', q => q.eq('storageId', storageId as Id<'_storage'>))
-            .take(1);
-    const [original] =
-      direct || backup || proposal
-        ? []
-        : await ctx.db
-            .query('projectBackups')
-            .withIndex('by_archive_storage', q =>
-              q.eq('archiveReceipt.storageId', storageId as Id<'_storage'>),
-            )
-            .take(1);
-    const row = direct ?? backup ?? proposal ?? original,
-      source = original
-        ? original.archiveReceipt
-        : direct && 'archiveReceipt' in direct && direct.transport === 'objects'
-          ? direct.archiveReceipt
-          : row;
-    if (!row || source?.location !== 'r2' || !source.r2Committed || !source.r2Key) return null;
+    if (!storageId.startsWith('r2archive:')) return null;
+    const row = await ctx.db.get(storageId.slice(10) as Id<'projectBackups'> | Id<'projectProposals'>);
+    invariant(row, 'PROJECT_UNAVAILABLE', 'Original archive is unavailable.');
+    const source = 'archiveReceipt' in row && row.transport === 'objects' ? row.archiveReceipt : row;
+    if (source?.location !== 'r2' || !source.r2Committed || !source.r2Key) return null;
     if (actor) await accessibleProject(ctx, row.projectId, actor);
     else {
       const project = await ctx.db.get(row.projectId);
@@ -64,14 +35,14 @@ export const resolve = internalQuery({
       digest: source.digest,
       size: source.size,
       url: await presignGet(r2Config(), source.r2Key),
-      purged: !!source.r2ConvexPurged || !source.storageId,
+      purged: true,
     };
   },
 });
 export async function archiveSource(ctx: ActionCtx, id: BlobId) {
   const user = await ctx.auth.getUserIdentity();
-  // Artifact references belong to blobStore. Legacy IDs and owning-archive
-  // aliases resolve through the current-authorized archive query.
+  // Artifact references belong to blobStore. Archive rows resolve through the
+  // current-authorized archive query.
   const r2: { digest: string; size: number; url: string; purged: boolean } | null = id.startsWith('r2blob:')
     ? null
     : await ctx.runQuery(makeFunctionReference<'query'>('r2ArchiveSource:resolve'), {
@@ -94,6 +65,5 @@ export async function archiveSource(ctx: ActionCtx, id: BlobId) {
       };
 }
 
-/** Read reference for newly resumed R2 archives, which have no legacy storage ID. */
-export const archiveRef = (row: { _id: string; storageId?: string }) =>
-  row.storageId ?? `r2archive:${row._id}`;
+/** Read reference for an R2 archive row. */
+export const archiveRef = (row: { _id: string }) => `r2archive:${row._id}`;

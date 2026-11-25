@@ -406,7 +406,9 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
               projectId: 'project',
               digest,
               size: sizes.get(digest) ?? objects.get(digest).length,
-              storageId: digest,
+              location: 'r2',
+              r2Committed: true,
+              r2Key: `v1/p/project/o/${digest}`,
               nonce: digest,
               removed: false,
             }),
@@ -553,12 +555,22 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
   };
   s.ctx.db.system.get = async id =>
     objects.has(id) ? { _id: id, sha256: id, size: objects.get(id).length } : null;
-  s.ctx.storage.get = async id => {
-    metrics.storageReads++;
-    if ([old, ...changes].includes(id)) metrics.sourceFileReads++;
-    return new Blob([objects.get(id)]);
+  // Objects are R2 objects: their reads are GETs of the default bucket, counted here.
+  const priorFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(String(input)),
+      id = decodeURIComponent(url.pathname).split('/').at(-1);
+    if (
+      url.hostname.endsWith('.r2.cloudflarestorage.com') &&
+      objects.has(id) &&
+      (init?.method ?? 'GET') === 'GET'
+    ) {
+      metrics.storageReads++;
+      if ([old, ...changes].includes(id)) metrics.sourceFileReads++;
+      return new Response(objects.get(id));
+    }
+    return priorFetch(input, init);
   };
-  s.ctx.storage.getMetadata = async id => ({ sha256: id, size: objects.get(id).length });
   const query = s.ctx.runQuery,
     mutation = s.ctx.runMutation;
   let stepStarted = performance.now();

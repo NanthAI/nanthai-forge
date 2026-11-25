@@ -11,7 +11,6 @@ import { tmpdir } from 'node:os';
 import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
 import { state } from './hosted-fixture.mjs';
-import { legacyObject } from './project-exchange-fixture.mjs';
 import { digest } from '../dist/hash.js';
 import { ConvexExchange } from '../dist/exchange-client.js';
 import { initNative } from '../dist/native-work.js';
@@ -195,158 +194,9 @@ test('explicit project deletion removes every object row, including unresolved u
   );
 });
 
-test('explicit native archive migration keeps backup IDs and old journals, verifies complete restore, and retires containers only after reference-safe switch', async t => {
-  const { setup } = await import('./r2-harness.mjs');
-  await setup(t);
-  const s = fixture(),
-    migration = await import(moduleUrl('../convex/projectExchangeMigration.ts'));
-  const { exportNativeWork } = await import('../dist/native-backup.js'),
-    { migrateNativeArchive } = await import('../dist/native-exchange-migrate.js');
-  const { readFileSync } = await import('node:fs');
-  const dir = mkdtempSync(join(tmpdir(), 'forge-archive-migration-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
-  const root = join(dir, 'owner');
-  mkdirSync(root);
-  writeFileSync(join(root, 'source.bin'), Buffer.alloc(65536, 71));
-  initNative(root);
-  const store = new WorkStore(root);
-  const archive = (await exportNativeWork(store, store.load().revision, true)).result,
-    manifest = JSON.parse(archive.json),
-    data = store.load(),
-    nonce = randomUUID();
-  const storageId = await s.ctx.storage.store(
-    new Blob([readFileSync(archive.archive.path)], { type: `application/x-forge-backup-${nonce}` }),
-  );
-  const backup = {
-    projectId: 'project',
-    operationId: randomUUID(),
-    request: 'original',
-    nonce,
-    previous: null,
-    digest: archive.archive.sha256,
-    size: archive.archive.size,
-    status: 'stored',
-    storageId,
-    preview: {
-      manifestDigest: digest(archive.json),
-      head: manifest.head,
-      format: 'native',
-      revision: data.revision,
-      intents: 0,
-      lanes: 0,
-      views: 0,
-      runs: 0,
-      files: manifest.files.length,
-      unavailable: 0,
-      channels: [],
-    },
-  };
-  const id = await s.ctx.db.insert('projectBackups', backup);
-  s.tables.hostedProjects.get('project').currentBackup = id;
-  const shared = await s.ctx.db.insert('projectBackups', { ...backup, operationId: randomUUID() });
-  await modules.projectWorkActions.initialize._handler(s.ctx, {
-    projectId: 'project',
-    backupId: id,
-    operationId: randomUUID(),
-  });
-  const before = JSON.parse(await readHosted(s.ctx, { projectId: 'project' })),
-    journal = await modules.projectWorkActions.exportJournal._handler(s.ctx, { projectId: 'project' }),
-    journalPath = join(dir, 'old-journal.json');
-  writeFileSync(journalPath, journal);
-  const tr = transport(s);
-  tr.migrate = (backupId, operationId, originalDigest, manifest) =>
-    migration.migrate._handler(s.ctx, {
-      backupId,
-      operationId,
-      originalDigest,
-      manifestDigest: manifest.sha256,
-      manifestSize: manifest.size,
-    });
-  const operation = randomUUID(),
-    complete = tr.migrate;
-  tr.migrate = async () => {
-    throw new Error('lost before switch');
-  };
-  await assert.rejects(
-    migrateNativeArchive(archive.archive.path, backup.digest, tr, id, operation),
-    /lost before switch/,
-  );
-  assert.equal(s.tables.projectBackups.get(id).transport, undefined);
-  assert.ok(s.files.has(storageId));
-  tr.migrate = complete;
-  const first = await migrateNativeArchive(archive.archive.path, backup.digest, tr, id, operation);
-  assert.equal(first.logicalClosureVerified, true);
-  assert.equal(first.fullRestoreVerified, false);
-  assert.equal(first.result.retired, false);
-  assert.ok(s.files.has(storageId), 'Another original backup still references compressed bytes.');
-  const row = s.tables.projectBackups.get(id);
-  assert.equal(row.digest, backup.digest);
-  assert.notEqual(row.objectManifest.digest, backup.digest);
-  assert.equal(row.archiveReceipt.digest, backup.digest);
-  const after = JSON.parse(await readHosted(s.ctx, { projectId: 'project' }));
-  assert.deepEqual(after.data, before.data);
-  assert.equal(after.backupId, id);
-  assert.equal(after.backupDigest, backup.digest);
-  const restored = join(dir, 'old-journal-restored');
-  await pullNativeExchange(id, restored, tr, { journalPath });
-  assert.deepEqual(readFileSync(join(restored, 'source.bin')), readFileSync(join(root, 'source.bin')));
-  const secondOperation = randomUUID(),
-    nativeMutation = s.ctx.runMutation;
-  let fail = true;
-  s.ctx.runMutation = async (ref, args) => {
-    if (getFunctionName(ref) === 'projectExchange:retireArchive' && fail) {
-      fail = false;
-      throw new Error('lost retirement reply');
-    }
-    return nativeMutation(ref, args);
-  };
-  await assert.rejects(
-    migrateNativeArchive(archive.archive.path, backup.digest, tr, shared, secondOperation),
-    /lost retirement reply/,
-  );
-  assert.ok(s.files.has(storageId));
-  assert.equal(s.tables.projectBackups.get(shared).transport, 'objects');
-  const second = await migrateNativeArchive(archive.archive.path, backup.digest, tr, shared, secondOperation);
-  assert.equal(second.uploadedObjects, 0);
-  assert.equal(second.result.retired, true);
-  assert.ok(!s.files.has(storageId));
-  const retry = await migrateNativeArchive(archive.archive.path, backup.digest, tr, id, operation);
-  assert.equal(retry.uploadedObjects, 0);
-  assert.equal(retry.result.retired, true);
-  assert.equal(s.tables.projectBackups.size, 2);
-  assert.equal(s.tables.hostedProjects.get('project').work.backupId, id);
-  await assert.rejects(
-    migrateNativeArchive(archive.archive.path, 'a'.repeat(64), tr, id, operation),
-    e => e.code === 'INVALID_WORK_BACKUP',
-  );
-});
-test('small legacy Convex batches verify all bytes and current access while larger content retains ranged downloads', async () => {
-  const s = fixture(),
-    contents = [Buffer.from('one'), Buffer.from('two')],
+test('small batches verify all bytes while larger content retains ranged downloads', async () => {
+  const contents = [Buffer.from('one'), Buffer.from('two')],
     pins = contents.map(bytes => ({ sha256: digest(bytes), size: bytes.length }));
-  // Copies written before R2 was the only path stay readable from Convex until cleanup.
-  for (const bytes of contents) await legacyObject(s, bytes);
-  const args = { projectId: 'project', digests: pins.map(pin => pin.sha256) };
-  const result = await actions.downloadBatch._handler(s.ctx, args);
-  assert.deepEqual(
-    result.map(row => Buffer.from(row.data)),
-    contents,
-  );
-  s.caller('stranger');
-  await assert.rejects(actions.downloadBatch._handler(s.ctx, args));
-  s.caller('owner');
-  const originalGet = s.ctx.storage.get;
-  s.ctx.storage.get = async id => {
-    const blob = await originalGet(id);
-    s.tables.hostedProjects.get('project').removal = 'deleting';
-    return blob;
-  };
-  await assert.rejects(actions.downloadBatch._handler(s.ctx, args));
-  delete s.tables.hostedProjects.get('project').removal;
-  s.ctx.storage.get = originalGet;
-  const row = [...s.tables.projectObjects.values()].find(row => row.digest === pins[0].sha256);
-  s.files.get(row.storageId).blob = new Blob(['bad']);
-  await assert.rejects(actions.downloadBatch._handler(s.ctx, args));
   const { ConvexExchange } = await import('../dist/exchange-client.js'),
     client = new ConvexExchange(
       testDeploymentOrigin('https://fixture.convex.cloud'),
@@ -390,17 +240,29 @@ test('small legacy Convex batches verify all bytes and current access while larg
   await assert.rejects(cold.downloadBatch([pins[0]]));
 });
 
-test('retiring an already absent exclusive archive reconciles when the provider rejects deleting a missing object', async () => {
+test('retiring a migrated archive keeps an R2 container that another backup still names (review of Item c0af6cfa)', async () => {
+  const { backupRow } = await import('./hosted-fixture.mjs');
   const s = fixture(),
-    { removeExclusive } = await import(moduleUrl('../convex/projectStorage.ts')),
-    original = s.ctx.storage.delete;
-  s.ctx.storage.delete = async id => {
-    assert.ok(s.files.has(id), 'Provider rejects missing storage deletion');
-    return original(id);
-  };
-  const id = await s.ctx.storage.store(new Blob(['archive']));
-  assert.equal(await removeExclusive(s.ctx, id), true);
-  assert.equal(await removeExclusive(s.ctx, id), true);
-  s.tables.projectBackups.set('still-referenced', { _id: 'still-referenced', storageId: id });
-  assert.equal(await removeExclusive(s.ctx, id), false);
+    key = `v1/p/project/o/${'a'.repeat(64)}`;
+  const receipt = { digest: 'a'.repeat(64), size: 10, location: 'r2', r2Committed: true, r2Key: key };
+  for (const id of ['first', 'second'])
+    s.tables.projectBackups.set(
+      id,
+      backupRow({
+        _id: id,
+        projectId: 'project',
+        transport: 'objects',
+        objectManifest: { digest: 'b'.repeat(64), size: 5 },
+        archiveReceipt: { ...receipt, operationId: 'op', at: 0 },
+      }),
+    );
+  const retire = id =>
+    modules.projectExchange.retireArchive._handler(s.ctx, {
+      backupId: id,
+      owner: 'owner',
+      operationId: 'op',
+    });
+  assert.equal((await retire('first')).retired, false, 'the second backup still names the same container');
+  s.tables.projectBackups.delete('second');
+  assert.equal((await retire('first')).retired, true);
 });

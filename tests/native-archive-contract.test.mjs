@@ -149,62 +149,6 @@ test('bounded metadata and browser preview preserve exact schema 2 logical sourc
     );
   await assert.rejects(previewWorkArchive(new File([badBytes], 'invalid-native.tar.gz')));
 });
-test('provider readers accept exact schema 2 metadata and still recheck current authorization and digest pins', async t => {
-  const f = await nativeFixture(t),
-    s = state([]);
-  s.tables.projectContributors = new Map();
-  s.tables.hostedProjects = new Map([
-    [
-      'project',
-      projectRow({
-        _id: 'project',
-        owner: 'owner',
-        key: randomUUID(),
-        name: 'Compact fixture',
-        revision: 1,
-        currentBackup: 'backup',
-      }),
-    ],
-  ]);
-  s.tables.projectBackups = new Map([
-    [
-      'backup',
-      backupRow({
-        _id: 'backup',
-        projectId: 'project',
-        digest: digest(f.bytes),
-        size: f.bytes.length,
-        storageId: 'storage',
-        preview: { manifestDigest: digest(f.manifestBytes) },
-      }),
-    ],
-  ]);
-  const prior = s.ctx.runQuery;
-  s.ctx.runQuery = (ref, args) =>
-    getFunctionName(ref) === 'projectBackups:get' ? backups.get._handler(s.ctx, args) : prior(ref, args);
-  s.files.set('storage', { blob: new Blob([f.bytes]) });
-  s.ctx.storage.get = () => {
-    throw Error('Do not read full archive');
-  };
-  const source = await actions.source(s.ctx, 'backup', 'owner');
-  assert.deepEqual(source.manifest, f.manifest);
-  assert.deepEqual(Buffer.from(JSON.stringify(source.data)), Buffer.from(JSON.stringify(JSON.parse(f.work))));
-  const project = s.tables.hostedProjects.get('project'),
-    before = structuredClone(project),
-    getUrl = s.ctx.storage.getUrl;
-  s.ctx.storage.getUrl = async id => {
-    const url = await getUrl(id);
-    project.owner = 'revoked';
-    return url;
-  };
-  await assert.rejects(actions.source(s.ctx, 'backup', 'owner'), e => e.data?.code === 'PROJECT_UNAVAILABLE');
-  assert.equal(project.currentBackup, before.currentBackup);
-  project.owner = 'owner';
-  s.ctx.storage.getUrl = getUrl;
-  s.tables.projectBackups.get('backup').preview.manifestDigest = 'b'.repeat(64);
-  await assert.rejects(actions.source(s.ctx, 'backup', 'owner'), code('INVALID_WORK_BACKUP'));
-  assert.deepEqual(project, before);
-});
 test('artifact deduplication is explicit, default-off and supported only for portable native archives', async t => {
   assert.deepEqual(exportWorkCommandSchema.parse({ action: 'export-work' }), { action: 'export-work' });
   assert.equal(

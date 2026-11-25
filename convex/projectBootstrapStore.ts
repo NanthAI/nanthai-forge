@@ -8,7 +8,6 @@ import { activeOwnedProject } from './projectAuthority';
 import { emptyHostedProject } from '../src/hosted-bootstrap';
 import { HOSTED_WORK_INDEX_FORMAT } from '../src/work-hosted-summary';
 import { invariant } from '../src/errors';
-import { storageDigest } from './projectStorage';
 import { report } from './errors';
 import { r2Key } from './r2';
 import { selectBornMain } from './projectHostedBirth';
@@ -71,9 +70,7 @@ export const publish = internalMutation({
     ...bootstrapInput,
     at: v.string(),
     projectId: v.optional(v.id('hostedProjects')),
-    objects: v.array(
-      v.object({ storageId: v.optional(v.id('_storage')), r2Key: v.optional(v.string()), nonce: v.string() }),
-    ),
+    objects: v.array(v.object({ r2Key: v.string(), nonce: v.string() })),
   },
   returns: v.object({ projectId: v.id('hostedProjects'), created: v.boolean() }),
   handler: async (ctx, input) => {
@@ -90,27 +87,10 @@ export const publish = internalMutation({
       for (const [index, object] of input.objects.entries()) {
         const expected = bootstrap.objects[index]!;
         invariant(
-          !object.storageId && object.r2Key,
-          'R2_REQUIRED',
-          'Old Convex file storage is retired; Forge stores these bytes in R2 only.',
+          input.projectId && object.r2Key === r2Key(input.projectId, expected.sha256),
+          'INVALID_WORK_BACKUP',
+          'Bootstrap R2 project binding changed.',
         );
-        if (object.r2Key) {
-          invariant(
-            input.projectId && object.r2Key === r2Key(input.projectId, expected.sha256),
-            'INVALID_WORK_BACKUP',
-            'Bootstrap R2 project binding changed.',
-          );
-        } else {
-          const stored = await ctx.db.system.get(object.storageId!);
-          invariant(
-            stored &&
-              stored.size === expected.size &&
-              storageDigest(stored.sha256) === expected.sha256 &&
-              stored.contentType === `application/x-forge-object-${object.nonce}`,
-            'INVALID_WORK_BACKUP',
-            'Bootstrap content differs from its immutable pins.',
-          );
-        }
       }
       const project = await createProject(ctx, {
         owner: user.subject,
@@ -138,7 +118,7 @@ export const publish = internalMutation({
         status: 'stored',
       });
       const catalog: Parameters<typeof storeCatalogObjects>[2] = [];
-      for (const [index, object] of input.objects.entries()) {
+      for (const index of input.objects.keys()) {
         const pin = bootstrap.objects[index]!;
         const entry = {
           digest: pin.sha256,
@@ -147,15 +127,7 @@ export const publish = internalMutation({
             ? { stateGeneration: 1, stateSize: { fileCount: 0, manifestBytes: pin.size } }
             : {}),
         };
-        if (object.r2Key) catalog.push(entry);
-        else
-          await ctx.db.insert('projectObjects', {
-            projectId: project._id,
-            ...entry,
-            nonce: object.nonce,
-            storageId: object.storageId,
-            removed: false,
-          });
+        catalog.push(entry);
       }
       if (catalog.length) await storeCatalogObjects(ctx, project._id, catalog, input.operationId);
       const generationId = await ctx.db.insert('projectWorkGenerations', {

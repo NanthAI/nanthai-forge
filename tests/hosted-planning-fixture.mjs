@@ -73,9 +73,20 @@ export async function setup(t, native = true, prepare, prepareIndex = true) {
     size: bytes.length,
     preview,
     status: 'stored',
-    storageId: 'source',
+    location: 'r2',
+    r2Committed: true,
+    r2Key: `v1/p/${projectId}/o/${digest(bytes)}`,
   });
-  s.files.set('source', { blob: new Blob([bytes], { type: 'application/gzip' }) });
+  {
+    // The base archive is an R2 object, written like any upload to whichever bucket the test installed.
+    const { presignPut, r2Config } = await import(moduleUrl('../convex/r2.ts'));
+    const target = await presignPut(r2Config(), `v1/p/${projectId}/o/${digest(bytes)}`, {
+      digest: digest(bytes),
+      size: bytes.length,
+    });
+    const put = await fetch(target.url, { method: 'PUT', headers: target.headers, body: bytes });
+    if (!put.ok && put.status !== 412) throw new Error(`base archive upload failed: ${put.status}`);
+  }
   await actions.initialize._handler(s.ctx, { projectId, backupId, operationId: randomUUID() });
   if (prepareIndex) {
     const { ensure } = await import(moduleUrl('../convex/projectWorkIndexActions.ts'));

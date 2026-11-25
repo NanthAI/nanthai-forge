@@ -3,14 +3,29 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { getFunctionName } from 'convex/server';
-// These checks hook Convex storage reads (memo, metadata, tampering), which still serve legacy
-// rows; R2 reads are covered by tests/r2-read-path.test.mjs.
-import { fixture, legacyObject as upload } from './project-exchange-fixture.mjs';
+// These checks hook the R2 reads of recipe leaves (memo, tampering, availability).
+import { fixture, upload } from './project-exchange-fixture.mjs';
+import { defaultR2Config, defaultR2Objects, interceptDefaultR2 } from './default-r2.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { digest } from '../dist/hash.js';
 const { objectRange } = await import(moduleUrl('../convex/projectObjectContent.ts'));
 const { exchangeObjectReader } = await import(moduleUrl('../convex/projectExchangeReader.ts'));
 const code = expected => error => (error.data?.code ?? error.code) === expected;
+const objectPath = row => `${defaultR2Config.bucket}/${row.r2Key}`;
+/** Counts GETs per bucket path, calling `after(path)` once an object's bytes were served. */
+function hookReads(after = () => {}) {
+  const reads = new Map();
+  const restore = interceptDefaultR2(async (input, init, serve) => {
+    const path = decodeURIComponent(new URL(input).pathname.slice(1)),
+      response = await serve(input, init);
+    if ((init?.method ?? 'GET') === 'GET') {
+      reads.set(path, (reads.get(path) ?? 0) + 1);
+      after(path);
+    }
+    return response;
+  });
+  return { reads, restore };
+}
 
 async function recipe(s, count = 64, group = count, tag = 0, changeLast = false) {
   const parts = [],
@@ -102,17 +117,13 @@ test('recipe rows in one reader page share first-level and leaf resolution windo
   );
 });
 
-test('shared recipe subtrees read and expand once across a State window', async () => {
+test('shared recipe subtrees read and expand once across a State window', async t => {
   const s = fixture(),
     built = await recipe(s, 128, 16),
     changed = await recipe(s, 128, 16, 0, true),
     windows = measure(s);
-  const read = s.ctx.storage.get,
-    reads = new Map();
-  s.ctx.storage.get = async id => {
-    reads.set(id, (reads.get(id) ?? 0) + 1);
-    return read(id);
-  };
+  const { reads, restore } = hookReads();
+  t.after(restore);
   const values = await exchangeObjectReader(s.ctx, false, 0).read('project', 'owner', [
     built.pin,
     changed.pin,
@@ -121,26 +132,22 @@ test('shared recipe subtrees read and expand once across a State window', async 
   assert(windows.length <= 11, `one shared tree walk, got ${windows.length} resolves`);
   for (const leaf of built.leaves) {
     const row = [...s.tables.projectObjects.values()].find(r => r.digest === leaf.sha256);
-    assert.equal(reads.get(row.storageId), 1);
+    assert.equal(reads.get(objectPath(row)), 1);
   }
 });
 
-test('shared subtrees at different depths wait for one common height frontier', async () => {
+test('shared subtrees at different depths wait for one common height frontier', async t => {
   const s = fixture(),
     wide = await recipe(s, 128, 16),
     narrow = await recipe(s, 16, 16);
   const node = [...s.tables.projectObjects.values()].find(row => row.digest === narrow.tree.sha256);
-  const get = s.ctx.storage.get;
-  let reads = 0;
-  s.ctx.storage.get = async id => {
-    if (id === node.storageId) reads++;
-    return get(id);
-  };
+  const { reads, restore } = hookReads();
+  t.after(restore);
   assert.deepEqual(
     await exchangeObjectReader(s.ctx, false, 0).read('project', 'owner', [wide.pin, narrow.pin]),
     [wide.bytes, narrow.bytes],
   );
-  assert.equal(reads, 1);
+  assert.equal(reads.get(objectPath(node)), 1);
 });
 
 test('batched content and ranges reject tampering, wrong size, recipe ancestry cycles and cross-project nodes', async () => {
@@ -149,10 +156,12 @@ test('batched content and ranges reject tampering, wrong size, recipe ancestry c
       const s = fixture(),
         built = await recipe(s, 4);
       const leaf = [...s.tables.projectObjects.values()].find(row => row.digest === built.leaves[0].sha256);
-      if (fault === 'tamper') s.files.get(leaf.storageId).blob = new Blob(['tampered']);
+      const path = objectPath(leaf),
+        original = defaultR2Objects.get(path);
+      if (fault === 'tamper') defaultR2Objects.set(path, Buffer.from('tampered'));
       if (fault === 'size') leaf.size++;
       if (fault === 'cycle') {
-        delete leaf.storageId;
+        Object.assign(leaf, { location: undefined, r2Key: undefined, r2Committed: undefined });
         leaf.recipe = { digest: leaf.digest, size: leaf.size };
       }
       if (fault === 'project') leaf.projectId = 'another-project';
@@ -160,33 +169,40 @@ test('batched content and ranges reject tampering, wrong size, recipe ancestry c
         range
           ? objectRange(s.ctx, built.row, 'owner', 0)
           : exchangeObjectReader(s.ctx).read('project', 'owner', [built.pin]);
-      await assert.rejects(read(), code('INVALID_WORK_BACKUP'), `${fault}, range=${range}`);
+      try {
+        await assert.rejects(
+          read(),
+          code(fault === 'tamper' ? 'BLOB_DIGEST_MISMATCH' : 'INVALID_WORK_BACKUP'),
+          `${fault}, range=${range}`,
+        );
+      } finally {
+        // The default bucket is shared by every fixture in the process.
+        defaultR2Objects.set(path, original);
+      }
     }
   }
 });
 
-test('a resolve window rechecks availability and authority after leaf IO without cached access', async () => {
+test('a resolve window rechecks availability and authority after leaf IO without cached access', async t => {
   for (const fault of ['access', 'availability']) {
     for (const range of [false, true]) {
       const s = fixture(),
         built = await recipe(s, 4),
         reader = exchangeObjectReader(s.ctx);
       await reader.read('project', 'owner', [built.pin]);
-      const get = s.ctx.storage.get;
       const leaf = [...s.tables.projectObjects.values()].find(row => row.digest === built.leaves[0].sha256);
-      s.ctx.storage.get = async id => {
-        const blob = await get(id);
-        if (id === leaf.storageId) {
-          if (fault === 'access') s.tables.hostedProjects.get('project').owner = 'other';
-          else leaf.removed = true;
-        }
-        return blob;
-      };
+      const { restore } = hookReads(path => {
+        if (path !== objectPath(leaf)) return;
+        if (fault === 'access') s.tables.hostedProjects.get('project').owner = 'other';
+        else leaf.removed = true;
+      });
+      t.after(restore);
       await assert.rejects(
         () =>
           range ? objectRange(s.ctx, built.row, 'owner', 0) : reader.read('project', 'owner', [built.pin]),
         code(fault === 'access' ? 'PROJECT_UNAVAILABLE' : 'INVALID_WORK_BACKUP'),
       );
+      restore();
     }
   }
 });
@@ -213,7 +229,7 @@ test('nested recipe nodes and repeated leaves retain exact bytes without inherit
       }),
     ),
   );
-  delete leaf.storageId;
+  Object.assign(leaf, { location: undefined, r2Key: undefined, r2Committed: undefined });
   leaf.recipe = { digest: body.sha256, size: body.size };
   const windows = measure(s);
   assert.deepEqual(await exchangeObjectReader(s.ctx).read('project', 'owner', [built.pin]), [built.bytes]);

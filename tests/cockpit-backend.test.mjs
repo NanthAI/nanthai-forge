@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { setup } from './hosted-planning-fixture.mjs';
 import { state } from './hosted-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
+import { interceptDefaultR2 } from './default-r2.mjs';
 import { NativeSource } from '../dist/native-source.js';
 import { coordinationChoicesSchema } from '../dist/coordination-types.js';
 import { dispatchCoordination } from '../dist/coordination-dispatch.js';
@@ -449,8 +450,11 @@ test('unavailable derived ancestry leaves retained Work readable and cannot bypa
   const { sourceParents } = await import(moduleUrl('../convex/projectWorkAncestry.ts'));
   const { materializeWork } = await import('../dist/work-hosted-index.js');
   const snapshot = await load(s.ctx, s.projectId, 'owner');
-  const original = s.ctx.storage.getUrl;
-  s.ctx.storage.getUrl = async id => (id === 'source' ? null : original(id));
+  // The retained source archive is gone from object storage.
+  const restore = interceptDefaultR2(async (input, init, serve) =>
+    (init?.method ?? 'GET') === 'GET' ? new Response(null, { status: 404 }) : serve(input, init),
+  );
+  t.after(restore);
   const parents = await sourceParents(s.ctx, snapshot.backup, snapshot.manifest, snapshot.data, 'owner');
   assert.equal(parents.size, 0);
   const projection = materializeWork(
