@@ -60,7 +60,9 @@ async function batchWrites(
   );
   const writes: BatchWrite[] = [];
   for (const [index, raw] of entries.entries()) {
-    const { action = 'put-planning-item', ...entry } = raw as { action?: string } & Record<string, unknown>;
+    const { action = 'put-planning-item', ...entry } = raw as {
+      action?: string;
+    } & Record<string, unknown>;
     const named = keys.filter(key => entry[key] !== undefined);
     invariant(
       named.every(key => entry[key] === entry[named[0]!]),
@@ -91,8 +93,37 @@ async function batchWrites(
       'BAD_ARGUMENT',
       `batch[${index}]: action is a put or a comment.`,
     );
+    // `fields` holds the model fields only; a plain put field (body, title, status…) placed there moves up, so
+    // [{itemId,expectedVersion,fields:{body}}] works like the single form instead of failing the shape check.
+    if (entry.fields && typeof entry.fields === 'object' && !Array.isArray(entry.fields)) {
+      const inner = { ...(entry.fields as Record<string, unknown>) };
+      for (const key of Object.keys(inner))
+        if (key in schemas.planningPutSchema.shape && !(key in schemas.planningPutAgentFields.shape)) {
+          invariant(
+            entry[key] === undefined || JSON.stringify(entry[key]) === JSON.stringify(inner[key]),
+            'BAD_ARGUMENT',
+            `batch[${index}]: ${key} is named both on the entry and in fields with different values. Name it once.`,
+          );
+          entry[key] = inner[key];
+          delete inner[key];
+        }
+      entry.fields = inner;
+    }
     if (entry.kind === 'item') entry.kind = 'issue';
-    const { fields, ...put } = putEntry.parse(entry);
+    const parsed = putEntry.safeParse(entry);
+    invariant(
+      parsed.success,
+      'BAD_ARGUMENT',
+      `batch[${index}]: ${
+        parsed.success
+          ? ''
+          : parsed.error.issues
+              .map(issue => `${issue.path.join('.') || 'entry'}: ${issue.message}`)
+              .slice(0, 3)
+              .join('; ')
+      }. A batch entry takes the single put's fields (for example itemId, expectedVersion, kind, title, body, status, reason) and model fields in fields.`,
+    );
+    const { fields, ...put } = parsed.data!;
     invariant(
       (fields?.waitingOn === undefined && put.waitingOn === undefined) ||
         port.serverFeatures?.includes(planningWaitingFeature),

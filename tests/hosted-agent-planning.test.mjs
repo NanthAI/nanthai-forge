@@ -169,7 +169,9 @@ function port(
       value &&
       !result.serverFeatures.includes('planning-put-mutation')
     ) {
-      const revision = await index.revision._handler(s.ctx, { projectId: args.projectId });
+      const revision = await index.revision._handler(s.ctx, {
+        projectId: args.projectId,
+      });
       return JSON.stringify({ ...JSON.parse(value), revision });
     }
     return value;
@@ -253,7 +255,14 @@ test('active search hides settled Items and an explicit Closed search finds both
     const row = s.item({ title: `Parser fixture ${status}` });
     await s.send(row);
     if (status !== 'open')
-      await s.send(s.item({ itemId: row.itemId, expectedVersion: 1, status, title: row.title }));
+      await s.send(
+        s.item({
+          itemId: row.itemId,
+          expectedVersion: 1,
+          status,
+          title: row.title,
+        }),
+      );
   }
   const alive = await list(p, { status: 'active', reconcile: false });
   assert.deepEqual(
@@ -266,13 +275,26 @@ test('active search hides settled Items and an explicit Closed search finds both
     ['open'],
   );
   for (const search of [undefined, 'parser']) {
-    const result = await list(p, { status: ['closed', 'abandoned'], search, reconcile: false });
+    const result = await list(p, {
+      status: ['closed', 'abandoned'],
+      search,
+      reconcile: false,
+    });
     assert.deepEqual(result.items.map(item => item.status).sort(), ['abandoned', 'closed']);
   }
-  const first = await list(p, { status: ['closed', 'abandoned'], search: 'parser', limit: 1 });
+  const first = await list(p, {
+    status: ['closed', 'abandoned'],
+    search: 'parser',
+    limit: 1,
+  });
   assert.ok(first.nextCursor);
   await assert.rejects(
-    list(p, { status: ['open', 'closed'], search: 'parser', limit: 1, cursor: first.nextCursor }),
+    list(p, {
+      status: ['open', 'closed'],
+      search: 'parser',
+      limit: 1,
+      cursor: first.nextCursor,
+    }),
     code('WORK_STALE'),
   );
   const more = await list(p, {
@@ -293,7 +315,9 @@ test('the worker closes an Item from its completed hosted Intent; planning reads
   );
   const { projectId, ctx } = s;
   const authorityEpoch = 1;
-  await ctx.db.patch(projectId, { sourceAuthority: { mode: 'server', epoch: authorityEpoch } });
+  await ctx.db.patch(projectId, {
+    sourceAuthority: { mode: 'server', epoch: authorityEpoch },
+  });
   const actor = 'owner';
   const base = { head: 'a'.repeat(64), receiptId: 'initial-receipt' };
   for (const met of [true, false]) {
@@ -334,7 +358,13 @@ test('the worker closes an Item from its completed hosted Intent; planning reads
       lifecycleVersion: 0,
       state: 'active',
     };
-    await writeHostedRecord(ctx, { projectId, actor, authorityEpoch, expectedVersion: null, record: lane });
+    await writeHostedRecord(ctx, {
+      projectId,
+      actor,
+      authorityEpoch,
+      expectedVersion: null,
+      record: lane,
+    });
     const reading = { id: itemId, reconcile: true };
     assert.equal((await list(p, reading)).item.status, 'in-progress');
     // Acceptance publishes the completed Lane, then runs this same Intent transition.
@@ -346,7 +376,13 @@ test('the worker closes an Item from its completed hosted Intent; planning reads
       record: { ...lane, version: 1, lifecycleVersion: 1, state: 'completed' },
     });
     assert.equal(
-      await completeIntentWhenLanesDone(ctx, { projectId, actor, authorityEpoch, at, intentId: itemId }),
+      await completeIntentWhenLanesDone(ctx, {
+        projectId,
+        actor,
+        authorityEpoch,
+        at,
+        intentId: itemId,
+      }),
       true,
     );
     await publishPlanWork(s, itemId);
@@ -373,7 +409,11 @@ test('title-only capture never starts a model and refinement needs an explicit p
   const change = fields =>
     set._handler(s.ctx, {
       projectId: s.projectId,
-      command: JSON.stringify({ action: 'set-policy', operationId: randomUUID(), ...fields }),
+      command: JSON.stringify({
+        action: 'set-policy',
+        operationId: randomUUID(),
+        ...fields,
+      }),
     });
   t.mock.method(globalThis, 'fetch', () => {
     throw new Error('Forge must not use an external model');
@@ -491,7 +531,10 @@ test('593fc2d7: a comment whose run ended mid-write is posted once by the next p
   const verdict = 'Opus review of Lane 00000000@00000000: GO';
   const operationId = randomUUID();
   // The reviewer writes; a builder on another model later posts what the reviewer left.
-  const reviewer = { agent: 'quiet-fox', agentClient: 'claude-code:reviewer-model' };
+  const reviewer = {
+    agent: 'quiet-fox',
+    agentClient: 'claude-code:reviewer-model',
+  };
   p.commentAgent = () => reviewer;
   process.env.FORGE_AGENT_NAME = 'Reviewer';
   await run(p, 'comment-planning-item', { itemId: issue.itemId, text: verdict }, operationId);
@@ -517,7 +560,10 @@ test('593fc2d7: a comment whose run ended mid-write is posted once by the next p
     sent.push(JSON.stringify(args));
     return mutation(name, args);
   };
-  p.commentAgent = () => ({ agent: 'busy-owl', agentClient: 'claude-code:builder-model' });
+  p.commentAgent = () => ({
+    agent: 'busy-owl',
+    agentClient: 'claude-code:builder-model',
+  });
   process.env.FORGE_AGENT_NAME = 'Builder';
   const read = await list(p, { id: issue.itemId, reconcile: false });
   assert.deepEqual(read.recoveredComments, [{ itemId: issue.itemId, commentId: lost.operationId }]);
@@ -534,7 +580,11 @@ test('593fc2d7: a comment whose run ended mid-write is posted once by the next p
     .map(args => JSON.parse(JSON.parse(args).command ?? '{}'))
     .find(c => c.text?.endsWith('(lost)'));
   assert.deepEqual(
-    { authorLabel: write.authorLabel, agent: write.agent, agentClient: write.agentClient },
+    {
+      authorLabel: write.authorLabel,
+      agent: write.agent,
+      agentClient: write.agentClient,
+    },
     { authorLabel: 'Reviewer', ...reviewer },
   );
   // A passing refusal (rate limit) keeps the entry for the next read; a temp file a cut write left
@@ -700,13 +750,19 @@ test('a planning detail past 50 comments continues with commentsCursor, one boun
   const issue = (await put(p, { kind: 'issue', title: 'Many comments', body: 'Body' })).result;
   const other = (await put(p, { kind: 'issue', title: 'Other', body: 'Body' })).result;
   for (let i = 0; i < 60; i++)
-    await run(p, 'comment-planning-item', { itemId: issue.itemId, text: `comment ${i}` });
+    await run(p, 'comment-planning-item', {
+      itemId: issue.itemId,
+      text: `comment ${i}`,
+    });
   const detail = await list(p, { id: issue.itemId, reconcile: false });
   assert.equal(detail.comments.length, 50);
   assert.equal(detail.commentsMore, true);
   assert.equal(detail.comments.at(-1).text, 'comment 59', 'the detail keeps the newest 50, oldest first');
   p.calls.length = 0;
-  const older = await list(p, { id: issue.itemId, cursor: detail.commentsCursor });
+  const older = await list(p, {
+    id: issue.itemId,
+    cursor: detail.commentsCursor,
+  });
   assert(p.calls.filter(name => name === 'projectWorkIndex:records').length === 1, `one page: ${p.calls}`);
   assert(p.calls.length <= 2, `bounded continuation, no item or work read: ${p.calls}`);
   assert.equal(older.commentsMore, undefined);
@@ -728,7 +784,13 @@ test('the files an Issue names group open Issues into stacks and parallel work, 
     ),
     ['src/a.ts', 'convex/b.ts', 'docs/x.md', 'forge.json'],
   );
-  const issue = (id, status, at, ...paths) => ({ id, title: id, status, at, paths });
+  const issue = (id, status, at, ...paths) => ({
+    id,
+    title: id,
+    status,
+    at,
+    paths,
+  });
   const schedule = suggestSchedule(
     [
       issue('old', 'open', '2026-01-01', 'src/a.ts'),
@@ -762,12 +824,31 @@ test('planning {schedule:true} suggests stacks from the stored Issues within the
   const s = await setup(t),
     p = port(s);
   const first = (
-    await put(p, { kind: 'issue', title: 'Speed up compose', body: 'Touch src/hosted-compose-worker.ts.' })
+    await put(p, {
+      kind: 'issue',
+      title: 'Speed up compose',
+      body: 'Touch src/hosted-compose-worker.ts.',
+    })
   ).result;
-  const second = (await put(p, { kind: 'issue', title: 'Fix src/hosted-compose-worker.ts paging' })).result;
-  const third = (await put(p, { kind: 'issue', title: 'Web copy', body: 'web/src/Home.tsx only' })).result;
+  const second = (
+    await put(p, {
+      kind: 'issue',
+      title: 'Fix src/hosted-compose-worker.ts paging',
+    })
+  ).result;
+  const third = (
+    await put(p, {
+      kind: 'issue',
+      title: 'Web copy',
+      body: 'web/src/Home.tsx only',
+    })
+  ).result;
   p.calls.length = 0;
-  const read = await list(p, { kind: 'issue', schedule: true, reconcile: false });
+  const read = await list(p, {
+    kind: 'issue',
+    schedule: true,
+    reconcile: false,
+  });
   assert.equal(read.schedule.coverage, 'complete');
   assert.deepEqual(
     read.schedule.stacks.map(stack => stack.order),
@@ -785,9 +866,17 @@ test('planning {schedule:true} suggests stacks from the stored Issues within the
 test('every planning read marks member-written text as data, once per read and in a few characters (S-17)', async t => {
   const s = await setup(t),
     p = port(s);
-  const issue = (await put(p, { kind: 'issue', title: 'Marked', body: 'Why and acceptance. '.repeat(80) }))
-    .result;
-  await run(p, 'comment-planning-item', { itemId: issue.itemId, text: 'A member comment' });
+  const issue = (
+    await put(p, {
+      kind: 'issue',
+      title: 'Marked',
+      body: 'Why and acceptance. '.repeat(80),
+    })
+  ).result;
+  await run(p, 'comment-planning-item', {
+    itemId: issue.itemId,
+    text: 'A member comment',
+  });
   const reads = {
     list: await list(p),
     one: await list(p, { id: issue.itemId }),
@@ -813,7 +902,13 @@ test('every planning read shows the body author as a public handle, with no extr
     handle: 'ada-builder',
   });
   const p = port(s);
-  const issue = (await put(p, { kind: 'issue', title: 'Authored', body: 'Why and acceptance.' })).result;
+  const issue = (
+    await put(p, {
+      kind: 'issue',
+      title: 'Authored',
+      body: 'Why and acceptance.',
+    })
+  ).result;
   const reads = async () => ({
     list: await list(p),
     one: await list(p, { id: issue.itemId }),
@@ -830,9 +925,17 @@ test('every planning read shows the body author as a public handle, with no extr
     search: 'ada-builder',
   });
   // A move that keeps the body keeps the author; the account id never appears in any read.
-  await put(p, { itemId: issue.itemId, expectedVersion: 1, status: 'proposed' });
+  await put(p, {
+    itemId: issue.itemId,
+    expectedVersion: 1,
+    status: 'proposed',
+  });
   const after = await reads();
-  assert.deepEqual(authors(after), { list: 'ada-builder', one: 'ada-builder', search: 'ada-builder' });
+  assert.deepEqual(authors(after), {
+    list: 'ada-builder',
+    one: 'ada-builder',
+    search: 'ada-builder',
+  });
   assert.equal(after.one.item.version, 2);
   assert.doesNotMatch(JSON.stringify(after), /"author":"owner"|\\"author\\":\\"owner/);
   // The author is on the row already: the list read makes the same calls as before the field existed
@@ -853,7 +956,11 @@ test('every planning read shows the body author as a public handle, with no extr
   const raw = value => JSON.parse(JSON.stringify(value).replaceAll('ada-builder', rawId));
   const wrapped = {
     ...p,
-    exchange: { client: { query: async (ref, args) => raw(await p.exchange.client.query(ref, args)) } },
+    exchange: {
+      client: {
+        query: async (ref, args) => raw(await p.exchange.client.query(ref, args)),
+      },
+    },
     query: async (name, args) => raw(await p.query(name, args)),
   };
   const leaked = {
@@ -1291,9 +1398,19 @@ test('a start keeps an archived Item archived and a deleted Item deleted: no sta
     ['archived', 'open'],
     ['deleted', 'proposed'],
   ]) {
-    const id = (await put(p, { kind: 'issue', title: `On the ${shelf} shelf`, status: from })).result.itemId;
+    const id = (
+      await put(p, {
+        kind: 'issue',
+        title: `On the ${shelf} shelf`,
+        status: from,
+      })
+    ).result.itemId;
     const before = (await list(p, { id, reconcile: false })).item;
-    await put(p, { itemId: id, expectedVersion: before.version, status: shelf });
+    await put(p, {
+      itemId: id,
+      expectedVersion: before.version,
+      status: shelf,
+    });
     const events = s.tables.projectWorkEvents.size;
     const startOperation = randomUUID();
     // With a claim offered: the shelf check runs before the claim, so nobody becomes the owner of a shelved Item.
@@ -1376,8 +1493,13 @@ test('builders claim the Item they start (d3357f40): an unowned Item takes the s
   assert.equal((await list(p, { id: issue })).item.owner, '@synthetic-owner/amber-fox');
 
   // Already in progress with no owner (started before claims existed): one write sets the owner, once.
-  const running = (await put(p, { kind: 'issue', title: 'Running, unowned', status: 'in-progress' })).result
-    .itemId;
+  const running = (
+    await put(p, {
+      kind: 'issue',
+      title: 'Running, unowned',
+      status: 'in-progress',
+    })
+  ).result.itemId;
   assert.equal(
     (await markPlanningStarted(p, running, randomUUID(), 'synthetic-owner')).owner,
     '@synthetic-owner',
@@ -1405,8 +1527,13 @@ test('builders claim the Item they start (d3357f40): an unowned Item takes the s
       });
     },
   };
-  const theirs = (await put(p, { kind: 'issue', title: 'Started by a contributor', status: 'in-progress' }))
-    .result.itemId;
+  const theirs = (
+    await put(p, {
+      kind: 'issue',
+      title: 'Started by a contributor',
+      status: 'in-progress',
+    })
+  ).result.itemId;
   assert.deepEqual(await markPlanningStarted(refused, theirs, randomUUID(), 'synthetic-owner/amber-fox'), {
     updated: false,
     status: 'in-progress',
@@ -1448,8 +1575,13 @@ test('builders claim the Item they start (d3357f40): an unowned Item takes the s
   assert.equal((await list(p, { id: closed, reconcile: false })).item.status, 'closed');
   assert.equal(s.tables.projectWorkEvents.size, before);
   // A proposed Item stays proposed for a member: the start says it waits for the owner (lead 2026-11-19).
-  const proposal = (await put(p, { kind: 'issue', title: 'Proposed, contributor start', status: 'proposed' }))
-    .result.itemId;
+  const proposal = (
+    await put(p, {
+      kind: 'issue',
+      title: 'Proposed, contributor start',
+      status: 'proposed',
+    })
+  ).result.itemId;
   assert.deepEqual(await markPlanningStarted(refused, proposal, randomUUID(), 'synthetic-owner/amber-fox'), {
     updated: false,
     status: 'proposed',
@@ -1468,8 +1600,13 @@ test('builders claim the Item they start (d3357f40): an unowned Item takes the s
   assert.equal(reported.movedBy, undefined);
   assert.equal(reported.error?.code, 'PROJECT_UNAVAILABLE');
   // The proposed reply is that server's too: an older server moves a proposed Item, so the refusal is reported.
-  const proposedOld = (await put(p, { kind: 'issue', title: 'Proposed, older server', status: 'proposed' }))
-    .result.itemId;
+  const proposedOld = (
+    await put(p, {
+      kind: 'issue',
+      title: 'Proposed, older server',
+      status: 'proposed',
+    })
+  ).result.itemId;
   const proposedReported = await markPlanningStarted(unmoved, proposedOld, randomUUID(), 'synthetic-owner');
   assert.equal(proposedReported.waitsFor, undefined);
   assert.equal(proposedReported.error?.code, 'PROJECT_UNAVAILABLE');
@@ -1507,7 +1644,10 @@ test('builders claim the Item they start (d3357f40): an unowned Item takes the s
   const broken = {
     ...refused,
     mutation: async () => {
-      throw new ConvexError({ code: 'WORK_STALE', message: 'Hosted Work changed.' });
+      throw new ConvexError({
+        code: 'WORK_STALE',
+        message: 'Hosted Work changed.',
+      });
     },
   };
   const other = (await put(p, { kind: 'issue', title: 'Open, failed write' })).result.itemId;
@@ -1515,7 +1655,10 @@ test('builders claim the Item they start (d3357f40): an unowned Item takes the s
   assert.equal(failed.updated, false);
   assert.ok(failed.error, 'a failed status write is still reported');
   // A server without the planning model would drop the field, so nothing is claimed there.
-  const old = { ...p, serverFeatures: p.serverFeatures.filter(name => name !== 'planning-model') };
+  const old = {
+    ...p,
+    serverFeatures: p.serverFeatures.filter(name => name !== 'planning-model'),
+  };
   const legacy = (await put(p, { kind: 'issue', title: 'Old server' })).result.itemId;
   assert.equal((await markPlanningStarted(old, legacy, randomUUID(), 'synthetic-owner')).owner, undefined);
 });
@@ -1612,12 +1755,22 @@ test('the server move after a member start: open Issues only, this project, the 
   }
   // A move scheduled by a server deployed before the actor was passed still validates, and moves the Item.
   const early = (await put(p, { kind: 'issue', title: 'Scheduled before the deploy' })).result.itemId;
-  const earlyArgs = { projectId: s.projectId, owner: 'owner', itemId: early, startOperationId: randomUUID() };
+  const earlyArgs = {
+    projectId: s.projectId,
+    owner: 'owner',
+    itemId: early,
+    startOperationId: randomUUID(),
+  };
   checkArgs(move, earlyArgs, 'projectPlanningStart:move');
   await move._handler(s.ctx, earlyArgs);
   assert.equal(await status(early), 'in-progress');
   // The operation id names the project, the Item and the caller, not only the start's id.
-  const base = { projectId: 'project', itemId: issue, actor: 'member', startOperationId: randomUUID() };
+  const base = {
+    projectId: 'project',
+    itemId: issue,
+    actor: 'member',
+    startOperationId: randomUUID(),
+  };
   const ids = new Set(
     [
       base,
@@ -1777,7 +1930,10 @@ function transport(s, { planning, features = false }) {
 
 test('a fresh hosted project with no selected index reports an exact repair for planning and the first put', async t => {
   const s = await setup(t, true, undefined, false);
-  const { transport: agent } = transport(s, { planning: true, features: hostedContractFeatures });
+  const { transport: agent } = transport(s, {
+    planning: true,
+    features: hostedContractFeatures,
+  });
   const tools = new Map();
   t.after(
     registerHostedAgentWorkflow(
@@ -1790,7 +1946,12 @@ test('a fresh hosted project with no selected index reports an exact repair for 
     ),
   );
   const rebuild = `nforge hosted-work https://fixture.invalid ${s.projectId} '{"action":"rebuild-index"}'`;
-  const first = { kind: 'issue', title: 'First Item', status: 'proposed', operationId: randomUUID() };
+  const first = {
+    kind: 'issue',
+    title: 'First Item',
+    status: 'proposed',
+    operationId: randomUUID(),
+  };
   for (const [action, fields] of [
     ['planning', { status: 'open' }],
     ['put-planning-item', first],
@@ -1800,7 +1961,9 @@ test('a fresh hosted project with no selected index reports an exact repair for 
       assert.equal(withTeaching(error, { surface: 'cli', root: agent.root }).next, rebuild);
       return true;
     });
-    const mcp = await tools.get('forge_planning')({ command: { action, ...fields } });
+    const mcp = await tools.get('forge_planning')({
+      command: { action, ...fields },
+    });
     assert(mcp.isError);
     assert.equal(JSON.parse(mcp.content[0].text).error.next, rebuild);
   }
@@ -1815,7 +1978,9 @@ test('a fresh hosted project with no selected index reports an exact repair for 
   const request = JSON.parse(/'([^']+)'/.exec(rebuild)[1]);
   assert.deepEqual(helpRequest, request);
   assert(helpTopicText('storage').includes(`nforge hosted-work ROOT '${JSON.stringify(request)}'`));
-  assert.deepEqual(hostedWorkRequestSchema.parse(request), { action: 'rebuild-index' });
+  assert.deepEqual(hostedWorkRequestSchema.parse(request), {
+    action: 'rebuild-index',
+  });
 
   const { ensure } = await import(moduleUrl('../convex/projectWorkIndexActions.ts'));
   await ensure._handler(s.ctx, { projectId: s.projectId, rebuild: true });
@@ -1888,11 +2053,18 @@ test('a refused agent write keeps structured retryable and retryAt in the CLI er
   };
   const operationId = randomUUID();
   await assert.rejects(
-    agent.dispatch('put-planning-item', { kind: 'issue', title: 'During a refusal', operationId }),
+    agent.dispatch('put-planning-item', {
+      kind: 'issue',
+      title: 'During a refusal',
+      operationId,
+    }),
     error => {
       assert.equal(error.code, 'HOSTED_CONFLICT');
       assert.equal(error.retryAt, at);
-      assert.deepEqual(error.recovery, { retryable: true, retryAt: new Date(at).toISOString() });
+      assert.deepEqual(error.recovery, {
+        retryable: true,
+        retryAt: new Date(at).toISOString(),
+      });
       assert.match(error.message, /nothing was changed/);
       assert.match(
         error.message,
@@ -1926,11 +2098,18 @@ test('a refused agent write keeps structured retryable and retryAt in the CLI er
   // An unknown outcome is not called refused and gains no retry claim here.
   p.exchange.client.action = async (ref, args) => {
     if (getFunctionName(ref).endsWith(':command'))
-      throw new ConvexError({ code: 'WORK_STALE', message: 'Hosted Work changed.' });
+      throw new ConvexError({
+        code: 'WORK_STALE',
+        message: 'Hosted Work changed.',
+      });
     return invoke(ref, args);
   };
   await assert.rejects(
-    agent.dispatch('put-planning-item', { kind: 'issue', title: 'Stale', operationId: randomUUID() }),
+    agent.dispatch('put-planning-item', {
+      kind: 'issue',
+      title: 'Stale',
+      operationId: randomUUID(),
+    }),
     error => error.code === 'WORK_STALE' && error.recovery === undefined,
   );
 });
@@ -2058,9 +2237,10 @@ test('start {planningItemId} starts the Issue as a planned Intent and links it o
   assert.equal(commands[0].expectedVersion, 1);
   assert.equal(commands[0].itemId, item.id);
 
-  const again = await s
-    .transport()
-    .dispatch('start', { planningItemId: item.id, operationId: started.operationId });
+  const again = await s.transport().dispatch('start', {
+    planningItemId: item.id,
+    operationId: started.operationId,
+  });
   assert.equal(again.operationId, started.operationId);
   assert.equal(commands.length, 2);
   assert.equal(commands[1].operationId, commands[0].operationId, 'the link replays its original operation');
@@ -2227,9 +2407,10 @@ test('incident replay 20b91e86: an identical start from another agent session op
     ['agent-a', a],
     ['agent-b', b],
   ]) {
-    const replay = await s
-      .transport(session)
-      .dispatch('start', { planningItemId: item.id, operationId: original.operationId });
+    const replay = await s.transport(session).dispatch('start', {
+      planningItemId: item.id,
+      operationId: original.operationId,
+    });
     assert.equal(replay.result.lane.laneId, original.result.lane.laneId);
   }
   assert.equal(created.size, 2, 'exact replays opened no Lane');
@@ -2255,8 +2436,18 @@ test('d9e1ac62: start names the Lane an open resolution Lane replaces, with the 
       const result = JSON.parse(value);
       // Like the server: `resolves` only for version 2.
       result.openLanes = [
-        { laneId: resolution, owner: 'lead', yours: true, lastActivityAt: '2026-01-01T00:00:00.000Z' },
-        { laneId: origin, owner: 'lead', yours: true, lastActivityAt: '2026-01-01T00:00:00.000Z' },
+        {
+          laneId: resolution,
+          owner: 'lead',
+          yours: true,
+          lastActivityAt: '2026-01-01T00:00:00.000Z',
+        },
+        {
+          laneId: origin,
+          owner: 'lead',
+          yours: true,
+          lastActivityAt: '2026-01-01T00:00:00.000Z',
+        },
       ];
       if (args.openLanesVersion === 2) result.openLanes[0].resolves = origin;
       return JSON.stringify(result);
@@ -2275,7 +2466,11 @@ test('d9e1ac62: start names the Lane an open resolution Lane replaces, with the 
     };
     assert.deepEqual(started.result.replaced, [hint]);
     assert.equal(s.calls.filter(call => call.name.endsWith(':abandon')).length, 0, 'advice only');
-    const printed = printedReceipt(started, { agent: true, detail: false, landChild: false });
+    const printed = printedReceipt(started, {
+      agent: true,
+      detail: false,
+      landChild: false,
+    });
     assert.deepEqual(printed.result.replaced, [hint], 'the compact reply keeps the hint');
   }
 });
@@ -2424,16 +2619,40 @@ test('an agent comment from the CLI carries the model its session declared, sing
     revoked: false,
     scope: 'cli',
   });
-  s.ctx.auth.getUserIdentity = async () => ({ subject: 'owner', forgeCredential: 'credential-1' });
-  p.commentAgent = () => ({ agent: 'keen-impala', agentClient: 'claude-code:synthetic-model-1' });
-  const issue = (await put(p, { kind: 'issue', title: 'Bylines', body: 'Done when:\n- [ ] x' })).result;
-  await run(p, 'comment-planning-item', { itemId: issue.itemId, text: 'single' });
+  s.ctx.auth.getUserIdentity = async () => ({
+    subject: 'owner',
+    forgeCredential: 'credential-1',
+  });
+  p.commentAgent = () => ({
+    agent: 'keen-impala',
+    agentClient: 'claude-code:synthetic-model-1',
+  });
+  const issue = (
+    await put(p, {
+      kind: 'issue',
+      title: 'Bylines',
+      body: 'Done when:\n- [ ] x',
+    })
+  ).result;
+  await run(p, 'comment-planning-item', {
+    itemId: issue.itemId,
+    text: 'single',
+  });
   await put(p, {
-    batch: [{ action: 'comment-planning-item', itemId: issue.itemId, text: 'batched' }],
+    batch: [
+      {
+        action: 'comment-planning-item',
+        itemId: issue.itemId,
+        text: 'batched',
+      },
+    ],
   });
   // A session that declared no model still reads as an agent, with "model not declared".
   p.commentAgent = () => ({ agent: 'amber-fox' });
-  await run(p, 'comment-planning-item', { itemId: issue.itemId, text: 'undeclared' });
+  await run(p, 'comment-planning-item', {
+    itemId: issue.itemId,
+    text: 'undeclared',
+  });
   const rows = Object.fromEntries(
     (await list(p, { id: issue.itemId, reconcile: false })).comments.map(row => [row.text, row]),
   );
@@ -2613,14 +2832,20 @@ test('a comment on a friction id names the Issue it was triaged to; other failur
   p.frictions.set(triaged, { status: 'planned', planningItemId: issue.itemId });
   p.frictions.set(untriaged, { status: 'open' });
   await assert.rejects(
-    run(p, 'comment-planning-item', { itemId: triaged, text: 'repeat evidence' }),
+    run(p, 'comment-planning-item', {
+      itemId: triaged,
+      text: 'repeat evidence',
+    }),
     error =>
       error.code === 'BAD_ARGUMENT' &&
       /friction record, not an Issue/.test(error.message) &&
       error.message.includes(`itemId ${issue.itemId}`),
   );
   await assert.rejects(
-    run(p, 'comment-planning-item', { itemId: untriaged, text: 'repeat evidence' }),
+    run(p, 'comment-planning-item', {
+      itemId: untriaged,
+      text: 'repeat evidence',
+    }),
     error => error.code === 'BAD_ARGUMENT' && /friction-triage/.test(error.message),
   );
   // Not a friction record either: the original NOT_FOUND stays.
@@ -2662,7 +2887,11 @@ test('filtered planning and one-read Initiative counts charge only matching rows
   }));
   const add = async (item, position) => {
     for (const entry of indexedRecord('planningItems', item.id, '', position, item))
-      await s.ctx.db.insert('projectPlanningRecords', { ...entry, projectId: s.projectId, generationId });
+      await s.ctx.db.insert('projectPlanningRecords', {
+        ...entry,
+        projectId: s.projectId,
+        generationId,
+      });
     await s.ctx.db.insert('projectHostedRecordHeads', {
       projectId: s.projectId,
       kind: 'issue',
@@ -2676,7 +2905,13 @@ test('filtered planning and one-read Initiative counts charge only matching rows
   };
   for (const [i, item] of items.entries()) await add(item, i);
   const meter = meterReads(s.ctx);
-  const filter = { status: 'open', kind: 'issue', initiativeId, limit: 100, reconcile: false };
+  const filter = {
+    status: 'open',
+    kind: 'issue',
+    initiativeId,
+    limit: 100,
+    reconcile: false,
+  };
   const allPages = async (client, input) => {
     const items = [];
     let cursor = null;
@@ -2714,9 +2949,20 @@ test('filtered planning and one-read Initiative counts charge only matching rows
   });
   assert.deepEqual(afterRows, beforeRows);
   assert.equal(afterRows.length, 2);
-  const expected = { proposed: 1, open: 2, 'in-progress': 1, abandoned: 1, closed: 392 };
+  const expected = {
+    proposed: 1,
+    open: 2,
+    'in-progress': 1,
+    abandoned: 1,
+    closed: 392,
+  };
   const beforeCount = await meter.cost(async () => {
-    const rows = await allPages(beforeClient, { status: 'all', initiativeId, limit: 100, reconcile: false });
+    const rows = await allPages(beforeClient, {
+      status: 'all',
+      initiativeId,
+      limit: 100,
+      reconcile: false,
+    });
     assert.equal(rows.length, 397);
   });
   p.calls.length = 0;
@@ -2728,13 +2974,19 @@ test('filtered planning and one-read Initiative counts charge only matching rows
   assert.equal(counted.coverage, 'complete');
   assert.equal(counted.nextCursor, null);
   assert.deepEqual(p.calls, ['projectWorkIndex:records'], 'counts make one read and no reconcile writes');
-  assertCommandWeight('planningCounts', { calls: p.calls.length, reads: count.documents });
+  assertCommandWeight('planningCounts', {
+    calls: p.calls.length,
+    reads: count.documents,
+  });
   // Growth in closed items, including closed members of this Initiative, changes no filtered read bytes.
   for (let i = 0; i < 500; i++) await add({ ...items[100], id: randomUUID() }, 1500 + i);
   assert.deepEqual(await meter.cost(() => allPages(p, filter)), after);
   assert(speedBudgets.costs.some(entry => entry.metric === 'planningFilteredReadBytes'));
   assert(speedBudgets.costs.some(entry => entry.metric === 'planningCountsReadBytes'));
-  withinLedger({ planningFilteredReadBytes: after.bytes, planningCountsReadBytes: count.bytes });
+  withinLedger({
+    planningFilteredReadBytes: after.bytes,
+    planningCountsReadBytes: count.bytes,
+  });
   t.diagnostic(
     JSON.stringify({
       board: 1500,
@@ -2752,7 +3004,11 @@ test('incident 411727ba: whole-plan counts read the exact Plan counter and the s
     p = port(s);
   const body = 'Synthetic retained detail. '.repeat(40);
   const initiativeId = (await put(p, { kind: 'initiative', title: 'Group' })).result.itemId;
-  await put(p, { kind: 'initiative', title: 'Shipped group', status: 'closed' });
+  await put(p, {
+    kind: 'initiative',
+    title: 'Shipped group',
+    status: 'closed',
+  });
   for (const [i, status] of [
     'proposed',
     'open',
@@ -2762,9 +3018,22 @@ test('incident 411727ba: whole-plan counts read the exact Plan counter and the s
     'closed',
     'abandoned',
   ].entries())
-    await put(p, { kind: 'issue', title: `Item ${i}`, status, body, ...(i % 2 ? { initiativeId } : {}) });
+    await put(p, {
+      kind: 'issue',
+      title: `Item ${i}`,
+      status,
+      body,
+      ...(i % 2 ? { initiativeId } : {}),
+    });
   const shelve = async (status, n) => {
-    const id = (await put(p, { kind: 'issue', title: `Shelved ${n}`, status: 'open', body })).result.itemId;
+    const id = (
+      await put(p, {
+        kind: 'issue',
+        title: `Shelved ${n}`,
+        status: 'open',
+        body,
+      })
+    ).result.itemId;
     const { item } = await list(p, { id, reconcile: false });
     await put(p, { itemId: id, expectedVersion: item.version, status });
   };
@@ -2795,13 +3064,27 @@ test('incident 411727ba: whole-plan counts read the exact Plan counter and the s
   };
   const counter = await read();
   assert.deepEqual(counter.replies[0], {
-    counts: { proposed: 1, open: 3, 'in-progress': 1, closed: 3, abandoned: 1, archived: 1, deleted: 2 },
+    counts: {
+      proposed: 1,
+      open: 3,
+      'in-progress': 1,
+      closed: 3,
+      abandoned: 1,
+      archived: 1,
+      deleted: 2,
+    },
     coverage: 'complete',
     nextCursor: null,
     notice: counter.replies[0].notice,
   });
   // Growth in Plan-status Items adds no count read: only the counter row's digits change.
-  for (let i = 0; i < 30; i++) await put(p, { kind: 'issue', title: `Grown ${i}`, status: 'closed', body });
+  for (let i = 0; i < 30; i++)
+    await put(p, {
+      kind: 'issue',
+      title: `Grown ${i}`,
+      status: 'closed',
+      body,
+    });
   const grown = await read();
   assert.equal(grown.replies[0].counts.closed, 33);
   assert(grown.bytes - counter.bytes < 64, JSON.stringify({ before: counter.bytes, after: grown.bytes }));
@@ -2830,7 +3113,13 @@ test('shelf counts keep independent byte bounds and overflow into exact root-pag
       parent: '',
       position: position++,
       value: JSON.stringify({ id: key, body: 'x'.repeat(chars) }),
-      planning: { text: '', kind: 'issue', status, initiativeId: '', open: status === 'open' },
+      planning: {
+        text: '',
+        kind: 'issue',
+        status,
+        initiativeId: '',
+        open: status === 'open',
+      },
     });
   };
   const meter = meterReads(s.ctx, { maxPaginations: 1 });
@@ -2890,8 +3179,14 @@ test('indexed planning preserves all filter combinations, record-store bodies, p
   // Stage both copies before exposing the record-store read path in this compatibility fixture.
   await s.ctx.db.patch(s.projectId, { workStore: 'dual' });
   const initiativeId = (await put(p, { kind: 'initiative', title: 'Group' })).result.itemId;
-  const first = (await put(p, { kind: 'issue', title: 'First', initiativeId, body: 'Done when:\n- [x] Met' }))
-    .result.itemId;
+  const first = (
+    await put(p, {
+      kind: 'issue',
+      title: 'First',
+      initiativeId,
+      body: 'Done when:\n- [x] Met',
+    })
+  ).result.itemId;
   await put(p, { kind: 'issue', title: 'Second', initiativeId });
   await put(p, { kind: 'issue', title: 'Elsewhere', status: 'closed' });
   const baseline = await list(p, { reconcile: false });
@@ -2928,7 +3223,14 @@ test('indexed planning preserves all filter combinations, record-store bodies, p
   );
   generation.planningSearchVersion = 1;
   assert.deepEqual(
-    (await list(p, { kind: 'issue', status: 'open', initiativeId, reconcile: false })).items,
+    (
+      await list(p, {
+        kind: 'issue',
+        status: 'open',
+        initiativeId,
+        reconcile: false,
+      })
+    ).items,
     baseline.items.filter(item => item.initiativeId === initiativeId),
   );
   assert.equal((await list(p, { counts: true, initiativeId })).coverage, 'partial-needs-preparation');
@@ -2957,7 +3259,10 @@ test('indexed planning preserves all filter combinations, record-store bodies, p
 test('Initiative progress agrees across Plan, CLI and MCP after status and scope moves (b7a0dff1)', async t => {
   const s = await setup(t);
   const p = port(s);
-  const { transport: agent } = transport(s, { planning: true, features: p.serverFeatures });
+  const { transport: agent } = transport(s, {
+    planning: true,
+    features: p.serverFeatures,
+  });
   const tools = new Map();
   t.after(
     registerHostedAgentWorkflow(
@@ -3019,12 +3324,20 @@ test('Initiative progress agrees across Plan, CLI and MCP after status and scope
     assert.equal(cli.coverage, 'complete');
     assert.equal(cli.nextCursor, null);
 
-    const mcp = await tools.get('forge_planning')({ command: { action: 'planning', ...selection } });
+    const mcp = await tools.get('forge_planning')({
+      command: { action: 'planning', ...selection },
+    });
     assert.ok(!mcp.isError, JSON.stringify(mcp.content));
     assert.deepEqual(JSON.parse(mcp.content[0].text).result, cli);
     return board;
   };
-  const initial = { proposed: 1, open: 1, 'in-progress': 1, closed: 1, abandoned: 1 };
+  const initial = {
+    proposed: 1,
+    open: 1,
+    'in-progress': 1,
+    closed: 1,
+    abandoned: 1,
+  };
   await check(initiativeId, initial);
   const olderServer = port(
     s,
@@ -3040,11 +3353,29 @@ test('Initiative progress agrees across Plan, CLI and MCP after status and scope
   await update(moving, { status: 'closed' });
   await update(child, { status: 'open' });
   await update(moving, { initiativeId: other });
-  await check(initiativeId, { proposed: 0, open: 2, 'in-progress': 0, closed: 1, abandoned: 1 });
-  await check(other, { proposed: 0, open: 0, 'in-progress': 0, closed: 1, abandoned: 0 });
+  await check(initiativeId, {
+    proposed: 0,
+    open: 2,
+    'in-progress': 0,
+    closed: 1,
+    abandoned: 1,
+  });
+  await check(other, {
+    proposed: 0,
+    open: 0,
+    'in-progress': 0,
+    closed: 1,
+    abandoned: 0,
+  });
 
   await update(parentId, { fields: { hidden: true } });
-  await check(initiativeId, { proposed: 0, open: 2, 'in-progress': 0, closed: 1, abandoned: 1 });
+  await check(initiativeId, {
+    proposed: 0,
+    open: 2,
+    'in-progress': 0,
+    closed: 1,
+    abandoned: 1,
+  });
   await update(parentId, { fields: { hidden: false } });
 
   const settledOnly = (await put(p, { kind: 'initiative', title: 'Shipped', status: 'closed' })).result
@@ -3062,8 +3393,21 @@ test('Initiative progress agrees across Plan, CLI and MCP after status and scope
       key: id,
       parent: '',
       position: position++,
-      value: JSON.stringify({ id, kind: 'issue', title: 'Synthetic step', status, initiativeId, parentId }),
-      planning: { text: 'Synthetic step', kind: 'issue', status, initiativeId, open: status === 'open' },
+      value: JSON.stringify({
+        id,
+        kind: 'issue',
+        title: 'Synthetic step',
+        status,
+        initiativeId,
+        parentId,
+      }),
+      planning: {
+        text: 'Synthetic step',
+        kind: 'issue',
+        status,
+        initiativeId,
+        open: status === 'open',
+      },
     });
     return id;
   };
@@ -3082,7 +3426,13 @@ test('Initiative progress agrees across Plan, CLI and MCP after status and scope
   assert.equal(board.more, true);
   assert.equal(board.byId.has(beyond), false, 'the foreign sub-item is beyond the live display window');
   assert.equal(board.initiativeGroups.get(initiativeId).lines.length, webRead.PLAN_LIVE_LIMIT);
-  const otherBoard = await check(other, { proposed: 0, open: 1, 'in-progress': 0, closed: 1, abandoned: 0 });
+  const otherBoard = await check(other, {
+    proposed: 0,
+    open: 1,
+    'in-progress': 0,
+    closed: 1,
+    abandoned: 0,
+  });
   assert.equal(otherBoard.initiativeGroups.get(other).lines.length, 0);
   const detail = await check(settledOnly, {
     proposed: 0,
@@ -3106,8 +3456,16 @@ test('Initiative progress agrees across Plan, CLI and MCP after status and scope
   );
   const { planningSearchVersion, ...oldHeader } = JSON.parse(generationHeader.value);
   assert.equal(planningSearchVersion, 2);
-  await s.ctx.db.patch(generationHeader._id, { value: JSON.stringify(oldHeader) });
-  await check(settledOnly, { proposed: 0, open: 0, 'in-progress': 0, closed: 1, abandoned: 0 });
+  await s.ctx.db.patch(generationHeader._id, {
+    value: JSON.stringify(oldHeader),
+  });
+  await check(settledOnly, {
+    proposed: 0,
+    open: 0,
+    'in-progress': 0,
+    closed: 1,
+    abandoned: 0,
+  });
   await headers.db.patch(generationId, { planRowsVersion: 1 });
 
   // The existing counter folds hidden members into one bucket. Bound the read when it cannot prove membership.
@@ -3177,7 +3535,11 @@ test('maintained Initiative counts use one bounded read at current and doubled b
       assert.equal(result.total, scale);
       assert.equal(result.counts.closed, scale);
       assert.equal(result.coverage, 'complete');
-      return { ...read, calls: client.calls.length, milliseconds: +milliseconds.toFixed(2) };
+      return {
+        ...read,
+        calls: client.calls.length,
+        milliseconds: +milliseconds.toFixed(2),
+      };
     };
     const indexed = await measure(legacy);
     const maintained = await measure(p);
@@ -3196,7 +3558,10 @@ test('planning detail, list and search distinguish the latest close from later e
   const first = Date.parse('2026-11-09T12:00:00Z');
   t.mock.timers.enable({ apis: ['Date'], now: first });
   const s = await setup(t);
-  await s.ctx.db.patch(s.projectId, { workStore: 'records', workStoreWriters: ['planning'] });
+  await s.ctx.db.patch(s.projectId, {
+    workStore: 'records',
+    workStoreWriters: ['planning'],
+  });
   const p = port(s, new Map(), [
     ...hostedContractFeatures,
     planningInitiativeCountsFeature,
@@ -3204,13 +3569,23 @@ test('planning detail, list and search distinguish the latest close from later e
   ]);
   const original = (await put(p, { kind: 'initiative', title: 'Original group' })).result.itemId;
   const destination = (await put(p, { kind: 'initiative', title: 'Destination group' })).result.itemId;
-  const issue = (await put(p, { kind: 'issue', title: 'Reopenable test issue', initiativeId: original }))
-    .result.itemId;
+  const issue = (
+    await put(p, {
+      kind: 'issue',
+      title: 'Reopenable test issue',
+      initiativeId: original,
+    })
+  ).result.itemId;
 
   t.mock.timers.setTime(Date.parse('2026-11-10T23:59:59Z'));
   await put(p, { itemId: issue, expectedVersion: 1, status: 'closed' });
   t.mock.timers.setTime(Date.parse('2026-11-11T00:00:01Z'));
-  await put(p, { itemId: issue, expectedVersion: 2, initiativeId: destination, status: 'closed' });
+  await put(p, {
+    itemId: issue,
+    expectedVersion: 2,
+    initiativeId: destination,
+    status: 'closed',
+  });
   const reads = await Promise.all([
     list(p, { id: issue, reconcile: false }).then(r => r.item),
     list(p, { initiativeId: destination, reconcile: false }).then(r => r.items[0]),
@@ -3244,7 +3619,11 @@ test('planning detail, list and search distinguish the latest close from later e
     [destination, '2026-11-12'],
   ]) {
     p.calls.length = 0;
-    const { history } = await list(p, { initiativeId, counts: true, history: true });
+    const { history } = await list(p, {
+      initiativeId,
+      counts: true,
+      history: true,
+    });
     assert.deepEqual(p.calls, ['projectWorkIndex:records']);
     assert.equal(history.coverage, 'complete');
     assert.equal(history.unresolved, 0);
@@ -3329,10 +3708,22 @@ test('planning counts sum every page and refuse stale generations, invalid curso
     parent: '',
     position: 0,
     value: '',
-    planning: { text: 'fragment', kind: 'issue', status: 'closed', initiativeId, open: false },
+    planning: {
+      text: 'fragment',
+      kind: 'issue',
+      status: 'closed',
+      initiativeId,
+      open: false,
+    },
   });
   const counted = await list(p, { counts: true, initiativeId });
-  assert.deepEqual(counted.counts, { proposed: 0, open: 500, 'in-progress': 0, closed: 501, abandoned: 0 });
+  assert.deepEqual(counted.counts, {
+    proposed: 0,
+    open: 500,
+    'in-progress': 0,
+    closed: 501,
+    abandoned: 0,
+  });
   assert.equal(counted.coverage, 'complete');
   assert.equal(counted.nextCursor, null);
   assert.equal(counted.next, undefined);
@@ -3393,7 +3784,13 @@ test('planning count page cap labels incomplete totals and continues without los
       parent: '',
       position: i,
       value: '{}',
-      planning: { text: '', kind: 'issue', status: 'closed', initiativeId, open: false },
+      planning: {
+        text: '',
+        kind: 'issue',
+        status: 'closed',
+        initiativeId,
+        open: false,
+      },
     });
   const first = await list(p, { counts: true, initiativeId });
   assert.equal(first.coverage, 'partial');
@@ -3404,7 +3801,11 @@ test('planning count page cap labels incomplete totals and continues without los
   assert.match(first.next, /same filters and nextCursor as cursor/);
   assert.match(first.next, /add the returned counts/);
   assert.equal(p.calls.length, 20, 'bounded to 20 records reads and no writes');
-  const last = await list(p, { counts: true, initiativeId, cursor: first.nextCursor });
+  const last = await list(p, {
+    counts: true,
+    initiativeId,
+    cursor: first.nextCursor,
+  });
   assert.equal(first.counts.closed + last.counts.closed, 20001);
   assert.equal(first.total + last.total, 20001);
   assert.equal(last.coverage, 'complete');
@@ -3426,12 +3827,20 @@ test('incident 1018d0f8: alert refresh preserves every outstanding Done-when lin
   };
   const issue = speedBudgetIssue(event, s.projectId, speedBudgets);
   const send = issue =>
-    write._handler(s.ctx, { projectId: s.projectId, owner: 'owner', issue: JSON.stringify(issue) });
+    write._handler(s.ctx, {
+      projectId: s.projectId,
+      owner: 'owner',
+      issue: JSON.stringify(issue),
+    });
   await send(issue);
   const body =
     'Owner diagnosis\n\nDone when:\n- [x] Root cause fixed\n- [ ] Measured on the next smoke and dogfood\n1. [ ] Compare discarded runner minutes\n[ ] Independent measurement still pending';
   const original = (await list(p, { id: issue.itemId, reconcile: false })).item;
-  await put(p, { itemId: issue.itemId, expectedVersion: original.version, body });
+  await put(p, {
+    itemId: issue.itemId,
+    expectedVersion: original.version,
+    body,
+  });
   await send(speedBudgetIssue({ ...event, landing: 'second' }, s.projectId, speedBudgets));
   await send(speedBudgetIssue({ ...event, kind: 'recovered', landing: 'second' }, s.projectId, speedBudgets));
   assert.equal((await list(p, { id: issue.itemId, reconcile: false })).item.body, body);
@@ -3456,8 +3865,13 @@ test('incident 1018d0f8: alert refresh preserves every outstanding Done-when lin
 test('planning model fields (order, type, parent, owner, relations, hidden) store, read back, keep and clear', async t => {
   const s = await setup(t),
     p = port(s);
-  const initiative = (await put(p, { kind: 'initiative', title: 'Release', fields: { hidden: true } }))
-    .result;
+  const initiative = (
+    await put(p, {
+      kind: 'initiative',
+      title: 'Release',
+      fields: { hidden: true },
+    })
+  ).result;
   const parent = (
     await put(
       p,
@@ -3468,7 +3882,13 @@ test('planning model fields (order, type, parent, owner, relations, hidden) stor
       }),
     )
   ).result;
-  const blocker = (await put(p, { kind: 'issue', title: 'Blocker', body: '- [x] one\n- [ ] two\n' })).result;
+  const blocker = (
+    await put(p, {
+      kind: 'issue',
+      title: 'Blocker',
+      body: '- [x] one\n- [ ] two\n',
+    })
+  ).result;
   const fields = {
     parentId: parent.itemId,
     order: 'AV',
@@ -3479,14 +3899,24 @@ test('planning model fields (order, type, parent, owner, relations, hidden) stor
   const child = (await put(p, { kind: 'issue', title: 'Child', fields })).result;
   const row = (await list(p)).items.find(item => item.id === child.itemId);
   assert.deepEqual(
-    { order: row.order, type: row.type, parentId: row.parentId, owner: row.owner, relations: row.relations },
+    {
+      order: row.order,
+      type: row.type,
+      parentId: row.parentId,
+      owner: row.owner,
+      relations: row.relations,
+    },
     fields,
   );
   assert.equal((await list(p)).items.find(item => item.id === initiative.itemId).hidden, true);
   // `item` is stored as the replay-stable kind `issue`.
   assert.equal((await list(p, { id: parent.itemId })).item.kind, 'issue');
   // A status move keeps every model field; null and [] clear them.
-  await put(p, { itemId: child.itemId, expectedVersion: 1, status: 'in-progress' });
+  await put(p, {
+    itemId: child.itemId,
+    expectedVersion: 1,
+    status: 'in-progress',
+  });
   assert.equal((await list(p, { id: child.itemId })).item.owner, 'mara/amber-fox');
   await put(p, {
     itemId: child.itemId,
@@ -3498,7 +3928,11 @@ test('planning model fields (order, type, parent, owner, relations, hidden) stor
     [cleared.owner, cleared.relations, cleared.order, cleared.type],
     [undefined, undefined, undefined, 'bug'],
   );
-  await put(p, { itemId: initiative.itemId, expectedVersion: 1, fields: { hidden: false } });
+  await put(p, {
+    itemId: initiative.itemId,
+    expectedVersion: 1,
+    fields: { hidden: false },
+  });
   assert.equal((await list(p, { id: initiative.itemId })).item.hidden, undefined);
   // Planning rows carry the Done-when count of the full body.
   assert.deepEqual((await list(p)).items.find(item => item.id === blocker.itemId).doneWhen, [1, 2]);
@@ -3511,7 +3945,11 @@ test('planning model fields (order, type, parent, owner, relations, hidden) stor
     code('BAD_ARGUMENT'),
   );
   await assert.rejects(
-    put(p, { kind: 'initiative', title: 'Nested', fields: { parentId: parent.itemId } }),
+    put(p, {
+      kind: 'initiative',
+      title: 'Nested',
+      fields: { parentId: parent.itemId },
+    }),
     code('BAD_ARGUMENT'),
   );
   // Agents name model fields only inside `fields`; the flat names stay refused.
@@ -3522,8 +3960,13 @@ test('CLI and MCP can group a bounded hierarchy page by a field without another 
   const s = await setup(t);
   const p = port(s);
   const initiative = (await put(p, { kind: 'initiative', title: 'Shipment' })).result.itemId;
-  const parent = (await put(p, { kind: 'issue', initiativeId: initiative, title: 'Parser parent' })).result
-    .itemId;
+  const parent = (
+    await put(p, {
+      kind: 'issue',
+      initiativeId: initiative,
+      title: 'Parser parent',
+    })
+  ).result.itemId;
   const child = (
     await put(p, {
       kind: 'issue',
@@ -3544,7 +3987,10 @@ test('CLI and MCP can group a bounded hierarchy page by a field without another 
   const plain = await list(p, filter);
   const calls = [...p.calls];
   p.calls.length = 0;
-  const { groupBy, groups, ...grouped } = await list(p, { ...filter, groupBy: 'owner' });
+  const { groupBy, groups, ...grouped } = await list(p, {
+    ...filter,
+    groupBy: 'owner',
+  });
   assert.deepEqual(grouped, plain);
   assert.deepEqual(p.calls, calls);
   assert.equal(groupBy, 'owner');
@@ -3571,17 +4017,28 @@ test('CLI and MCP can group a bounded hierarchy page by a field without another 
     { history: { from: '2026-11-20' } },
     { transfer: {} },
   ])
-    assert.equal(hostedAgentCommandSchemas.planning.safeParse({ groupBy: 'owner', ...args }).success, false);
+    assert.equal(
+      hostedAgentCommandSchemas.planning.safeParse({
+        groupBy: 'owner',
+        ...args,
+      }).success,
+      false,
+    );
   assert.equal(hostedAgentCommandSchemas.planning.safeParse({ groupBy: 'body' }).success, false);
   const selection = { ...filter, groupBy: 'parent', search: 'Parser' };
   const cli = await list(p, selection);
   assert.deepEqual(cli.groups[0], { key: parent, itemIds: [child] });
-  const { transport: agent } = transport(s, { planning: true, features: p.serverFeatures });
+  const { transport: agent } = transport(s, {
+    planning: true,
+    features: p.serverFeatures,
+  });
   const tools = new Map();
   t.after(
     registerHostedAgentWorkflow({ registerTool: (name, _schema, call) => tools.set(name, call) }, agent),
   );
-  const mcp = await tools.get('forge_planning')({ command: { action: 'planning', ...selection } });
+  const mcp = await tools.get('forge_planning')({
+    command: { action: 'planning', ...selection },
+  });
   assert.ok(!mcp.isError, JSON.stringify(mcp.content));
   assert.deepEqual(JSON.parse(mcp.content[0].text).result.groups, cli.groups);
 });
@@ -3609,15 +4066,21 @@ test('waiting reasons compose with planning selectors and page without text sear
   const initiativeId = (await put(p, { kind: 'initiative', title: 'Release' })).result.itemId;
   const waitingOn = { kind: 'evidence', reason: 'Read live volume on Monday' };
   const make = (title, fields = {}, group = initiativeId) =>
-    put(p, { kind: 'issue', title: `Synthetic ${title}`, initiativeId: group, fields }).then(
-      reply => reply.result.itemId,
-    );
+    put(p, {
+      kind: 'issue',
+      title: `Synthetic ${title}`,
+      initiativeId: group,
+      fields,
+    }).then(reply => reply.result.itemId);
   const legacy = await make('legacy');
   const fields = { waitingOn, type: 'bug', owner: 'mara/amber-fox' };
   const first = await make('first', fields);
   const second = await make('second', fields);
   await make('other type', { ...fields, type: 'task' });
-  await make('other wait', { ...fields, waitingOn: { kind: 'owner', reason: 'Choose scope' } });
+  await make('other wait', {
+    ...fields,
+    waitingOn: { kind: 'owner', reason: 'Choose scope' },
+  });
   await make('ungrouped', fields, null);
   const filter = {
     kind: 'issue',
@@ -3675,7 +4138,13 @@ test('waiting reasons compose with planning selectors and page without text sear
       parent: '',
       position: i + 100,
       value: '{}',
-      planning: { text: 'Unrelated', kind: 'issue', status: 'closed', initiativeId: '', open: false },
+      planning: {
+        text: 'Unrelated',
+        kind: 'issue',
+        status: 'closed',
+        initiativeId: '',
+        open: false,
+      },
     });
   p.calls.length = 0;
   assert.deepEqual(await meter.cost(readBoth), before);
@@ -3683,18 +4152,40 @@ test('waiting reasons compose with planning selectors and page without text sear
   t.diagnostic(JSON.stringify({ waitingPages: 2, calls: pageCalls.length, ...before }));
   meter.restore();
 
-  const search = await list(p, { search: 'synthetic', waitingOn: 'evidence', status: 'open' });
+  const search = await list(p, {
+    search: 'synthetic',
+    waitingOn: 'evidence',
+    status: 'open',
+  });
   assert.ok(search.items.some(item => item.id === first));
   assert.ok(search.items.every(item => item.waitingOn.kind === 'evidence'));
-  const count = await list(p, { counts: true, kind: 'issue', initiativeId, waitingOn: 'evidence' });
+  const count = await list(p, {
+    counts: true,
+    kind: 'issue',
+    initiativeId,
+    waitingOn: 'evidence',
+  });
   assert.equal(count.counts.open, 3);
   assert.equal(count.coverage, 'complete');
-  const clear = { itemId: first, expectedVersion: 1, fields: { waitingOn: null } };
-  await put(p, { itemId: first, expectedVersion: 1, title: 'Synthetic renamed' });
+  const clear = {
+    itemId: first,
+    expectedVersion: 1,
+    fields: { waitingOn: null },
+  };
+  await put(p, {
+    itemId: first,
+    expectedVersion: 1,
+    title: 'Synthetic renamed',
+  });
   assert.deepEqual((await list(p, { id: first, reconcile: false })).item.waitingOn, waitingOn);
   await assert.rejects(put(p, clear), code('ITEM_CHANGED'));
   await put(p, { ...clear, expectedVersion: 2 });
-  const free = await list(p, { kind: 'issue', initiativeId, waitingOn: 'none', reconcile: false });
+  const free = await list(p, {
+    kind: 'issue',
+    initiativeId,
+    waitingOn: 'none',
+    reconcile: false,
+  });
   assert.deepEqual(new Set(free.items.map(item => item.id)), new Set([first, legacy]));
   assert.ok(free.items.every(item => !Object.hasOwn(item, 'waitingOn')));
 
@@ -3736,14 +4227,21 @@ test('forge_planning sets and clears wait reasons, and old servers refuse them w
     assert.ok(!result.isError, JSON.stringify(result.content));
     return JSON.parse(result.content[0].text).result;
   };
-  const waitingOn = { kind: 'item', reason: 'The related Item owns the prototype' };
+  const waitingOn = {
+    kind: 'item',
+    reason: 'The related Item owns the prototype',
+  };
   const { itemId } = await mcp({
     action: 'put-planning-item',
     kind: 'issue',
     title: 'Prototype user',
     fields: { waitingOn },
   });
-  const { items } = await mcp({ action: 'planning', waitingOn: 'item', reconcile: false });
+  const { items } = await mcp({
+    action: 'planning',
+    waitingOn: 'item',
+    reconcile: false,
+  });
   assert.deepEqual(
     items.map(item => [item.id, item.waitingOn]),
     [[itemId, waitingOn]],
@@ -3784,7 +4282,14 @@ test('3fa3187d: the stored counter and the CLI count the same Issues past 1,000,
   const cli = async () => {
     const result = await list(p, { counts: true, kind: 'issue' });
     assert.equal(result.coverage, 'complete');
-    const all = { proposed: 0, open: 0, 'in-progress': 0, closed: 0, abandoned: 0, ...result.counts };
+    const all = {
+      proposed: 0,
+      open: 0,
+      'in-progress': 0,
+      closed: 0,
+      abandoned: 0,
+      ...result.counts,
+    };
     // The read names in-progress `inProgress` (validator fields are identifiers); the figures are the CLI's.
     return {
       proposed: all.proposed,
@@ -3798,11 +4303,20 @@ test('3fa3187d: the stored counter and the CLI count the same Issues past 1,000,
   const made = [];
   for (const status of ['open', 'open', 'in-progress', 'proposed']) {
     const itemId = randomUUID();
-    await put(p, { itemId, kind: 'issue', title: `Synthetic ${status}`, status });
+    await put(p, {
+      itemId,
+      kind: 'issue',
+      title: `Synthetic ${status}`,
+      status,
+    });
     made.push(itemId);
   }
   const first = (await list(p, { id: made[0], reconcile: false })).item;
-  await put(p, { itemId: made[0], expectedVersion: first.version, status: 'closed' });
+  await put(p, {
+    itemId: made[0],
+    expectedVersion: first.version,
+    status: 'closed',
+  });
   const live = await read();
   assert.equal(live.exact, true);
   assert.deepEqual(live.issue, await cli());
@@ -3820,8 +4334,19 @@ test('3fa3187d: the stored counter and the CLI count the same Issues past 1,000,
       key,
       parent: '',
       position: 10_000 + i,
-      value: JSON.stringify({ id: key, kind: 'issue', title: `Synthetic ${i}`, status }),
-      planning: { text: '', kind: 'issue', status, initiativeId: '', open: status !== 'closed' },
+      value: JSON.stringify({
+        id: key,
+        kind: 'issue',
+        title: `Synthetic ${i}`,
+        status,
+      }),
+      planning: {
+        text: '',
+        kind: 'issue',
+        status,
+        initiativeId: '',
+        open: status !== 'closed',
+      },
     });
     roots.push({ id, key, status });
   }
@@ -3849,7 +4374,10 @@ test('3fa3187d: the stored counter and the CLI count the same Issues past 1,000,
   for (let guard = 0; !step.done && guard < 20; guard++)
     step = await counts.backfill._handler(s.ctx, { projectId });
   assert.equal(step.done, true);
-  assert.deepEqual(await counts.backfill._handler(s.ctx, { projectId }), { done: true, counted: 0 });
+  assert.deepEqual(await counts.backfill._handler(s.ctx, { projectId }), {
+    done: true,
+    counted: 0,
+  });
   const exact = await read();
   assert.equal(exact.exact, true);
   const fromCli = await cli();
@@ -3858,7 +4386,11 @@ test('3fa3187d: the stored counter and the CLI count the same Issues past 1,000,
   // A title edit moves no count and writes nothing to the counter.
   const before = counter().value;
   const item = (await list(p, { id: made[1], reconcile: false })).item;
-  await put(p, { itemId: made[1], expectedVersion: item.version, title: 'Renamed synthetic Item' });
+  await put(p, {
+    itemId: made[1],
+    expectedVersion: item.version,
+    title: 'Renamed synthetic Item',
+  });
   assert.equal(counter().value, before);
 });
 
@@ -3874,7 +4406,10 @@ test('2026-11-18 lead: every Item id field of a put and the initiativeId filter 
       kind: 'issue',
       title: 'Child',
       initiativeId: short(initiative),
-      fields: { parentId: short(parent), relations: [{ kind: 'depends-on', id: short(blocker) }] },
+      fields: {
+        parentId: short(parent),
+        relations: [{ kind: 'depends-on', id: short(blocker) }],
+      },
     })
   ).result.itemId;
   const stored = (await list(p, { id: child, reconcile: false })).item;
@@ -3892,9 +4427,17 @@ test('2026-11-18 lead: every Item id field of a put and the initiativeId filter 
   assert(!p.calls.includes('projectHostedPlanning:resolveId'));
   // An ambiguous prefix is refused with its candidates and writes nothing.
   for (const n of [1, 2])
-    await put(p, { itemId: `feedface-000${n}-4000-8000-000000000000`, kind: 'issue', title: `Twin ${n}` });
+    await put(p, {
+      itemId: `feedface-000${n}-4000-8000-000000000000`,
+      kind: 'issue',
+      title: `Twin ${n}`,
+    });
   await assert.rejects(
-    put(p, { itemId: child, expectedVersion: 2, fields: { parentId: 'feedface' } }),
+    put(p, {
+      itemId: child,
+      expectedVersion: 2,
+      fields: { parentId: 'feedface' },
+    }),
     error => error.code === 'AMBIGUOUS_ID' && /feedface-0001/.test(error.message),
   );
   assert.equal((await list(p, { id: child, reconcile: false })).item.version, 2);
@@ -3920,8 +4463,15 @@ test('tick-planning-item ticks the line by position or text prefix and posts the
     p = port(s);
   const itemId = await tickIssue(p);
   p.calls.length = 0;
-  const first = await tick(p, { planningItemId: itemId, line: 2, evidence: 'Evidence two' });
-  assert.deepEqual(first.result.ticked, { line: 2, text: 'A clear error on no match' });
+  const first = await tick(p, {
+    planningItemId: itemId,
+    line: 2,
+    evidence: 'Evidence two',
+  });
+  assert.deepEqual(first.result.ticked, {
+    line: 2,
+    text: 'A clear error on no match',
+  });
   assert.equal(first.result.openLines, 2);
   // One planning write and one comment (plus the reads that fetch the stored body).
   assert.equal(p.calls.filter(name => name === 'projectWorkCommand:command').length, 2);
@@ -3955,10 +4505,18 @@ test('an Item read never moves status; the last Done-when tick lets the worker c
   assert.equal(read.item.status, 'open');
   assert.equal(s.tables.projectWorkEvents.size, events, 'an Item read writes nothing');
   for (const line of [1, 2]) {
-    const ticked = await tick(p, { planningItemId: itemId, line, evidence: `Evidence ${line}` });
+    const ticked = await tick(p, {
+      planningItemId: itemId,
+      line,
+      evidence: `Evidence ${line}`,
+    });
     assert.equal(ticked.result.reconciled, undefined, 'a line is still open');
   }
-  const last = await tick(p, { planningItemId: itemId, line: 4, evidence: 'Evidence 4' });
+  const last = await tick(p, {
+    planningItemId: itemId,
+    line: 4,
+    evidence: 'Evidence 4',
+  });
   assert.equal(last.result.openLines, 0);
   assert.equal(last.result.reconciled, undefined);
   assert.equal((await stored(p, itemId)).status, 'open');
@@ -4053,7 +4611,11 @@ test('tick-planning-item retries a version race and re-applies only its own line
     }
     return mutation(name, args);
   };
-  const result = await tick(p, { planningItemId: itemId, line: 1, evidence: 'Mine' });
+  const result = await tick(p, {
+    planningItemId: itemId,
+    line: 1,
+    evidence: 'Mine',
+  });
   assert.equal(result.result.retries, 1);
   const item = await stored(p, itemId);
   assert.equal(item.title, 'Retitled');
@@ -4076,7 +4638,11 @@ test('tick-planning-item: two concurrent ticks on different lines both survive (
   };
   const results = await Promise.all([
     tick(p, { planningItemId: itemId, line: 1, evidence: 'Evidence one' }),
-    tick(p, { planningItemId: itemId, line: 'A clear error', evidence: 'Evidence two' }),
+    tick(p, {
+      planningItemId: itemId,
+      line: 'A clear error',
+      evidence: 'Evidence two',
+    }),
     tick(p, { planningItemId: itemId, line: 4, evidence: 'Evidence four' }),
   ]);
   assert.deepEqual(results.map(result => result.result.ticked.line).sort(), [1, 2, 4]);
@@ -4099,7 +4665,44 @@ test('tick-planning-item names the missing checkboxes of a body without any (666
     /no Done-when checkboxes/,
   );
   assert.throws(
-    () => hostedAgentCommandSchemas['tick-planning-item'].parse({ line: 1, evidence: 'x' }),
+    () =>
+      hostedAgentCommandSchemas['tick-planning-item'].parse({
+        line: 1,
+        evidence: 'x',
+      }),
     /planningItemId/,
   );
+});
+
+test('a put with an itemId and no expectedVersion shows the update form; a batch with body in fields works (Item 2fa36bb2)', async t => {
+  const s = await setup(t),
+    p = port(s);
+  const issue = (await put(p, { kind: 'issue', title: 'Hints', body: 'Done when:\n- [ ] x' })).result;
+  await assert.rejects(
+    put(p, { itemId: issue.itemId, body: 'new' }),
+    error =>
+      /Without expectedVersion this put is a create/.test(error.message) &&
+      /expectedVersion":VERSION/.test(error.message),
+  );
+  await assert.rejects(put(p, { itemId: issue.itemId.slice(0, 8), status: 'closed' }), error =>
+    /Without expectedVersion this put is a create/.test(error.message),
+  );
+  const batched = await put(p, {
+    batch: [
+      {
+        itemId: issue.itemId,
+        expectedVersion: issue.version,
+        fields: { body: 'Done when:\n- [ ] y' },
+      },
+    ],
+  });
+  assert.equal(batched.result.results[0].outcome, 'applied');
+  await assert.rejects(
+    put(p, {
+      batch: [{ itemId: issue.itemId, expectedVersion: issue.version + 1, bogus: 1 }],
+    }),
+    error => /batch\[0\]: .*bogus/.test(error.message) && /model fields in fields/.test(error.message),
+  );
+  const read = await list(p, { id: issue.itemId, reconcile: false });
+  assert.match(read.item.body, /- \[ \] y/);
 });

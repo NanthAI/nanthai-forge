@@ -66,10 +66,20 @@ type Workspace = {
   likelyDuplicates?: unknown;
   planningFilteredReads?: boolean;
   capabilities?: { planning?: boolean };
-  rollupCatchup?: { state: 'running' | 'partial' | 'complete'; moved: number; reason?: string };
-  autonomyPolicy?: { autoCreatePlanningItem?: boolean; agentsWriteItemText?: boolean };
+  rollupCatchup?: {
+    state: 'running' | 'partial' | 'complete';
+    moved: number;
+    reason?: string;
+  };
+  autonomyPolicy?: {
+    autoCreatePlanningItem?: boolean;
+    agentsWriteItemText?: boolean;
+  };
 };
-type PlanningTimes = { closedAt?: string | null; lastStatusChangeAt?: string | null };
+type PlanningTimes = {
+  closedAt?: string | null;
+  lastStatusChangeAt?: string | null;
+};
 type PlanningReadItem = PlanningItem & PlanningTimes;
 type CloseHistory = {
   closedByDay: { day: string; count: number }[];
@@ -240,7 +250,10 @@ const commentsContinue = (ws: Workspace, id: string, cursor: string) => ({
     ),
 });
 async function olderComments(port: PlanningPort, ws: Workspace, id: string, cursor: string) {
-  const bound = decodeBound(cursor, ws) as { cursor: string | null; comments?: unknown };
+  const bound = decodeBound(cursor, ws) as {
+    cursor: string | null;
+    comments?: unknown;
+  };
   invariant(
     bound.comments === id,
     'BAD_ARGUMENT',
@@ -449,10 +462,11 @@ export async function resolvePlanningId(
 async function frictionCommentPointer(port: PlanningPort, itemId: string, error: unknown) {
   if (!(error instanceof ForgeError) || ['WORK_STALE', 'WORK_OPERATION_CHANGED'].includes(error.code)) return;
   try {
-    const found = await port.query<{ found: boolean; status?: string; planningItemId?: string }>(
-      'projectHostedFriction:lookup',
-      { id: itemId },
-    );
+    const found = await port.query<{
+      found: boolean;
+      status?: string;
+      planningItemId?: string;
+    }>('projectHostedFriction:lookup', { id: itemId });
     if (!found.found) return;
     return new ForgeError(
       'BAD_ARGUMENT',
@@ -503,7 +517,13 @@ async function reconcile(
       open.includes(item.status) &&
       (states[item.id] === 'completed' || (!serverOwnsStatus && states[item.id] === 'abandoned')),
   );
-  const changed: { id: string; from: string; to: PlanningItem['status']; at?: string; undo: string }[] = [];
+  const changed: {
+    id: string;
+    from: string;
+    to: PlanningItem['status'];
+    at?: string;
+    undo: string;
+  }[] = [];
   const failed: unknown[] = [];
   const held: unknown[] = [];
   for (const entry of due.slice(0, maxReconcile)) {
@@ -630,9 +650,11 @@ async function rowFilter(input: {
 }): Promise<(row: object) => boolean> {
   if (!input.type && !input.owner && !input.relation) return () => true;
   const { planFilterMatch } = await import('./planning-filter.js');
-  const filter = { type: input.type, owner: input.owner, relation: input.relation } as Parameters<
-    typeof planFilterMatch
-  >[1];
+  const filter = {
+    type: input.type,
+    owner: input.owner,
+    relation: input.relation,
+  } as Parameters<typeof planFilterMatch>[1];
   return row => planFilterMatch(row as Parameters<typeof planFilterMatch>[0], filter);
 }
 
@@ -641,7 +663,10 @@ async function readPlanning(
   input: ReturnType<typeof hostedAgentCommandSchemas.planning.parse>,
 ) {
   if (input.initiativeId)
-    input = { ...input, initiativeId: await resolvePlanningId(port, input.initiativeId) };
+    input = {
+      ...input,
+      initiativeId: await resolvePlanningId(port, input.initiativeId),
+    };
   const planningAudit = port.serverFeatures?.includes(planningAuditFeature) ? true : undefined;
   if (input.id && input.history === true) {
     invariant(
@@ -801,7 +826,11 @@ async function readPlanning(
     const countPages = input.history ? 1 : maxCountPages;
     for (let pages = 0; pages < countPages && !done; pages++) {
       const result = await port.query<
-        Page & { counts: Record<string, number>; coverage?: string; history?: CloseHistory }
+        Page & {
+          counts: Record<string, number>;
+          coverage?: string;
+          history?: CloseHistory;
+        }
       >('projectWorkIndex:records', {
         ...(bound ? { generationId: bound.generationId } : {}),
         collection: 'planningItems',
@@ -824,7 +853,10 @@ async function readPlanning(
       }
       needsPreparation ||= result.coverage === 'partial-needs-preparation';
       done = result.isDone;
-      bound = { generationId: result.generationId, cursor: result.continueCursor };
+      bound = {
+        generationId: result.generationId,
+        cursor: result.continueCursor,
+      };
     }
     return {
       counts,
@@ -1049,7 +1081,11 @@ function flattenModelFields(port: PlanningPort, input: Record<string, unknown>) 
  * killed process left is posted by the next planning read or comment for the same project on this
  * machine, under its original operationId, so the server records it once, and under the author and
  * agent of the run that wrote it, never the run that posts it. Local files only. */
-type CommentAuthor = { authorLabel: string; agent?: string; agentClient?: string };
+type CommentAuthor = {
+  authorLabel: string;
+  agent?: string;
+  agentClient?: string;
+};
 type OutboxEntry = {
   url: string;
   projectId: string;
@@ -1071,7 +1107,9 @@ const outboxDirectory = () =>
     ? null
     : join(dirname(laneRegistryDirectory()), 'comment-outbox');
 function writeEntry(path: string, entry: OutboxEntry) {
-  writeFileSync(`${path}.${process.pid}.tmp`, JSON.stringify(entry), { mode: 0o600 });
+  writeFileSync(`${path}.${process.pid}.tmp`, JSON.stringify(entry), {
+    mode: 0o600,
+  });
   renameSync(`${path}.${process.pid}.tmp`, path);
 }
 function keepComment(entry: OutboxEntry) {
@@ -1140,7 +1178,10 @@ async function flushComments(port: PlanningPort, actor: string) {
           entry.operationId,
           entry.author,
         );
-        const { itemId, commentId } = sent.result as { itemId: string; commentId: string };
+        const { itemId, commentId } = sent.result as {
+          itemId: string;
+          commentId: string;
+        };
         posted.push({ itemId, commentId });
       } catch (error) {
         // The network, the sign-in or the service is out: keep this and the rest for the next read.
@@ -1157,7 +1198,11 @@ async function flushComments(port: PlanningPort, actor: string) {
           try {
             // Another read may have posted and removed it meanwhile: never bring it back.
             if (existsSync(path))
-              writeEntry(path, { ...entry, refused, nextAt: Date.now() + outboxBackoff(refused) });
+              writeEntry(path, {
+                ...entry,
+                refused,
+                nextAt: Date.now() + outboxBackoff(refused),
+              });
           } catch {}
           continue;
         }
@@ -1224,7 +1269,11 @@ export async function executeHostedPlanning(
     const result = marked(await readPlanning(port, read));
     const grouped =
       read.groupBy && 'items' in result && Array.isArray(result.items)
-        ? { ...result, groupBy: read.groupBy, groups: groupPage(result.items, read.groupBy) }
+        ? {
+            ...result,
+            groupBy: read.groupBy,
+            groups: groupPage(result.items, read.groupBy),
+          }
         : result;
     return {
       operationId: null,
@@ -1334,7 +1383,10 @@ export async function executeHostedPlanning(
     // The last tick closes an Issue whose Intent already finished (6b7d5a79), so no close command or
     // reconciling read is left to remember. One Intent-state read, only when no line is left open.
     const closed = ticked.openLines === 0 ? await closeTicked(port, itemId, ticked.version) : undefined;
-    return { operationId: journal.operationId, result: { itemId, ...ticked, ...closed } };
+    return {
+      operationId: journal.operationId,
+      result: { itemId, ...ticked, ...closed },
+    };
   }
   if (input.batch !== undefined) {
     const { batch } = hostedAgentCommandSchemas['put-planning-item'].parse(input);
@@ -1352,15 +1404,21 @@ export async function executeHostedPlanning(
     Extract<PlanningWrite, { action: 'put-planning-item' }>,
     'action' | 'operationId' | 'itemId'
   > & { itemId?: string };
+  // An omitted expectedVersion defaults to 0, a create. A create naming an itemId without kind and title is
+  // almost always an update that forgot the version, so show the update form.
+  const updateHint =
+    put.expectedVersion === 0 && put.itemId
+      ? ` Without expectedVersion this put is a create. To change Item ${put.itemId}, read its version (planning '{"id":"${put.itemId}"}') and send {"itemId":"${put.itemId}","expectedVersion":VERSION,...fields}.`
+      : '';
   invariant(
     put.expectedVersion > 0 || (put.kind && put.title),
     'BAD_ARGUMENT',
-    'Creating a planning item (expectedVersion 0) needs `kind` and `title`.',
+    `Creating a planning item (expectedVersion 0) needs \`kind\` and \`title\`.${updateHint}`,
   );
   invariant(
     put.expectedVersion > 0 || !put.itemId || !isPlanningPrefix(put.itemId),
     'BAD_ARGUMENT',
-    'Creating a planning item (expectedVersion 0) needs a complete itemId UUID, or none.',
+    `Creating a planning item (expectedVersion 0) needs a complete itemId UUID, or none.${updateHint}`,
   );
   const itemId = put.itemId ? await resolvePlanningId(port, put.itemId, journal) : await journal.id('item');
   // Other Item id fields take the same short ids; full ids make no call.
@@ -1370,12 +1428,21 @@ export async function executeHostedPlanning(
   if (typeof put.parentId === 'string') put.parentId = await ref(put.parentId, 'parentId');
   if (put.relations)
     put.relations = await Promise.all(
-      put.relations.map(async relation => ({ ...relation, id: await ref(relation.id, 'relations') })),
+      put.relations.map(async relation => ({
+        ...relation,
+        id: await ref(relation.id, 'relations'),
+      })),
     );
   const hints: { likelyDuplicates?: unknown } = {};
   const { revision } = await writePlanning(
     port,
-    { action, operationId: journal.operationId, ...put, itemId, ...putAgent(port) },
+    {
+      action,
+      operationId: journal.operationId,
+      ...put,
+      itemId,
+      ...putAgent(port),
+    },
     journal,
     hints,
   );
@@ -1471,7 +1538,11 @@ export async function markPlanningStarted(
         : undefined;
     if (port.serverFeatures?.includes('planning-status-worker')) {
       if (!claim) return { updated: false, status: item.status };
-      const memberStart = () => ({ updated: false, status: item.status, claimed: false });
+      const memberStart = () => ({
+        updated: false,
+        status: item.status,
+        claimed: false,
+      });
       if (ws.capabilities?.planning === false) return memberStart();
       let current = item;
       for (let attempt = 0; ; attempt++) {
@@ -1501,7 +1572,11 @@ export async function markPlanningStarted(
             return memberStart();
           // A known CAS refusal (not an unknown outcome) can use the current version and a new operation id.
           if (safe.code !== 'ITEM_CHANGED' || attempt > 0)
-            return { updated: false, claimed: false, error: { code: safe.code, message: safe.message } };
+            return {
+              updated: false,
+              claimed: false,
+              error: { code: safe.code, message: safe.message },
+            };
           const latest = await fullItem(port, ws, item.id);
           if (!latest || latest.owner || isShelved(latest.status) || latest.purged)
             return { updated: false, status: latest?.status, claimed: false };
@@ -1548,7 +1623,12 @@ export async function markPlanningStarted(
         };
       // An open Issue: the server moves it after the start.
       if (memberRefused && (item.status ?? 'open') === 'open')
-        return { updated: false, status: 'in-progress', movedBy: 'server', claimed: false };
+        return {
+          updated: false,
+          status: 'in-progress',
+          movedBy: 'server',
+          claimed: false,
+        };
       throw error;
     }
     return {
