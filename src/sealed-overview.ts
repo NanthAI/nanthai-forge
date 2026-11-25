@@ -57,6 +57,30 @@ export type OverviewSet = {
   proposals: readonly PendingFacts[];
 };
 
+/** One computer shows one name in every set it holds (Item fcfc7e62): a computer whose entry carries no usable name in
+ * one set takes the name another set of the same project already has for that device id, from the sets' own signed
+ * entries and kept names, with no added read. Returns the sets with `entryNames` filled in. */
+export function shareDeviceNames<T extends OverviewSet>(sets: readonly T[]): T[] {
+  const known = new Map<string, string>();
+  const learn = (id: Uint8Array, name: string | undefined) => {
+    if (name && !isPlaceholderName(name) && !known.has(hex(id))) known.set(hex(id), name);
+  };
+  for (const set of sets) {
+    for (const e of set.roster.entries) if (e.entryKind === 1) learn(e.id, e.displayName);
+    for (const n of set.entryNames ?? []) learn(n.id, n.name);
+  }
+  if (!known.size) return [...sets];
+  return sets.map(set => {
+    const kept = [...(set.entryNames ?? [])];
+    for (const e of set.roster.entries) {
+      if (e.entryKind !== 1 || (e.displayName && !isPlaceholderName(e.displayName))) continue;
+      const name = known.get(hex(e.id));
+      if (name && !kept.some(n => equalBytes(n.id, e.id))) kept.push({ id: e.id, name });
+    }
+    return kept.length === (set.entryNames?.length ?? 0) ? set : { ...set, entryNames: kept };
+  });
+}
+
 const marked = (set: Pick<OverviewSet, 'revoked'>, id: Uint8Array) =>
   set.revoked.some(m => equalBytes(m, id));
 const accountKey = (entry: Pick<Entry, 'accountId'>) => hex(entry.accountId);

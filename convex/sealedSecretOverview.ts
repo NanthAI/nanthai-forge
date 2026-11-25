@@ -21,6 +21,7 @@ import {
   nameRows,
   OVERVIEW_PAGE,
   rotateRows,
+  shareDeviceNames,
   takeOutRows,
   type OverviewSet,
 } from '../src/sealed-overview';
@@ -65,7 +66,7 @@ export async function overviewFor(
       .unique();
     if (set) rows.push(set);
   }
-  const decoded = rows.map(set => {
+  const decoded0 = rows.map(set => {
     const { head, roster } = decodeSealedWire(u8(set.payload)) as { head: Head; roster: Roster };
     const view: OverviewSet = {
       head,
@@ -99,6 +100,9 @@ export async function overviewFor(
     };
     return { set, view };
   });
+  // The same computer shows the same name in every set (all sets are read only on the first load of the page).
+  const shared = shareDeviceNames(decoded0.map(d => d.view));
+  const decoded = decoded0.map((d, i) => ({ set: d.set, view: shared[i]! }));
   // Roster accounts that are the owner or a listed contributor get their public handle (one account row each).
   const wanted = new Set(
     decoded.flatMap(d => d.view.roster.entries.filter(e => e.accountId.length).map(e => hex(e.accountId))),

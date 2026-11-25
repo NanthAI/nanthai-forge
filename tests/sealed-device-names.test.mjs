@@ -183,3 +183,32 @@ test('walk 2026-11-25: an agent device that only proposes still keeps its approv
   await agent.write('API_TOKEN', VALUE);
   assert.equal(set(h).entryNames?.length, 1);
 });
+
+test('fcfc7e62 walk 2026-11-25: one computer shows one name in every set it holds, with no added read', async t => {
+  const { checksClient } = await import('../dist/sealed-checks.js');
+  const h = setup(t);
+  await h.client.write('DEV_ONLY', VALUE);
+  await (await checksClient(h.client)).write('CHECK_ONLY', VALUE);
+  const sets = () => [...h.s.tables.sealedSecretSets.values()].filter(r => r.active);
+  const dev = sets().find(r => r.kind === 1),
+    checks = sets().find(r => r.kind === 2);
+  // The walk: Development learned the name from a write; Checks has only the placeholder and no kept name yet.
+  delete checks.entryNames;
+  assert.equal(dev.entryNames?.length, 1);
+  const names = read =>
+    read.sets.map(s => [s.kind, s.people.page[0].computers.map(c => c.name)]).sort((a, b) => a[0] - b[0]);
+  h.io.queries = 0;
+  const before = await overview(h);
+  const reads = h.io.queries;
+  assert.deepEqual(names(before), [
+    [1, ['synthetic']],
+    [2, ['synthetic']],
+  ]);
+  // The stored Checks row is untouched: the name is shared at read time only.
+  assert.equal(checks.entryNames, undefined);
+  // The same read as before the change: nothing is added for the sharing.
+  delete dev.entryNames;
+  h.io.queries = 0;
+  await overview(h);
+  assert.equal(h.io.queries, reads, 'no added read');
+});
