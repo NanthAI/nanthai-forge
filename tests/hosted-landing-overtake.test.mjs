@@ -404,10 +404,12 @@ test('incident replay 70a9bd2f: global-risk A/C overtake meets the unchanged 1.5
   // read fewer per finish wake: 37,384 fewer read bytes for the pair, with unchanged calls and writes.
   // Item c0af6cfa (check reports always in R2): every new run row carries `reportStorage: 'r2'` (21 bytes): +462 read
   // and +378 write bytes for the pair, with unchanged calls.
+  // Item 8947a779: each landing's save-to-main time joins its day's histogram in the main summary's existing write
+  // (twelve counters, no new call): +105 read and +140 write bytes for the pair, with unchanged calls.
   const measured = canonicalReplayCost(pair);
   assert.deepEqual(
     measured,
-    { calls: 103, readBytes: 1_666_616, writeBytes: 568_919 },
+    { calls: 103, readBytes: 1_666_721, writeBytes: 569_059 },
     'the 70a9bd2f pair cost moved; ratchet this row to the measured cost, with the reason',
   );
   assert.equal(pair.idle, 0, 'the settled pair has no idle queue work');
@@ -472,10 +474,11 @@ test('70a9bd2f: admission pipeline calls and metadata bytes stay bounded at 4000
   // Item 1018d0f8: the same discarded run count adds 3,699 read and 491 write bytes at 4,000 files.
   // Item 411727ba (settle): the same landing-row read saved per finish wake at 4,000 files: 37,467 fewer read bytes.
   // Item c0af6cfa: the same `reportStorage: 'r2'` field on each run row: +462 read and +378 write bytes at 4,000 files.
+  // Item 8947a779: the same day histogram on the summary row: +105 read and +140 write bytes at 4,000 files.
   const measured = canonicalReplayCost(after);
   assert.deepEqual(
     measured,
-    { calls: 103, readBytes: 1_671_128, writeBytes: 571_112 },
+    { calls: 103, readBytes: 1_671_233, writeBytes: 571_252 },
     'the 70a9bd2f 4,000-file cost moved; ratchet this row to the measured cost, with the reason',
   );
   assert.equal(after.idle, 0);

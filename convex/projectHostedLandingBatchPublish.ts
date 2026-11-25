@@ -70,6 +70,7 @@ import { secretAllowMark } from '../src/secret-allow';
 import { batchCoverageFailure } from './projectHostedBatchCoverage';
 import type { BatchMemberPaths } from '../src/hosted-batch-coverage';
 import { landingDocsUndo } from '../src/docs-resolution';
+import { landingToMainSeconds } from '../src/public-time-to-main';
 
 /** At most eight independently authorized members, one checked head, one main
  * CAS. All receipts, request settlements and completion activations commit with
@@ -338,6 +339,7 @@ export async function publishLandingBatch(
   const checkTime = batchTime ? { ...batchTime, batch: true as const } : null;
   let previousSnapshot = main.snapshotId;
   const receipts = [];
+  const toMain: (number | null)[] = [];
   const completions: {
     identity: ReceiptIdentity;
     planId: Id<'projectHostedAcceptancePlans'>;
@@ -486,6 +488,7 @@ export async function publishLandingBatch(
         ),
       });
     receipts.push(receipt);
+    toMain.push(landingToMainSeconds(receipt.at, member.state));
   }
   const last = receipts.at(-1)!;
   // The line's main snapshot moves with main, as a single landing's publish moves it (Item 85f456c1): one summary
@@ -497,6 +500,7 @@ export async function publishLandingBatch(
     receipts.length,
     main.receipt.kind === 'server' && main.receipt.previousReceiptId !== null,
     receipts[0]!.snapshot.revision,
+    toMain,
   );
   await queueProjectSnapshots(ctx, project, false);
   await ctx.db.patch(channel._id, {

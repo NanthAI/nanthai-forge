@@ -4,6 +4,7 @@ import { internal } from './_generated/api';
 import type { Doc, Id } from './_generated/dataModel';
 import type { ActionCtx } from './_generated/server';
 import { invariant } from '../src/errors';
+import { histogramMedian, TIME_BINS } from '../src/public-time-to-main';
 import { snapshotCount, snapshotFence, snapshotRecord } from '../src/public-snapshot-contract';
 import { type DirectoryRow, directoryAuditPage } from './publicDirectorySource';
 import { publishSnapshot } from './publicSnapshotStorage';
@@ -27,7 +28,16 @@ async function previousInput(config: R2Config): Promise<Input | null> {
       snapshotFence(stored)?.state === 'public' &&
       Array.isArray(stored.rows) &&
       stored.rows.every(
-        row => typeof row?.id === 'string' && Array.isArray(row.days) && row.days.length === 7,
+        row =>
+          typeof row?.id === 'string' &&
+          Array.isArray(row.days) &&
+          row.days.length === 7 &&
+          (row.bins === undefined ||
+            (Array.isArray(row.bins) &&
+              row.bins.length === 7 &&
+              row.bins.every(
+                (day: unknown) => Array.isArray(day) && (day.length === 0 || day.length === TIME_BINS),
+              ))),
       ) &&
       snapshotCount(stored.day) &&
       (stored.auditCursor === null || typeof stored.auditCursor === 'string') &&
@@ -43,10 +53,24 @@ async function previousInput(config: R2Config): Promise<Input | null> {
   };
 }
 
+/** Move a checkpoint row to today's week. The median is derived again from the day histograms still in the week,
+ * for every row, so a day that has left the week never keeps ranking a project. */
 function roll(row: DirectoryRow, elapsed: number) {
   if (!elapsed) return row;
   const days = Array.from({ length: 7 }, (_, i) => row.days[i + elapsed] ?? 0);
-  return { ...row, days, landings: days.reduce((total, n) => total + n, 0) };
+  const landings = days.reduce((total, n) => total + n, 0);
+  const bins = Array.from({ length: 7 }, (_, i): number[] => row.bins?.[i + elapsed] ?? []);
+  const timeToMain = histogramMedian(bins);
+  const rest: Partial<DirectoryRow> = { ...row };
+  delete rest.timeToMain;
+  delete rest.bins;
+  return {
+    ...(rest as DirectoryRow),
+    days,
+    landings,
+    ...(timeToMain === undefined ? {} : { timeToMain }),
+    ...(bins.some(day => day.length) ? { bins } : {}),
+  };
 }
 
 export async function readDirectoryInput(

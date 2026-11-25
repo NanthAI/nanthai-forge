@@ -24,6 +24,7 @@ import { ensurePublicRow, publicRow } from './publicListing';
 import { readProfile } from './personDays';
 import { publicWorkPlan, type PublicPlanRoot } from './publicWorkPlan';
 import { publicPlanRoot } from './projectPlanningCloseProgress';
+import { histogramMedian, weekHistograms } from '../src/public-time-to-main';
 import {
   isPublicProject,
   visibleLanes,
@@ -53,17 +54,24 @@ export async function publicProject(ctx: QueryCtx, handle: string, slug: string,
   return { project, handle: account.handle };
 }
 
-/** Seven compact UTC day totals, maintained in the main summary's existing write. Never scan receipts. */
-export async function weekOf(ctx: QueryCtx, project: Doc<'hostedProjects'>, now: number): Promise<Activity> {
+/** Seven compact UTC day totals, maintained in the main summary's existing write. Never scan receipts. `bins` are the
+ * seven days' save-to-main histograms for the directory checkpoint (oldest first); the public page never shows them. */
+export async function weekOf(
+  ctx: QueryCtx,
+  project: Doc<'hostedProjects'>,
+  now: number,
+): Promise<{ activity: Activity; bins: number[][] }> {
   const summary = await lineSummary(ctx.db, project._id);
   const value = summary ? JSON.parse(summary.value) : {};
   const today = Math.floor(now / DAY);
+  const bins = weekHistograms(value.publicWeek?.days, today);
+  const timeToMain = histogramMedian(bins);
   const days = Array.from(
     { length: 7 },
     (_, index) =>
       value.publicWeek?.days.find((row: { day: number }) => row.day === today - 6 + index)?.count ?? 0,
   );
-  return {
+  const activity: Activity = {
     at: now,
     landings: days.reduce((sum, count) => sum + count, 0),
     days,
@@ -72,7 +80,10 @@ export async function weekOf(ctx: QueryCtx, project: Doc<'hostedProjects'>, now:
       : {}),
     ...(value.publicWeek?.lastAt >= (today - 6) * DAY ? { lastAt: value.publicWeek.lastAt } : {}),
     main: value.main?.check === 'passed' ? 'passing' : 'unchecked',
+    // Median save-to-main of this week's landings, from the same summary row (8947a779); absent until one is recorded.
+    ...(timeToMain === undefined ? {} : { timeToMain }),
   };
+  return { activity, bins };
 }
 
 const OPEN = ['proposed', 'open', 'in-progress'] as const;
@@ -228,7 +239,7 @@ export const projectPage = internalQuery({
         ...(upstream === undefined ? {} : { upstream }),
       },
       stars: row?.stars ?? 0,
-      activity: await weekOf(ctx, project, now),
+      activity: (await weekOf(ctx, project, now)).activity,
       lanes: await lanesOf(ctx, project, row?.laneTitles === true, roots),
       plan,
       // The cached activity the explore list ranks by needs refreshing (the route writes it once, not per visitor).
@@ -255,6 +266,7 @@ export const noteActivity = internalMutation({
       days: v.array(v.number()),
       lastAt: v.optional(v.number()),
       recordedSince: v.optional(v.number()),
+      timeToMain: v.optional(v.number()),
       main: v.union(v.literal('passing'), v.literal('unchecked')),
     }),
   },

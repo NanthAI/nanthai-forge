@@ -4,7 +4,7 @@ A visitor can open Explore at `/explore`, search by name or handle, or follow a 
 
 | Step | What Forge does |
 | --- | --- |
-| Find a project | Explore offers Active, Stars and Newest. Active sorts the listed projects by main health, recorded landings in the last seven days, then Forge stars. |
+| Find a project | Explore offers Active, Stars and Newest. Active sorts the listed projects by recorded landings in the last seven days, then faster time to main, then main health, then Forge stars (the legacy fallback before the snapshot is on has no time to main and sorts by main health first). |
 | See what is happening | The public front page shows main health, weekly landings and aggregate Lane counts. It shows the public plan and Lane titles according to the project's visibility settings. Code and history are available through the public code viewer. |
 | Star a project | A visitor gets a sign-in link that returns to the public page. A signed-in person can give or remove their one star. The public count updates and the project owner can open **Who starred**. |
 | Clone | The public page gives the sign-in link and then the clone and device-approval commands. A direct CLI clone without a signed-in device returns `SIGN_IN_REQUIRED` with the deployment's `nforge login` command and `recovery.nothingChanged: true`, without looking up the project or creating a destination. |
@@ -12,7 +12,7 @@ A visitor can open Explore at `/explore`, search by name or handle, or follow a 
 
 Public project stars follow the account (I42). Forge drops old public browser stars from the public Projects view and count. A person can star the project again from any browser. Private project bookmarks in the legacy Projects list still live in that browser. Source bookmarks are account-backed.
 
-The site caches public responses for 30 seconds. The dormant R2 path ranks Explore from snapshot activity and Forge stars. Explore can show a reported time to main from the snapshot and otherwise says “not reported” or “not checked”; the weekly save-to-main aggregation is not wired yet. The fork action and its sign-in prompt depend on Item d1303286.
+The site caches public responses for 30 seconds. The dormant R2 path ranks Explore from snapshot activity and Forge stars. Time to main is the median save-to-main time of this week's landings, kept as a small histogram of whole-second times beside each day's landing count, so it covers every timed landing and drops days as they leave the week, including on the directory rebuild, so Active ranks landings, then faster time to main, then main health, then stars. A project says “not reported” until a landing records a time (earlier landings are not backfilled) and “not checked” when main has no check. The fork action and its sign-in prompt depend on Item d1303286.
 
 ## Decisions
 

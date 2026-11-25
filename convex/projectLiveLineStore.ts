@@ -7,6 +7,7 @@ import { measureSize } from './projectLiveLineOpen';
 import { internal } from './_generated/api';
 import { nextActivityHour } from './accountProjectOrderHour';
 import { readFlowLandings } from './projectLiveLineRecovery';
+import { recordDay, type WeekDay } from '../src/public-time-to-main';
 import { flowDay, flowMain, HOUR_MS, stepFlow, utcDayStart, type FlowStep } from '../src/flow-day';
 import { metricAliasGeneration } from '../src/self-metrics-context';
 
@@ -233,6 +234,8 @@ export async function writeLineMain(
   landings = 0,
   priorServerReceipt = false,
   firstSequence?: number,
+  /** Each landing's save-to-main seconds (null: not recorded), for the week's median time to main (8947a779). */
+  toMain: readonly (number | null)[] = [],
 ) {
   const old = await lineSummary(ctx.db, projectId);
   const value = old ? JSON.parse(old.value) : {};
@@ -256,7 +259,7 @@ export async function writeLineMain(
     if (Number.isFinite(at)) {
       const day = Math.floor(at / 86_400_000);
       const week = value.publicWeek ?? { since: at, days: [] };
-      const days: Array<{ day: number; count: number }> = week.days.filter(
+      const days: WeekDay[] = week.days.filter(
         (row: { day: number }) => row.day >= day - 6 && row.day <= day,
       );
       const today = days.find(row => row.day === day);
@@ -281,8 +284,7 @@ export async function writeLineMain(
       const base = missing ? (await readFlowLandings(ctx.db, projectId, now, flow, firstSequence)).day : flow;
       value.flow = stepFlow(base, now, { landed: landings });
       if (firstSequence !== undefined) value.landingSequence = firstSequence + landings - 1;
-      if (today) today.count += landings;
-      else days.push({ day, count: landings });
+      recordDay(days, day, landings, toMain);
       value.publicWeek = { since: week.since, lastAt: at, days };
     }
   }

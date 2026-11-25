@@ -34,7 +34,10 @@ const reader = (ctx: QueryCtx, now: number) => {
     }
     const currentHandle = await handle;
     if (!currentHandle) return null;
-    const { landings, days, main } = await weekOf(ctx, project, now);
+    const {
+      activity: { landings, days, main, timeToMain },
+      bins,
+    } = await weekOf(ctx, project, now);
     return {
       handle: currentHandle,
       id: project._id,
@@ -45,6 +48,9 @@ const reader = (ctx: QueryCtx, now: number) => {
       landings,
       days,
       main,
+      ...(timeToMain === undefined ? {} : { timeToMain }),
+      // The checkpoint keeps each day's histogram so the median is derived again as days leave the week.
+      ...(bins.some(day => day.length) ? { bins } : {}),
     };
   };
 };

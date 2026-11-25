@@ -64,6 +64,7 @@ import { grantedApproval } from './projectHostedOwnerGrant';
 import { carriedProtectedPaths } from './projectHostedOwnerGrantCarry';
 import { approvalHoldReason, attemptApprovals, endLandedApprovals } from './projectHostedApprovalStore';
 import { landingAcceptedBy } from '../src/landing-accepted-by';
+import { landingToMainSeconds } from '../src/public-time-to-main';
 /** One constant-size publication transaction. A completed replay authorizes the
  * reader first, then returns the original receipt without rechecking old policy,
  * acquiring another lease or rewinding any later main/saved Lane. */
@@ -493,6 +494,7 @@ export async function publishAcceptance(
     1,
     main.receipt.kind === 'server' && main.receipt.previousReceiptId !== null,
     receipt.snapshot.revision,
+    [landingToMainSeconds(receipt.at, state)],
   );
   await queueProjectSnapshots(ctx, project, false);
   await ctx.db.insert('projectHostedAcceptanceSnapshots', {

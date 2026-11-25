@@ -469,6 +469,11 @@ test('a batch landing moves the line’s main snapshot and counts every member, 
     4,
     'four receipts under one head count four landings',
   );
+  assert.equal(
+    week.days.reduce((n, d) => n + (d.hist ?? []).reduce((a, c) => a + c, 0), 0),
+    4,
+    'each member records its save-to-main time for the public week’s median (8947a779)',
+  );
   assert.equal(day.flowToday(feed.flow, Date.now(), Date.now() - 3_600_000).landed, 4);
   t.diagnostic(JSON.stringify({ batchOfFour: { summaryWrites: summary.n } }));
 });
