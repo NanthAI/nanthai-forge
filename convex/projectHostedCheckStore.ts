@@ -180,6 +180,7 @@ export async function writeHostedCheck(
   run: HostedCheckRun,
   providerAttested = false,
   mainMoveDecision?: Doc<'projectHostedCheckRuns'>['mainMoveDecision'],
+  evidence?: Pick<Partial<Doc<'projectHostedCheckRuns'>>, 'timingHistoryGeneration' | 'machineSelection'>,
 ) {
   const providerDelayChanged = run.failureReason?.startsWith('provider-delayed:') === true;
   // A platform retry's check-infrastructure wait (0d8a85a3) ends once Forge takes the run's plan,
@@ -219,6 +220,7 @@ export async function writeHostedCheck(
     ...reports,
     status: run.status,
     ...(mainMoveDecision ? { mainMoveDecision } : {}),
+    ...evidence,
     ...(hostedCheckClock(run) ? { replayClock: hostedCheckClock(run) } : {}),
     ...(reportRecovered ? { reportRecovery: undefined } : {}),
     ...(providerAttested && run.status === 'passed' ? { verdictKey: hostedVerdictKey(run) } : {}),

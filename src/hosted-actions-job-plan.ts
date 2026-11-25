@@ -428,6 +428,7 @@ export async function prepareActionsJob(
     selection: planError ? { ...selection, planError } : selection,
     groups,
     ...(pool ? { pool } : {}),
+    ...(client.timingHistory ? { timingHistory: client.timingHistory } : {}),
     standard,
     interaction: false,
     command: [standard ? 'node' : run.check.executable, ...run.check.args],

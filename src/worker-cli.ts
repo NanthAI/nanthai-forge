@@ -211,7 +211,7 @@ export async function workerCli(args: string[]) {
             ...address,
             runId,
             command: canonicalPayload(command),
-            features: ['check-report-detail'],
+            features: ['check-report-detail', 'check-selection-detail'],
           }),
         heartbeat: (callback, signature) =>
           mutation('projectHostedCheckWorker:heartbeat', { callback: canonicalPayload(callback), signature }),

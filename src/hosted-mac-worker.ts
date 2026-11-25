@@ -61,6 +61,7 @@ export interface MacWorkerServices {
     acquired: boolean;
     dispatch: boolean;
     reportUpload?: import('./check-report-upload.js').ReportUploadTarget;
+    selectionUpload?: import('./check-report-upload.js').ReportUploadTarget;
   }>;
   heartbeat(
     callback: {
@@ -175,7 +176,11 @@ export async function runHostedMacWorker(services: MacWorkerServices, signal: Ab
         await services.execute(run, controller.signal, async command => {
           const next = await services.control(id, command);
           run = next.run;
-          return { ...run, ...(next.reportUpload ? { reportUpload: next.reportUpload } : {}) };
+          return {
+            ...run,
+            ...(next.reportUpload ? { reportUpload: next.reportUpload } : {}),
+            ...(next.selectionUpload ? { selectionUpload: next.selectionUpload } : {}),
+          };
         });
       } finally {
         clearTimeout(deadline);

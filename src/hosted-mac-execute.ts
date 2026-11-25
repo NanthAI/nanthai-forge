@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-import { uploadCheckReports, type ReportUploadTarget } from './check-report-upload.js';
+import { uploadCheckBytes, uploadCheckReports, type ReportUploadTarget } from './check-report-upload.js';
 import { networkFetch } from './network-fetch.js';
 import { isMachineRunner } from './hosted-machine-runner.js';
 import { semanticCheckCommand } from './semantic-check-command.js';
@@ -17,12 +17,12 @@ import { semanticTests } from './intent-semantic-conflict.js';
 import { localMacLogFiles } from './check-local-log-files.js';
 import { compactProviderOutput } from './check-compact-output.js';
 import { deliverMacCallback } from './hosted-mac-delivery.js';
-import { createReadStream, readFileSync } from 'node:fs';
+import { constants, createReadStream, readFileSync } from 'node:fs';
 import { captureArtifacts } from './work-artifacts.js';
 import { junitDirEnv } from './junit-report.js';
 import { readJunitReports } from './junit-report-files.js';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, open, readFile, writeFile, rm } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -36,7 +36,12 @@ import { prepareMachineCheckout } from './hosted-mac-source.js';
 import { checkSubmodules, submoduleFailureCommand } from './submodule-materialize.js';
 import { checkEnvironment, checkProcessEnvironment, checkPassthrough } from './check-environment.js';
 import { checkPin, type HostedCheckRun } from './hosted-check.js';
-import { signHostedCheckCallback, type HostedCheckCallback } from './hosted-check-evidence.js';
+import {
+  checkSelectionBytes,
+  machineSelectionSchema,
+  signHostedCheckCallback,
+  type HostedCheckCallback,
+} from './hosted-check-evidence.js';
 import { hostedOutputPublisher, type OutputTransport } from './hosted-output-transfer.js';
 import { collectHostedOutput } from './hosted-output-collector.js';
 import { canonicalPayload } from './hosted-source-operation.js';
@@ -53,6 +58,7 @@ import {
 } from './secret-scan.js';
 import type { OutputRoot } from './hosted-check-output.js';
 import { stopProcessTree } from './stop-process-tree.js';
+import { HostedOutputRedactor } from './hosted-output-redactor.js';
 
 /** A machine runner's browser is its own install, not a pinned cache. */
 export const macBrowserNext =
@@ -62,6 +68,45 @@ export type MacExecutionTransport = CheckoutObjectTransport & {
   callback(value: HostedCheckCallback, signature: string): Promise<HostedCheckRun>;
   output: OutputTransport;
 };
+
+/** Read the standard command's own selection, including explicit and docs
+ * selections. Its auxiliary explanations are larger than the replay fields. */
+async function machineSelectionBytes(
+  path: string,
+  files: ReturnType<typeof parseNativeState>['files'],
+  secrets: string[],
+  root: string,
+) {
+  const file = await open(
+    path,
+    constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0),
+  ).catch(() => null);
+  if (!file) return null;
+  try {
+    const stat = await file.stat();
+    const { size } = stat;
+    if (!stat.isFile() || size <= 0 || size > 8 * 1024 * 1024) return null;
+    const raw = Buffer.alloc(size);
+    const { bytesRead } = await file.read(raw);
+    if (bytesRead !== size) return null;
+    const selection = machineSelectionSchema.safeParse(JSON.parse(raw.toString('utf8')));
+    if (!selection.success) return null;
+    const paths = new Set(files.map(entry => entry.path));
+    if (!selection.data.tests.every(path => paths.has(path))) return null;
+    const redactor = new HostedOutputRedactor({ secrets, paths: [root, homedir()] });
+    const bytes = new TextEncoder().encode(
+      canonicalPayload({
+        ...selection.data,
+        reason: redactor.write(Buffer.from(selection.data.reason), true).toString('utf8'),
+      }),
+    );
+    return bytes.length <= checkSelectionBytes ? bytes : null;
+  } catch {
+    return null;
+  } finally {
+    await file.close();
+  }
+}
 /** Landing secret scan (src/secret-scan.ts) on the paths changed from the composition
  * base (main): one extra State read. An unreadable base scans every file instead and
  * applies no allow entry. Allow entries come from the base only (R-01). It runs before
@@ -195,9 +240,13 @@ export async function executeHostedMacCheck(
   const owner = run.lease!.owner,
     token = run.lease!.token;
   let reportUpload: ReportUploadTarget | undefined;
-  const accept = (reply: HostedCheckRun & { reportUpload?: ReportUploadTarget }) => {
-    const { reportUpload: target, ...head } = reply;
+  let selectionUpload: ReportUploadTarget | undefined;
+  const accept = (
+    reply: HostedCheckRun & { reportUpload?: ReportUploadTarget; selectionUpload?: ReportUploadTarget },
+  ) => {
+    const { reportUpload: target, selectionUpload: selectionTarget, ...head } = reply;
     if (target) reportUpload = target;
+    if (selectionTarget) selectionUpload = selectionTarget;
     run = head;
     return run;
   };
@@ -276,8 +325,9 @@ export async function executeHostedMacCheck(
     );
     const selection = await publish({
       scope: 'full',
+      reason: 'The machine runner executes the configured check command in full.',
       tests: [],
-      semanticTests: semanticTests(run.semanticPlan),
+      semanticTests: unionTests,
       ...(queueProof ? { queueProof } : {}),
       // The full command always runs here; declared docs paths only say which Markdown no test reads.
       ...(testedDocsList ? { testedDocs: testedDocsList } : {}),
@@ -395,12 +445,17 @@ export async function executeHostedMacCheck(
         };
         const reports: ContractTimingReader['reports'] = {};
         const readers: ContractTimingReader[] = [];
+        const selectionPath =
+          selectionUpload && isStandardForgeCheck(run.check, process.execPath)
+            ? join(root, 'selection.json')
+            : undefined;
         const child = spawn(execute[0]!, execute.slice(1), {
           cwd: checkout,
           env: {
             ...runtime.env,
             [junitDirEnv]: junitDir,
             ...(queueProofFile ? { FORGE_QUEUE_PROOF: queueProofFile } : {}),
+            ...(selectionPath ? { FORGE_CHECK_SELECTION: selectionPath } : {}),
           },
           detached: process.platform !== 'win32',
           stdio: ['ignore', 'pipe', 'pipe'],
@@ -524,9 +579,20 @@ export async function executeHostedMacCheck(
           const reportDigest = reportUpload
             ? await uploadCheckReports(reportUpload, reports, networkFetch)
             : undefined;
+          const observedSelection = selectionPath
+            ? await machineSelectionBytes(selectionPath, state.files, secrets, root)
+            : null;
+          const machineSelection =
+            observedSelection && selectionUpload
+              ? {
+                  sha256: await uploadCheckBytes(selectionUpload, observedSelection, networkFetch),
+                  size: observedSelection.length,
+                }
+              : undefined;
           await callback({
             kind: 'complete',
             ...(reportDigest ? { reportDigest } : {}),
+            ...(machineSelection ? { machineSelection } : {}),
             status,
             exitCode,
             output: null,

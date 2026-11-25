@@ -214,7 +214,9 @@ export const prepare = internalMutation({
       if (input.packRefresh && run.actions) run.actions.packRefresh = true;
       run.status = 'running';
       if (run.gate) await ctx.db.patch(row._id, { gate: run.gate });
-      await writeHostedCheck(ctx, row._id, run);
+      // This generation is the create-only R2 slot this run’s timings session uses.
+      // Older runners never echo a digest in the recipe, but they read the same slot.
+      await writeHostedCheck(ctx, row._id, run, false, undefined, { timingHistoryGeneration: run.id });
     }
     if (input.resultsPacked && replay) {
       const batch = await ctx.db

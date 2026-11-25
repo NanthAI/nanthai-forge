@@ -14273,6 +14273,72 @@
         "src/scoped-recheck-policy.ts"
       ],
       "test": "lost batch upload replies replay the same generation without duplicate source jobs or checks"
+    },
+    {
+      "incident": "843dc73a",
+      "what": "Hosted checks retain exact shard groups, pool units, machine selections and the original timing inputs for replay.",
+      "file": "tests/hosted-actions-direct.test.mjs",
+      "paths": [
+        "convex/projectHostedActionsDirect.ts",
+        "convex/projectHostedActionsSession.ts",
+        "convex/projectHostedCheckClock.ts",
+        "convex/projectHostedCheckDefinitions.ts",
+        "convex/projectHostedCheckDetail.ts",
+        "convex/projectHostedCheckEntries.ts",
+        "convex/projectHostedCheckLease.ts",
+        "convex/projectHostedCheckRead.ts",
+        "convex/projectHostedCheckReports.ts",
+        "convex/projectHostedCheckSelection.ts",
+        "convex/projectHostedCheckStore.ts",
+        "convex/projectHostedCheckTimingSnapshot.ts",
+        "convex/projectHostedCheckVerdictReuse.ts",
+        "convex/projectHostedChecks.ts",
+        "convex/projectHostedKeepSwitch.ts",
+        "convex/projectHostedLandingCheckWake.ts",
+        "convex/projectHostedLandingEnvironmentHold.ts",
+        "convex/projectHostedLandingEvents.ts",
+        "convex/projectMetricAliasWriter.ts",
+        "convex/schedulerCancel.ts",
+        "src/first-check-risk.ts",
+        "src/hosted-check-evidence.ts",
+        "src/hosted-check.ts",
+        "src/scoped-recheck-policy.ts"
+      ],
+      "test": "check replay returns the original shard groups, pool cuts and timing bytes after rolling history changes"
+    },
+    {
+      "incident": "843dc73a",
+      "what": "A standard machine check publishes the exact selection emitted by its command.",
+      "file": "tests/hosted-mac-runner.test.mjs",
+      "paths": [
+        "convex/projectHostedActionsDirect.ts",
+        "convex/projectHostedActionsReports.ts",
+        "convex/projectHostedActionsWake.ts",
+        "convex/projectHostedCheckCallbacks.ts",
+        "convex/projectHostedCheckClock.ts",
+        "convex/projectHostedCheckDefinitions.ts",
+        "convex/projectHostedCheckDispatch.ts",
+        "convex/projectHostedCheckEntries.ts",
+        "convex/projectHostedCheckLease.ts",
+        "convex/projectHostedCheckMachines.ts",
+        "convex/projectHostedCheckRead.ts",
+        "convex/projectHostedCheckReports.ts",
+        "convex/projectHostedCheckStore.ts",
+        "convex/projectHostedCheckVerdictReuse.ts",
+        "convex/projectHostedCheckWorker.ts",
+        "convex/projectHostedChecks.ts",
+        "convex/projectHostedLandingCheckWake.ts",
+        "convex/projectHostedLandingEnvironmentHold.ts",
+        "convex/projectHostedLandingEvents.ts",
+        "convex/projectHostedMainAuditState.ts",
+        "convex/projectMetricAliasWriter.ts",
+        "src/first-check-risk.ts",
+        "src/hosted-check-evidence.ts",
+        "src/hosted-check-verdict.ts",
+        "src/hosted-check.ts",
+        "src/scoped-recheck-policy.ts"
+      ],
+      "test": "a standard machine check retains the exact selection emitted by its command in its one shard"
     }
   ]
 }

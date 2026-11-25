@@ -17,6 +17,19 @@ import {
 } from './hosted-check.js';
 import { invariant } from './errors.js';
 
+export const checkSelectionBytes = 512 * 1024;
+export const checkSelectionPin = checkObject.refine(pin => pin.size <= checkSelectionBytes);
+export const machineSelectionSchema = z
+  .object({
+    scope: z.enum(['full', 'scoped', 'docs', 'interaction', 'partial']),
+    reason: z.string(),
+    tests: z.array(z.string()),
+  })
+  .strip();
+
+export const machineSelectionKey = (projectId: string, runId: string, fence: number) =>
+  `v1/p/${projectId}/checks/${runId}/selection/fence-${fence}.json`;
+
 /** Runner-clock interval of one supervised shard job. Optional for legacy rows. */
 export const shardExecutionSchema = z
   .object({
@@ -62,6 +75,7 @@ export const hostedCheckCallbackSchema = z
           kind: z.literal('complete'),
           contractReports: semanticReportsSchema.optional(),
           reportDigest: checkHash.optional(),
+          machineSelection: checkSelectionPin.optional(),
           status: z.enum(['passed', 'failed', 'cancelled', 'interrupted', 'runner-unavailable', 'unknown']),
           exitCode: z.number().int().nullable(),
           output: checkObject.nullable(),

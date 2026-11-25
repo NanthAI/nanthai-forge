@@ -95,6 +95,9 @@ export const hostedCheckTables = {
       }),
     ),
     reportStorage: v.optional(v.literal('r2')),
+    /** The run-scoped immutable timing version, even for Actions recipes from older runners. */
+    timingHistoryGeneration: v.optional(v.string()),
+    machineSelection: v.optional(v.object({ sha256: v.string(), size: v.number() })),
     resultBatch: v.optional(v.object({ packed: v.boolean() })),
     reportTimingStamp: v.optional(v.object({ generation: v.string(), sequence: v.number() })),
     reportTimingComplete: v.optional(v.boolean()),

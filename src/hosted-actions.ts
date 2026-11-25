@@ -34,6 +34,8 @@ export const hostedActionsRecipeSchema = z
     groups: z.array(z.array(z.string())),
     // Shard pool cut indices per group (scripts/shard-pool.mjs); absent means the static plan.
     pool: z.array(z.array(z.number().int())).optional(),
+    // Exact bytes the planning session returned, retained beside this run's reports.
+    timingHistory: checkObject.optional(),
     standard: z.boolean(),
     interaction: z.boolean(),
     command: z.array(z.string()).min(1),

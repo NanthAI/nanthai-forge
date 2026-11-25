@@ -2979,11 +2979,22 @@ export class HostedAgentTransport {
     }
   }
   private async observe(command: z.infer<typeof hostedAgentCommandSchemas.status>, waiting = false) {
-    const { laneId, operationId, submissionId, runId, kind, version, summary, reports, cursor, main } =
-      command;
+    const {
+      laneId,
+      operationId,
+      submissionId,
+      runId,
+      kind,
+      version,
+      summary,
+      reports,
+      selection,
+      cursor,
+      main,
+    } = command;
     if (main !== undefined) {
       invariant(
-        [laneId, operationId, submissionId, runId, kind, version, summary, reports, cursor].every(
+        [laneId, operationId, submissionId, runId, kind, version, summary, reports, selection, cursor].every(
           value => value === undefined,
         ),
         'BAD_ARGUMENT',
@@ -2992,6 +3003,11 @@ export class HostedAgentTransport {
       return this.query('projectMainRed:read', main === true ? {} : { sequence: main });
     }
     invariant(!summary || runId, 'BAD_ARGUMENT', 'summary:true reads one check run: pass runId.');
+    invariant(
+      !selection || (runId && !reports && !summary && cursor === undefined),
+      'BAD_ARGUMENT',
+      'Read selection with runId alone.',
+    );
     const ids = [laneId, operationId, submissionId, runId].filter(Boolean).length;
     // A bare status is the project status (handled before this); an observe with no id lists landings.
     if (!ids) throw missingObserveId(this.address);
@@ -3010,6 +3026,11 @@ export class HostedAgentTransport {
         runId,
         ...(reports === 'failed' ? { failed: true } : typeof reports === 'object' ? reports : {}),
         ...(cursor === undefined ? {} : { cursor }),
+      });
+    if (runId && selection)
+      return this.action('projectHostedCheckSelection:detail', {
+        runId,
+        ...(selection === 'timing-history' ? { timings: true } : {}),
       });
     if (runId)
       return this.query(`projectHostedCheckRead:${summary ? 'summary' : 'status'}`, {

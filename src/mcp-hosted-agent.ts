@@ -140,7 +140,7 @@ export function registerHostedAgentWorkflow(
     },
     {
       name: 'forge_work_overview',
-      short: 'Lanes, records, status, board.',
+      short: 'Read Work records.',
       actions: [
         'status',
         'capabilities',
@@ -153,7 +153,7 @@ export function registerHostedAgentWorkflow(
         'help',
       ],
       description:
-        'Read paged metrics/decisions/friction-list, capabilities or one Lane/run/operation/submission; status main:true|N says why main failed. board: unread notes. Decisions: target?, cursor?. friction-list: status?(default open),area?,laneId?,search?,limit?,cursor?; friction-triage (forge_task) dismisses (dropped+reason) or links an Issue (planned+planningItemId). records: collection, parentId/status or id/version; cursor pages pin immutable versions; saves list each saved State (head). No Work hydration, wakes or idle observer.',
+        'Read paged metrics/decisions/friction-list, capabilities or one Lane/run/operation/submission; status main:true|N says why main failed. With runId, selection:true reads the saved check selection and selection:"timing-history" reads its timing snapshot. board: unread notes. Decisions: target?, cursor?. friction-list: status?(default open),area?,laneId?,search?,limit?,cursor?; friction-triage (forge_task) dismisses (dropped+reason) or links an Issue (planned+planningItemId). records: collection, parentId/status or id/version; cursor pages pin immutable versions; saves list each saved State (head). No Work hydration, wakes or idle observer.',
     },
   ];
   // Project rules: defaults until the first call reads the live policy, then regenerated from it.

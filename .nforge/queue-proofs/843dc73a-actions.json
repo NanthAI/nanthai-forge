@@ -1,0 +1,276 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedCheckDetail.ts": "95681d35db5a11b3ee5ac9bbf8d2c86f171beb860649e0f04a4a0998b226f4e4",
+    "convex/projectHostedCheckSelection.ts": "1248f42f3fc00eb2bacae0e556719f4e97bb09ca595ac96bfc9cd752f67c321c",
+    "convex/projectHostedCheckTimingSnapshot.ts": "3487a2d4e6d18251ef86cf368774de253030af94df42b578a6971f5ef11daf89"
+  },
+  "replay": {
+    "incident": "843dc73a",
+    "test": "check replay returns the original shard groups, pool cuts and timing bytes after rolling history changes",
+    "receipt": "246dbd80-a52c-4f2c-b804-87aa57594b06"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "ee376b69b72165304d49999f571b66caf2075ac82ad294fccbaeaefdc89953cc",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "api-review:56826204-3605-4613-bb1d-7a96a4cb8893",
+    "receipt": "56826204-3605-4613-bb1d-7a96a4cb8893"
+  },
+  "exercised": {
+    "convex/projectHostedCheckDetail.ts": {
+      "executed": [
+        "retained"
+      ],
+      "digest": "8802fabefa8d9caee4077cda8bf502ebbdf426d6758c5bc4bbfeb8a0d3d633cf",
+      "units": [
+        [
+          "actionWithMappedResult",
+          "b0ed6eff3696bf0aba536af711123e23326c4c6bceec57a5a3742468863a9d85"
+        ],
+        [
+          "canonicalPayload",
+          "95124f3098690f0b83a3927221e9cee6fc53fe1b0c044ab43a9f934e9effe9bb"
+        ],
+        [
+          "checkPin",
+          "8ad91d20ba8470e84d6fcaa842c7f9a2e934ae8eac8e9a88a87f1f12f376c822"
+        ],
+        [
+          "checkReader",
+          "db0a4ea457ee07432713119b127208b1620aa50b29ba04da28f38a40db32a17b"
+        ],
+        [
+          "checkReportsKey",
+          "f5e9e23e17cbca79e33d6d10df4ec700251010924fb3b089a68e0f04495f2d79"
+        ],
+        [
+          "convexFetch",
+          "77a428f6988af8779d7ca8b82d55e7012514f3dc308446822ee9b8a7fd091bee"
+        ],
+        [
+          "detailAction",
+          "0fa84401bd613cf0e09401ac010c11fdc305500a04c7615b756abab4746fa48a"
+        ],
+        [
+          "identity",
+          "acf4d75e2e03fe385398f8dee728dac29c994433c2847f8c5c382151c81ba6af"
+        ],
+        [
+          "internalQuery",
+          "5c8d0604b108135e4cffd87375004b84485d42cd496921fe3be62e07ab39079a"
+        ],
+        [
+          "invariant",
+          "a25036d770aae805d10bdb41ade261044ed7f7ba6fbbf3ccd57a32c56a3d4c20"
+        ],
+        [
+          "loadHostedCheck",
+          "7d7c2fad5d560d74b72df0c0dfd719fe39b88b74c22fbcad6581a2a765e1c1fd"
+        ],
+        [
+          "makeFunctionReference",
+          "90760cdb0f99f8303180da5ca3bbe536fdac31c89e78b170e62dbf914920e3e4"
+        ],
+        [
+          "pageCheckReports",
+          "3f8118cadd738a4a4182ff78b979cbfbc90073d2e0209607fb7519cdd322028e"
+        ],
+        [
+          "presignGet",
+          "403c89ec97a9a01e8741958d713772eae18dc4b041151fdd1309e17bf155c17b"
+        ],
+        [
+          "r2Config",
+          "d2ad95dc420459f86ba5411296e8abd9e570a3862752b67ea047db825f010c1b"
+        ],
+        [
+          "report",
+          "11f51c908ed7b15c3270a2410f7282cdb9c431b81d35e62cdff8695c9d306e0b"
+        ],
+        [
+          "reports",
+          "234a0352c8a66585f11f90a623f6a589c871c74e2bdd7f46bbebda2d94c2e0a8"
+        ],
+        [
+          "retained",
+          "a8e2b7590cde904d06d3910bb6265b126c23c98270c0c7920c0c0ddf968c4726"
+        ],
+        [
+          "semanticReportsSchema",
+          "c716be7ccccabf4d53937f3654556a0278bb810c7d8bc8b959c000a1227d2a70"
+        ],
+        [
+          "v",
+          "c9b23930c9b094848cdb5f563a16f0a2f497fc28d7ea9a82afca6bc52741e95f"
+        ]
+      ],
+      "shell": "e99eca10958ba0302e7c617f5e5662ca68cbf5286308d97b5479ba71825a2be1"
+    },
+    "convex/projectHostedCheckSelection.ts": {
+      "executed": [
+        "detail"
+      ],
+      "digest": "3351eb4ecf26123deee9a95303a8195a9d87df084a8ccf10605829f4e012b35c",
+      "units": [
+        [
+          "action",
+          "16cc0a385814a698ecc696c740cf8101aaccb68dbf0e14699d65b1f2111cd5df"
+        ],
+        [
+          "canonicalPayload",
+          "95124f3098690f0b83a3927221e9cee6fc53fe1b0c044ab43a9f934e9effe9bb"
+        ],
+        [
+          "checkPin",
+          "8ad91d20ba8470e84d6fcaa842c7f9a2e934ae8eac8e9a88a87f1f12f376c822"
+        ],
+        [
+          "checkSelectionPin",
+          "e6ab11682bca596169a9283490dff790667c6f9d17d8b2e25f9f0cb153122ea2"
+        ],
+        [
+          "detail",
+          "4036a948c4e7f3706c6fc51b81978c33af7be8c6ed61817f3e40e283f63c262c"
+        ],
+        [
+          "digest",
+          "38d4d3b725b6d3f04e00592f37bae5ebce6c5aa005b2548dafe354ff97cf6239"
+        ],
+        [
+          "exchangeObjectReader",
+          "12465ebd029eefb11a16cd0b8d464c2eb1eede5716340c8378970d8de8f1721e"
+        ],
+        [
+          "findCheckTimingSnapshot",
+          "00c826374ece06c5980a21d34ba64244c79cbfec014828c2f8b099a401d6e256"
+        ],
+        [
+          "hostedActionsRecipeSchema",
+          "de9ca10fe6aeb7359a5c94e0b7937b7993e9fbd6c89d5942518d5d3577087540"
+        ],
+        [
+          "internal",
+          "1c4fbefad38403789b67ae2c19c3c68aef7fe69b77ecebf23ef385c154219554"
+        ],
+        [
+          "invariant",
+          "a25036d770aae805d10bdb41ade261044ed7f7ba6fbbf3ccd57a32c56a3d4c20"
+        ],
+        [
+          "machineSelectionKey",
+          "c22b3292540b6c670d28978ebb494af4819b86986e97eb2bbfc2b63286ae76d8"
+        ],
+        [
+          "machineSelectionSchema",
+          "e33204c3fe50bc1b068aca724be5991c2fba216398a272aac507a73f29972b28"
+        ],
+        [
+          "presignGet",
+          "403c89ec97a9a01e8741958d713772eae18dc4b041151fdd1309e17bf155c17b"
+        ],
+        [
+          "r2Config",
+          "d2ad95dc420459f86ba5411296e8abd9e570a3862752b67ea047db825f010c1b"
+        ],
+        [
+          "readCheckTimingSnapshot",
+          "ee57dbe97ac31409d03a7bf0ffdd2456801d7ae2b69511edfa286a21248f3e74"
+        ],
+        [
+          "readExactObject",
+          "7aff58c18f4dd651cc2888af96a1e963d2834dddb13abab374f5f2bd5cf65469"
+        ],
+        [
+          "report",
+          "11f51c908ed7b15c3270a2410f7282cdb9c431b81d35e62cdff8695c9d306e0b"
+        ],
+        [
+          "v",
+          "c9b23930c9b094848cdb5f563a16f0a2f497fc28d7ea9a82afca6bc52741e95f"
+        ]
+      ],
+      "shell": "057a977dff1dfe6c74ca5a678d077fc5ba2d68d5c188518be2a0171d8c97c955"
+    },
+    "convex/projectHostedCheckTimingSnapshot.ts": {
+      "executed": [
+        "findCheckTimingSnapshot",
+        "retainCheckTimingSnapshot",
+        "timingKey"
+      ],
+      "digest": "536c46900c11100e5c64e77ab67e996383a9f4a46fad6f75434ef01a1095de73",
+      "units": [
+        [
+          "convexFetch",
+          "77a428f6988af8779d7ca8b82d55e7012514f3dc308446822ee9b8a7fd091bee"
+        ],
+        [
+          "decoder",
+          "f9e7a6a4b8ba9943880ddb7bf69e761a47f41b3f4ddde43907a7fa19aef02070"
+        ],
+        [
+          "digest",
+          "5f605f8606bb3242a28c6a44a95e70e8b39f3555b7f0838c11f4e606795a3e50"
+        ],
+        [
+          "encoder",
+          "8c975eb5ac94b8c3645cec6d91be6485db47925f783914da5ae08b75eaaa26d4"
+        ],
+        [
+          "findCheckTimingSnapshot",
+          "da4d441fec94c627fad6dfbbe5b962c44d904c4b8080cf61643fd6ccd45a2473"
+        ],
+        [
+          "invariant",
+          "a25036d770aae805d10bdb41ade261044ed7f7ba6fbbf3ccd57a32c56a3d4c20"
+        ],
+        [
+          "messages",
+          "93059b1c419b9019648fcc7ee8fcc27ce4d52c9f9f63b613479dea3f619b33b6"
+        ],
+        [
+          "networkTimeout",
+          "60b76ce77cf75d5d18ec9e2cdaed22e7d238d2f2b56ff3344657f787963ea400"
+        ],
+        [
+          "presignGet",
+          "403c89ec97a9a01e8741958d713772eae18dc4b041151fdd1309e17bf155c17b"
+        ],
+        [
+          "presignPut",
+          "3159739f5e30f10aabdf5b1927a4d9b716af9b40941690c2358abe2c9ca85e6f"
+        ],
+        [
+          "r2Config",
+          "d2ad95dc420459f86ba5411296e8abd9e570a3862752b67ea047db825f010c1b"
+        ],
+        [
+          "readCheckTimingSnapshot",
+          "bdd91a9f2ce0743ff6898fbf4dff97296932ca0fce3fd592b998f627301cf6a6"
+        ],
+        [
+          "readExactObject",
+          "7aff58c18f4dd651cc2888af96a1e963d2834dddb13abab374f5f2bd5cf65469"
+        ],
+        [
+          "readR2Object",
+          "b41aeeb6f99758417e9cc463a0e5cf053ce03bedfd6aa384df5f04eb34a40e79"
+        ],
+        [
+          "retainCheckTimingSnapshot",
+          "62c9f7ff4df9cf9ce1ebe5f793f3cd1c8fe9396e58d6cfb86d2395001a6ca94c"
+        ],
+        [
+          "timingHistoryLimits",
+          "0520e80caa50a2fafb3d4526a732d17c6fc2aa8023c69b3562be6f4800255da6"
+        ],
+        [
+          "timingKey",
+          "05a62378843d5acc15a451bb0c3da4b8e73ace277a4707195b46cbc581231de1"
+        ]
+      ],
+      "shell": "c8e671f425f8a1b9ffa2bc28c93a7be46561d13609a3c853b6c93153e096c8d9"
+    }
+  }
+}

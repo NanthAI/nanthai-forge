@@ -18,11 +18,22 @@ const identity = { projectId: v.id('hostedProjects'), runId: v.string() };
 /** Internal bytes are never exposed as a URL or key. The public action repeats the query's
  * access check and uses the same cliServer identity mapper on its final reply. */
 export const retained = internalQuery({
-  args: identity,
+  args: { ...identity, header: v.optional(v.literal(true)) },
   returns: v.string(),
-  handler: async (ctx, input) => {
+  handler: async (ctx, { header, ...input }) => {
     await checkReader(ctx, input.projectId);
-    return canonicalPayload((await loadHostedCheck(ctx, input)).run);
+    const { row, run } = await loadHostedCheck(ctx, input, !header);
+    return canonicalPayload(
+      header
+        ? {
+            plan: run.plan,
+            provider: run.configuration.provider,
+            fence: run.fence,
+            timingHistoryGeneration: row.timingHistoryGeneration ?? null,
+            machineSelection: row.machineSelection ?? null,
+          }
+        : run,
+    );
   },
 });
 const detailAction = actionWithMappedResult((value, input) => {

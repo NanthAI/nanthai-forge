@@ -23,6 +23,7 @@ import { workerCli, workerConfiguration } from '../dist/worker-cli.js';
 import { runHostedMacWorker, HostedMacProvider } from '../dist/hosted-mac-worker.js';
 import { installHostedCheckout } from '../dist/hosted-checkout-files.js';
 import { signMacHeartbeat, hostedMacRuntime } from '../dist/hosted-mac-lease.js';
+import { fakeSourceR2 } from './convex-source-r2-fixture.mjs';
 const worker = await import(moduleUrl('../convex/projectHostedCheckWorker.ts'));
 const lease = await import(moduleUrl('../convex/projectHostedCheckLease.ts'));
 const outputApi = await import(moduleUrl('../convex/projectHostedOutputApi.ts'));
@@ -107,9 +108,14 @@ async function fixture(t, actualEnvironment = false, provider = 'mac', source = 
         ...overrides,
       }),
     );
-  const control = (runId, command) =>
+  const control = (runId, command, features) =>
     f
-      .call('macControl', worker.control, { ...address, runId, command: JSON.stringify(command) })
+      .call('macControl', worker.control, {
+        ...address,
+        runId,
+        command: JSON.stringify(command),
+        ...(features ? { features } : {}),
+      })
       .then(JSON.parse);
   const claim = id => control(id, { kind: 'claim', owner: sessionId, leaseMs: 60_000 });
   const heartbeat = (run, eventId = randomUUID(), signature) => {
@@ -579,7 +585,7 @@ for (const [p, sha256, mode, target] of expected) {
 }
 console.log('exact source verified: ' + expected.length + ' entries on ' + process.platform + '/' + process.arch);
 `;
-async function exactSourceRun(t, files, serve = bytes => bytes, command = null, removed = []) {
+async function exactSourceRun(t, files, serve = bytes => bytes, command = null, removed = [], features) {
   const blobs = new Map(files.map(([, text]) => [digest(Buffer.from(text)), Buffer.from(text)]));
   const stateFiles = files
     .map(([path, text, mode]) => ({ path, blob: digest(Buffer.from(text)), mode }))
@@ -656,7 +662,7 @@ async function exactSourceRun(t, files, serve = bytes => bytes, command = null, 
         return () => {};
       },
       watch: () => () => {},
-      control: f.control,
+      control: (runId, command) => f.control(runId, command, features),
       heartbeat: async (callback, signature) =>
         JSON.parse(
           await f.call('heartbeat', worker.heartbeat, {
@@ -685,6 +691,56 @@ async function exactSourceRun(t, files, serve = bytes => bytes, command = null, 
   );
   return { f, run, failure, wallMs: Math.round(performance.now() - started) };
 }
+
+test('a standard machine check retains the exact selection emitted by its command in its one shard', async t => {
+  const r2 = fakeSourceR2(t);
+  const sourceFetch = globalThis.fetch;
+  globalThis.fetch = (target, init) => {
+    const { pathname } = new URL(target);
+    if (init?.method !== 'PUT' || !pathname.includes('/selection/fence-')) return sourceFetch(target, init);
+    assert.equal(new Headers(init.headers).get('if-none-match'), '*');
+    r2.requests.push('PUT');
+    assert(!r2.objects.has(pathname));
+    r2.objects.set(pathname, Buffer.from(init.body));
+    return Promise.resolve(new Response(null, { status: 200 }));
+  };
+  const selection = {
+    scope: 'partial',
+    reason: 'Synthetic explicit selection',
+    tests: ['tests/selected.test.mjs'],
+  };
+  const { f, run, failure } = await exactSourceRun(
+    t,
+    [
+      [
+        'scripts/forge-check.mjs',
+        `import { writeFileSync } from 'node:fs';
+        writeFileSync(process.env.FORGE_CHECK_SELECTION, ${JSON.stringify(JSON.stringify(selection))});`,
+        'file',
+      ],
+      ['tests/selected.test.mjs', '// selected', 'file'],
+      ['tests/other.test.mjs', '// unselected', 'file'],
+    ],
+    undefined,
+    {
+      name: 'verify',
+      executable: process.execPath,
+      args: ['scripts/forge-check.mjs'],
+      environmentLabel: 'clean',
+    },
+    [],
+    ['check-selection-detail'],
+  );
+  assert.equal(failure, null);
+  const completed = await f.status(run.id);
+  assert.equal(completed.status, 'passed');
+  const row = [...f.tables.projectHostedCheckRuns.values()].find(row => row.runId === run.id);
+  const [key, bytes] = [...r2.objects][0];
+  assert(key.endsWith(`/checks/${run.id}/selection/fence-${completed.fence}.json`));
+  assert.deepEqual(JSON.parse(bytes.toString()), selection);
+  assert.deepEqual(row.machineSelection, { sha256: digest(bytes), size: bytes.length });
+  assert.deepEqual(r2.requests, ['PUT']);
+});
 
 test('a hosted machine standard check refuses a deleted queue path without attached proof', async t => {
   const guard = new URL('../scripts/test-queue-proof.mjs', import.meta.url).href;

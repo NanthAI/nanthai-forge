@@ -85,7 +85,7 @@ export function fakeSourceR2(t) {
         headers: { 'content-range': `bytes ${start}-${end}/${bytes.length}` },
       });
     }
-    return new Response(bytes);
+    return new Response(bytes, { headers: { 'content-length': String(bytes.length) } });
   };
   t.after(() => (globalThis.fetch = original));
   return { objects, requests, hooks };

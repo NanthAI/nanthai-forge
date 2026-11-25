@@ -2196,6 +2196,101 @@ test('HTTP plan pairs use verified canonical R2 bytes and reuse both digests on 
   );
 });
 
+test('check replay returns the original shard groups, pool cuts and timing bytes after rolling history changes', async t => {
+  const s = await fixture(t, 3);
+  await s.bind();
+  const r2 = fakeSourceR2(t),
+    r2Fetch = globalThis.fetch;
+  globalThis.fetch = (url, init) =>
+    new URL(url).hostname === 'token.actions.githubusercontent.com'
+      ? Promise.resolve(jwks())
+      : r2Fetch(url, init);
+  const modules = { projectHostedActionsSession: sessions, projectHostedActionsPlan: plans };
+  const mutations = [];
+  const send = command =>
+    handle._handler(
+      {
+        runMutation: (ref, input) => {
+          const [module, method] = getFunctionName(ref).split(':');
+          mutations.push(module);
+          return s.raw(modules[module], method, input);
+        },
+      },
+      new Request(`${audience}/checks/actions`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${oidc()}` },
+        body: JSON.stringify({ ...s.id, command }),
+      }),
+    );
+
+  const files = ['a', 'b', 'c', 'd', 'e'].map(name => `tests/${name}.test.mjs`);
+  const history = durationMs =>
+    JSON.stringify({ version: 1, files: { [files[0]]: { durationMs, updatedAt: '2026-01-01' } }, runs: [] });
+  s.insert('projectHostedTestTimings', { projectId: s.projectId, history: history(40_000) });
+  const command = { kind: 'session', timings: true };
+  const first = await (await send(command)).json();
+  assert.deepEqual(mutations, ['projectHostedActionsSession']);
+  assert.deepEqual(r2.requests, ['PUT']);
+  assert.equal(first.timingHistory, history(40_000));
+  assert.deepEqual(first.timingHistoryPin, {
+    sha256: createHash('sha256').update(first.timingHistory).digest('hex'),
+    size: Buffer.byteLength(first.timingHistory),
+  });
+  const key = [...r2.objects.keys()][0];
+  assert(key.endsWith(`/checks/${s.run.id}/selection/timing-history.json`));
+  [...s.tables.projectHostedTestTimings.values()][0].history = history(90_000);
+  const retry = await (await send(command)).json();
+  assert.equal(retry.timingHistory, first.timingHistory);
+  assert.deepEqual(retry.timingHistoryPin, first.timingHistoryPin);
+  assert.deepEqual(r2.requests, ['PUT', 'PUT', 'GET']);
+  assert.equal(r2.objects.size, 1);
+
+  const pins = {
+    head: s.run.request.expectedHead,
+    definition: s.run.check.definition,
+    selection: { scope: 'full', reason: 'synthetic complete suite', tests: files },
+    standard: true,
+    interaction: false,
+    command: ['node', 'scripts/forge-check.mjs'],
+    groups: [
+      [files[2], files[0], files[4]],
+      [files[1], files[3]],
+    ],
+    pool: [[1, 2], [1]],
+  };
+  const recipe = { ...pins, pin: checkPin(pins) };
+  mutations.length = 0;
+  assert.equal((await send({ kind: 'plan', plan: { recipe, lockfile: 'e'.repeat(64) } })).status, 200);
+  assert.deepEqual(mutations, ['projectHostedActionsSession', 'projectHostedActionsPlan']);
+  assert.equal(r2.objects.size, 3, 'existing recipe and selection plus one timing snapshot');
+  const { detail } = await import(moduleUrl('../convex/projectHostedCheckSelection.ts'));
+  const { retained } = await import(moduleUrl('../convex/projectHostedCheckDetail.ts'));
+  const { resolve } = await import(moduleUrl('../convex/projectObjects.ts'));
+  let viewer = 'owner';
+  const ctx = {
+    auth: { getUserIdentity: async () => ({ subject: viewer }) },
+    runQuery: (ref, input) =>
+      getFunctionName(ref) === 'projectHostedCheckDetail:retained'
+        ? s.transaction('replay-run', retained, input, viewer)
+        : s.transaction('replay-object', resolve, input, viewer),
+  };
+  assert.deepEqual(JSON.parse(await detail._handler(ctx, s.id)), {
+    selection: pins.selection,
+    groups: pins.groups,
+    pool: pins.pool,
+    timingHistory: first.timingHistoryPin,
+  });
+  const timingInput = { ...s.id, timings: true };
+  assert.deepEqual(JSON.parse(await detail._handler(ctx, timingInput)), {
+    timingHistory: first.timingHistoryPin,
+    history: first.timingHistory,
+  });
+  viewer = 'stranger';
+  const reads = r2.requests.length;
+  await assert.rejects(detail._handler(ctx, timingInput), code('PROJECT_UNAVAILABLE'));
+  assert.equal(r2.requests.length, reads, 'a denied replay reads no R2 objects');
+});
+
 test('HTTP plan stores the selection and recipe objects concurrently with the same R2 requests', async t => {
   const s = await fixture(t);
   await s.bind();

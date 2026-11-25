@@ -727,6 +727,20 @@ than 30 days as of that run's completion. It updates observed files first, so
 partial selections and argument pages retain recent unselected weights and can
 refresh a dormant weight in the same run. No cleanup job or extra read runs.
 
+The Actions recipe retains the selection and the ordered groups and pool cuts
+it gave to the shards. The recipe also pins the SHA-256 and byte count of the
+timing history returned to the planner. The first timing session
+stores that history beside the reports in R2. A retry uses the same snapshot
+even if another check has updated the rolling history. Report expiry leaves
+the selection, recipe and timing snapshot available with the run record.
+The ordinary landing path adds one R2 PUT per planned Actions run, bounded by
+the existing 1 MiB timing-history limit, and adds zero Convex calls or row reads.
+Older Actions supervisors use the same run-scoped timing generation even when
+their recipe predates the digest field. Machine runners record the selection
+emitted by the standard check in a single R2 PUT of up to 512 KiB. Machine
+commands do not use timing weights to plan shards. Per-test reports describe
+outcomes for files that executed.
+
 `/checks/actions` accepts only GitHub-signed OIDC tokens for this exact site audience,
 repository, `forge-check.yml@refs/heads/main`, `workflow_dispatch`, first attempt,
 and a GitHub-hosted or self-hosted runner. The execution ID must already be bound by the dispatch

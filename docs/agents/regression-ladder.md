@@ -145,6 +145,7 @@ removed, skipped or moved out of `tests/*.test.mjs`, or when this page stops nam
 | `1cb3caa2` | A queue proof a peer landing made stale in a unit its replay ran: the planner keeps it while the Lane kept its proven bytes, and the landing check re-runs the replay |
 | `789b7b21` | `nforge agent ROOT open` into a folder that does not exist yet redirected into Forge's addressed state dir instead of creating ROOT and its checkout (breaking `scripts/bench-t3code/forge-arm.mjs:137`); checkout-creating commands now keep ROOT while address-only commands keep `59f0e296` behaviour |
 | `8b7ab7a9` | Dry N=3 bench cells forge-n3-r1-dry-a1-20261124T070718 and forge-n3-r1-dry-a2-20261124T074857 repacked about 2.11 MB per clean batch terminal quantum after losing the exact main physical descriptor across an action boundary. |
+| `843dc73a` | Hosted checks retain exact shard groups, pool units, machine selections and the original timing inputs for replay. |
 
 A new core-claim incident adds its replay to the registry and a row here in the Lane that fixes
 it.

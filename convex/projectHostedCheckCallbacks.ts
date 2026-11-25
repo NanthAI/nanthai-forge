@@ -121,6 +121,11 @@ export async function receiveHostedCheckCallback(
     );
   run.executionId = callback.executionId;
   const result = callback.result;
+  invariant(
+    result.kind !== 'complete' || !result.machineSelection || machine,
+    'EVIDENCE_CHANGED',
+    'Only the registered machine can report its selection.',
+  );
   if (result.kind === 'shard') {
     const shard = result.shard;
     invariant(
@@ -261,7 +266,16 @@ export async function receiveHostedCheckCallback(
   });
   await input.beforeWrite?.(run);
   if (!input.deferWrite) {
-    await writeHostedCheck(ctx, row._id, run, input.providerAttested);
+    await writeHostedCheck(
+      ctx,
+      row._id,
+      run,
+      input.providerAttested,
+      undefined,
+      result.kind === 'complete' && result.machineSelection && hostedCheckTerminal(run)
+        ? { machineSelection: result.machineSelection }
+        : undefined,
+    );
     await notifyActionsProgress(ctx, run, now);
   }
   return run;

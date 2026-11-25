@@ -17,6 +17,21 @@ cancelled provider conclusions never feed timings. The report object follows the
 existing check-log retention and cleanup. Legacy row removal is tracked by Issue
 589601f7-9593-42ee-b89b-01954d438251.
 
+Use `status {runId,selection:true}` to read the pinned scope, reason, selected
+test paths and ordered shard groups for a hosted run. In Actions the static
+job is counted separately from the test groups. Pool cuts delimit units inside
+each group's tail, in group and cut order. A null pool means the groups run
+without pooling. Machine checks execute their configured command in one job
+and retain the standard check's emitted selection. A null test inventory means
+the command did not expose its selection. Semantic tests remain listed separately.
+Runs cancelled before planning and external CI status checks have no Forge
+selection.
+
+Use `status {runId,selection:"timing-history"}` to retrieve the raw timing-history
+JSON text and its size and SHA-256. Runs that planned before timing snapshots
+and providers without timing-based planning return a null pin. Selection and timing reads
+are on demand and use the same access as check report detail.
+
 Preparing landings appear in `queue` after admitted entries, with `position:null` and
 `waitingOn.kind:"source-preparation"`. They wait for their server source/landing
 controller, not another queue entry; dispatch rank is assigned at admission.

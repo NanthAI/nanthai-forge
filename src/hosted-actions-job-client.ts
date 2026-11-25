@@ -11,12 +11,13 @@ import type { PhysicalGrantPlan, SignedPhysicalRun } from './physical-manifest-d
 import {
   actionsSourceStateCapability,
   actionsSourceStateV2Capability,
+  actionsTimingSnapshotCapability,
 } from './hosted-actions-capabilities.js';
 import { mapSourceOrdered } from './hosted-source-parallel.js';
 import type { ResultBatchTargets } from './hosted-actions-result-batch.js';
 import { networkFetch } from './network-fetch.js';
 import { actionsPreflightTicketSchema, type ActionsPreflightTicket } from './hosted-actions-preflight.js';
-import type { HostedCheckRun } from './hosted-check.js';
+import { checkObject, type HostedCheckRun } from './hosted-check.js';
 
 import type { SourceWorkerTransport } from './hosted-source-worker-reader.js';
 import { sourcePackDownloadSchema, type SourcePackDownload } from './source-pack.js';
@@ -58,6 +59,7 @@ export class ActionsJobClient {
   run: HostedCheckRun | null = null;
   standalonePlacement: { checkEntries: string[] } | undefined;
   timings: Record<string, number> = {};
+  timingHistory: z.infer<typeof checkObject> | undefined;
   capabilities: string[] = [];
   sourcePack: SourcePackDownload | null = null;
   invalidSourcePack = false;
@@ -217,14 +219,17 @@ export class ActionsJobClient {
       ? capabilities.filter(value => typeof value === 'string')
       : [];
     this.timings = {};
+    this.timingHistory = undefined;
     this.standalonePlacement = undefined;
     this.sourcePack = null;
     this.invalidSourcePack = false;
     if (timings && this.capabilities.includes('session.timingHistory')) {
+      const snapshot = this.capabilities.includes(actionsTimingSnapshotCapability);
       const result = (await this.call({ kind: 'session', timings: true })) as {
         run: HostedCheckRun;
         standalonePlacement?: { checkEntries: string[] };
         timingHistory: string;
+        timingHistoryPin?: unknown;
         sourcePack?: SourcePackDownload;
       };
       this.run = result.run;
@@ -233,6 +238,16 @@ export class ActionsJobClient {
         const pack = sourcePackDownloadSchema.safeParse(result.sourcePack);
         this.sourcePack = pack.success ? pack.data : null;
         this.invalidSourcePack = !pack.success && result.sourcePack != null;
+      }
+      if (snapshot && (!result.run.plan || result.timingHistoryPin !== undefined)) {
+        const pin = checkObject.safeParse(result.timingHistoryPin);
+        const bytes = Buffer.from(result.timingHistory);
+        invariant(
+          pin.success && bytes.length === pin.data.size && digest(bytes) === pin.data.sha256,
+          'EVIDENCE_CHANGED',
+          'Actions timing history differs from its retained snapshot.',
+        );
+        this.timingHistory = pin.data;
       }
       this.timings = timingDurations(parseTimingHistory(result.timingHistory));
     }

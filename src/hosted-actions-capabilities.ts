@@ -27,6 +27,7 @@ export const actionsSubmoduleAccessCapability = 'checks.submoduleAccess';
 /** The plan call says it starts the optional source-pack job; a pass then reads the required
  * jobs' conclusions instead of waiting for the run's (friction 0064c3b2). */
 export const actionsPackVerdictCapability = 'checks.packVerdict';
+export const actionsTimingSnapshotCapability = 'session.timingSnapshot';
 /** The trusted plan can report the pinned control build with its existing request. */
 const actionsControlBuildCapability = 'checks.controlBuildKey';
 /** Results say where the shard ran project code (`user` or `shared`); the run and receipt keep it. */
@@ -38,6 +39,7 @@ export const hostedActionsCapabilities = [
   'results.testFiles.truncated',
   'results.execution',
   'session.timingHistory',
+  actionsTimingSnapshotCapability,
   'sourcePack',
   actionsSourceBatchCapability,
   actionsSourceClosureCapability,
@@ -82,6 +84,7 @@ export const actionsCapabilityFields: Readonly<Record<string, string>> = {
   'result.result.execution': 'results.execution',
   'result.logBytes': actionsInlineLogCapability,
   'plan.plan.recipe.pool': actionsPoolCapability,
+  'plan.plan.recipe.timingHistory': actionsTimingSnapshotCapability,
   'result.result.pool': actionsPoolCapability,
   'plan.plan.recipe.actions': actionsToolchainsCapability,
   'plan.resultsBatch': actionsBatchCapability,

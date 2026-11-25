@@ -26,6 +26,8 @@ import { machineCollectorKey, runSigningSecret } from '../src/hosted-collector-k
 import { hostedMachineRunnerSchema, checkPin, hostedCheckTerminal } from '../src/hosted-check';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
+import { machineSelectionKey } from '../src/hosted-check-evidence';
+import { presignResultSlot, r2Config } from './r2';
 import { report } from './errors';
 import type { Id } from './_generated/dataModel';
 
@@ -174,7 +176,17 @@ export const control = mutation({
         invariant(run.lease?.owner === input.sessionId, 'WORK_STALE', 'Claim the run before controlling it.');
       const reply = await controlHostedCheck(ctx, { ...input, command });
       const reportUpload = await checkReportUploadTarget(reply.run, input.features);
-      return canonicalPayload({ ...reply, ...(reportUpload ? { reportUpload } : {}) });
+      const selectionUpload =
+        command.kind === 'observe' &&
+        reply.run.status === 'running' &&
+        input.features?.includes('check-selection-detail')
+          ? await presignResultSlot(r2Config(), machineSelectionKey(input.projectId, run.id, reply.run.fence))
+          : undefined;
+      return canonicalPayload({
+        ...reply,
+        ...(reportUpload ? { reportUpload } : {}),
+        ...(selectionUpload ? { selectionUpload } : {}),
+      });
     } catch (error) {
       return report(error);
     }

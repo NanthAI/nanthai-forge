@@ -33,7 +33,7 @@
 | `x complete-merged` | `operationId?` |
 | `x abandon-dormant` | `apply?, limit?, operationId?` |
 | `start --reopen` | `laneId?, target?, operationId?` |
-| `status` | `laneId?, whoami?, kind?, operationId?, submissionId?, runId?, version?, summary?, reports?, cursor?, main?, files?` |
+| `status` | `laneId?, whoami?, kind?, operationId?, submissionId?, runId?, version?, summary?, reports?, selection?, cursor?, main?, files?` |
 | `observe` | `kind?, operationId?, submissionId?, runId?, version?` |
 | `metrics` | `from?, to?, limit?, cursor?, contextDays?, operationId?` |
 | `capabilities` | `operationId?` |

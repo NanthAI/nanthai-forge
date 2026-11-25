@@ -262,6 +262,14 @@ function fixture(
           ? {
               run,
               timingHistory: JSON.stringify(timingHistory),
+              ...(capabilities?.includes('session.timingSnapshot')
+                ? {
+                    timingHistoryPin: {
+                      sha256: digest(JSON.stringify(timingHistory)),
+                      size: Buffer.byteLength(JSON.stringify(timingHistory)),
+                    },
+                  }
+                : {}),
               ...(session.standalonePlacement ? { standalonePlacement: session.standalonePlacement } : {}),
               ...(session.sourcePack ? { sourcePack: session.sourcePack } : {}),
               ...(capabilities ? { capabilities } : {}),
@@ -1069,6 +1077,10 @@ test('planner consumes session timing history for balanced LPT shards; empty and
       timedShards(tests, Object.keys(filesHistory).length ? durations : {}, { callsPerJob: 4 }),
     );
     assert.equal(s.calls.filter(call => call.kind === 'session').length, 2);
+    assert.deepEqual(prepared.recipe.timingHistory, {
+      sha256: digest(JSON.stringify({ version: 1, files: filesHistory, runs: [] })),
+      size: Buffer.byteLength(JSON.stringify({ version: 1, files: filesHistory, runs: [] })),
+    });
     if (Object.keys(filesHistory).length) {
       assert.equal(prepared.recipe.groups.length, 2);
       const estimates = prepared.recipe.groups.map(group => shardDuration(group, durations));

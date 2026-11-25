@@ -509,6 +509,10 @@ export const hostedAgentCommandSchemas = {
           z.literal(true),
         ])
         .optional(),
+      selection: z
+        .union([z.literal(true), z.literal('timing-history')])
+        .optional()
+        .describe('With runId, reads the retained check selection or its exact timing snapshot.'),
       cursor: z.string().nullable().optional(),
       /** Why main failed (ae068e0c): the newest red (true) or the red at this audit event sequence, with its failed
        * run, the landings since the last pass, the culprit when proven and how it ended. */

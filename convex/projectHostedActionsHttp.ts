@@ -34,6 +34,7 @@ import { submoduleReadTokens, type SubmodulePolicy } from './githubAppToken';
 import type { RunnerScope } from './githubBindingAccess';
 import { convexFetch } from './networkFetch';
 import { networkFailure } from '../src/network-fetch';
+import { findCheckTimingSnapshot, retainCheckTimingSnapshot } from './projectHostedCheckTimingSnapshot';
 /** Refused writes that resolve on their own: the runner keeps its result and
  * retries the same request (Issue 72d50375). */
 // EXCHANGE_REQUEST_*: convexFetch transport faults (deadline or lost connection).
@@ -139,14 +140,23 @@ export const handle = httpAction(async (ctx, request) => {
           log: canonicalPayload(command.log),
         }),
       );
-    else if (command.kind === 'session')
+    else if (command.kind === 'session') {
       value = JSON.parse(
         await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedActionsSession:session'), {
           ...input,
           ...(command.timings ? { timings: true } : {}),
         }),
       );
-    else if (command.kind === 'sourcePack')
+      if (command.timings) {
+        reason = 'storage';
+        const session = value as { run: HostedCheckRun; timingHistory: string };
+        const snapshot = session.run.plan
+          ? await findCheckTimingSnapshot(input)
+          : await retainCheckTimingSnapshot(input, session.timingHistory);
+        if (snapshot) Object.assign(session, snapshot);
+        reason = 'authorization';
+      }
+    } else if (command.kind === 'sourcePack')
       value = await sourcePackCommand(ctx, input, command.phase, command.object);
     else if (command.kind === 'submoduleAccess') {
       // Authorize the live run first; the same call reads the owner's current submodule

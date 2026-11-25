@@ -3,3 +3,7 @@ server action serves exact paged reports from retained inline or paged runs and 
 R2 report objects. Every new run uses the writer (inline readers go on 2026-12-31). Failure lists are bounded to 8 KiB with
 exact counts, including mass failures. CLI/MCP `status {runId,reports:"failed"}` and the landing
 page's Test reports disclosure read detail on demand. Uploader, provider webhook and verdict confirmation coalesce report ingestion; settled replays skip report I/O while unfinished timing and output work remains repairable.
+
+Check status also reads the retained test selection, ordered shard groups and
+pool cuts on demand. New Actions plans pin the exact timing snapshot used to
+balance their shards. The snapshot stays in R2 with the run's selection evidence.

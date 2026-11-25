@@ -12,6 +12,13 @@ export async function uploadCheckReports(
   request: typeof fetch,
 ) {
   const bytes = new TextEncoder().encode(canonicalPayload(reports));
+  return uploadCheckBytes(target, bytes, request);
+}
+export async function uploadCheckBytes(
+  target: ReportUploadTarget,
+  bytes: Uint8Array<ArrayBuffer>,
+  request: typeof fetch,
+) {
   const pin = digest(bytes);
   let response: Response;
   for (let attempt = 0; ; attempt++) {
@@ -27,8 +34,8 @@ export async function uploadCheckReports(
     invariant(
       original.ok && digest(new Uint8Array(await original.arrayBuffer())) === pin,
       'EVIDENCE_CHANGED',
-      'Retry the original immutable check report upload.',
+      'Retry the original immutable check evidence upload.',
     );
-  } else invariant(response.ok, 'SOURCE_UNAVAILABLE', 'The check report upload is unavailable.');
+  } else invariant(response.ok, 'SOURCE_UNAVAILABLE', 'The check evidence upload is unavailable.');
   return pin;
 }
