@@ -42,7 +42,6 @@ const convexSourceModules = Object.fromEntries(
       'projectConvexSourceFanout',
       'projectConvexSourceStore',
       'projectConvexSourceObjects',
-      'legacyStorageRead',
       // A step's lease renewal and its lease-end repair wake (incident e62d834b).
       'projectConvexSourceLease',
       // save-then-resolve: the real chain action, with this fixture's R2 and source steps.

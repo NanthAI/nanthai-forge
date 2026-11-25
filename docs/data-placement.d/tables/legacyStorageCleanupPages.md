@@ -1,1 +1,1 @@
-| `legacyStorageCleanupPages` | Retry receipts for approved maintenance pages; no file bodies. | Maintenance pages |
+| `legacyStorageCleanupPages` | Retry receipts for maintenance and operational-expiry pages, and the expiry catch-up cursor; no file bodies. The name is historical (it began as the legacy storage cleanup receipts); a rename moves rows and capsule pointers. | Maintenance and expiry pages |

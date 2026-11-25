@@ -2,6 +2,10 @@
 // Copyright 2026 Ferdinando Valsecchi
 import type { MutationCtx, QueryCtx } from './server';
 import { invariant } from '../src/errors';
+
+/** Retry receipts for one-off maintenance pages. The table keeps its original name
+ * (`legacyStorageCleanupPages`) because operational expiry and the landing capsule also store
+ * their own receipts in it; a rename moves rows and capsule pointers (Item c0af6cfa follow-up). */
 export async function cleanupReceipt(ctx: QueryCtx, operationId: string, part: string, request: string) {
   const old = await ctx.db
     .query('legacyStorageCleanupPages')
@@ -23,8 +27,4 @@ export async function recordCleanup(
     request,
     result: JSON.stringify(result),
   });
-}
-export function recentCleanup(value: string, since: number, window: number) {
-  const at = Date.parse(value);
-  return Number.isFinite(at) && at >= since && at <= Date.now() && Date.now() - at <= window;
 }

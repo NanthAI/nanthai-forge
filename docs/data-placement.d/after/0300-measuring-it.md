@@ -1,6 +1,6 @@
 ## Measuring it
 
-The [legacy storage audit](../../operations/legacy-storage-cleanup.md#read-only-audit-and-disposition-planner) pages every table and `_storage` without deploying code, reports physical bytes separately from document JSON sizes, and prepares a dry-run-only disposition plan. R2 LIST size matches do not replace full-digest purge verification.
+The read-only storage inventory (`scripts/storage-inventory.mjs`, [storage inventory](../../operations/storage-inventory.md)) pages every table and `_storage` through reviewed named queries, reports physical bytes separately from document JSON sizes and reads no file bytes.
 
 Hosted self-metrics include **bytes by location**: every Convex file-storage write on the deployment in the window, read from the `_storage` system table newest first (`projectBytePlacement:convexWritten`, pages of 64; one call when nothing was written). It must read 0 bytes; any byte adds a warning to the headline. An older deployment without the query reports the metric as unknown, never 0.
 

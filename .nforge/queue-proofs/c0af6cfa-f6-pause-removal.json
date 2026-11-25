@@ -1,0 +1,193 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedLandingRedrive.ts": "ee542b7b6fee370646dc58f28ac3b9ea5dde5b5f1ffac425e029ddff21b9aaa9",
+    "src/hosted-landing-redrive.ts": "165116420413904d4a1cd0067e0dd8e774fc568455438fa7aa4d91f3780e0ce8"
+  },
+  "replay": {
+    "incident": "37016080",
+    "test": "incident replay 37016080: the licence sequence (two fixes after failed checks, then a resolution Lane through four main moves) needs one owner approval",
+    "receipt": "e95a8271-21d0-4c3d-ae0c-7a0ee554ecb8"
+  },
+  "authorModel": "claude-sonnet-5-5",
+  "authorSession": "120772f6-a122-49eb-85bf-2b5228dac2b9",
+  "review": {
+    "model": "claude-opus-5-5",
+    "session": "review-api:d76f5a6f-7f3e-48e0-863e-54c675f56c07",
+    "receipt": "f5e5e712-8811-4588-991a-3d9b15a9c1e0"
+  },
+  "exercised": {
+    "convex/projectHostedLandingRedrive.ts": {
+      "executed": [
+        "redriveLanding",
+        "redriveQueue"
+      ],
+      "digest": "153f84b3c7f4713b8b43bd004aa2b6cd637b5505491ae584d5637a233e3e0d81",
+      "units": [
+        [
+          "REDRIVE_ORDER_HOPS",
+          "a0426c5407aa87a13a8e4c9773c14c22416c0acc4d558029e1aef5ab43635e75"
+        ],
+        [
+          "REDRIVE_SWEEP_ENTRIES",
+          "1eb5ec75af38356d535760dcc7da991d29ee705ba195ca07a4e5f8a7599b083d"
+        ],
+        [
+          "acceptanceActor",
+          "0c9112e8326de402fdb77b8cece78b3ea8676c6d95760b6ea8075135b05abaf0"
+        ],
+        [
+          "activeProject",
+          "d18cc6b641cd45a0e474d0afe7700101c46cef8057b70e172637d1e1d30d2be9"
+        ],
+        [
+          "armLandingAlarm",
+          "b961926a4e9f7e790ec7b31b241d7b3bb2b4ba0a72558e6c8f34921f531a533a"
+        ],
+        [
+          "auditRow",
+          "d7f397ab003a3e0eff09650ffca672876c18e56dec50d558433ef4be5f6f2eeb"
+        ],
+        [
+          "canonicalPayload",
+          "95124f3098690f0b83a3927221e9cee6fc53fe1b0c044ab43a9f934e9effe9bb"
+        ],
+        [
+          "checkWakeRow",
+          "aed8cc21dc2bbb6eccdc1daaceb7a1a4b98c617dad1d66503095baf4090a4f08"
+        ],
+        [
+          "desiredLanding",
+          "a16cab9e2518219f1ae223b2363df2dbeaca3f54d7d23c324cf4335792d90483"
+        ],
+        [
+          "finishRow",
+          "42f05b1aac53a7d0d1b32027b90939cd2afcd2e8f6f2648e459e44a2ca8c92b5"
+        ],
+        [
+          "idleCohortLeader",
+          "50ab2f32419995849bbdc835301e28fbfcaeae1c100ab7df67f98763d1452a15"
+        ],
+        [
+          "idleReady",
+          "d0daffe32faa1834f9292d7d83de855ee06871f500097a3c323c5c591103558a"
+        ],
+        [
+          "internalMutation",
+          "ad8bc3b3467b48874a9b8a7695205b860617a360baed788cc47dbc2e6f4b18a6"
+        ],
+        [
+          "landingQueue",
+          "9026c1ea4274dd4b973e1305cfedd1d6ceb94a234de2faf476c0bf842d8d91b7"
+        ],
+        [
+          "landingRow",
+          "9b2f0188e0b4cde94aab9a444ecb94a974871df87818b7d98abd5a37b26204aa"
+        ],
+        [
+          "loadBatch",
+          "a4dbf321198ba21dfcc7d169b8c8c45b2166c6dd1fa7fce27231f4887a27fbfa"
+        ],
+        [
+          "lost",
+          "1f28c1193dbfc080a480d46e01e1946db060968c643331edf461cb499405ceba"
+        ],
+        [
+          "makeFunctionReference",
+          "90760cdb0f99f8303180da5ca3bbe536fdac31c89e78b170e62dbf914920e3e4"
+        ],
+        [
+          "mutation",
+          "4f17c7855059ce010489b8b943f417aba3333721a20f7872a46abe0eee887bc9"
+        ],
+        [
+          "redrive",
+          "4849f95d5bda257835b882560d72b101ece934421c88616d1cfd85c2c04418bf"
+        ],
+        [
+          "redriveCiDown",
+          "c4f60fee8eccf143713f36096d16fe90cd369f2763c026fa8c46f5cf39d5b910"
+        ],
+        [
+          "redriveCohortHold",
+          "493809af890b19f8f6847bde801339b79b9fc7cfb12d44c8d335bf764128d6e0"
+        ],
+        [
+          "redriveHolders",
+          "4a44f6562e0670d233cbc2ea278c25b0839af617ff8465265667f9d126310f9c"
+        ],
+        [
+          "redriveLanding",
+          "c377626b590bb3a6180b708a2821bc6a0a40611f483d977d34af4f4b80a66612"
+        ],
+        [
+          "redriveQueue",
+          "33ec383508288702fce7bf836cfd1c9b2456e2d2ed90b6f728528eb684fcf626"
+        ],
+        [
+          "report",
+          "11f51c908ed7b15c3270a2410f7282cdb9c431b81d35e62cdff8695c9d306e0b"
+        ],
+        [
+          "scheduleCheckWake",
+          "e53aec6d78f8b2808c1c9d567e1df9c36acfce3ac1a2f17ca88ad085173d63a0"
+        ],
+        [
+          "scheduleDesired",
+          "3f1d48f1380e5fdfd712b815e0d47c826c280694f6466c4a38de91959b698a7e"
+        ],
+        [
+          "scheduleFinish",
+          "bc3cadba879b5c49ac45c5ecc1015ab368ca31081a5275a7d1879d701431ce65"
+        ],
+        [
+          "scheduleLandingWake",
+          "984864374f8e58635a5f583002cb4afc0d6a112f6ed7202617676cc4b338dbdd"
+        ],
+        [
+          "storedLandingStateSchema",
+          "84f2e6ac995c11ec270f1529329561cce7a49b20ebc8bf42dd09977cfa51b6a4"
+        ],
+        [
+          "sweep",
+          "fc895562bf79e0f09e142ac470f7db1206684579cd8ce6f2160ace00cd5a4c88"
+        ],
+        [
+          "v",
+          "c9b23930c9b094848cdb5f563a16f0a2f497fc28d7ea9a82afca6bc52741e95f"
+        ]
+      ],
+      "shell": "5c9c4f9b81851eabc448578ec86ffd2331e1dee1f0d19140a15ea791ffc7fc40"
+    },
+    "src/hosted-landing-redrive.ts": {
+      "executed": [
+        "landingRedriver"
+      ],
+      "digest": "611b45ec71056c3a5530d34c2115a7328b033cbf9ab48d387eeca383fcbba887",
+      "units": [
+        [
+          "hostedActionError",
+          "4567b7362f2fb825b8f175c2de24139a535dc088e646975c9d9dd20efb9db8c4"
+        ],
+        [
+          "landingRedriver",
+          "f9ad74f66fd571c8a6f7f891bb9292e6feca78a46c63c8c455a9fdb4ee228876"
+        ],
+        [
+          "redriveQuietMaxMs",
+          "0c618634b59027ca8a8c6bd9d20d59e9d43191fda063527f187903cb16023f0d"
+        ],
+        [
+          "redriveQuietMs",
+          "47ea3119093209e014ec633e0bd41110eb94b32358df2c3db4c0e6e7ac33cd6a"
+        ],
+        [
+          "retryableExchangeError",
+          "c10aaa1d483209c51c0c095c385c1e55b9d7e31830b6ed193411cfa8b46701cb"
+        ]
+      ],
+      "shell": "04080e2f4cf470df37787e181361f5fc139d0f8033d42fb7deca10ec8aa8bd1c"
+    }
+  }
+}

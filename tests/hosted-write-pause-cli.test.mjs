@@ -13,19 +13,15 @@ import { hostedActionError, mainDiscoveryError } from '../dist/hosted-action-err
 import { landingRedriver } from '../dist/hosted-landing-redrive.js';
 import { ForgeError } from '../dist/errors.js';
 
-/** Issue 72d50375: a refused write during a maintenance pause is retryable,
+/** Issue 72d50375: a refused write (an OCC conflict or a refused outage) is retryable,
  * says when, and changes nothing. */
 const paused = retryAt =>
-  new ConvexError({
-    code: 'LEGACY_STORAGE_WRITES_PAUSED',
-    message: 'Dev writes are paused for approved storage maintenance.',
-    retryAt,
-  });
+  new ConvexError({ code: 'HOSTED_CONFLICT', message: 'The write was refused.', retryAt });
 
-test('a write pause keeps its retry time through the client error mapping', () => {
+test('a refused write keeps its retry time through the client error mapping', () => {
   const at = Date.now() + 120_000;
   const error = hostedActionError(paused(at), 'save');
-  assert.equal(error.code, 'LEGACY_STORAGE_WRITES_PAUSED');
+  assert.equal(error.code, 'HOSTED_CONFLICT');
   assert.equal(error.retryAt, at);
   assert.equal(
     hostedActionError(new ConvexError({ code: 'X', message: 'm', retryAt: 'soon' }), 'p').retryAt,
@@ -33,12 +29,12 @@ test('a write pause keeps its retry time through the client error mapping', () =
   );
 });
 
-test('a write pause is retryable with a clear message and recovery', () => {
+test('a refused write is retryable with a clear message and recovery', () => {
   const at = Date.now() + 120_000;
   const operationId = randomUUID();
   const error = retryableExchangeError(hostedActionError(paused(at), 'save'), operationId);
-  assert.equal(error.code, 'LEGACY_STORAGE_WRITES_PAUSED');
-  assert.match(error.message, /not accepting writes during approved maintenance; nothing was changed/);
+  assert.equal(error.code, 'HOSTED_CONFLICT');
+  assert.match(error.message, /could not accept this write right now; nothing was changed/);
   assert.match(
     error.message,
     new RegExp(`after ${new Date(at).toISOString()} \\(operation ${operationId}\\)`),
@@ -49,7 +45,7 @@ test('a write pause is retryable with a clear message and recovery', () => {
   assert.match(conflict.message, /Retry the same command in a moment/);
 });
 
-test('retryExchange waits out a short pause with the same request and stops early on a long one', async t => {
+test('retryExchange waits out a short refusal with the same request and stops early on a long one', async t => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000_000 });
   let calls = 0;
   const short = retryExchange('save', randomUUID(), async () => {
@@ -67,9 +63,9 @@ test('retryExchange waits out a short pause with the same request and stops earl
       calls++;
       throw paused(Date.now() + 20 * 60_000);
     }),
-    error => error.code === 'LEGACY_STORAGE_WRITES_PAUSED' && error.recovery?.retryable === true,
+    error => error.code === 'HOSTED_CONFLICT' && error.recovery?.retryable === true,
   );
-  assert.equal(calls, 1, 'a 20-minute pause is reported at once, not slept through');
+  assert.equal(calls, 1, 'a 20-minute refusal is reported at once, not slept through');
 });
 
 const ready = (id, version) => ({ id, version, phase: 'ready', observation: { state: 'pending' } });
@@ -112,23 +108,23 @@ test('a healthy wait asks nothing: only an entry quiet in Ready for 2 minutes is
   assert.equal(sent.length, 4, 'progress ends the asks');
 });
 
-test('a paused re-drive waits for the pause end (at most 5 minutes per ask) and a finished wait stops', async t => {
+test('a refused re-drive asks again after its quiet period and a finished wait stops', async t => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 0 });
   const sent = [];
-  const pausedUntil = 12 * 60_000;
+  const refusedUntil = 5 * 60_000;
   const redrive = landingRedriver(
     {
       mutation: async () => {
         sent.push(Date.now());
-        if (Date.now() < pausedUntil) throw paused(pausedUntil);
+        if (Date.now() < refusedUntil) throw paused(refusedUntil);
         return '{"redriven":["finish"]}';
       },
     },
     () => false,
   );
   redrive(ready('s1', 1));
-  for (let i = 0; i < 12; i++) await tick(t, 60_000);
-  assert.deepEqual(sent, [2 * 60_000, 7 * 60_000, pausedUntil]);
+  for (let i = 0; i < 7; i++) await tick(t, 60_000);
+  assert.deepEqual(sent, [2 * 60_000, 4 * 60_000, 6 * 60_000]);
 
   let stopped = false;
   const later = [];

@@ -209,12 +209,6 @@
     "tests/landing-worker-wake.test.mjs": {
       "sleep": 1
     },
-    "tests/legacy-storage-cleanup.test.mjs": {
-      "sleep": 1
-    },
-    "tests/legacy-storage-verify.test.mjs": {
-      "sleep": 1
-    },
     "tests/lint-rules.test.mjs": {
       "docs": 1
     },

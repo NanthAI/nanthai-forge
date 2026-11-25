@@ -2,7 +2,7 @@
 // Copyright 2026 Ferdinando Valsecchi
 import type { StorageActionWriter, StorageReader, StorageWriter } from 'convex/server';
 import type { ActionCtx, MutationCtx } from './server';
-import type { Doc } from './_generated/dataModel';
+import type { Doc, Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
 import { artifactBlobId } from './artifactBlobFields';
 import { artifactMetadata, removeArtifact } from './artifactStorage';
@@ -11,8 +11,6 @@ import { exchangeFetch } from '../src/exchange-request';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { invariant } from '../src/errors';
-import { storageWritesAvailable } from './legacyStoragePause';
-import { legacyBlob, legacyMetadata, legacyUrl } from './legacyStorageRead';
 
 /** Opaque legacy storage ID or r2blob:<artifactBlobs ID>. Owning callers always
  * authorize before resolving a reference; storage metadata never grants access. */
@@ -46,7 +44,7 @@ export function blobStore(ctx: Context): BlobStore {
   };
   return {
     get: async id => {
-      if (!artifactBlobId(id)) return legacyBlob(ctx as Context & { storage: StorageActionWriter }, id);
+      if (!artifactBlobId(id)) return (ctx.storage as StorageActionWriter).get(id as Id<'_storage'>);
       const value = await row(id);
       if (!value) return null;
       const response = await exchangeFetch(
@@ -91,8 +89,7 @@ export function blobStore(ctx: Context): BlobStore {
       return ref;
     },
     delete: async id => {
-      storageWritesAvailable();
-      if (!artifactBlobId(id)) return (ctx.storage as StorageWriter).delete(id);
+      if (!artifactBlobId(id)) return (ctx.storage as StorageWriter).delete(id as Id<'_storage'>);
       if (ctx.db && ctx.scheduler) {
         const value = await ctx.db.get(artifactBlobId(id)!);
         if (value) await removeArtifact({ db: ctx.db, scheduler: ctx.scheduler }, value);
@@ -102,12 +99,12 @@ export function blobStore(ctx: Context): BlobStore {
       }
     },
     getUrl: async id => {
-      if (!artifactBlobId(id)) return legacyUrl(ctx, id);
+      if (!artifactBlobId(id)) return (ctx.storage as StorageReader).getUrl(id as Id<'_storage'>);
       const value = await row(id);
       return value ? presignGet(r2Config(), value.r2Key) : null;
     },
     getMetadata: async id => {
-      if (!artifactBlobId(id)) return legacyMetadata(ctx, id);
+      if (!artifactBlobId(id)) return (ctx.storage as StorageReader).getMetadata(id as Id<'_storage'>);
       if (ctx.db) return artifactMetadata({ db: ctx.db }, id);
       const value = await row(id);
       return value ? { size: value.size, sha256: value.digest, contentType: value.contentType } : null;

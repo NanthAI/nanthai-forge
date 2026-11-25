@@ -11,16 +11,10 @@ export const retryableCodes: ReadonlySet<string> = new Set([
   'HOSTED_CONFLICT',
   'HOSTED_ACTION_FAILED',
   'HOSTED_REQUEST_FAILED',
-  'LEGACY_STORAGE_WRITES_PAUSED',
 ]);
 /** Refused writes that end on their own: nothing was committed, so the same
  * request (same operation ID) reconciles once writes return (Issue 72d50375). */
-export const transientWriteCodes = [
-  'LEGACY_STORAGE_WRITES_PAUSED',
-  'HOSTED_CONFLICT',
-  'EXCHANGE_REQUEST_TIMEOUT',
-  'EXCHANGE_REQUEST_FAILED',
-];
+export const transientWriteCodes = ['HOSTED_CONFLICT', 'EXCHANGE_REQUEST_TIMEOUT', 'EXCHANGE_REQUEST_FAILED'];
 /** Marks a transient refusal retryable with when and how to retry; returns null otherwise. */
 export function retryableExchangeError(error: ForgeError, operationId?: string | null) {
   if (!transientWriteCodes.includes(error.code)) return null;
@@ -29,11 +23,9 @@ export function retryableExchangeError(error: ForgeError, operationId?: string |
   // Only a refusal proves nothing ran; a timeout or gateway error may have
   // committed, and replaying the same operation reconciles either way.
   const reason =
-    error.code === 'LEGACY_STORAGE_WRITES_PAUSED'
-      ? 'Forge is not accepting writes during approved maintenance; nothing was changed'
-      : error.code === 'HOSTED_CONFLICT' || error.recovery?.outcome === 'refused'
-        ? 'Forge could not accept this write right now; nothing was changed'
-        : 'Forge could not be reached or did not answer; the outcome is not known yet';
+    error.code === 'HOSTED_CONFLICT' || error.recovery?.outcome === 'refused'
+      ? 'Forge could not accept this write right now; nothing was changed'
+      : 'Forge could not be reached or did not answer; the outcome is not known yet';
   return new ForgeError(
     error.code,
     `${reason}. Retry the same command ${when}${operationId ? ` (operation ${operationId})` : ''}. ${error.message}`,

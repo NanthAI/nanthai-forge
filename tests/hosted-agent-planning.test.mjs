@@ -1872,7 +1872,7 @@ test('the transport serves planning actions from the advertised capability and t
   assert(old.seen.length === 1 || !old.seen.at(-1).includes('planningVersion'));
 });
 
-test('a paused or refused agent write keeps structured retryable and retryAt in the CLI error (72d50375)', async t => {
+test('a refused agent write keeps structured retryable and retryAt in the CLI error (72d50375)', async t => {
   const s = await setup(t);
   const { p, transport: agent } = transport(s, { planning: true });
   const at = Date.now() + 10 * 60_000;
@@ -1880,17 +1880,17 @@ test('a paused or refused agent write keeps structured retryable and retryAt in 
   p.exchange.client.action = async (ref, args) => {
     if (getFunctionName(ref).endsWith(':command'))
       throw new ConvexError({
-        code: 'LEGACY_STORAGE_WRITES_PAUSED',
-        message: 'Dev writes are temporarily paused for approved storage maintenance.',
+        code: 'HOSTED_CONFLICT',
+        message: 'The write was refused.',
         retryAt: at,
       });
     return invoke(ref, args);
   };
   const operationId = randomUUID();
   await assert.rejects(
-    agent.dispatch('put-planning-item', { kind: 'issue', title: 'During a pause', operationId }),
+    agent.dispatch('put-planning-item', { kind: 'issue', title: 'During a refusal', operationId }),
     error => {
-      assert.equal(error.code, 'LEGACY_STORAGE_WRITES_PAUSED');
+      assert.equal(error.code, 'HOSTED_CONFLICT');
       assert.equal(error.retryAt, at);
       assert.deepEqual(error.recovery, { retryable: true, retryAt: new Date(at).toISOString() });
       assert.match(error.message, /nothing was changed/);

@@ -1,1 +1,1 @@
-| `legacyStorageTombstones` | One legacy storage ID and its verified R2 copy pin, plus the retirement operation ID and optional media type. Indexed by storage ID. No file bytes. | Legacy read-through after a Convex file miss |
+| `legacyStorageTombstones` | One retired legacy storage ID and its R2 copy pin. Nothing reads it; `storageTombstoneRetire` empties it and the table leaves the schema in the next State (Item c0af6cfa). No file bytes. | Deleted with its copies |

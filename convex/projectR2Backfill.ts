@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-import { nativeLegacyUrl } from './legacyStorageRead';
 import { v } from 'convex/values';
 import { query, mutation, internalQuery, internalMutation } from './cliServer';
 import { activeOwnedProject, accessibleProject } from './projectAuthority';
@@ -99,7 +98,7 @@ export const targets = mutation({
         const { matches, source } = await current(ctx, projectId, pin);
         if (!matches || source?.location === 'r2') continue;
         // The operator verifies the original Convex copy before writing its R2 copy.
-        const url = await nativeLegacyUrl(ctx, pin.storageId);
+        const url = await ctx.storage.getUrl(pin.storageId);
         invariant(url, 'BACKFILL_SOURCE_MISSING', 'A backfill source file is unavailable.');
         targets.push({ pin, url, target: await presignPut(config, r2Key(projectId, pin.digest), pin) });
       }

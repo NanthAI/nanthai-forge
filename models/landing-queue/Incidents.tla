@@ -274,23 +274,6 @@ PassAge == /\ Scenario = "passage"
                      /\ UNCHANGED <<canonical, observed, inputsDone, returned, main, checked, applied, owner>>
                      /\ pc' = 4
        [] OTHER -> FALSE
-\* Issue 72d50375 remainder (w3c, 2026-11-06): the same write outage as
-\* `outage`, in settlement, but nobody ends it: the operator never returns,
-\* no reader waits and nothing else writes (inputsDone = writes refused,
-\* owner = b's step alive). The window simply expires. Unfixed, every
-\* re-drive needs an event (the window end, a reader, the first write after
-\* expiry), so b stays Ready. Fixed, beginning the window armed one expiry
-\* task: it is that first write, closes the fence and re-drives b.
-OutageExpiry == /\ Scenario = "expiry"
-  /\ CASE pc = 0 -> /\ b' = "ready" /\ inputsDone' = TRUE /\ pc' = 1
-                     /\ UNCHANGED <<canonical, observed, returned, a, main, checked, applied, owner>>
-       [] pc = 1 -> /\ owner' = FALSE /\ pc' = 2
-                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, b, main, checked, applied>>
-       [] pc = 2 -> /\ inputsDone' = FALSE /\ owner' = Fixed /\ pc' = 3
-                     /\ UNCHANGED <<canonical, observed, returned, a, b, main, checked, applied>>
-       [] pc = 3 /\ owner /\ ~inputsDone -> /\ b' = "landed" /\ pc' = 4
-                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, main, checked, applied, owner>>
-       [] OTHER -> FALSE
 \* Issue 7ecc4884 (cost slice 2, w3c 2026-11-06): b is a checking entry whose last
 \* queue tick retained progress inside the throttle window (checked = 1), with no
 \* wake pending (owner = FALSE). A progress event arrives: the wake it would
@@ -379,7 +362,7 @@ ReserveCycle == /\ Scenario \in {"reservebudget", "reservehanded"}
        [] OTHER -> FALSE
 Step == Wait \/ CohortConflict \/ LostWake \/ MovingMain \/ CrossHead \/ OrderWake \/ Outage \/ CohortHold \/ LostDispatch
         \/ Supervisor \/ CheckRound
-        \/ RetryKeep \/ OrderChain \/ PassAge \/ OutageExpiry \/ ProgressWake \/ Reserve \/ ReserveCycle
+        \/ RetryKeep \/ OrderChain \/ PassAge \/ ProgressWake \/ Reserve \/ ReserveCycle
 \* The two reserve fairness conjuncts are never enabled in any other scenario.
 Spec == Init /\ [][Step]_vars /\ WF_vars(Step) /\ WF_vars(ReserveDriver) /\ WF_vars(ReserveStream)
 FreshTerminal == returned => observed = canonical

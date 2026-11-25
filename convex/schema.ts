@@ -683,6 +683,8 @@ export default defineSchema({
   ...landingReadTables,
   ...statsTables,
   ...personDayTables,
+  // Both tables below are read only by convex/storageTombstoneRetire.ts, which empties them on every
+  // deployment; they leave the schema with it (Item c0af6cfa F6, dated 2026-12-31).
   legacyStorageTombstones: defineTable({
     storageId: v.id('_storage'),
     digest: v.string(),
@@ -690,9 +692,7 @@ export default defineSchema({
     copyKey: v.string(),
     operationId: v.string(),
     contentType: v.optional(v.string()),
-  })
-    .index('by_storage', ['storageId'])
-    .index('by_copy_key', ['copyKey']),
+  }),
   legacyStorageCleanupWindows: defineTable({
     operationId: v.string(),
     deployment: v.string(),
@@ -700,7 +700,7 @@ export default defineSchema({
     expiresAt: v.number(),
     active: v.boolean(),
     endedAt: v.optional(v.number()),
-  }).index('by_operation', ['operationId']),
+  }),
   legacyStorageCleanupPages: defineTable({
     operationId: v.string(),
     part: v.string(),

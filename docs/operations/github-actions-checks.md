@@ -811,11 +811,9 @@ catalog fallback) running past it, so the runner's retry starts at once.
 Exhaustion throws sanitized `RUNNER_UNAVAILABLE`; the webhook classifies failure
 when a job cannot send a callback. Result and output delivery (Issue 72d50375)
 outlives a write outage: the same body is resent with 1, 2, 4 … 60 s backoff for
-up to 35 minutes, longer than the 30-minute approved dev storage pause. Forge
-answers a refused write (`LEGACY_STORAGE_WRITES_PAUSED`, `HOSTED_CONFLICT`) with
-503 and, during a pause, `Retry-After` set to the pause end, which the runner
-waits for once. A 20-minute outage costs about 25 attempts without `Retry-After`
-and two with it. Success adds zero Convex calls, DB reads/writes
+up to 35 minutes. Forge answers a refused write (`HOSTED_CONFLICT`) with 503, which
+the runner retries with the same backoff. A 20-minute outage costs about 25
+attempts. Success adds zero Convex calls, DB reads/writes
 or idle activity.
 
 ### Forge source packs

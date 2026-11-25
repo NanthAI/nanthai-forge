@@ -114,17 +114,6 @@ export function dynamicIndexUses(c) {
       call.node.expression.expression.getText() === 'original'
     ) {
       // Legacy fallback uses the same table/index pairs already recorded at callers.
-    } else if (path === 'scripts/lib/legacy-storage-bench-query.mjs' && argument?.getText() === 'index') {
-      // benchIndexes prefers by_project, otherwise the first declared project-first
-      // index (its AST walk visits the chain in reverse and takes the last).
-      const selector = sourceAt('scripts/lib/legacy-storage-bench-definition.mjs')?.text;
-      if (!selector?.includes("indexes.includes('by_project')") || !selector.includes('indexes.at(-1)'))
-        throw Error('Update bench selector analysis');
-      for (const definition of c.definitions) {
-        const indexes = definition.indexes.filter(i => i.fields[0] === 'projectId');
-        const index = indexes.find(i => i.name === 'by_project') ?? indexes[0];
-        if (index) add(definition.table, index.name, call, 'benchIndexes project-first selection');
-      }
     } else continue;
     handled.add(call.node);
   }

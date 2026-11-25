@@ -109,21 +109,13 @@ export const INCIDENTS = [
   },
   {
     issue: '72d50375',
-    shape: 'a write outage in the middle of CI or settlement, ended by the operator or a reader',
+    shape:
+      'a write outage fails a settlement step: the passed entry strands until a reader or an operator re-drives it',
     replay: [
       './hosted-landing-write-outage.test.mjs',
-      'write outage during ${during}: every landing lands once the operator resumes writes',
+      'without a re-drive a failed settlement step strands a passed landing (the bug this guards)',
     ],
     model: 'outage',
-  },
-  {
-    issue: '72d50375',
-    shape: 'a write outage nobody ends: no operator, no reader, no other write',
-    replay: [
-      './hosted-landing-write-outage.test.mjs',
-      'a write outage nobody ends and nobody waits on: the window expiry re-drives and every landing lands',
-    ],
-    model: 'expiry',
   },
 ];
 

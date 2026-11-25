@@ -2796,41 +2796,6 @@ test('Issue 0c457ae4: a Convex value-limit refusal is a deterministic 403 limit,
   assert.equal((await send('Connection lost while action was in flight')).status, 503);
 });
 
-test('Issue 72d50375: a paused deployment answers 503 with Retry-After so the runner keeps its result', async t => {
-  const s = await fixture(t);
-  await s.bind();
-  t.mock.method(globalThis, 'fetch', async () => jwks());
-  const now = Date.now();
-  const prior = process.env.FORGE_LEGACY_STORAGE_PAUSE;
-  process.env.FORGE_LEGACY_STORAGE_PAUSE = JSON.stringify({
-    deployment: 'dev:forge',
-    operationId: randomUUID(),
-    startedAt: now,
-    expiresAt: now + 600_000,
-  });
-  t.after(() => {
-    if (prior === undefined) delete process.env.FORGE_LEGACY_STORAGE_PAUSE;
-    else process.env.FORGE_LEGACY_STORAGE_PAUSE = prior;
-  });
-  const response = await handle._handler(
-    {
-      runMutation: () => {
-        throw Object.assign(new Error('Dev writes are paused'), {
-          data: { code: 'LEGACY_STORAGE_WRITES_PAUSED' },
-        });
-      },
-    },
-    new Request(`${audience}/checks/actions`, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${oidc()}` },
-      body: JSON.stringify({ ...s.id, command: { kind: 'session' } }),
-    }),
-  );
-  assert.equal(response.status, 503);
-  const seconds = Number(response.headers.get('Retry-After'));
-  assert(seconds > 590 && seconds <= 600, String(seconds));
-});
-
 test('failed shard evidence still fails the check when a later infrastructure job fails', async t => {
   const s = await fixture(t);
   await s.bind();

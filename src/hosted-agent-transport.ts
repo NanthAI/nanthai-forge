@@ -2143,12 +2143,9 @@ export class HostedAgentTransport {
           undefined,
           workIndexRecovery(this.address.url, this.address.projectId),
         );
-      // A write pause, OCC conflict or 429/503 refusal ran nothing: keep its structured
+      // An OCC conflict or 429/503 refusal ran nothing: keep its structured
       // retryable flag and retryAt instead of rebuilding it from code and message (72d50375).
-      const refused =
-        safe.code === 'LEGACY_STORAGE_WRITES_PAUSED' ||
-        safe.code === 'HOSTED_CONFLICT' ||
-        safe.recovery?.outcome === 'refused';
+      const refused = safe.code === 'HOSTED_CONFLICT' || safe.recovery?.outcome === 'refused';
       if (refused && safe.recovery?.retryable !== true)
         throw retryableExchangeError(safe, this.callerOperationId) ?? safe;
       const limited = limitRefusal(safe, this.callerOperationId);

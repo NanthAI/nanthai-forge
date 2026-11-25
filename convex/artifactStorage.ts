@@ -11,7 +11,6 @@ import {
 } from './server';
 import { internal } from './_generated/api';
 import type { Doc, Id } from './_generated/dataModel';
-import { legacySystemMetadata } from './legacyStorageRead';
 import { artifactBlobId } from './artifactBlobFields';
 import { refundStored } from './discussionAttachmentStored';
 import { cancelPendingTask } from './schedulerCancel';
@@ -23,7 +22,7 @@ import { exchangeFetch } from '../src/exchange-request';
  * remains the owning action's responsibility, just as for legacy storage IDs. */
 export async function artifactMetadata(ctx: Pick<QueryCtx, 'db'>, ref: string) {
   const id = artifactBlobId(ref);
-  if (!id) return legacySystemMetadata(ctx, ref as Id<'_storage'>);
+  if (!id) return ctx.db.system.get(ref as Id<'_storage'>);
   const row = await ctx.db.get(id);
   return row && row.committed && !row.removed
     ? {

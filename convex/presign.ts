@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import { presign as sign, type PresignInput } from '../src/r2-presign.js';
-import { storageWritesAvailable } from './legacyStoragePause';
 export type { PresignInput };
 
 /** R2 requests this isolate has signed (Issue 3e3f9fe6): every R2 request needs a URL signed here, so
@@ -22,10 +21,7 @@ function countRequest(input: PresignInput) {
     if (Number.isSafeInteger(length) && length > 0) signed.put += length;
   }
 }
-/** Reads stay available during the approved dev pause. Already issued external
- * PUT URLs cannot be revoked; their database publication is paused separately. */
 export function presign(input: PresignInput) {
-  if (input.method !== 'GET' && input.method !== 'HEAD') storageWritesAvailable();
   const before = r2Counts();
   countRequest(input);
   // Durations/counters only: no URL, object path, credential or source body is logged. The

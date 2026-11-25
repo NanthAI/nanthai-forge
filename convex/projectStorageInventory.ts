@@ -6,7 +6,7 @@ import { internalQuery, internalMutation, type QueryCtx } from './server';
 import { deleteLandingRequestBodies } from './projectLandingRequestBody';
 import { deleteCapsulePins } from './projectLandingCapsulePins';
 import { projectPurgeWriter } from './projectFinishReadWriter';
-import { cleanupReceipt, recordCleanup } from './legacyStorageReceipts';
+import { cleanupReceipt, recordCleanup } from './maintenanceReceipts';
 import { rowReferences, valuesAt, type ProjectPurgeTable } from './projectPurgeInventory';
 import { removeExclusive } from './projectStorage';
 import { storageOwners, storageOwner, projectOwnedScope } from './projectStorageOwnership';

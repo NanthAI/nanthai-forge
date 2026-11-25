@@ -1219,8 +1219,7 @@ families. The preflight adds zero maintained indexes, makes zero R2 requests,
 downloads zero file bytes and schedules zero work.
 
 The report covers the named indexes at each page's read time. References in
-legacy Work cursors, snapshots and serialized task bodies require the
-[separate legacy storage audit](operations/legacy-storage-cleanup.md).
+legacy Work cursors, snapshots and serialized task bodies are not covered by the report.
 Pages can see concurrent writes. The purge runs its own scan under the active
 purge operation and tracks its progress server-side.
 

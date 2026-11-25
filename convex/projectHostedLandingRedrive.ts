@@ -2,7 +2,7 @@
 // Copyright 2026 Ferdinando Valsecchi
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
-import { mutation, internalMutation, internalAction } from './cliServer';
+import { mutation, internalMutation } from './cliServer';
 import type { MutationCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { acceptanceActor } from './projectAutonomy';
@@ -13,7 +13,6 @@ import { finishRow, scheduleFinish } from './projectHostedFinishWake';
 import { armLandingAlarm } from './projectHostedLandingStallWake';
 import { desiredLanding, scheduleDesired } from './projectHostedLandingDesiredWake';
 import { checkWakeRow, scheduleCheckWake } from './projectHostedLandingCheckWake';
-import { activeStoragePause } from './legacyStoragePause';
 import { loadBatch } from './projectHostedLandingBatchState';
 import { redriveCohortHold } from './projectHostedLandingCohortHold';
 import { auditRow } from './projectHostedMainAuditState';
@@ -22,11 +21,11 @@ import { storedLandingStateSchema } from '../src/hosted-landing';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { report } from './errors';
 
-/** Issue 72d50375: any write outage (the dev storage pause, OCC exhaustion, a
+/** Issue 72d50375: any write outage (OCC exhaustion, a
  * platform incident) makes a scheduled settlement step or stall alarm throw.
  * Convex does not retry it and the row keeps pointing at the failed task, so the
- * entry has no owner. Re-drive is event driven only: when writes resume after
- * a pause (sweep), and when a waiting reader's entry stays Ready with no new
+ * entry has no owner. Re-drive is event driven only: when an operator runs the
+ * sweep after an outage, and when a waiting reader's entry stays Ready with no new
  * version (redrive, which finds the lost steps itself). No cron, no server
  * poll; an idle queue costs nothing. */
 /** A step is lost when its function failed (a refused write, OCC exhaustion)
@@ -269,51 +268,6 @@ export const sweep = internalMutation({
           cursor: page.continueCursor,
         },
       );
-    return null;
-  },
-});
-
-/** The pause window's own expiry, armed when the window begins (72d50375). The
- * operator normally ends the window, and the first write after expiry closes
- * it; when the operator never returns and nothing writes, this is that write,
- * so stranded steps resume with no waiter or operator. It runs through the
- * pause boundary: an expired flag closes the fence there and schedules the
- * sweep; a flag removed without an end is closed here. One task per window. */
-export const expired = internalMutation({
-  args: { operationId: v.string() },
-  returns: v.null(),
-  handler: async (ctx, { operationId }) => {
-    const window = await ctx.db
-      .query('legacyStorageCleanupWindows')
-      .withIndex('by_operation', q => q.eq('operationId', operationId))
-      .unique();
-    if (!window?.active) return null;
-    await ctx.db.patch(window._id, { active: false, endedAt: Date.now() });
-    await ctx.scheduler.runAfter(0, makeFunctionReference<'mutation'>('projectHostedLandingRedrive:sweep'), {
-      cursor: null,
-    });
-    return null;
-  },
-});
-
-/** Writes resumed after an approved dev storage pause. The window can end
- * before the operator removes the flag; wait for that (at most until the
- * window's own expiry, one check a minute) and then sweep once. */
-export const resume = internalAction({
-  args: {},
-  returns: v.null(),
-  handler: async ctx => {
-    const pause = activeStoragePause();
-    if (pause)
-      await ctx.scheduler.runAfter(
-        Math.max(1_000, Math.min(60_000, pause.expiresAt - Date.now())),
-        makeFunctionReference<'action'>('projectHostedLandingRedrive:resume'),
-        {},
-      );
-    else
-      await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedLandingRedrive:sweep'), {
-        cursor: null,
-      });
     return null;
   },
 });

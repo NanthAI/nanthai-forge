@@ -37,8 +37,6 @@ npm run model:landing-queue -- outage          # expected liveness violation (72
 npm run model:landing-queue -- outage-fixed
 npm run model:landing-queue -- orderchain      # expected: a holder that lost every driver strands its parked waiters (c329d191 class)
 npm run model:landing-queue -- orderchain-fixed
-npm run model:landing-queue -- expiry          # expected: an outage nobody ends strands a Ready head (72d50375)
-npm run model:landing-queue -- expiry-fixed
 npm run model:landing-queue -- progresswake    # expected liveness violation: a skip rule that also drops the terminal wake (7ecc4884)
 npm run model:landing-queue -- progresswake-fixed
 npm run model:landing-queue -- reserve         # expected: a large Lane on hot files is superseded on every passed check (10d253c6)
@@ -543,14 +541,12 @@ algorithm drift: changes to these code anchors require manual model review.
    (`main = 1`). `outage` finds a liveness counterexample (`HeadLands`).
    `outage-fixed` keeps the runner's result until Forge accepts it
    (`src/hosted-actions-retry.ts`, about 35 minutes) and re-drives the lost step
-   when writes resume (`convex/projectHostedLandingRedrive.ts`: the window end,
-   the first write after expiry, or a waiting reader of a quiet Ready entry).
+   when writes resume (`convex/projectHostedLandingRedrive.ts`: an operator's
+   sweep, or a waiting reader of a quiet Ready entry).
    No timer or poll is modelled or added. `tests/hosted-landing-write-outage.test.mjs`
-   replays a 20-minute outage against the implementation. `expiry` is the
-   remaining case: nobody ends the window, no reader waits and nothing writes,
-   so no event re-drives B (`HeadLands` violated). `expiry-fixed`: beginning a
-   window arms one task just after its expiry
-   (`projectHostedLandingRedrive:expired`), which is that first write.
+   replays the stranded step and its re-drive against the implementation. The
+   dev write pause, and with it the `expiry` scenario (a window nobody ends and
+   its expiry task), is deleted (Item c0af6cfa).
 
 8. **Retry discards dependents (ea86f3fb; incident a7de3a93, fixed).** A platform
    retry (`interrupted`, `runner-unavailable`) of a check re-checks the same
@@ -659,8 +655,6 @@ or production historical replay is implied.
 | `outage-fixed` | 10 | 10 | 0.567 | Passed; CI and settlement branches |
 | `orderchain` | 4 | 4 | 0.667 | Expected liveness violation |
 | `orderchain-fixed` | 6 | 6 | 0.623 | Passed |
-| `expiry` | 4 | 4 | 0.704 | Expected liveness violation |
-| `expiry-fixed` | 5 | 5 | 0.774 | Passed |
 | `progresswake` | 4 | 4 | 0.707 | Expected liveness violation |
 | `progresswake-fixed` | 5 | 5 | 0.565 | Passed |
 | `reserve` | 88 | 50 | 4.628 | Expected WithinTwo |

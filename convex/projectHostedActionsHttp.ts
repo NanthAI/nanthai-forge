@@ -27,7 +27,6 @@ import { runnerPublicCode } from '../src/runner-visibility';
 import { storeSourceBytes } from './projectSourceBytes';
 import { savePin } from '../src/hosted-save';
 import type { SessionInput } from './projectHostedActionsSession';
-import { activeStoragePause } from './legacyStoragePause';
 import { presignPoolClaim, r2Config } from './r2';
 import type { HostedActionsRecipe } from '../src/hosted-actions';
 import { poolClaimBody, poolClaimExpirySeconds, poolClaimKey, poolUnits } from '../src/hosted-actions-pool';
@@ -40,7 +39,6 @@ import { networkFailure } from '../src/network-fetch';
 // EXCHANGE_REQUEST_*: convexFetch transport faults (deadline or lost connection).
 const transientCodes = [
   'RUNNER_UNAVAILABLE',
-  'LEGACY_STORAGE_WRITES_PAUSED',
   'HOSTED_CONFLICT',
   'EXCHANGE_REQUEST_TIMEOUT',
   'EXCHANGE_REQUEST_FAILED',
@@ -336,8 +334,6 @@ export const handle = httpAction(async (ctx, request) => {
         transientCodes.includes(code ?? '') ||
         ['TimeoutError', 'AbortError', 'TypeError'].includes((error as Error)?.name) ||
         (!code && (error as Error)?.name === 'Error' && reason !== 'validation'));
-    // A paused deployment names its end, so runners wait once instead of polling.
-    const pause = unavailable ? activeStoragePause() : null;
     return Response.json(
       {
         reason,
@@ -346,12 +342,7 @@ export const handle = httpAction(async (ctx, request) => {
       },
       {
         status: unavailable ? 503 : 403,
-        headers: {
-          'Cache-Control': 'no-store',
-          ...(pause
-            ? { 'Retry-After': String(Math.max(1, Math.ceil((pause.expiresAt - Date.now()) / 1000))) }
-            : {}),
-        },
+        headers: { 'Cache-Control': 'no-store' },
       },
     );
   }
