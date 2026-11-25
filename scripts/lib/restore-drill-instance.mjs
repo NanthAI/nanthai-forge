@@ -158,6 +158,16 @@ export async function startBackend(instance, log, url) {
       response => response.ok,
       () => false,
     );
+  // Any listener on the backend's port or its site-proxy port (port + 1) would stall the start for
+  // minutes; name it now.
+  const port = Number(new URL(url).port);
+  if (port) {
+    for (const busy of [port, port + 1])
+      if (!(await portIsFree(busy)))
+        throw Object.assign(new Error(`Scratch port ${busy} is in use; pass --port with a free pair.`), {
+          code: 'PORT_IN_USE',
+        });
+  }
   // Another backend on this port would answer for ours (two drills on one machine).
   if (await answering()) throw Object.assign(new Error('Scratch port in use.'), { code: 'PORT_IN_USE' });
   const child = spawn(process.execPath, [join(root, 'scripts/selfhost.mjs'), 'start', instance], {
@@ -174,6 +184,15 @@ export async function startBackend(instance, log, url) {
   child.kill('SIGTERM');
   throw Object.assign(new Error('Scratch backend did not start.'), {
     code: 'BACKEND_START_FAILED',
+  });
+}
+
+async function portIsFree(port) {
+  const { createServer } = await import('node:net');
+  return new Promise(done => {
+    const server = createServer();
+    server.once('error', () => done(false));
+    server.listen(port, '127.0.0.1', () => server.close(() => done(true)));
   });
 }
 

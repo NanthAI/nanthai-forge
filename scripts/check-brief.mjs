@@ -6,7 +6,7 @@
 // or at a common-rules file it names; local .md files the brief names are read one level deep.
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { basename, dirname, isAbsolute, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { envPrintFindings } from './check-env-print.mjs';
 
@@ -14,6 +14,9 @@ const UUID = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i
 const POINTER = /briefings\.md#standard-builder-block|standard\s+(?:builder|safety)[^\n]{0,40}\bblock/i;
 // Canonical rule files define the fields; naming them never counts as a brief's own rules file.
 const CANONICAL = new Set(['briefings.md', 'brief-template.md', 'agents.md', 'claude.md']);
+// Logs, scratch output and recorded results are evidence a brief points at, not rules it gives.
+const NOT_RULES =
+  /(?:^|[/._-])(?:\.forge|scratch|logs?|node_modules|results?|outputs?|evidence|artifacts?|transcripts?)(?:[/._-]|s?$)/i;
 const MAX_RULES_BYTES = 256 * 1024;
 const BRIEFINGS_PATH = new URL('../docs/agents/briefings.md', import.meta.url);
 const REVIEWER_PROMPT_RULE = 'The reviewer prompt must include the AGENTS.md safety line verbatim.';
@@ -82,8 +85,12 @@ export const briefFields = [
 // Local rules files the brief names (relative to the brief, then the working directory).
 export function rulesFiles(brief, briefDir = '.') {
   const found = new Set();
-  for (const [token] of brief.matchAll(/[\w@~./\\-]+\.md\b/g)) {
+  for (const match of brief.matchAll(/[\w@~./\\-]+\.md\b/g)) {
+    const token = match[0];
     if (CANONICAL.has(basename(token).toLowerCase()) || token.startsWith('~')) continue;
+    // A line that says "rules" designates the file as rules wherever it lives.
+    const line = brief.slice(brief.lastIndexOf('\n', match.index) + 1).split('\n')[0];
+    if (NOT_RULES.test(token.replace(/\\/g, '/')) && !/\brules?\b/i.test(line)) continue;
     for (const candidate of isAbsolute(token) ? [token] : [resolve(briefDir, token), resolve(token)]) {
       if (
         existsSync(candidate) &&
@@ -107,6 +114,15 @@ export const briefHazards = [
     ok: ({ all }) => !envPrintFindings('brief.md', all).length,
   },
 ];
+
+/** `file:line` hazard findings in the brief and its rules files (never the matched text). */
+export function hazardLocations(brief, briefDir = '.') {
+  const files = [
+    ['brief.md', brief],
+    ...rulesFiles(brief, briefDir).map(p => [basename(p), readFileSync(p, 'utf8')]),
+  ];
+  return files.flatMap(([name, text]) => envPrintFindings(name, text));
+}
 
 /** Names of required fields the brief lacks; `rules` is extra text from common-rules files. */
 export function briefFindings(brief, rules = '') {
@@ -213,7 +229,14 @@ export async function checkBriefMain(
     if (missing.has(field.name)) err(`check-brief: missing ${field.name}: ${field.need}`);
   }
   for (const hazard of briefHazards) {
-    if (missing.has(hazard.name)) err(`check-brief: ${hazard.name}: ${hazard.need}`);
+    if (!missing.has(hazard.name)) continue;
+    err(`check-brief: ${hazard.name}: ${hazard.need}`);
+    for (const where of hazardLocations(
+      brief,
+      path === '-' ? '.' : dirname(resolve(path)),
+      path === '-' ? 'stdin brief' : basename(path),
+    ))
+      err(`check-brief:   ${where}`);
   }
   if (board && !missing.has('issue-id')) {
     const issue = await resolveBriefIssue(brief, reader);

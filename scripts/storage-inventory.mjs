@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 /** Readonly diagnostic query: returns sizes and field names, never payloads.
  * One bounded page per table; count() uses Convex's internal table metadata. */
-export async function inventorySample(ctx, table, order, cursor = null) {
+export async function inventorySample(ctx, table, order, cursor = null, numItems = 128) {
   const p = await ctx.db.query(table).order(order).paginate({
     cursor,
-    numItems: 128,
-    maximumRowsRead: 128,
+    numItems,
+    maximumRowsRead: numItems,
     maximumBytesRead: 262144,
   });
   const bytes = value => new TextEncoder().encode(JSON.stringify(value)).byteLength;
@@ -44,10 +44,34 @@ function run(source) {
   const child = spawnSync(
     process.execPath,
     [resolve('node_modules/convex/bin/main.js'), 'run', '--deployment', 'dev', '--inline-query', source],
-    { encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 },
+    { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
   );
-  if (child.status !== 0) throw new Error('STORAGE_INVENTORY_READ_FAILED');
+  if (child.status !== 0) {
+    // Name the real cause: a missing deployment, a buffer overflow or the query's own error.
+    const reason = child.error?.code ?? (child.signal ? `signal ${child.signal}` : `exit ${child.status}`);
+    const diagnostic = (child.stderr ?? '').trim().split('\n').slice(-6).join('\n').slice(0, 1500);
+    throw Object.assign(
+      new Error(`STORAGE_INVENTORY_READ_FAILED (${reason})${diagnostic ? `\n${diagnostic}` : ''}`),
+      { code: 'STORAGE_INVENTORY_READ_FAILED' },
+    );
+  }
   return JSON.parse(child.stdout);
+}
+
+/** A table whose page is too big for one read (a row over the byte limit) is sampled with fewer rows;
+ * a table that still fails is reported as unreadable instead of ending the whole inventory. */
+function sample(table) {
+  let failure;
+  for (const numItems of [128, 16, 1]) {
+    try {
+      return run(
+        `return await (${inventorySample.toString()})(ctx,${JSON.stringify(table)},"desc",null,${numItems});`,
+      );
+    } catch (error) {
+      failure = error;
+    }
+  }
+  return { table, unreadable: String(failure?.message ?? failure) };
 }
 
 if (process.argv[1] === new URL(import.meta.url).pathname) {
@@ -63,7 +87,13 @@ if (process.argv[1] === new URL(import.meta.url).pathname) {
   let bytes = 0;
   for (const { table, count } of counts) {
     if (!count) continue;
-    const result = run(`return await (${inventorySample.toString()})(ctx,${JSON.stringify(table)},"desc");`);
+    rmSync(resolve(output, `${table}-desc.json`), { force: true }); // never leave an old sample beside new counts
+    const result = sample(table);
+    if (result.unreadable) {
+      process.exitCode = 1; // incomplete inventory
+      process.stdout.write(JSON.stringify({ table, count, unreadable: result.unreadable }) + '\n');
+      continue;
+    }
     bytes += result.rows.reduce((n, row) => n + row.bytes, 0);
     writeFileSync(resolve(output, `${table}-desc.json`), JSON.stringify(result), { mode: 0o600 });
     process.stdout.write(

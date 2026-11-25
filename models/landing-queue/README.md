@@ -104,7 +104,7 @@ fails closed. No JAR or generated state files belong in source. TLC reports
 version 2.19, revision `5a47802`. One worker, fingerprint polynomial 0 and seed 1
 make runs comparable. Java heap is bounded at 2 GiB, plus JVM/native overhead;
 the default `small` run has a five-minute execution deadline; optional wider configurations may run longer and requires 40 GB free before
-starting. Slot wait and download time are separate from reported Java wall time.
+starting (checked first; `FORGE_LANDING_QUEUE_MIN_FREE_GB` lowers it, a run uses under 1 MB). Slot wait and download time are separate from reported Java wall time.
 At very large production queue sizes, this tool still makes **zero Convex calls,
 zero DB reads/writes and zero provider calls**. Exploration cost grows with model
 bounds, not production records. Idle cost is zero. The model is opt-in; only the

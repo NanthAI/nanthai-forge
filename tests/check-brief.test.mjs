@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -12,6 +12,7 @@ import {
   briefIssueId,
   checkBriefMain,
   cliBoardReader,
+  hazardLocations,
   lintBrief,
   resolveBriefIssue,
 } from '../scripts/check-brief.mjs';
@@ -259,6 +260,25 @@ test('ed4c5852: the real board reader reports UNAVAILABLE (not NOT_FOUND) outsid
     );
   } finally {
     process.chdir(cwd);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a named log file with env words is not a rules file; a real rules file names file and line', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'check-brief-'));
+  try {
+    mkdirSync(join(dir, '.forge', 'scratch'), { recursive: true });
+    writeFileSync(join(dir, '.forge', 'scratch', 'run.md'), 'ok\n$ printenv\n');
+    writeFileSync(join(dir, 'build-log.md'), '$ printenv\n');
+    writeFileSync(join(dir, 'rules.md'), 'fine\nRun `printenv` first.\n');
+    assert.deepEqual(hazardLocations('See .forge/scratch/run.md and build-log.md.', dir), []);
+    const found = hazardLocations('Follow rules.md.', dir);
+    assert.equal(found.length, 1);
+    assert.match(found[0], /^rules\.md:2:/);
+    writeFileSync(join(dir, 'restore-results.md'), '$ printenv\n');
+    assert.deepEqual(hazardLocations('Evidence: restore-results.md.', dir), []);
+    assert.equal(hazardLocations('Common rules: restore-results.md.', dir).length, 1);
+  } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });

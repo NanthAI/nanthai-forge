@@ -19,6 +19,22 @@ export const tlaTools = {
 const directory = dirname(fileURLToPath(import.meta.url));
 const config = process.argv[2] ?? 'small';
 if (!/^[a-z][a-z0-9-]*$/.test(config)) throw new Error('Select a model configuration name.');
+{
+  // Fail first with the real cause: before any slot wait, download or child run.
+  const override = process.env.FORGE_LANDING_QUEUE_MIN_FREE_GB?.trim();
+  const needGb = override ? Number(override) : 40;
+  if (!Number.isFinite(needGb) || needGb < 0)
+    throw new Error('FORGE_LANDING_QUEUE_MIN_FREE_GB must be a non-negative number of GB.');
+  const disk = await statfs(tmpdir());
+  const freeGb = (disk.bavail * disk.bsize) / 1000 ** 3;
+  if (freeGb < needGb) {
+    console.error(
+      `landing-queue model: refused, ${freeGb.toFixed(1)} GB free disk but ${needGb} GB reserve required. ` +
+        'Free space, or set FORGE_LANDING_QUEUE_MIN_FREE_GB to a lower number (a run uses under 1 MB).',
+    );
+    process.exit(1);
+  }
+}
 if (config === 'all') {
   for (const name of [
     'small',
@@ -128,8 +144,6 @@ async function officialJar() {
   }
 }
 const cfg = await readFile(join(directory, `${config}.cfg`), 'utf8');
-const disk = await statfs(tmpdir());
-if (disk.bavail * disk.bsize < 40 * 1000 ** 3) throw new Error('TLC requires 40 GB free disk reserve.');
 const scratch = temporaryDirectory(null, 'forge-landing-tlc-');
 try {
   const home = join(scratch, 'home'),
