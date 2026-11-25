@@ -115,18 +115,25 @@ async function autoWorker(input: Record<string, unknown>) {
         raw.push(match[1]!);
   }
   const contexts: string[] = [];
+  const denied: string[] = [];
   const seen = new Set<string>();
   const session = String(input.session_id ?? input.tool_use_id ?? randomUUID());
   // Local teaching (6b7d5a79): an edit in the project folder, during a live landing, or long unsaved.
-  const { cloneRootOf, cloneRootHint, laneEditHints } = await import('./agent-edit-local-hints.js');
+  const { cloneRootOf, cloneRootHint, cloneRootRefusal, laneEditHints } =
+    await import('./agent-edit-local-hints.js');
   const lanes = new Set<string>();
   for (const path of raw) {
     const absolute = resolve(cwd, path);
     const target = editTarget(absolute);
     if (!target) {
       const clone = cloneRootOf(absolute);
-      const hint = clone && editHooksEnabled(clone.projectId) ? cloneRootHint(clone, session) : '';
-      if (hint) contexts.push(hint);
+      const live = clone && editHooksEnabled(clone.projectId) ? clone : null;
+      const refusal = live ? cloneRootRefusal(live, absolute) : '';
+      if (refusal) denied.push(refusal);
+      else if (live) {
+        const hint = cloneRootHint(live, session);
+        if (hint) contexts.push(hint);
+      }
       continue;
     }
     if (!editHooksEnabled(target.project)) continue;
@@ -139,6 +146,18 @@ async function autoWorker(input: Record<string, unknown>) {
     seen.add(key);
     const context = hostedEditContext(await preEditHosted(target, session));
     if (context) contexts.push(context);
+  }
+  if (denied.length) {
+    // The same text as context: a harness that cannot refuse before the write (Antigravity) still says it.
+    const reason = [...new Set(denied)].join('\n').slice(0, 1800);
+    return {
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+        permissionDecisionReason: reason,
+        additionalContext: reason,
+      },
+    };
   }
   return contexts.length
     ? {

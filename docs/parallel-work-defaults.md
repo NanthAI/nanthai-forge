@@ -356,7 +356,9 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
   or the manager version or install settings changed) it relinks to the install for the new key, installing
   it once into the shared cache if no Lane has yet, and prints one line on stderr (`start`/`open` also report
   `dependencies.relinked.from`). Lanes linked by older builds follow the same rule. If the new install
-  fails the previous link is put back. These commands also restore a Forge link when its shared
+  fails the previous link stays (a plain single-link `node_modules` keeps pointing at the old install while the new one
+  is installed, then swaps in one step, so a check running in the Lane never sees it missing; the old install
+  counts as just used, so a cache sweep evicts it last). These commands also restore a Forge link when its shared
   install was pruned. If the directory holds packages Forge did not link, it is kept
   and reported (`dependencies.status` `stale`, or a stderr line); delete it to relink. A Lane with no
   `node_modules` is not given one by these commands.

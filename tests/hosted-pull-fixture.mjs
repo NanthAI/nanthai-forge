@@ -2,7 +2,7 @@
 // Copyright 2026 Ferdinando Valsecchi
 import fs from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { digest } from '../dist/hash.js';
 import { ForgeError } from '../dist/errors.js';
@@ -68,7 +68,10 @@ export function pullFixture(t, count = 3, extra = []) {
   fs.mkdirSync(join(root, 'src'), { recursive: true });
   fs.mkdirSync(join(root, '.forge'));
   fs.writeFileSync(join(root, '.forge/hosted-main.json'), JSON.stringify({ selection: main, state }));
-  for (const file of files) fs.writeFileSync(join(root, file.path), objects.get(file.blob));
+  for (const file of files) {
+    fs.mkdirSync(dirname(join(root, file.path)), { recursive: true });
+    fs.writeFileSync(join(root, file.path), objects.get(file.blob));
+  }
   // Seed only the old manifest. Unchanged files must come from ROOT, even with
   // a completely cold machine cache and per-clone blob store.
   fs.mkdirSync(join(clientCacheRoot(root), 'objects'), { recursive: true });

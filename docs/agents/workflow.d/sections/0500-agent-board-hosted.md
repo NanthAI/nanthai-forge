@@ -112,8 +112,9 @@ its retained replies. MCP uses `forge_work_overview` action `board`.
   It sends the board argument only after a Lane action learned that the server has
   the board (a small local marker), so it never adds a capability call.
 - Local working-rule hints (Item 6b7d5a79; local reads only, no server call): the hook
-  warns once per session when an edit is in the project's copy of main (a clone root,
-  never saved or landed) and names the start command; on every edit while this machine
+  refuses a source edit in the project's copy of main (a clone root, never saved or landed;
+  build output, dependencies, env files and Forge metadata stay editable) and names the
+  start command (friction 71d3ac78; a harness that cannot refuse before the write, such as Antigravity, gets the same text as a notice); on every edit while this machine
   has a live landing of the Lane (registry `landing`, under 6 h old) it names the
   `wait` and `land --withdraw` commands; and after 30 minutes of unsaved edits (from
   the first write after the last save) it names the save command, at most once per 30

@@ -13,6 +13,7 @@ import {
 import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { digest } from './hash.js';
+import { generatedOutput } from './generated-output.js';
 import { ForgeError } from './errors.js';
 import { durableReplace, syncDirectory } from './state/durability.js';
 import { checkoutPathExists as exists } from './hosted-checkout-files.js';
@@ -230,11 +231,16 @@ function rollForward(
   const flipped = (directory: string) =>
     installPaths.some(path => fold(directory) === path || fold(directory).startsWith(`${path}/`));
   for (const directory of journal.directories) if (flipped(directory)) removeEmptied(root, directory, track);
+  // Only the shared main clone replaces codegen output; a Lane's unsaved regenerated file is its work.
+  const disposable = (path: string) => journal.marker === 'hosted-main.json' && generatedOutput(path);
   const changed = journal.displace.filter(
-    file => exists(join(backup, file.path)) && !matches(join(backup, file.path), file, steps.text),
+    file =>
+      !disposable(file.path) &&
+      exists(join(backup, file.path)) &&
+      !matches(join(backup, file.path), file, steps.text),
   );
   const occupied = journal.install.filter(
-    file => pending.has(file.path) && exists(join(steps.root, file.path)),
+    file => pending.has(file.path) && !disposable(file.path) && exists(join(steps.root, file.path)),
   );
   // Nothing installed yet: an edit undoes the apply and refuses, as the clean check would have.
   if ((changed.length || occupied.length) && pending.size === journal.install.length) {

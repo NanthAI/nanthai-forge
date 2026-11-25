@@ -17,7 +17,7 @@ import { basename, dirname, isAbsolute, join } from 'node:path';
 import { readInstallScriptAllowlist, type InstallScriptAllowlist } from './install-script-allowlist.js';
 import { linkInstall } from './dependency-link.js';
 import { removeInstall, sealInstall } from './dependency-seal.js';
-import { readLink, recordLink, relinkDependencyEntry, type Relinked } from './dependency-relink.js';
+import { readLink, recordLink, relinkDependencyEntry, swapLink, type Relinked } from './dependency-relink.js';
 import { allowedRebuilds, npmInstaller, scriptedPackages } from './npm-install.js';
 import {
   detectPackageManager,
@@ -305,6 +305,8 @@ export async function shareDependencies(
      * Unset: skipped; a repository's request (forge.json `install.scripts`, an allowlist) runs only
      * when this machine's installScripts setting accepts it (installScriptsPolicy). */
     runScripts?: boolean | undefined;
+    /** Internal to a relink: install the current lockfile's entry, then swap the Lane's existing link over. */
+    swapLink?: boolean;
     /** Only follow a lockfile change of an existing Forge link; a Lane with no node_modules stays without. */
     refresh?: boolean;
     /** How to run a non-npm manager (default: corepack at the declared version, else PATH). */
@@ -323,7 +325,7 @@ export async function shareDependencies(
   const pm = detected.manager,
     other = pm.name !== 'npm',
     cache = options.cache ?? dependencyCacheDirectory();
-  if (exists(join(root, 'node_modules'))) {
+  if (!options.swapLink && exists(join(root, 'node_modules'))) {
     const current = dependencyKey(root);
     if (!current) return { status: 'none' };
     const link = readLink(root);
@@ -341,9 +343,14 @@ export async function shareDependencies(
         rmSync(lock, { recursive: true, force: true });
       }
       try {
-        return await relinkDependencyEntry(root, link, missing, () =>
-          shareDependencies(root, { ...options, refresh: false }),
+        const result = await relinkDependencyEntry(root, link, missing, swap =>
+          shareDependencies(root, { ...options, refresh: false, swapLink: swap }),
         );
+        // The Lane left this install: it counts as just used, so a sweep evicts it last and a check still
+        // running against the old link keeps its packages (friction 476d490e).
+        if ('relinked' in result && result.relinked)
+          maintenance.touchDependencyEntry(link.entry, root, link.folders);
+        return result;
       } finally {
         release();
         maintenance.sweepDependencyCache(cache, root);
@@ -476,8 +483,15 @@ export async function shareDependencies(
         : { status: 'none' };
     // npm workspaces link siblings inside the root node_modules; they must reach the Lane's source too.
     const npmFolders = other ? [] : (workspaceDirectories(readFileSync(join(root, pm.lockfile))) ?? []);
-    if (other || npmFolders.length) linkInstall(entry, root, other ? folders : npmFolders);
-    else linkDirectory(path, join(root, 'node_modules'));
+    const laneFolders = other ? folders : npmFolders;
+    // A relink from one plain link to another is one swap; a lockfile that now has workspace folders builds
+    // a directory of links, so the old link goes first.
+    if (options.swapLink && !laneFolders.length) swapLink(path, join(root, 'node_modules'));
+    else {
+      if (options.swapLink) rmSync(join(root, 'node_modules'), { force: true });
+      if (other || npmFolders.length) linkInstall(entry, root, laneFolders);
+      else linkDirectory(path, join(root, 'node_modules'));
+    }
     const fingerprint = dependencyKey(root);
     if (fingerprint) recordLink(root, { fingerprint, entry, folders: other ? folders : npmFolders });
     const { touchDependencyEntry } = await cacheMaintenance();

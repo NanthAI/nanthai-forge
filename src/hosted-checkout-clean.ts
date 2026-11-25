@@ -27,6 +27,7 @@ import { diskShapeMatches, diskMode } from './source-links.js';
 import { fold } from './hosted-checkout-delta.js';
 import { workingMatches, worktreeText } from './checkout-text.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
+import { generatedOutput } from './generated-output.js';
 
 export type CheckoutChange = { path: string; kind: 'edited' | 'extra' | 'deleted' };
 
@@ -247,6 +248,10 @@ export function cleanHostedCheckout(
         (observedDigest === file.blob || workingMatches(text, path, bytes, file.blob, file.mode)) &&
         diskShapeMatches(stat, file.mode),
       );
+      if (!matches && markerName === 'hosted-main.json' && generatedOutput(path)) {
+        allowed.delete(path);
+        continue;
+      }
       if (!matches && options.collect) {
         options.collect.push({ path, kind: saved ? 'edited' : 'extra' });
         allowed.delete(path);

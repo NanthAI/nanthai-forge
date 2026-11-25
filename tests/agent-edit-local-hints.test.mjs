@@ -15,6 +15,7 @@ import { PeersCache } from '../dist/agent-peers-cache.js';
 import {
   UNSAVED_HINT_MINUTES,
   cloneRootHint,
+  cloneRootRefusal,
   cloneRootOf,
   laneEditHints,
 } from '../dist/agent-edit-local-hints.js';
@@ -115,4 +116,24 @@ test('unsaved edits past the checkpoint nudge get one save line per interval, me
   utimesSync(marker, saved, saved);
   assert.deepEqual(laneEditHints(target, minutes(2 * UNSAVED_HINT_MINUTES + 2), cache), []);
   assert.deepEqual(laneEditHints(target, minutes(2 * UNSAVED_HINT_MINUTES + 10), cache), []);
+});
+
+/** Friction 71d3ac78: a builder edited the shared project copy before starting its Lane. */
+test('a source edit in the project copy of main is refused before a Lane exists; local-only paths are not', t => {
+  const { base } = folders(t);
+  const clone = join(base, 'project');
+  mkdirSync(clone, { recursive: true });
+  writeFileSync(join(clone, '.gitignore'), 'dist/\n');
+  const refusal = path => cloneRootRefusal({ root: clone }, join(clone, path));
+  assert.match(refusal('src/a.ts'), /nforge agent '.*project' start/);
+  assert.match(refusal('docs/new-note.md'), /never saved or landed/);
+  for (const local of [
+    '.forge/scratch/a.log',
+    'node_modules/x/index.js',
+    'dist/cli.js',
+    '.env.local',
+    'convex/_generated/api.js',
+  ])
+    assert.equal(refusal(local), '', local);
+  assert.equal(cloneRootRefusal({ root: clone }, join(base, 'elsewhere/a.ts')), '');
 });

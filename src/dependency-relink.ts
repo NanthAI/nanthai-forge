@@ -6,6 +6,7 @@ import {
   readFileSync,
   readdirSync,
   readlinkSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -103,6 +104,26 @@ function onlyLinks(directory: string, top = true): boolean {
   });
 }
 
+/** Point PATH at TARGET in one step: a process resolving modules through PATH meets the old install or the new
+ * one, never a missing `node_modules` (friction 476d490e). */
+export function swapLink(target: string, path: string): void {
+  const temporary = `${path}.forge-swap-${process.pid}`;
+  rmSync(temporary, { force: true });
+  linkDirectory(target, temporary);
+  try {
+    renameSync(temporary, path);
+  } catch (error) {
+    rmSync(temporary, { force: true });
+    throw error;
+  }
+}
+
+/** A Lane whose whole `node_modules` is one Forge symlink (no workspace folders): it can be swapped in place. */
+export const swappable = (root: string, link: ForgeLink) =>
+  process.platform !== 'win32' &&
+  !link.folders.length &&
+  Boolean(stat(join(root, 'node_modules'))?.isSymbolicLink());
+
 /** Remove a Forge-made link so a new one can be made; returns how to put it back, or why it was kept. */
 function retire(root: string, link: ForgeLink): (() => void) | string {
   const modules = ['', ...link.folders].map(folder => join(root, folder, 'node_modules'));
@@ -138,13 +159,21 @@ export async function relinkDependencyEntry<T extends { status: string }>(
   root: string,
   link: ForgeLink,
   missing: boolean,
-  relink: () => Promise<T>,
+  relink: (swap: boolean) => Promise<T>,
 ): Promise<{ status: 'stale'; reason: string } | (T & { relinked?: Relinked })> {
+  // A single-symlink Lane keeps its old link while the new install is made, then swaps in one step: a check
+  // running in this Lane never sees a missing `node_modules` (friction 476d490e). A failed install changes nothing.
+  if (swappable(root, link)) {
+    const result = await relink(true);
+    return result.status === 'linked' || result.status === 'installed'
+      ? { ...result, relinked: { from: link.fingerprint, ...(missing ? { restored: true } : {}) } }
+      : result;
+  }
   const undo = retire(root, link);
   if (typeof undo === 'string') return { status: 'stale', reason: undo };
   let result: T;
   try {
-    result = await relink();
+    result = await relink(false);
   } catch (error) {
     undo();
     throw error;

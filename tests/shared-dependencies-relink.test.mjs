@@ -4,6 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   existsSync,
+  readdirSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -277,4 +278,35 @@ test('a relink queued behind another process install of the same lockfile says s
     /^dependencies: waiting for another process to finish installing or relinking npm-[0-9a-f]{24}/,
   );
   assert.equal(sees(root, 'new-dep'), true);
+});
+
+// Friction 476d490e: a preflight relink removed the Lane's link, then installed for 11 s; a check running in the
+// same Lane met MODULE_NOT_FOUND. The old link now stays until the new install is ready.
+test('a relink keeps the old install reachable while the new one is installed, then swaps in one step', async t => {
+  const directory = scratch(t),
+    calls = [],
+    root = lane(directory, 'a', { lock: lockOf(['old-dep']) });
+  await shareDependencies(root, options(directory, calls));
+  const first = readlinkSync(join(root, 'node_modules'));
+  writeFileSync(join(root, 'package-lock.json'), lockOf(['old-dep', 'new-dep']));
+  const seenDuring = [];
+  const result = await shareDependencies(
+    root,
+    options(directory, calls, {
+      refresh: true,
+      install: async stage => {
+        seenDuring.push(sees(root, 'old-dep'), readlinkSync(join(root, 'node_modules')) === first);
+        await installer(calls)(stage);
+      },
+    }),
+  );
+  assert.equal(result.status, 'installed');
+  assert.deepEqual(seenDuring, [true, true], 'the old install stays linked and readable during the install');
+  assert.notEqual(readlinkSync(join(root, 'node_modules')), first);
+  assert.equal(sees(root, 'new-dep'), true);
+  assert.deepEqual(
+    readdirSync(root).filter(name => name.includes('forge-swap')),
+    [],
+    'no temporary link is left',
+  );
 });

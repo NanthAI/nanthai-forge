@@ -4,12 +4,15 @@
 // edit lands in the project's main copy, during a live landing, or after a long unsaved stretch. Local reads only
 // (a marker stat, the machine's Lane registry file and one small cache entry): no server call, nothing at idle.
 // Light module: the hook imports it. Node builtins and the hook's own light modules only.
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative, sep } from 'node:path';
 import { PeersCache } from './agent-peers-cache.js';
-import { readEditMarkerIdentity, type EditTarget } from './agent-edit-target.js';
+import { canonicalEditPath, readEditMarkerIdentity, type EditTarget } from './agent-edit-target.js';
 import { shellQuote } from './shell-quote.js';
+import { generatedOutput } from './generated-output.js';
+import { captureExclusion } from './files.js';
+import { ignoreNames, ignoredBy, readIgnoreLayer } from './source-ignore.js';
 
 /** The shipped checkpoint nudge (agent-parallel-defaults checkpointNudgeMinutes); the hook reads no settings. */
 export const UNSAVED_HINT_MINUTES = 30;
@@ -40,6 +43,31 @@ export function cloneRootHint(clone: { root: string }, session: string, cache = 
   if (cache.read(key)) return '';
   cache.write(key, { shown: true });
   return `Forge: ${clone.root} is the project's copy of main, not a Lane: Forge never saves or lands edits here. Start a Lane and edit in the folder it prints: nforge agent ${shellQuote(clone.root)} start '{"outcome":"what you will change"}' (or {"planningItemId":"ITEM_ID"}).`;
+}
+
+/** A source edit in the project copy of main, before any Lane exists (friction 71d3ac78): the hook refuses it,
+ * since Forge never saves it there, it blocks the next pull and no one else sees it. Empty for paths Forge does not
+ * track: the project's own ignore rules (build output), Forge's protected names (dependencies, env files, metadata)
+ * and codegen output a pull replaces. Reads the folder's two root ignore files only. */
+export function cloneRootRefusal(clone: { root: string }, absolute: string) {
+  let root = clone.root,
+    inside: string;
+  try {
+    // The ignore reader compares real paths: a symlinked temp or home folder must not read as an escape.
+    root = realpathSync(clone.root);
+    inside = relative(root, canonicalEditPath(absolute)).split(sep).join('/');
+  } catch {
+    return '';
+  }
+  if (!inside || inside.startsWith('..') || generatedOutput(inside) || /^\.forge(?:\/|$)/.test(inside))
+    return '';
+  if (captureExclusion(inside, false)) return '';
+  try {
+    if (ignoredBy(readIgnoreLayer(root, '', [...ignoreNames]), inside)) return '';
+  } catch {
+    return '';
+  }
+  return `Forge: ${clone.root} is the project's copy of main, not a Lane: edits here are never saved or landed, and they block the next pull. Start a Lane first, then edit in the folder it prints: nforge agent ${shellQuote(clone.root)} start '{"outcome":"what you will change"}' (or {"planningItemId":"ITEM_ID"}).`;
 }
 
 /** The landing this machine submitted for the Lane and has not seen settle (lane-registry `landing`). */
