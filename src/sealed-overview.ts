@@ -10,6 +10,10 @@ import type { Entry, Head, NameRecord, Roster } from './sealed-records.js';
 /** Items one page shows: names and rotate rows per set, and people per set. */
 export const OVERVIEW_PAGE = { names: 100, rotate: 100, people: 25 } as const;
 
+/** The names a device gets when its own name was not known (older genesis and join requests): not a given name, so a
+ * holder row shows the code alone instead of "this device". */
+const PLACEHOLDER_NAMES = new Set(['this device', 'new device']);
+export const isPlaceholderName = (name: string) => PLACEHOLDER_NAMES.has(name);
 const byName = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
 /** The rotate list, derived from signed records only: each live name a removed device or machine could open, because
@@ -46,7 +50,7 @@ export type OverviewSet = {
   roster: Roster;
   revoked: readonly Uint8Array[];
   notes: readonly MarkNote[];
-  formerHandles: readonly { id: Uint8Array; handle: string }[];
+  formerHandles: readonly { id: Uint8Array; handle?: string; name?: string }[];
   joinRequests: readonly { deviceId: Uint8Array; accountId: Uint8Array | null; at: number }[];
   proposals: readonly PendingFacts[];
 };
@@ -125,7 +129,7 @@ export function holderRows(
         .map(e => ({
           code: deviceFingerprint(e.id),
           how: howWord(e.how),
-          ...(mine && e.displayName ? { name: e.displayName } : {}),
+          ...(mine && e.displayName && !isPlaceholderName(e.displayName) ? { name: e.displayName } : {}),
           ...(marked(set, e.id) ? { marked: true as const } : {}),
         }))
         .sort((a, b) => byName(a.code, b.code)),
@@ -140,6 +144,7 @@ export function holderRows(
   const keys = machines
     .map(e => ({
       code: deviceFingerprint(e.id),
+      ...(e.displayName ? { name: e.displayName } : {}),
       by: handleOf(set.roster.entries.find(o => equalBytes(o.id, e.addedBy))?.accountId ?? new Uint8Array()),
     }))
     .sort((a, b) => byName(a.code, b.code));

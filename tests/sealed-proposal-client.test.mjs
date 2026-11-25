@@ -203,19 +203,29 @@ test('a person rejects a proposal; the journal then refuses it as resolved', asy
   assert.equal(h.stored().length, 0);
 });
 
-test('review F2: a stale proposal the server still lists teaches reject; one no longer current teaches listing', async t => {
+test('review F2: a stale proposal a lagging listing still shows teaches reject; one no longer current teaches listing', async t => {
   const reject = error => teach(error.code, { argv: ['secret', 'apply'] }, undefined, error.message);
   const h = harness(t);
   await h.person.write('API_TOKEN', text('synthetic-value-one'));
   const proposed = await h.agent.write('API_TOKEN', text('synthetic-value-two'));
-  // The base changed: the server keeps listing the proposal, so the next step is reject, not a new listing.
+  const [listed] = await h.transport.proposals({ kind: 1 });
+  // The base changed: the write that changed it closed the proposal (fcfc7e62), so nothing waits on the server. A
+  // listing read just before still shows it, and applying from that listing teaches reject, not a new listing.
   await h.person.write('API_TOKEN', text('synthetic-value-three'));
-  const changed = await applyWaiting(h.person, proposed.proposed, yes).catch(error => error);
+  assert.equal(h.stored().length, 0, 'the changing write closed the proposal');
+  const lagging = new SealedClient(
+    h.project,
+    h.account,
+    h.keys,
+    h.pins,
+    { ...h.transport, proposals: async () => [listed] },
+    false,
+  );
+  const changed = await applyWaiting(lagging, proposed.proposed, yes).catch(error => error);
   assert.equal(changed.code, 'WORK_CONFLICT');
   assert.equal(reject(changed).next, 'nforge secret reject ID', changed.message);
   // A listing that fails the public checks on this view (a forged proposer).
-  const [row] = await h.transport.proposals({ kind: 1 });
-  const decoded = decodeSealedProposal(decodeSealedWire(new Uint8Array(row)));
+  const decoded = decodeSealedProposal(decodeSealedWire(new Uint8Array(listed)));
   const forged = Uint8Array.from(
     encodeSealedWire({ ...decoded, proposerId: Buffer.alloc(decoded.proposerId.length, 7) }),
   ).buffer;
@@ -231,7 +241,6 @@ test('review F2: a stale proposal the server still lists teaches reject; one no 
   assert.notEqual(invalid.code, 'WORK_CONFLICT');
   assert.equal(reject(invalid).next, 'nforge secret reject ID', invalid.message);
   // Nothing waits under this id any more, and storage's own refusal is its fixed client text.
-  await rejectWaiting(h.person, proposed.proposed);
   const gone = await applyWaiting(h.person, proposed.proposed, yes).catch(error => error);
   assert.equal(reject(gone).next, 'nforge secret proposals', gone.message);
   const refused = sealedRefusal(

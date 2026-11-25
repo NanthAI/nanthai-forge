@@ -135,6 +135,7 @@ export class ChecksClient extends SealedClient {
       development.agent,
       development.notice,
       development.terminal,
+      development.deviceName,
     );
   }
   override get kind(): 2 {
@@ -156,7 +157,7 @@ export class ChecksClient extends SealedClient {
       'SECRETS_NOT_SET_UP',
       'This device trusts a Checks set that Forge no longer shows. Nothing was changed; try again later.',
     );
-    const made = newSealedSet(this.project, this.account, this.keys, Date.now(), 2);
+    const made = newSealedSet(this.project, this.account, this.keys, Date.now(), 2, this.deviceName);
     try {
       const pointer = {
         checksSetId: made.reply.roster.setId,

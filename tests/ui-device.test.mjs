@@ -20,6 +20,18 @@ test('device codes are paste-tolerant and grouped like the terminal prints them'
   assert.equal(code.expiresIn(Date.now() + 8 * 60_000, Date.now()), 'in 8 min');
 });
 
+test('a name edited before the passkey re-check survives it (friction 8710bfcf)', () => {
+  const fresh = { name: 'owner Mac', settings: { source: 'write' } };
+  assert.deepEqual(code.recheckedDraft(undefined, fresh), fresh, 'a first look takes the terminal name');
+  assert.deepEqual(
+    code.recheckedDraft({ name: 'MacBook Air', settings: undefined }, fresh),
+    { name: 'MacBook Air', settings: { source: 'write' } },
+    'the edited name stays; unset settings take the server view',
+  );
+  const edited = { name: 'MacBook Air', settings: { source: 'read' } };
+  assert.deepEqual(code.recheckedDraft(edited, fresh), edited, 'edited settings stay too');
+});
+
 test('a terminal-chosen name is cleaned and capped before it is shown (S-02)', () => {
   const name = 'Forge\u202Eevil\u200B  \n' + 'x'.repeat(100) + '<b>hi</b>';
   const shown = code.shownDeviceName(name);

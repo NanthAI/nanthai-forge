@@ -55,6 +55,8 @@ export type SealedReadWire = {
   unlinked?: true;
   /** How many proposals wait for a holder; absent when none or from older deployments. */
   proposals?: number;
+  /** The given names of removed CI machines, which a signed former entry does not carry: display only. */
+  formerNames?: { id: ArrayBuffer; name: string }[];
 };
 export interface SealedTransport {
   read(input: {

@@ -1127,7 +1127,11 @@ page reads the whole overview again instead of combining two snapshots.
 **Kept beside markers.** A marker keeps when it was set and, when the person left the
 project, their public Forge handle (`revokedNotes`; handles only, never names or
 emails). A re-key moves the handles of the entries it removes to `formerHandles`, so
-"after @handle left" survives the re-key. `propose` keeps the proposal's operation and
+"after @handle left" survives the re-key. A removed CI machine's given name moves there
+too (a signed former entry holds only an id), so the rotate list on the page and in
+`nforge secret list` shows `“walk-ci” (id c876f11a)`; a device's own name comes from its
+signed roster entry, written from the sign-in's device name when it first joins, and the
+page shows a computer's name only to its owner. `propose` keeps the proposal's operation and
 kind on the pending facts so the page names them without opening the sealed bytes. A
 computer's sign-in ending and a person leaving the project are separate reasons: a marker
 carries the handle only when the person left, so the holder list says "left the project"

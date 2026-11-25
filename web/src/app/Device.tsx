@@ -13,7 +13,7 @@ import { assertPasskey } from './webauthn';
 import { useAction, useMutation } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
 import type { DeviceSettings as Settings } from './access-contract';
-import { codeComplete, codeProblem } from '../device/code';
+import { codeComplete, codeProblem, recheckedDraft } from '../device/code';
 import { forgetLinkCode, githubReturn, takeLinkCode, takeTypedCode } from '../device/link-code';
 import { DeviceView, type DevicePhase } from './DeviceView';
 export { DeviceView } from './DeviceView';
@@ -61,7 +61,7 @@ export function Device({ viewerHandle }: { viewerHandle: string | undefined }) {
         : 'Forge could not check that code. Try again.',
     );
   };
-  const find = async () => {
+  const find = async (kept?: { name: string; settings: Settings | undefined }) => {
     setPhase({ kind: 'checking' });
     setProblem(null);
     try {
@@ -74,8 +74,9 @@ export function Device({ viewerHandle }: { viewerHandle: string | undefined }) {
         setPhase({ kind: 'enter' });
         return;
       }
-      setName(request.name);
-      setSettings(request.device?.settings);
+      const draft = recheckedDraft(kept, { name: request.name, settings: request.device?.settings });
+      setName(draft.name);
+      setSettings(draft.settings);
       setPhase({ kind: 'review', request });
     } catch (error) {
       fail(error, { kind: 'enter' });
@@ -139,7 +140,7 @@ export function Device({ viewerHandle }: { viewerHandle: string | undefined }) {
           setBusy(true);
           try {
             await confirm({ response: await assertPasskey(await startConfirmation({})) });
-            await find();
+            await find({ name, settings });
           } catch (error) {
             fail(error, back);
           } finally {

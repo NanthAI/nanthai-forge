@@ -22,6 +22,16 @@ export function expiresIn(at: number, now: number): string {
   return `in ${Math.round(seconds / 60)} min`;
 }
 
+/** The name and access on the approval page once the server is asked again (the passkey or GitHub re-check that enables
+ * Approve): what the person already edited stays, and only a first look takes the terminal's name and the server's
+ * settings (friction 8710bfcf: the re-check put the terminal name back over an edit). */
+export function recheckedDraft<S>(
+  kept: { name: string; settings: S | undefined } | undefined,
+  fresh: { name: string; settings: S | undefined },
+): { name: string; settings: S | undefined } {
+  return kept ? { name: kept.name, settings: kept.settings ?? fresh.settings } : fresh;
+}
+
 /** The access a device asks for, in plain words. */
 export function scopeWords(scope: string): string {
   return scope === 'cli'

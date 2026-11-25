@@ -51,7 +51,7 @@ export const overviewSet = v.object({
         version: v.number(),
         devices: v.array(v.object({ code: v.string(), handle })),
         more: v.number(),
-        machines: v.optional(v.array(v.string())),
+        machines: v.optional(v.array(v.object({ id: v.string(), name: v.optional(v.string()) }))),
       }),
     ),
   ),
@@ -87,7 +87,7 @@ export const overviewSet = v.object({
       }),
     ),
   ),
-  machines: v.optional(v.array(v.object({ code: v.string(), by: handle }))),
+  machines: v.optional(v.array(v.object({ code: v.string(), name: v.optional(v.string()), by: handle }))),
   waiting: v.optional(v.array(v.object({ code: v.string(), handle, at: v.number() }))),
 });
 export const overviewResult = v.union(

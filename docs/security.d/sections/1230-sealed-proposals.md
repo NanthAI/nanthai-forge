@@ -44,7 +44,8 @@ proposal ids that left the list, so an applied or rejected proposal is not store
 (the holder's own journal of applied ids is the client's check). A Development head write may carry a proposal record only when
 it answers a waiting proposal from that record's author, for that name and epoch; the
 same mutation removes it. The write also removes the proposals it names as resolved
-(adopted or rejected with it), and a re-key or roster step removes proposals from an
+(adopted or rejected with it), every proposal waiting on a name the write changes, adds
+or removes (its signed base moved, so it could only be rejected), and a re-key or roster step removes proposals from an
 older epoch or from a proposer no longer on the roster or marked for removal. Marking a
 proposer (a person removed, or a sign-in ended) removes its proposals in the same
 mutation. `sealedSecrets:reject` removes waiting proposals without a head write: a

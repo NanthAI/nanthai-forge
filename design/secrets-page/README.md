@@ -85,7 +85,7 @@ People come first, each with their computers folded inside (rule 35). Machines c
 |---|---|---|
 | A | After a removal (the mock's main page) | Needs you with all three bands, then Names and holders |
 | B | Nothing needs you | no Needs you region and no orange; "18 secrets in 2 sets. Nothing needs you." |
-| C | Never had any | "This project has no secrets yet." Empty Names: "Names appear here once someone sets the first one in a terminal." with `nforge secret set NAME`; the `.env` import line carries **Proposed** until slice 3 documents `nforge secret import` |
+| C | Never had any | "This project has no secrets yet." Empty Names: "Names appear here once someone sets the first one in a terminal." with `nforge secret set NAME`; the `.env` import line shows `nforge secret import` with no tag (import shipped) |
 | D | Loading | the head draws at once; nothing for 100 ms; still bars after about 300 ms, six at most |
 | E | Could not load | a notice (**Could not load**) with "Below is what this page last showed, at 14:02." and **Retry**; the last view stays, its hint "as shown at 14:02". Nothing reads again on its own |
 | F | Read role | "Secrets are for people who can write." plus a link to People and access; no read is made (the query refuses readers, as the page does today) |

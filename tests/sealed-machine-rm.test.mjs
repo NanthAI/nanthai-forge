@@ -8,7 +8,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { moduleUrl } from './convex-module.mjs';
-import { clone, setup } from './helpers/sealed-hosted.mjs';
+import { clone, server, setup } from './helpers/sealed-hosted.mjs';
 import { addMachine, checksClient } from '../dist/sealed-checks.js';
 import { removeMachine } from '../dist/sealed-machine-rm.js';
 import { readdirSync, rmSync } from 'node:fs';
@@ -431,5 +431,42 @@ test('review 5b51e7f3: the CLI refuses an agent with PERSON_REQUIRED before it s
     {
       code: 'PERSON_REQUIRED',
     },
+  );
+});
+
+test('fcfc7e62 a removed CI machine keeps its given name: the rotate list names it on the page and in the terminal', async t => {
+  const p = await project(t);
+  await removeMachine(p.checks, p.leaked.machineId.slice(0, 8));
+  await p.checks.write('API_TOKEN', synthetic('api-rotated'));
+  const id = p.leaked.machineId.slice(0, 8);
+  // The terminal's read carries the server's display-only hint beside the verified records.
+  const state = await p.checks.read();
+  const pin = state.pin;
+  assert.deepEqual(
+    rotateList(pin.roster, pin.head, state.formerNames).map(r => [r.name, r.machines]),
+    [
+      ['DB_URL', [{ id, name: 'ci' }]],
+      ['OTHER', [{ id, name: 'ci' }]],
+    ],
+  );
+  assert.deepEqual(
+    rotateList(pin.roster, pin.head).map(r => r.machines),
+    [[{ id }], [{ id }]],
+    'with no hint (an older server, or a machine removed before names were kept) the id stands alone',
+  );
+  wipe(state);
+  // The page's read names the same machine, and the kept machine shows its name among the holders.
+  const read = await server.overview._handler(p.s.ctx, { projectId: p.project });
+  const checks = read.sets.find(set => set.kind === 2);
+  assert.deepEqual(
+    checks.rotate.page.map(r => [r.name, r.machines]),
+    [
+      ['DB_URL', [{ id, name: 'ci' }]],
+      ['OTHER', [{ id, name: 'ci' }]],
+    ],
+  );
+  assert.deepEqual(
+    checks.machines.map(m => m.name),
+    ['ci-kept'],
   );
 });

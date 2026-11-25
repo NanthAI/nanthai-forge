@@ -3,7 +3,7 @@
 import { resolve } from 'node:path';
 import { AGENT_CLIENTS, nearestAgentProcess } from './agent-session.js';
 import { hostedAgentAddress } from './hosted-agent-address.js';
-import { resolveAuthToken } from './auth-store.js';
+import { resolveAuthToken, savedCredential } from './auth-store.js';
 import { secretRunRoot } from './secret-run-cli.js';
 import { invariant, ForgeError } from './errors.js';
 import { localSealedIdentity } from './sealed-identity.js';
@@ -42,6 +42,7 @@ export async function sealedClientForRoot(root: string, agent = sealedAgent()) {
     agent,
     line => process.stderr.write(`${line}\n`),
     !agent && process.stderr.isTTY === true,
+    savedCredential(address.url)?.name ?? '',
   );
   return client;
 }
@@ -260,12 +261,12 @@ export async function sealedCli(args: string[]) {
       if (marked) {
         const result = await removeMarked(client);
         process.stdout.write(
-          `${result.removed.length ? removalLine(result.removed, result.rotate) : 'Forge marks no Development entry for removal; nothing was removed.'}\n`,
+          `${result.removed.length ? removalLine(result.removed, result.rotate, result.names) : 'Forge marks no Development entry for removal; nothing was removed.'}\n`,
         );
       } else {
         const result = await unshareDevice(client, fingerprint!);
         process.stdout.write(
-          `${result.already ? `Device ${result.removed} was already removed from Development. Rotate at their provider what it could open: ${result.rotate.length ? result.rotate.map(safeSecretName).join(', ') : 'nothing'}.` : removalLine([result.removed], result.rotate)}\n`,
+          `${result.already ? `Device ${result.removed} was already removed from Development. Rotate at their provider what it could open: ${result.rotate.length ? result.rotate.map(safeSecretName).join(', ') : 'nothing'}.` : removalLine([result.removed], result.rotate, result.names)}\n`,
         );
       }
     } else if (command === 'proposals' || command === 'apply' || command === 'reject') {
@@ -302,7 +303,7 @@ export async function sealedCli(args: string[]) {
             );
         // Design 5.5: what removed devices and machines could open and nobody has changed since, from signed records only.
         const { rotateList } = await import('./sealed-unshare.js');
-        const rotate = rotateList(result.pin.roster, result.pin.head);
+        const rotate = rotateList(result.pin.roster, result.pin.head, result.formerNames);
         // On stderr, so the name table on stdout keeps its shape for scripts.
         if (rotate.length)
           process.stderr.write(
@@ -310,7 +311,9 @@ export async function sealedCli(args: string[]) {
               .map(r => {
                 const who = [
                   ...r.devices.map(fp => `fp ${fp}`),
-                  ...(r.machines ?? []).map(m => `machine id ${m.id}`),
+                  ...(r.machines ?? []).map(m =>
+                    m.name ? `machine “${m.name}” (id ${m.id})` : `machine id ${m.id}`,
+                  ),
                 ];
                 return `${safeSecretName(r.name)}\tremoved ${who.slice(0, 3).join(', ')}${who.length > 3 ? ` and ${who.length - 3} more` : ''}\n`;
               })

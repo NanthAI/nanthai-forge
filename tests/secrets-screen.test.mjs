@@ -247,6 +247,11 @@ test('Secrets: value-free screen, honest states, accessible themes, no sideways 
       assert.match(await needs.innerText(), /change\s+API_TOKEN\s+\(env\)/);
       assert.match(await needs.innerText(), /remove\s+LEGACY_WEBHOOK_SECRET\s+\(removal\)/);
       assert.match(await needs.innerText(), /fp R2PA-9XNE \(@dana\) could open v7/);
+      // A removed CI machine shows the name it was given with its id beside it; one with no kept name shows its id.
+      assert.match(
+        await needs.innerText(),
+        /CI machine “walk-ci” \(id c876f11a\), id 3d48a562 could open v4/,
+      );
       await page.getByRole('button', { name: 'Copy command' }).nth(1).click();
       assert.equal(
         await page.evaluate(() => navigator.clipboard.readText()),
@@ -271,7 +276,15 @@ test('Secrets: value-free screen, honest states, accessible themes, no sideways 
     // The viewer's own computers show their name; no other person's name ever appears.
     const holders = await page.getByRole('region', { name: 'Who can open them' }).innerText();
     assert.match(holders, /desk machine/);
-    assert.equal((holders.match(/“/g) ?? []).length, 3);
+    // Three computer names plus the CI machine's given name, beside its code (walk 2026-11-25).
+    assert.match(holders, /“walk-ci”/);
+    assert.equal((holders.match(/“/g) ?? []).length, 4);
+    // No holder row draws an empty box where an avatar or device mark belongs (walk 2026-11-25).
+    const empty = await page
+      .getByRole('region', { name: 'Who can open them' })
+      .locator('.av')
+      .evaluateAll(marks => marks.filter(m => !m.textContent.trim() && !m.querySelector('svg')).length);
+    assert.equal(empty, 0);
     await capture('calm');
   });
 
@@ -281,7 +294,9 @@ test('Secrets: value-free screen, honest states, accessible themes, no sideways 
       await open('empty');
       assert.equal(await sentence(), 'This project has no secrets yet.');
       await page.getByRole('button', { name: 'Copy: nforge secret set NAME' }).waitFor();
-      assert.equal(await page.getByText('Proposed', { exact: true }).count(), 1);
+      // Import shipped, so the empty page names `nforge secret import` without a Proposed tag (walk 2026-11-25).
+      assert.equal(await page.getByText('Proposed', { exact: true }).count(), 0);
+      await page.getByText('nforge secret import', { exact: true }).waitFor();
       await show('loading');
       assert.equal(await sentence(), 'Loading secrets…');
       await show('reader');

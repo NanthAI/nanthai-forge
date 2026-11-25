@@ -403,3 +403,53 @@ test('6466c6a5 review F4 N3: an applied proposal is not stored again; a proposer
   assert.equal(ring.length, 64);
   assert.deepEqual(new Uint8Array(ring.at(-1)), Uint8Array.of(69));
 });
+
+test('fcfc7e62 a write that changes or removes a name closes the proposals waiting on it, and no others', async t => {
+  const h = await harness(t),
+    f = h.f;
+  // Three waiting: a change of TOKEN, an addition of NEW_TOKEN and a change of an untouched second name.
+  f.bump();
+  f.name('KEPT_TOKEN', Buffer.from('kept-synthetic-value'));
+  assert.equal((await h.publish()).accepted, true);
+  assert.equal((await h.propose(h.seal('TOKEN', Buffer.from('proposed-synthetic-value')))).accepted, true);
+  assert.equal((await h.propose(h.seal('NEW_TOKEN', Buffer.from('new-synthetic-value')))).accepted, true);
+  assert.equal((await h.propose(h.seal('KEPT_TOKEN', Buffer.from('kept-proposed-value')))).accepted, true);
+  assert.equal(await h.waiting(), 3);
+  // The owner sets TOKEN directly: its waiting proposal can only be rejected now, so it closes with the write.
+  f.bump();
+  f.name('TOKEN', Buffer.from('owner-changed-value'));
+  assert.equal((await h.publish()).accepted, true);
+  assert.deepEqual(
+    h
+      .set()
+      .proposals.map(p => p.name)
+      .sort(),
+    ['KEPT_TOKEN', 'NEW_TOKEN'],
+  );
+  assert.equal(h.s.tables.sealedSecretProposals.size, 2);
+  assert.equal(h.set().needs, 2, 'the counter follows the waiting proposals in the same write');
+  // The owner adds NEW_TOKEN by hand, then removes KEPT_TOKEN: each closes its proposal in its own write.
+  f.bump();
+  f.name('NEW_TOKEN', Buffer.from('owner-new-value'));
+  assert.equal((await h.publish()).accepted, true);
+  assert.deepEqual(
+    h.set().proposals.map(p => p.name),
+    ['KEPT_TOKEN'],
+  );
+  f.bump();
+  f.name('KEPT_TOKEN', Buffer.alloc(0), { kind: 3 });
+  assert.equal((await h.publish()).accepted, true);
+  assert.equal(h.set().proposals, undefined);
+  assert.equal(h.s.tables.sealedSecretProposals.size, 0);
+  assert.equal(await h.waiting(), 0, 'the terminal count agrees with the page');
+  assert.equal(h.set().needs ?? 0, 0, 'Needs you drops to 0');
+  // A proposal for a different name than the one a write changes stays.
+  assert.equal((await h.propose(h.seal('LATER_TOKEN', Buffer.from('later-synthetic-value')))).accepted, true);
+  f.bump();
+  f.name('TOKEN', Buffer.from('owner-changed-again'));
+  assert.equal((await h.publish()).accepted, true);
+  assert.deepEqual(
+    h.set().proposals.map(p => p.name),
+    ['LATER_TOKEN'],
+  );
+});

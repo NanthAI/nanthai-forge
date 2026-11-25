@@ -93,7 +93,7 @@ const checks = (patch: Partial<OverviewSet> = {}): OverviewSet => ({
     ],
     next: null,
   },
-  machines: [{ code: 'T8NB-3QZE', by: 'alex' }],
+  machines: [{ code: 'T8NB-3QZE', name: 'walk-ci', by: 'alex' }],
   waiting: [],
   ...patch,
 });
@@ -127,6 +127,7 @@ const removal = (): OverviewSet =>
           kind: 1,
           version: 4,
           devices: [{ code: 'R2PA-9XNE', handle: 'dana' }],
+          machines: [{ id: 'c876f11a', name: 'walk-ci' }, { id: '3d48a562' }],
           more: 0,
         },
       ],

@@ -3,7 +3,7 @@
 import { randomBytes } from 'node:crypto';
 import { forgeSecretId, framedHash } from './sealed-format.js';
 import { inboxKeys, keyCommit, signBytes, wrapSetKey, type DeviceKeys } from './sealed-keys.js';
-import { headBytes, rosterBytes, type Entry, type Roster } from './sealed-records.js';
+import { displayText, headBytes, rosterBytes, type Entry, type Roster } from './sealed-records.js';
 import type { SealedReply } from './sealed-verify.js';
 
 export function newSealedSet(
@@ -12,6 +12,8 @@ export function newSealedSet(
   keys: DeviceKeys,
   now: number,
   kind: 1 | 2 = 1,
+  /** The device's given name (its saved sign-in name); a signed roster entry carries it, so every holder list shows it. */
+  deviceName = '',
 ) {
   const projectId = forgeSecretId('project', project),
     setId = randomBytes(16),
@@ -23,7 +25,7 @@ export function newSealedSet(
     signPub: keys.signPub,
     accountId: forgeSecretId('account', account),
     accountHandle: '',
-    displayName: 'this device',
+    displayName: displayText(deviceName) || 'this device',
     role: 1,
     addedBy: keys.id,
     how: 1,

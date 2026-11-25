@@ -68,7 +68,7 @@ export async function firstContactAnchor(
     'SECRETS_NOT_ALLOWED',
     `Your account already has a device in Development: add this one from that device with a code. This device's fingerprint: ${fp}.`,
   );
-  const request = joinRequestBytes(client.project, client.account, keys);
+  const request = joinRequestBytes(client.project, client.account, keys, client.deviceName);
   // Recorded before posting, so the anchor only ever rests on this device's own request.
   await recordJoin(client.pins, client.project, Date.now());
   if (!wire.joinRequests?.some(r => equalBytes(new Uint8Array(r), request))) {

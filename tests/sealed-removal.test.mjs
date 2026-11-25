@@ -13,7 +13,13 @@ import { device, owner } from './helpers/sealed-devices.mjs';
 import { deviceFingerprint } from '../dist/sealed-join.js';
 import { forgeSecretId } from '../dist/sealed-format.js';
 import { encodeSealedWire } from '../dist/sealed-wire.js';
-import { droppableFormers, markerNotice, removeMarked, rotateList } from '../dist/sealed-unshare.js';
+import {
+  droppableFormers,
+  markerNotice,
+  removalLine,
+  removeMarked,
+  rotateList,
+} from '../dist/sealed-unshare.js';
 import { verifySealedReply } from '../dist/sealed-verify.js';
 import { markedEntries } from '../dist/sealed-roster.js';
 import { SealedClient } from '../dist/sealed-client.js';
@@ -165,7 +171,7 @@ test('unshare --marked removes every marked entry in one write, and automatic sh
   assert.deepEqual(done.rotate, ['API_TOKEN']);
   // A repeat after an unknown outcome removes nothing. Its read is the holder's next run, which now shares the
   // newcomer: the removals are done.
-  assert.deepEqual(await removeMarked(o.client), { removed: [], rotate: [] });
+  assert.deepEqual(await removeMarked(o.client), { removed: [], rotate: [], names: {} });
   const read = await c.client.read();
   try {
     assert(read.secrets.some(s => s.name === 'API_TOKEN' && s.value.equals(VALUE)));
@@ -384,4 +390,25 @@ test('cost: removing a reader reads no sealed set; removing a write member reads
   tables.length = 0;
   await actorNames.retainMembership(ctx, h.project, 'fixture-member', h.account);
   assert.equal(tables.filter(name => name === 'sealedSecretSets').length, 3);
+});
+
+test('fcfc7e62 unshare --marked reports a removed device by the name it was given, with its fingerprint beside it', async t => {
+  const h = setup(t),
+    o = owner(h);
+  await o.client.write('API_TOKEN', VALUE);
+  const named = device(h, t, 'fixture-named', { deviceName: 'dana-laptop' });
+  await assert.rejects(named.client.read(), code('SECRETS_WAITING'));
+  clear(await o.client.read());
+  clear(await named.client.read());
+  const plain = await joined(h, t, o, 'fixture-plain');
+  await removePerson(h, 'fixture-named');
+  await removePerson(h, 'fixture-plain');
+  const done = await removeMarked(o.client);
+  const fp = deviceFingerprint(named.keys.id);
+  assert.deepEqual(done.names, { [fp]: 'dana-laptop' }, 'a placeholder name is no given name');
+  const line = removalLine(done.removed, done.rotate, done.names);
+  assert.match(line, new RegExp(`Removed .*“dana-laptop” \\(fp ${fp}\\)`));
+  assert.ok(line.includes(`fp ${deviceFingerprint(plain.keys.id)}`));
+  assert.equal(removalLine(['R2PA-9XNE'], ['A']), removalLine(['R2PA-9XNE'], ['A'], {}));
+  assert.match(removalLine(['R2PA-9XNE'], ['A']), /^Removed fp R2PA-9XNE from Development/);
 });

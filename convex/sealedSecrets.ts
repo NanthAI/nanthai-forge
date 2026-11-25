@@ -52,6 +52,8 @@ export const read = query({
       unlinked: v.optional(v.literal(true)),
       /** How many proposals wait for a holder (sealedSecrets:proposals lists them); absent when none. */
       proposals: v.optional(v.number()),
+      /** Display only: the given names of removed CI machines, for the rotate list a terminal prints. */
+      formerNames: v.optional(v.array(v.object({ id: v.bytes(), name: v.string() }))),
     }),
   ),
   handler: async (ctx, args) => {
@@ -73,6 +75,9 @@ export const read = query({
         ...(set.revoked?.length ? { revoked: set.revoked } : {}),
         ...(set.joinRequests?.length ? { joinRequests: set.joinRequests.map(j => j.request) } : {}),
         ...(set.proposals?.length ? { proposals: set.proposals.length } : {}),
+        ...(set.formerHandles?.some(h => h.name)
+          ? { formerNames: set.formerHandles.flatMap(h => (h.name ? [{ id: h.id, name: h.name }] : [])) }
+          : {}),
         ...(device?.deviceKey && !device.sealed?.some(l => l.projectId === args.projectId)
           ? { unlinked: true as const }
           : {}),

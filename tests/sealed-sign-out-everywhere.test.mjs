@@ -370,7 +370,7 @@ test('Sole-owner follow-up, lost-laptop race: the laptop signing in first clears
     clear(state);
   }
   assert.deepEqual(marks(h), []);
-  assert(o.notices.some(line => line.includes('Removed fp')));
+  assert(o.notices.some(line => /^Removed .*fp /.test(line)));
   // The re-keying write keeps that record: a late step after it still marks nothing.
   for (const s of steps) await run(h, s);
   assert.deepEqual(marks(h), []);

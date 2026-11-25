@@ -19,7 +19,9 @@ function ComputerRow({ computer }: { computer: Computer }) {
     <div className="row secret-dev">
       <span className="secret-dn">
         <span className="who dev">
-          <span className="av si" aria-hidden="true" />
+          <span className="av si" aria-hidden="true">
+            c
+          </span>
           {computer.name ? <span className="quoted">“{computer.name}”</span> : null}
           <span className="dcode">{computer.code}</span>
         </span>
@@ -130,7 +132,9 @@ export function SecretsHolders({
                   <div className="row secret-dev" key={wait.code}>
                     <span className="secret-dn">
                       <span className="who dev">
-                        <span className="av si" aria-hidden="true" />
+                        <span className="av si" aria-hidden="true">
+                          c
+                        </span>
                         <span className="dcode">{wait.code}</span>
                       </span>
                       <span className="sgn">
@@ -147,12 +151,18 @@ export function SecretsHolders({
               <div className="row secret-person" key={machine.code}>
                 <span className="secret-pn">
                   <span className="who dev">
-                    <span className="av none" aria-hidden="true" />
-                    <span className="a-run mono">machine key</span>
+                    <span className="av none" aria-hidden="true">
+                      m
+                    </span>
+                    {machine.name ? (
+                      <span className="quoted">“{machine.name}”</span>
+                    ) : (
+                      <span className="a-run mono">machine key</span>
+                    )}
                     <span className="dcode">{machine.code}</span>
                   </span>
                   <span className="sub">
-                    for checks on your CI · added by{' '}
+                    {machine.name ? 'machine key · ' : ''}for checks on your CI · added by{' '}
                     {machine.by ? `@${machine.by}` : 'someone Forge cannot name'}
                   </span>
                 </span>

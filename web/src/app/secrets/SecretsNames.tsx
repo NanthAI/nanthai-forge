@@ -27,8 +27,7 @@ export function SecretsNames({
           </p>
           <SecretCommand command="nforge secret set NAME" label="Copy: nforge secret set NAME" />
           <span className="t3">
-            Have a .env file? <code className="mono">nforge secret import</code>{' '}
-            <span className="prop">Proposed</span>
+            Have a .env file? <code className="mono">nforge secret import</code>
           </span>
         </div>
       </Region>

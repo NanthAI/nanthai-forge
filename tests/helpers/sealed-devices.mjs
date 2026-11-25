@@ -13,7 +13,12 @@ import { SecretPins } from '../../dist/sealed-pins.js';
 import { SealedClient } from '../../dist/sealed-client.js';
 
 /** A second CLI device on the same synthetic hosted project, signed in as `account`. */
-export function device(h, t, account, { member = true, terminal = false, agent = false, keys } = {}) {
+export function device(
+  h,
+  t,
+  account,
+  { member = true, terminal = false, agent = false, keys, deviceName = '' } = {},
+) {
   const credentialId = `${account}-device`;
   if (!h.s.tables.cliCredentials.has(`${credentialId}-row`))
     h.s.tables.cliCredentials.set(`${credentialId}-row`, {
@@ -70,6 +75,7 @@ export function device(h, t, account, { member = true, terminal = false, agent =
       options.agent ?? agent,
       line => notices.push(line),
       options.terminal ?? terminal,
+      options.deviceName ?? deviceName,
     );
   return { client: make(), make, notices, keys, transport, directory, store, as };
 }
@@ -91,6 +97,7 @@ export function owner(h, options = {}) {
       more.agent ?? options.agent ?? false,
       line => notices.push(line),
       more.terminal ?? options.terminal ?? false,
+      more.deviceName ?? options.deviceName ?? '',
     );
   return { client: make(), make, notices, transport };
 }

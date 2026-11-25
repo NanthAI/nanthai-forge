@@ -144,7 +144,11 @@ test("M3: removing the owner's own second owner device marks it, and the owner's
   const o = owner(h);
   o.notices.length = 0;
   await o.client.write('NEXT_TOKEN', VALUE);
-  assert(o.notices.some(line => line.includes(`Removed fp ${deviceFingerprint(second.id)}`)));
+  assert(
+    o.notices.some(
+      line => line.startsWith('Removed ') && line.includes(`fp ${deviceFingerprint(second.id)}`),
+    ),
+  );
   const state = await o.client.read();
   try {
     assert(!state.pin.roster.entries.some(e => e.id.equals(second.id)));

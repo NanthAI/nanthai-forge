@@ -440,13 +440,19 @@ test('guard 7: Undo removes the automatic device and re-keys, so it opens nothin
   clear(await m.client.read());
   await assert.rejects(unshareDevice(o.make({ agent: true }), fp), code('PERSON_REQUIRED'));
   const result = await unshareDevice(o.client, fp);
-  assert.deepEqual(result, { removed: fp, rotate: ['API_TOKEN'], already: false });
+  assert.deepEqual(result, { removed: fp, rotate: ['API_TOKEN'], already: false, names: {} });
   // Repeated after an unknown outcome: already gone, and the rotate list is still printed.
-  assert.deepEqual(await unshareDevice(o.client, fp), { removed: fp, rotate: ['API_TOKEN'], already: true });
+  assert.deepEqual(await unshareDevice(o.client, fp), {
+    removed: fp,
+    rotate: ['API_TOKEN'],
+    already: true,
+    names: {},
+  });
   assert.deepEqual(await unshareDevice(o.client, m.keys.id.toString('hex')), {
     removed: fp,
     rotate: ['API_TOKEN'],
     already: true,
+    names: {},
   });
   const state = await o.client.read();
   clear(state);

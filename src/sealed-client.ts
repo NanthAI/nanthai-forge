@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { deserialize, serialize } from 'node:v8';
 import { ForgeError, invariant } from './errors.js';
 import { equalBytes, framedHash } from './sealed-format.js';
+import { hex } from './sealed-portable.js';
 import { signBytes } from './sealed-keys.js';
 import type { StoredDeviceKeys } from './sealed-local.js';
 import { resolveSealedOperation } from './sealed-resolve.js';
@@ -75,6 +76,11 @@ export function signNext(
   check.key?.fill(0);
   for (const secret of check.secrets) secret.value.fill(0);
 }
+/** The server's display-only hint beside a verified read: the given names of removed CI machines, by device id. */
+const hint = (wire: SealedReadWire) =>
+  wire.formerNames?.length
+    ? { formerNames: new Map(wire.formerNames.map(n => [hex(new Uint8Array(n.id)), n.name] as const)) }
+    : {};
 export class SealedClient {
   constructor(
     readonly project: string,
@@ -86,6 +92,8 @@ export class SealedClient {
     readonly notice: (line: string) => void = () => {},
     /** A person sees stderr on a terminal: kept automatic-share notices are cleared once shown here. */
     readonly terminal = false,
+    /** This device's given name: the first entry or join request it signs carries it. */
+    readonly deviceName = '',
   ) {}
   /** The set this client reads and writes; ChecksClient (src/sealed-checks.ts) is the owner device's Checks view. */
   get kind(): 1 | 2 {
@@ -132,7 +140,7 @@ export class SealedClient {
       } finally {
         if (cached) result.key?.fill(0);
       }
-      return { reply, ...result, key: cached ? undefined : result.key };
+      return { reply, ...result, key: cached ? undefined : result.key, ...hint(wire) };
     } catch (error) {
       if (error instanceof ForgeError && ['SECRETS_ROLLBACK', 'SECRETS_FORK'].includes(error.code)) {
         const latest = await this.pins.load(this.project, this.kind);
@@ -148,7 +156,12 @@ export class SealedClient {
   }
   async read(
     cached = false,
-  ): Promise<({ reply: SealedReply } & ReturnType<typeof verifySealedReply>) | null> {
+  ): Promise<
+    | ({ reply: SealedReply; formerNames?: ReadonlyMap<string, string> } & ReturnType<
+        typeof verifySealedReply
+      >)
+    | null
+  > {
     const current = await this.pins.load(this.project, this.kind);
     if (cached && current) {
       // The small response on a hit still rechecks current access; the full bounded row is read server-side.
@@ -495,7 +508,7 @@ export class SealedClient {
   }
   /** The first head of this client's set: Development's genesis; ChecksClient overrides it. */
   async genesis(): Promise<{ reply: SealedReply; key: Buffer }> {
-    return newSealedSet(this.project, this.account, this.keys, Date.now());
+    return newSealedSet(this.project, this.account, this.keys, Date.now(), 1, this.deviceName);
   }
   resolve(operationId: string, confirmDiscard?: (summary: string) => Promise<boolean>) {
     return resolveSealedOperation(this, operationId, confirmDiscard);

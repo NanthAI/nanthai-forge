@@ -18,13 +18,30 @@ import { createTransition } from './sealed-transition.js';
 import { sealedRefusal, sealedWrite, sealedWriteArgs } from './sealed-transport.js';
 import { verifySealedReply, type SealedReply } from './sealed-verify.js';
 import { safeSecretName } from './sealed-display.js';
-import { rotateRows } from './sealed-overview.js';
+import { isPlaceholderName, rotateRows } from './sealed-overview.js';
 import { hex } from './sealed-portable.js';
 import type { SealedClient } from './sealed-client.js';
 
-/** What a removal prints: who went, and the names to rotate at their provider. */
-export const removalLine = (removed: readonly string[], rotate: readonly string[]) =>
-  `Removed ${removed.map(fp => `fp ${fp}`).join(', ')} from Development and re-keyed it. Rotate at their provider what ${removed.length === 1 ? 'it' : 'they'} could open: ${rotate.length ? rotate.map(safeSecretName).join(', ') : 'nothing'}.`;
+/** A device as a terminal names it: the name it was given with its fingerprint beside it, or the fingerprint alone. */
+const deviceLabel = (fp: string, name?: string) => (name ? `“${name}” (fp ${fp})` : `fp ${fp}`);
+/** What a removal prints: who went, and the names to rotate at their provider. `names` are the removed devices' given
+ * names by fingerprint, read from the signed roster before the removal. */
+export const removalLine = (
+  removed: readonly string[],
+  rotate: readonly string[],
+  names: Readonly<Record<string, string>> = {},
+) =>
+  `Removed ${removed.map(fp => deviceLabel(fp, names[fp])).join(', ')} from Development and re-keyed it. Rotate at their provider what ${removed.length === 1 ? 'it' : 'they'} could open: ${rotate.length ? rotate.map(safeSecretName).join(', ') : 'nothing'}.`;
+
+/** The given names of the entries a removal takes out, by fingerprint, from the signed roster the person just verified. */
+const namesOf = (entries: readonly Entry[]) =>
+  Object.fromEntries(
+    entries.flatMap(e =>
+      e.displayName && !isPlaceholderName(e.displayName)
+        ? [[deviceFingerprint(e.id), e.displayName] as const]
+        : [],
+    ),
+  );
 
 type Verified = { reply: SealedReply } & ReturnType<typeof verifySealedReply>;
 const discard = (result: ReturnType<typeof verifySealedReply> | null | undefined) => {
@@ -57,13 +74,19 @@ export function droppableFormers(roster: Roster, head: Head): Buffer[] {
  * that recipient's last epoch, with who could open it. Both come from the signed roster's former list, so a device
  * that pins later, or re-pins, still sees every outstanding rotation. A removed machine never signed, so it has an
  * id and no fingerprint or label. A new value (sealed at a later epoch) takes the name off the list. */
-export function rotateList(roster: Roster, head: Head) {
+export function rotateList(roster: Roster, head: Head, names?: ReadonlyMap<string, string>) {
   return rotateRows(roster, head).map(row => ({
     name: row.record.name,
     devices: row.former.map(f => deviceFingerprint(f.deviceId)),
-    // Only when a removed machine could open it, so a list without machines keeps its shape.
+    // Only when a removed machine could open it, so a list without machines keeps its shape. The name is the server's
+    // display-only hint (a signed former entry holds only an id); a machine removed before it was kept shows its id.
     ...(row.machines.length
-      ? { machines: row.machines.map(m => ({ id: hex(m.deviceId).slice(0, 8) })) }
+      ? {
+          machines: row.machines.map(m => {
+            const name = names?.get(hex(m.deviceId));
+            return { id: hex(m.deviceId).slice(0, 8), ...(name ? { name } : {}) };
+          }),
+        }
       : {}),
   }));
 }
@@ -217,7 +240,12 @@ export function unshareDevice(client: SealedClient, fingerprint: string) {
         const gone = roster.former.filter(e => names(e.deviceId, true));
         if (gone.length === 1)
           return {
-            result: { removed: fp, rotate: liveNames(state.pin.head, gone[0]!.lastEpoch), already: true },
+            result: {
+              removed: fp,
+              rotate: liveNames(state.pin.head, gone[0]!.lastEpoch),
+              already: true,
+              names: {} as Record<string, string>,
+            },
           };
       }
       invariant(
@@ -227,7 +255,10 @@ export function unshareDevice(client: SealedClient, fingerprint: string) {
           ? 'Two Development entries share this fingerprint; nothing was removed. Use the full device id.'
           : `No automatic device with fingerprint ${fp} holds Development; nothing was removed. For a device added another way, use its full device id.`,
       );
-      return { remove: matches, done: rotate => ({ removed: fp, rotate, already: false }) };
+      return {
+        remove: matches,
+        done: rotate => ({ removed: fp, rotate, already: false, names: namesOf(matches) }),
+      };
     },
     `Run nforge secret unshare ${fp} again: it says when the device is gone.`,
   );
@@ -243,10 +274,17 @@ export function removeMarked(
     client,
     state => {
       const marked = markedEntries(state.pin.roster, state.reply.revoked, client.keys.id).remove;
-      if (!marked.length) return { result: { removed: [] as string[], rotate: [] as string[] } };
+      if (!marked.length)
+        return {
+          result: { removed: [] as string[], rotate: [] as string[], names: {} as Record<string, string> },
+        };
       return {
         remove: marked,
-        done: rotate => ({ removed: marked.map(e => deviceFingerprint(e.id)), rotate }),
+        done: rotate => ({
+          removed: marked.map(e => deviceFingerprint(e.id)),
+          rotate,
+          names: namesOf(marked),
+        }),
       };
     },
     retry,
@@ -273,6 +311,6 @@ export async function removeMarkedFirst(client: SealedClient, state: Verified | 
     state,
     'Your change was not written. Repeat it: it removes the marked entries first if they are still there.',
   );
-  if (done.removed.length) client.notice(removalLine(done.removed, done.rotate));
+  if (done.removed.length) client.notice(removalLine(done.removed, done.rotate, done.names));
   return true;
 }

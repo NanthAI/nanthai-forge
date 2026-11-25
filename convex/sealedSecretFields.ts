@@ -45,11 +45,15 @@ export const sealedSetFields = {
   resolvedProposals: v.optional(v.array(v.bytes())),
   /** Server-owned, beside `revoked` (Item 41a0df87, slice 4): when each marker was set and, when the person left the
    * project, their public Forge handle (never a name or email). A holder's re-key step moves the handles of the
-   * entries it removes into `formerHandles`. Bounded by the roster: only ids in `revoked` or the roster's former list. */
+   * entries it removes into `formerHandles`, which also keeps the given name of a removed CI machine (a signed former
+   * entry carries only its id) so the rotate list names it. Bounded by the roster: only ids in `revoked` or the
+   * roster's former list. */
   revokedNotes: v.optional(
     v.array(v.object({ id: v.bytes(), at: v.number(), handle: v.optional(v.string()) })),
   ),
-  formerHandles: v.optional(v.array(v.object({ id: v.bytes(), handle: v.string() }))),
+  formerHandles: v.optional(
+    v.array(v.object({ id: v.bytes(), handle: v.optional(v.string()), name: v.optional(v.string()) })),
+  ),
   /** Server-owned: this set's needs-you total (removed people still listed + names to rotate + waiting proposals),
    * kept by the writes that change them so the project's top-bar counter moves in the same transaction. */
   needs: v.optional(v.number()),

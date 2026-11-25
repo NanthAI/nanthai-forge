@@ -115,9 +115,19 @@ function Rotate({
                   </span>
                 ))}
                 {row.more ? ` and ${count(row.more, 'more computer')}` : ''}
-                {row.machines?.length
-                  ? `${row.devices.length ? ', ' : ''}CI machine ${row.machines.join(', ')}`
-                  : ''}{' '}
+                {row.machines?.length ? (
+                  <>
+                    {row.devices.length ? ', ' : ''}CI machine{' '}
+                    {row.machines.map((machine, i) => (
+                      <span key={machine.id}>
+                        {i ? ', ' : ''}
+                        {machine.name ? `“${machine.name}” (id ` : 'id '}
+                        <span className="dcode">{machine.id}</span>
+                        {machine.name ? ')' : ''}
+                      </span>
+                    ))}
+                  </>
+                ) : null}{' '}
                 could open v{row.version.toLocaleString()}
               </span>
             </div>

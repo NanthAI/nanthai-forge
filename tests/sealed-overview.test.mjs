@@ -221,3 +221,52 @@ test('slice 4 review: the initialiser pages by project, repairs a wrong counter 
   assert.deepEqual([end.projects, end.next], [0, null]);
   await assert.rejects(init.initialise._handler(h.s.ctx, { apply: false, limit: 17 }), code('BAD_ARGUMENT'));
 });
+
+test('fcfc7e62 removing a name closes its rotate task in the same write: Needs you drops to 0', async t => {
+  const h = setup(t),
+    o = owner(h);
+  await o.client.write('API_TOKEN', VALUE);
+  await o.client.write('OTHER_TOKEN', OTHER);
+  await joined(h, t, o, 'fixture-member');
+  await contributors.remove._handler(h.s.ctx, { projectId: h.project, contributor: 'fixture-member' });
+  await o.client.write('API_TOKEN', ROTATED);
+  assert.equal(counter(h), 1, 'OTHER_TOKEN waits to be rotated');
+  assert.equal((await overview(h)).sets[0].rotate.total, 1);
+  // The owner removes the name instead of rotating it: the task, the page and the counter clear together.
+  await o.client.write('OTHER_TOKEN', null);
+  assert.equal(counter(h), undefined);
+  assert.equal(set(h).needs, 0);
+  const read = await overview(h);
+  assert.equal(read.needs, 0);
+  assert.equal(read.sets[0].rotate.total, 0);
+  assert.deepEqual(
+    read.sets[0].names.page.map(n => n.name),
+    ['API_TOKEN'],
+  );
+});
+
+test('fcfc7e62 a device given its name shows it in the holder list; an unnamed older entry shows its code alone', async t => {
+  const h = setup(t),
+    o = owner(h, { deviceName: 'MacBook Air' });
+  await o.client.write('API_TOKEN', VALUE);
+  let people = (await overview(h)).sets[0].people.page[0];
+  assert.deepEqual(
+    people.computers.map(c => c.name),
+    ['MacBook Air'],
+    'the first device signs its given name into its roster entry',
+  );
+
+  // A joining device carries its given name in its own request, so the entry a holder signs for it is named.
+  const m = device(h, t, 'fixture-member', { deviceName: 'dana-laptop' });
+  await assert.rejects(m.client.read(), code('SECRETS_WAITING'));
+  clear(await o.client.read());
+  const state = await o.client.read();
+  assert.deepEqual(state.pin.roster.entries.map(e => e.displayName).sort(), ['MacBook Air', 'dana-laptop']);
+  clear(state);
+  // Before names were passed on, a genesis said "this device": that is a placeholder, not a given name.
+  const old = setup(t);
+  await old.client.write('API_TOKEN', VALUE);
+  const entry = await overview(old);
+  people = entry.sets[0].people.page[0];
+  assert.equal(people.computers[0].name, undefined, 'no "this device" in the list');
+});

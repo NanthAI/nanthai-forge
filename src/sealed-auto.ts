@@ -12,14 +12,14 @@ import {
   encodeJoinRequest,
   unshareCommand,
 } from './sealed-join.js';
-import { headBytes, rosterBytes, type Entry, type Roster } from './sealed-records.js';
+import { displayText, headBytes, rosterBytes, type Entry, type Roster } from './sealed-records.js';
 import { findEntry, markedEntries, sameId, writeDevice } from './sealed-roster.js';
 import { createTransition } from './sealed-transition.js';
 import { requireConfirmedBase } from './sealed-anchors.js';
 import type { SealedReply, SecretPin } from './sealed-verify.js';
 
 /** The joining device's own request: its keys and signed account binding, never a role or a how. */
-export const joinRequestBytes = (project: string, account: string, keys: DeviceKeys) =>
+export const joinRequestBytes = (project: string, account: string, keys: DeviceKeys, deviceName = '') =>
   encodeJoinRequest({
     v: 1,
     projectId: forgeSecretId('project', project),
@@ -29,7 +29,7 @@ export const joinRequestBytes = (project: string, account: string, keys: DeviceK
     signPub: keys.signPub,
     encPub: keys.encPub,
     bindSig: keys.bindSig,
-    displayName: 'new device',
+    displayName: displayText(deviceName) || 'new device',
   });
 
 /** Which waiting requests this holder device wraps now. Each skipped request gets a value-free reason. */

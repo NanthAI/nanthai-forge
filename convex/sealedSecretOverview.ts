@@ -76,7 +76,11 @@ export async function overviewFor(
         at: n.at,
         ...(n.handle ? { handle: n.handle } : {}),
       })),
-      formerHandles: (set.formerHandles ?? []).map(h => ({ id: u8(h.id), handle: h.handle })),
+      formerHandles: (set.formerHandles ?? []).map(h => ({
+        id: u8(h.id),
+        ...(h.handle ? { handle: h.handle } : {}),
+        ...(h.name ? { name: h.name } : {}),
+      })),
       joinRequests: (set.joinRequests ?? []).map(j => ({
         deviceId: u8(j.deviceId),
         accountId: (decodeSealedWire(u8(j.request)) as { accountId?: Uint8Array }).accountId ?? null,
@@ -116,8 +120,10 @@ export async function overviewFor(
     const all = !args.part;
     const proposerHandle = (id: Uint8Array) =>
       handleOf(view.roster.entries.find(e => equalBytes(e.id, id))?.accountId ?? new Uint8Array());
-    const formerHandle = (id: Uint8Array) =>
-      view.formerHandles.find(h => equalBytes(h.id, id))?.handle ?? null;
+    const former = {
+      handle: (id: Uint8Array) => view.formerHandles.find(h => equalBytes(h.id, id))?.handle ?? null,
+      name: (id: Uint8Array) => view.formerHandles.find(h => equalBytes(h.id, id))?.name,
+    };
     const base = {
       kind: set.kind,
       sharing: view.roster.sharingMode === 1 ? ('automatic' as const) : ('confirm' as const),
@@ -142,7 +148,7 @@ export async function overviewFor(
             handle: proposerHandle(p.proposerId),
             at: p.at,
           })),
-        rotate: rotatePage(view, undefined, formerHandle),
+        rotate: rotatePage(view, undefined, former),
         names: slice(nameRows(view, handleOf), undefined, OVERVIEW_PAGE.names, r => r.name),
         people,
         machines: holders.machines,
@@ -158,7 +164,7 @@ export async function overviewFor(
         ...base,
         names: slice(nameRows(view, handleOf), args.after, OVERVIEW_PAGE.names, r => r.name),
       };
-    if (args.part === 'rotate') return { ...base, rotate: rotatePage(view, args.after, formerHandle) };
+    if (args.part === 'rotate') return { ...base, rotate: rotatePage(view, args.after, former) };
     return {
       ...base,
       people: slice(holderRows(view, self, handleOf).people, args.after, OVERVIEW_PAGE.people, (_r, i) =>
@@ -177,18 +183,26 @@ export async function overviewFor(
 function rotatePage(
   view: OverviewSet,
   after: string | undefined,
-  formerHandle: (id: Uint8Array) => string | null,
+  former: { handle: (id: Uint8Array) => string | null; name: (id: Uint8Array) => string | undefined },
 ) {
-  const rows = rotateRows(view.roster, view.head).map(({ record, former, machines }) => ({
+  const rows = rotateRows(view.roster, view.head).map(({ record, former: devices, machines }) => ({
     name: record.name,
     kind: record.kind,
     version: record.valueVersion,
-    devices: former
+    devices: devices
       .slice(0, 3)
-      .map(f => ({ code: deviceFingerprint(f.deviceId), handle: formerHandle(f.deviceId) })),
-    more: Math.max(0, former.length - 3),
-    // A removed CI machine that could open it: its short id only (it has no sign-in, so no handle).
-    ...(machines.length ? { machines: machines.slice(0, 3).map(f => hex(f.deviceId).slice(0, 8)) } : {}),
+      .map(f => ({ code: deviceFingerprint(f.deviceId), handle: former.handle(f.deviceId) })),
+    more: Math.max(0, devices.length - 3),
+    // A removed CI machine that could open it: its short id beside the name it was given (it has no sign-in, so no
+    // handle). A machine removed before names were kept shows its id alone.
+    ...(machines.length
+      ? {
+          machines: machines.slice(0, 3).map(f => {
+            const name = former.name(f.deviceId);
+            return { id: hex(f.deviceId).slice(0, 8), ...(name ? { name } : {}) };
+          }),
+        }
+      : {}),
   }));
   return slice(rows, after, OVERVIEW_PAGE.rotate, r => r.name);
 }

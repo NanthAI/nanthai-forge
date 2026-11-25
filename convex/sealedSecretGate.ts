@@ -50,7 +50,7 @@ export type StoredSealedSet = {
   proposals?: SealedPendingProposal[];
   resolvedProposals?: ArrayBuffer[];
   revokedNotes?: SealedMarkNote[];
-  formerHandles?: { id: ArrayBuffer; handle: string }[];
+  formerHandles?: { id: ArrayBuffer; handle?: string; name?: string }[];
   needs?: number;
 };
 const u8 = (bytes: ArrayBuffer) => new Uint8Array(bytes);
@@ -217,6 +217,18 @@ export function nextProposals(
     const row = find(u8(id));
     if (row) done.add(row);
   }
+  // A write that changes, adds or removes a name closes every proposal waiting on that name, whoever signed the change:
+  // the proposal's signed base moved, so it can only be rejected, and it would otherwise wait on the page and in every
+  // terminal until someone does (walk 2026-11-25: a removed name's proposals kept Needs you above zero).
+  const changed = new Set(
+    facts.head.names
+      .filter(n => {
+        const old = current?.names.find(o => o.name === n.name);
+        return !old || old.valueVersion !== n.valueVersion;
+      })
+      .map(n => n.name),
+  );
+  for (const p of pending) if (changed.has(p.name)) done.add(p);
   // Review F2: a proposer marked for removal counts as off the roster.
   const listed = (p: SealedPendingProposal) =>
     facts.roster.entries.some(e => e.entryKind === 1 && equalBytes(e.id, u8(p.proposerId))) &&
@@ -585,10 +597,13 @@ export function nextMarkNotes(
     : notes;
 }
 /** The handle lists after a head write: markers still set keep their note; the handle of a removed entry moves to
- * `formerHandles` while the roster still lists that device as a former signer, and leaves with it. */
+ * `formerHandles` while the roster still lists that device as a former signer, and leaves with it. A CI machine that
+ * this write moves to the former list keeps its given name there, read from the roster this write replaces (a signed
+ * former entry holds only an id), so the rotate list on the page and in the terminal names it. One decode of the
+ * stored roster, only in a write that removes a machine. */
 export function nextHandles(set: StoredSealedSet | null, revoked: readonly ArrayBuffer[], roster: Roster) {
   const notes = (set?.revokedNotes ?? []).filter(n => revoked.some(id => equalBytes(u8(id), u8(n.id))));
-  const former = [
+  const former: NonNullable<StoredSealedSet['formerHandles']> = [
     ...(set?.formerHandles ?? []),
     ...(set?.revokedNotes ?? []).flatMap(n => (n.handle ? [{ id: n.id, handle: n.handle }] : [])),
   ].filter(
@@ -596,5 +611,15 @@ export function nextHandles(set: StoredSealedSet | null, revoked: readonly Array
       roster.former.some(f => equalBytes(f.deviceId, u8(h.id))) &&
       all.findIndex(o => equalBytes(u8(o.id), u8(h.id))) === i,
   );
+  const fresh = roster.former.filter(
+    f => f.signPub.length === 0 && !former.some(h => h.name && equalBytes(u8(h.id), f.deviceId)),
+  );
+  if (set && fresh.length) {
+    const before = (decodeSealedWire(u8(set.payload)) as Payload).roster;
+    for (const f of fresh) {
+      const name = before.entries.find(e => e.entryKind === 2 && equalBytes(e.id, f.deviceId))?.displayName;
+      if (name) former.push({ id: Uint8Array.from(f.deviceId).buffer, name });
+    }
+  }
   return { revokedNotes: notes, formerHandles: former };
 }
