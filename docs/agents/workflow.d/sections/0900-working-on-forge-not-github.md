@@ -39,16 +39,14 @@ Multi-Lane work: `start` with `intentId` adds a Lane to an open Intent; each Lan
 
 Omitted `operationId`, `expectedHead`, `checkId`, `expectedDefinition` and `accept.expectedPrevious` are filled from current state and echoed under `resolved`. After an unknown reply, resend the request plus `resolved`: it reconciles without repeating the check. Fully pinned requests behave as before. Failures, cancellations and conflicts stay recorded and never accept.
 
-To land a selected set of already saved Lanes, use:
+To land a selected set of already saved Lanes, name them as `inputs`:
 
 ```sh
-nforge land ROOT LANE_ID OTHER_LANE_ID --operation-id UUID --wait
-# Optional shared message:
-nforge land ROOT LANE_ID OTHER_LANE_ID --operation-id UUID --wait --message "Land selected changes"
+nforge agent ROOT land --save '{"inputs":[{"laneId":"LANE_ID"},{"laneId":"OTHER_LANE_ID"}],"operationId":"UUID","wait":true}'
 ```
 
 `land` pins each recorded head once and leaves unsaved files untouched.
-`--wait` watches the retained handle until every selected input is terminal, prints
+`wait:true` watches the retained handle until every selected input is terminal, prints
 a per-Lane result table to stderr (also in JSON), and exits nonzero if any input
 did not land. The agent equivalent is `land {laneIds:[...],wait:true}`. Check
 failures and conflicts are terminal and are never retried. Definite infrastructure

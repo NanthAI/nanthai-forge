@@ -1143,7 +1143,7 @@ is still paging. Restore on a project that is not deleted, and delete on one tha
 is already deleted, change nothing and do not bump the revision, so a stale second
 tab cannot fail other holders.
 
-Settings, Home's removed-projects list and `nforge host --delete` name the project's
+Settings, Home's removed-projects list and `nforge host ROOT --delete-project PROJECT_ID --confirm SLUG` name the project's
 phase from one derive (`src/project-phase.ts`): active, deleted and restorable,
 deleted with restore unavailable (revocation finishing or the window ended),
 purging, purge stopped (each stop code has a reason sentence and a next step),
@@ -1505,7 +1505,7 @@ accepted main; GitHub push drains pending main audits first.
 
 Queue holders and runs record PID plus process start identity. Status, observe, run, finish and clean apply reconcile a dead local runner as `interrupted`, retaining its output and original operation id without rerunning the command. A surviving detached process group keeps its queue capacity and workspace until it exits. Legacy records without a start identity remain conservatively PID-based; remote-host liveness is unknown.
 
-Before Lane/check materialization and check execution, Forge probes free space on the owner's filesystem. At ≤5 GB free, receipts include a warning; below 2 GB, preparation refuses with `DISK_LOW` and points to `nforge agent ROOT clean` (dry run). A drop while queued produces a failed run with a structured `error` rather than executing. Configure decimal-GB thresholds with `FORGE_DISK_WARN_GB` and `FORGE_DISK_BLOCK_GB` (non-negative; `0` disables that threshold). Forge never deletes files because of low disk space.
+Before Lane/check materialization and check execution, Forge probes free space on the owner's filesystem. At ≤5 GB free, receipts include a warning; below 2 GB, preparation refuses with `DISK_LOW` and points to `nforge prune` (dry run). A drop while queued produces a failed run with a structured `error` rather than executing. Configure decimal-GB thresholds with `FORGE_DISK_WARN_GB` and `FORGE_DISK_BLOCK_GB` (non-negative; `0` disables that threshold). Forge never deletes files because of low disk space.
 
 ### Agent sandboxes
 
@@ -1746,7 +1746,7 @@ for measured totals, modeled splits and the remaining invoice reconciliation.
 
 ## Local cleanup
 
-`nforge agent ROOT clean` (MCP `forge_task` action `clean`) reclaims regenerable local disk. It is a dry run unless you send `{"apply":true}`; the dry run lists candidates grouped by kind with bytes and the reason each is safe, plus totals and every skipped item with its reason. Apply recomputes the set under the owner lock and re-validates each item (pass `items` ids from a dry run to limit it; anything that changed is skipped). `kinds` filters:
+The retired `clean` action (it now answers `HOSTED_ACTION_UNSUPPORTED`; use `nforge prune`) reclaimed regenerable local disk. It is a dry run unless you send `{"apply":true}`; the dry run lists candidates grouped by kind with bytes and the reason each is safe, plus totals and every skipped item with its reason. Apply recomputes the set under the owner lock and re-validates each item (pass `items` ids from a dry run to limit it; anything that changed is skipped). `kinds` filters:
 
 - `check-retention`: remove eligible terminal remote source copies immediately; after strictly more than seven days, remove unpinned terminal runs’ remaining source/runtime and shard work copies and remove expired combined and shard log bytes while keeping compact test evidence. Terminal receipts (including failure summaries), compact test reports, selection, changes, plans, provider state and selected artifacts stay. Running/queued/preparing runs, explicit release build-run/export pins, resumable or unknown remote executions and in-use directories stay. Acceptance and open-Lane references retain evidence without protecting old bulk; recent shard work and logs remain untouched. Both the run end and the individual remaining copy/log must be older than seven days.
 - `check-workspaces`: finished check runs’ `workspace/`, `runtime/`, `modal-source/` and `github-actions-source/` copies, without an age gate. Remote source copies require a matching terminal receipt, no resumable backend, release/export pin, unresolved remote execution or process blocker. `result.json`, logs, selection, plans and artifacts stay. Missing receipts, archived-interrupted-only receipts, receipt mismatches and unresolved remote executions have specific skip reasons. An interrupted run with a matching archived receipt and a recorded supersession by a later retained Candidate in the same Intent/Lane family may release only its remote source copies; its evidence stays untouched. Ambiguous interruption or supersession retains all copies.

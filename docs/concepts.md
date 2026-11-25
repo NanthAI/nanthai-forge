@@ -55,7 +55,7 @@ State read. An index miss can fall back to the retained archive. After resolving
 the State, the reader fetches the selected blob and, for a submodule, its pointer
 metadata.
 
-- **Native project (owner)** — a directory managed by Forge without Git. Source objects and Work metadata live under `.forge/`. Lanes are materialized under `.forge/work/lane-<id>`. The optional `ownerRootUpdates` policy keeps the owner folder’s tracked files current with accepted main. It defaults off; local edits or untracked obstructions skip refresh and appear in local Needs you. `nforge owner refresh ROOT` requests the same guarded update on demand.
+- **Native project (owner)** — a directory managed by Forge without Git. Source objects and Work metadata live under `.forge/`. Lanes are materialized under `.forge/work/lane-<id>`. The optional `ownerRootUpdates` policy keeps the owner folder’s tracked files current with accepted main. It defaults off; local edits or untracked obstructions skip refresh and appear in local Needs you. The on-demand refresh command is retired with native mode.
 - **Git-backed project** — an ordinary Git repository; Forge keeps its Work metadata beside the Git data. Git and GitHub are compatibility layers, not Forge's source of truth.
 - **Hosted project** — a copy of a project's source and Work in the hosted backend, so several machines and people can share it. The user's machine controls execution; native checks use the configured local or GitHub Actions backend.
 - **Exchange** — pushing and pulling between a local owner and a hosted project. Only missing content is transferred.

@@ -631,8 +631,8 @@ before selecting current main. The shared atomic workspace writer has a separate
 owner apply journal and a strict first-apply guard. It reads only selected tracked
 paths, refuses local edits and untracked obstructions, and preserves `.forge/`
 source exclusions and ignored/untracked content. Skips retain acceptance and
-publish a local Needs you notice with `nforge owner refresh ROOT` recovery. The
-explicit command uses the same lock and guard. Recovery/notice files live under
+publish a local Needs you notice. The retired owner-refresh command used the same lock and
+guard. Recovery/notice files live under
 `.forge/work`; no Work schema changes or real-owner policy migration occur.
 
 Selected-run observation retries transient `SOURCE_CHANGED` reads from concurrent
@@ -765,7 +765,7 @@ A check is an executable, its arguments, an optional environment label and expli
 
 Playbooks run a sequence of checks. Automation rules start a Playbook on an event. Native disjoint fast-path reuse requires explicit policy and revalidates the exact check and manifest-path proof before scheduling full main verification. Missing coverage is unknown. A passing check, a model critique and a human review are separate facts. Accepting a Channel is an explicit step against an observed previous head. An optional Invariant can require specific evidence first.
 
-Hosted checks run on the project's configured runner (`configure-runner`); the local `nforge local-checks` computer path is retired.
+Hosted checks run on the project's configured runner (`configure-runner`); the local-checks computer path is retired.
 
 ## Making-of record
 
@@ -1332,8 +1332,8 @@ alone grant no source publication or landing authority.
 
 ## Integration preview
 
-`nforge agent ROOT integrate '{"laneIds":["LANE_ID","OTHER_LANE_ID"]}'`
-composes accepted main with the latest saved heads of the selected active Lanes.
+The retired `integrate` action became `nforge agent ROOT preflight '{"laneId":"LANE_ID"}'`
+and `land --save` with `check-only` (see the agent guide). The old preview composed accepted main with the latest saved heads of the selected active Lanes.
 Omitting `laneIds` selects every active Lane with a checkpoint; unsaved edits are
 excluded. The preview uses the existing in-memory source composition and disposable
 workspace materialization, for native owners and Git compatibility workspaces.

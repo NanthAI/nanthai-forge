@@ -553,7 +553,7 @@ currently complete their bundle transfer before becoming ready.
 
 ### Direct GitHub hosting design (not implemented)
 
-A future `nforge host ROOT --from-github` should read the Git origin, resolve the exact local
+A future option of `nforge host` that hosts straight from GitHub should read the Git origin, resolve the exact local
 commit and retained refs with hooks disabled, and send repository identity and those pins under
 the original hosting operation UUID. The hosted side must check current repository access through
 `convex/access.ts`, reuse the public/private import acquisition in `convex/imports.ts` and
