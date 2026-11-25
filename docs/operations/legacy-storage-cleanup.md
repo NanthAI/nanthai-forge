@@ -111,3 +111,30 @@ legacy tombstones are not kept until a calendar date. `storageTombstoneRetire:ru
 
 The receipt table (`legacyStorageCleanupPages`) stays: operational expiry and the landing capsule keep their
 receipts in it, so it is a live store with an old name. Only the retired endpoints' rows go.
+
+## F6 leftovers (second converter, State A2)
+
+After the pointer and tombstone work, rows still carried the R2 backfill markers (`r2BackfilledAt`,
+`r2BackfillOperationId`, `r2ConvexPurged`), a `location` of `convex`, and project-deletion fields for the
+retired native sweep (`hostedProjects.exchangeCleanupCursor`, `exchangeCleanupDone`, `r2BackfillRevision`;
+`projectUploadCleanup` `cursor`, `pending`, `task`). State A2 is the release that has
+`convex/legacyFieldRetire.ts` (main receipt 19347fd0); the field removal is the next main State.
+
+1. Deploy State A2. Confirm the deployment answers `legacyFieldRetire:run`.
+2. Dry run: `npx convex run --deployment NAME legacyFieldRetire:run '{"apply":false,"budgetBytes":50000000,"untilMs":T}'`
+   (`--prod` only with the owner's go). `T` is a creation time after the last backfill write. It prints a
+   total per family (`rows`, `bytes`, `changed`, `blocked`, `stopped`), `nativeRefs` and the artifact owner
+   counts. Dev read 26.0 MB for 47,616 objects, 0.34 MB for projects and 27 KB for backups.
+3. Gates: `blocked` 0 everywhere; `nativeRefs` 0 (an import, import artifact, agent grant, source zone,
+   pre-protocol import cursor or non-removed derived row with an id that is not `r2blob:` makes the apply
+   refuse, because the reader no longer opens it). `stopped` `budget` means rerun with more budget. The
+   objects scan ends at `cutoff`: that is not proof, the deploy of the tightened schema validates the rest.
+4. Apply: the same call with `"apply":true`. It clears the markers, turns a committed `convex` location into
+   `r2`, clears the retired project fields, and deletes removed derived rows whose original was a native id.
+   Replay must print `changed` 0.
+5. Proof: sample object, backup and project rows before and after; every field except the cleared ones is equal.
+   Then deploy main; a refusal names the table and field the job missed.
+
+Dev (2026-11-25): 47,135 object rows, 1 backup, 328 projects cleared and 26 spent derived rows deleted
+(the apply read 26.4 MB of documents and patched each changed row once); replay 0; 259 sampled object rows and 355 backup and
+project rows equal before and after.

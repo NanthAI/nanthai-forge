@@ -379,10 +379,8 @@ revision must match on either path. Early purge excludes rows created after
 before that pass qualify. Each 100-row page re-HEADs every eligible object and
 requires its size and checksum to match before any deletion in that page. The
 mutation rechecks the pass, original row pins and other storage references.
-It uses at most 1,401 document reads (below 4,096). Storage IDs remain immutable
-archive lookup aliases with `r2ConvexPurged: true`; they no longer assert a live
-Convex file. Archive readers resolve them through the authorized R2 pointer,
-including when old Convex-derived caches are absent.
+It uses at most 1,401 document reads (below 4,096). No row carries a Convex file ID or a
+backfill marker any more: archive readers resolve the row's own R2 record.
 
 Sweep removes only prepared, uncommitted R2 keys under `v1/p/PROJECT_ID/`, older
 than 24 hours since their latest preparation (legacy rows use creation time).

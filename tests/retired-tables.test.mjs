@@ -65,11 +65,7 @@ const dogfoodShape = () => ({
   projectPublications: rowsFor('projectPublications', 19, 1400),
   projectPublicationPages: [],
   projectReturnSupersessions: rowsFor('projectReturnSupersessions', 2),
-  hostedProjects: [
-    { _id: 'p1', exchangeCleanupDone: true },
-    { _id: 'p2', exchangeCleanupDone: true },
-    { _id: 'p3', work: { intentMigration: { revision: 1 } } },
-  ],
+  hostedProjects: [{ _id: 'p3', work: { intentMigration: { revision: 1 } } }],
   projectBackups: [{ _id: 'b1', ownerDerived: { sha256: 'a', size: 1 } }, { _id: 'b2' }],
 });
 async function temporary(fn) {
@@ -89,7 +85,6 @@ test('inventory counts retired rows and bytes, and reports live-field usage with
   assert.ok(result.tables.projectPublications.bytes > 19 * 1400);
   assert.equal(result.tables.projectPublicationPages.rows, 0);
   const usage = Object.fromEntries(result.fields.map(f => [`${f.table}.${f.path}`, f.rows]));
-  assert.equal(usage['hostedProjects.exchangeCleanupDone'], 2);
   assert.equal(usage['hostedProjects.work.intentMigration'], 1);
   assert.equal(usage['projectBackups.ownerDerived'], 1);
   assert.equal(usage['projectBackups.metadataPublication'], 0);

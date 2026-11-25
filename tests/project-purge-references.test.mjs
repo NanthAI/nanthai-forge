@@ -169,7 +169,7 @@ const oracleRanges = [
   ['projectObjects', 'by_project_and_digest'],
   ['projectBackups', 'by_project'],
   ['projectProposals', 'by_project_and_operation'],
-  ['projectUploadCleanup', 'by_project_and_pending'],
+  ['projectUploadCleanup', 'by_project'],
 ];
 async function oracle(ctx, id) {
   const prefix = projectPrefix(id),
@@ -237,7 +237,6 @@ const keyedFixture = (random, ids, rows, foreign) => {
     if (kind === 3)
       s.insert('projectUploadCleanup', `u-${i}`, {
         projectId: owner,
-        pending: random() < 0.5,
         ...fields(key()),
       });
   }

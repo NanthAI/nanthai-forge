@@ -126,7 +126,7 @@ export const projectPurgeTables = {
   projectHistoryPacks: 'by_project',
   projectGitLaneCommits: 'by_project',
   projectGitMainCommits: 'by_project_and_state',
-  projectUploadCleanup: 'by_project_and_pending',
+  projectUploadCleanup: 'by_project',
   projectReaders: 'by_project_and_reader',
   projectReaderOperations: 'by_project_and_operation',
   projectAccessOperations: 'by_project_and_operation',

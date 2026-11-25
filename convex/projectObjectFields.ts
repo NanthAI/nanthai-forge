@@ -2,7 +2,7 @@
 // Copyright 2026 Ferdinando Valsecchi
 import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
-import { backfillFields } from './r2BackfillFields';
+import { r2PlacementFields } from './r2PlacementFields';
 /** The only writers that may copy an immutable catalog or point entry into its own row, one label
  * each: they change trusted State metadata, rebind the stored encoding, or mark a purge tombstone.
  * Flag-only and id-only writers never copy (guarded by tests/object-row-reasons.test.mjs). */
@@ -38,7 +38,7 @@ export const objectFields = {
   /** Trusted State-bound physical recipe root; absent until the writer is enabled. */
   statePhysical: v.optional(v.object({ sha256: v.string(), size: v.number() })),
   nonce: v.string(),
-  ...backfillFields,
+  ...r2PlacementFields,
   r2SweepKey: v.optional(v.string()),
   /** A pending reservation whose ID is private to a catalog seed upload. */
   seedOperationId: v.optional(v.string()),

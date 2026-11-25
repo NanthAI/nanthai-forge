@@ -21,8 +21,6 @@ export const RETIRED_TABLES = {
 };
 // Optional fields on live rows. Reported only: live code still reads them, so they are not purged here.
 export const REPORT_ONLY_FIELDS = [
-  { table: 'hostedProjects', path: 'exchangeCleanupCursor' },
-  { table: 'hostedProjects', path: 'exchangeCleanupDone' },
   { table: 'hostedProjects', path: 'work.intentMigration' },
   { table: 'projectBackups', path: 'metadataPublication' },
   { table: 'projectBackups', path: 'ownerDerived' },

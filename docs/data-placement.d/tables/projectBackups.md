@@ -1,1 +1,1 @@
-| `projectBackups`, `projectProposals`, `projectUploadCleanup`, `projectRecoveryConnections` | Backup and proposal archive rows (R2 key, legacy `storageId`) and upload cleanup. | Activity |
+| `projectBackups`, `projectProposals`, `projectUploadCleanup`, `projectRecoveryConnections` | Backup and proposal archive rows (R2 key) and upload cleanup (the R2 key of an archive whose row was deleted). | Activity |

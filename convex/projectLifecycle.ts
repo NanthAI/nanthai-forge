@@ -438,7 +438,6 @@ export async function retainUploadCleanup(
     nonce: row.nonce,
     digest: row.digest,
     size: row.size,
-    pending: false,
     r2Key: row.r2Key,
   });
   return (await ctx.db.get(id))!;

@@ -468,7 +468,7 @@ definitions, reader and purge entries were removed from the schema; a Route A re
 an older backup that still holds them must skip those two tables.) The first four definitions stay in
 the schema until the rows are exported and purged, because schema push and a Route A
 restore of an older weekly backup still contain them. The optional fields
-`exchangeCleanupCursor`, `exchangeCleanupDone`, `work.intentMigration`,
+`work.intentMigration`,
 `projectBackups.metadataPublication` and `projectBackups.ownerDerived` are only
 counted: live code still reads them.
 

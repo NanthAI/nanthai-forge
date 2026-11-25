@@ -25,7 +25,7 @@ import { deployTables } from './projectDeployFields';
 import { sourceStepTables } from './projectSourceStepFields';
 import { workDetailMigration, workDetailTables } from './projectWorkDetailFields';
 import { hostedSeedTables } from './projectHostedSeedFields';
-import { backfillFields } from './r2BackfillFields';
+import { r2PlacementFields } from './r2PlacementFields';
 import { r2ReferencePosition } from './projectPurgeReferenceFields';
 import { sourceAuthority, sourceAuthorityTables } from './projectSourceAuthorityFields';
 import { actorTables } from './projectActorFields';
@@ -452,9 +452,6 @@ const projectFields = {
   /** Declared `globalRiskPaths` globs of every check definition, refreshed with `checkEntries`; global-risk only, never owner-protected. */
   globalRiskPaths: v.optional(v.array(v.string())),
   agentGuidance: v.optional(v.string()),
-  exchangeCleanupCursor: v.optional(v.string()),
-  exchangeCleanupDone: v.optional(v.boolean()),
-  r2BackfillRevision: v.optional(v.number()),
   r2PrefixPurged: v.optional(v.boolean()),
   owner: v.string(),
   key: v.string(),
@@ -492,7 +489,7 @@ const projectFields = {
   ),
 };
 const projectBackupFields = {
-  ...backfillFields,
+  ...r2PlacementFields,
   displayProtocol: v.optional(v.literal(3)),
   metadataPublication: v.optional(v.id('projectPublications')),
   ownerDerived: v.optional(v.object({ sha256: v.string(), size: v.number() })),
@@ -516,7 +513,7 @@ const projectBackupFields = {
     v.object({
       digest: v.string(),
       size: v.number(),
-      ...backfillFields,
+      ...r2PlacementFields,
       operationId: v.string(),
       at: v.number(),
     }),
@@ -552,7 +549,7 @@ export const projectContributorFields = {
   ),
 };
 export const projectProposalFields = {
-  ...backfillFields,
+  ...r2PlacementFields,
   transport: v.optional(v.literal('objects')),
   projectId: v.id('hostedProjects'),
   actor: v.string(),
@@ -755,14 +752,10 @@ export default defineSchema({
     nonce: v.string(),
     digest: v.string(),
     size: v.number(),
-    cursor: v.optional(v.string()),
-    pending: v.boolean(),
-    r2Key: v.optional(v.string()),
-    task: v.optional(v.id('_scheduled_functions')),
+    r2Key: v.string(),
   })
     .index('by_upload', ['uploadId'])
-
-    .index('by_project_and_pending', ['projectId', 'pending'])
+    .index('by_project', ['projectId'])
     .index('by_r2Key', ['r2Key']),
   projectReaders: defineTable({ projectId: v.id('hostedProjects'), reader: v.string() })
     .index('by_project_and_reader', ['projectId', 'reader'])

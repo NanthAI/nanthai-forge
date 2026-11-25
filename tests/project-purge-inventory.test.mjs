@@ -243,7 +243,6 @@ function fixture() {
       }
       if (table === 'projectObjects') Object.assign(extra, { removed: false, size: 300 });
       if (table === 'projectBackups') extra.size = 700;
-      if (table === 'projectUploadCleanup') extra.pending = false;
       if (table === 'projectGithubImports') extra.protocol = 1;
       if (table === 'agentGuidanceOperations') extra.scope = 'project';
       add(table, projectId, extra);
