@@ -230,6 +230,8 @@ const flag = (value: unknown) => (typeof value === 'boolean' ? value : undefined
 /** Actions that capture the working files themselves (a save) or snapshot them as part of their
  * own move (`snapshots`) take no snapshot first. */
 /** Commands whose capability read carries the learned guard-set revision (13ea93bf). */
+/** How long preflight waits for this checkout's just-returned save to settle before it says IN PROGRESS. */
+const PREFLIGHT_SETTLE_MS = 30_000;
 const guardAsking = new Set(['open', 'preflight', 'land']);
 /** Actions whose first main read follows capability discovery at once (capabilities-main). */
 const mainFirstActions = new Set(['start', 'sync', 'compose']);
@@ -2587,7 +2589,18 @@ export class HostedAgentTransport {
     // An interrupted local apply leaves the marker describing other bytes; finish it first.
     finishPendingCheckoutDelta(root);
     await this.refreshDependencies(root);
-    const pendingSave = await reconcileHostedSave(root, this.exchange, epoch, features);
+    // A save that has just returned is usually still settling: wait for it (bounded by the clock: backing
+    // off from 0.5 s to 4 s, 30 s in all; one progress read per poll, none when no save is pending)
+    // instead of exiting 3. Only a save still unsettled after that is reported as IN PROGRESS.
+    let pendingSave = await reconcileHostedSave(root, this.exchange, epoch, features);
+    for (
+      let delay = 500, deadline = Date.now() + PREFLIGHT_SETTLE_MS;
+      pendingSave && Date.now() < deadline;
+      delay = Math.min(delay * 2, 4000)
+    ) {
+      await new Promise(resolve => setTimeout(resolve, Math.min(delay, Math.max(0, deadline - Date.now()))));
+      pendingSave = await reconcileHostedSave(root, this.exchange, epoch, features);
+    }
     if (pendingSave) return this.response(action, null, pendingSave);
     const marker = readHostedLaneCheckout(root);
     const laneId = (input.laneId as string | undefined) ?? marker?.selection.laneId;

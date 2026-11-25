@@ -244,7 +244,7 @@ test('e5e6fca8: the four files a wide source change broke are selected and prote
       secondsPerFile: 4,
       waitSeconds: notRun.length * 4,
     }).finish,
-    `nforge agent '/lane' preflight '{"laneId":"L","retry":true,"trim":false}'`,
+    `nforge agent '/lane' preflight '{"laneId":"L","retry":true}'`,
   );
   assert.equal(preflightVerdict({ passed: false, incomplete }), 'NOT COMPLETE');
   // When the protected tier fits, nothing changes: no must-run file was stopped.

@@ -1418,7 +1418,7 @@ function planTests(
       ...(guardSet ? { guardSet } : {}),
       filler: filler.filter(test => selected.has(test)).length,
       trimmedTests: only ? [] : cut.filter(test => !filled.has(test)).sort(),
-      rerun: context ? rerunCommand(root, context.laneId) : undefined,
+      rerun: context ? rerunCommand(root, cut.filter(test => !filled.has(test)).sort()) : undefined,
       trim,
       commentOnly,
       costTests,
@@ -1535,9 +1535,51 @@ export function planLine(plan: PreflightPlan & { status: 'planned' }) {
 }
 const PLAN_REASON_CHARS = 400;
 
-/** Tries the ranked tiers up to the ceiling, reusing passes. */
-const rerunCommand = (root: string, laneId: string) =>
-  `nforge agent ${shellQuote(root)} preflight ${shellQuote(JSON.stringify({ laneId, trim: false }))}`;
+/** Whether a path lies inside a Forge checkout (a Lane or the main folder): its own or an ancestor's
+ * `.forge` marker makes Forge resolve a fixture made there to that live checkout. */
+export function insideForgeCheckout(path: string): boolean {
+  for (let selected = path; ;) {
+    if (
+      existsSync(join(selected, '.forge/hosted-lane.json')) ||
+      existsSync(join(selected, '.forge/native.json')) ||
+      existsSync(join(selected, '.forge/hosted-main.json'))
+    )
+      return true;
+    const parent = dirname(selected);
+    if (parent === selected) return false;
+    selected = parent;
+  }
+}
+/** The directories test temp files may go under: `candidate` when no Forge checkout contains it, else
+ * each system temp root that none does, in order (empty when there is none). */
+export function tmpdirsOutsideCheckout(
+  candidate: string,
+  fallbacks: string[] = ['/tmp', '/var/tmp'],
+): string[] {
+  if (!insideForgeCheckout(candidate)) return [candidate];
+  return fallbacks.filter(path => existsSync(path) && !insideForgeCheckout(path));
+}
+/** A fresh preflight scratch directory in the first of `roots` that accepts one. */
+function scratchIn(roots: string[], prefix: string): string | undefined {
+  for (const root of roots)
+    try {
+      return mkdtempSync(join(root, prefix));
+    } catch {
+      // Read-only or full: try the next root.
+    }
+  return undefined;
+}
+
+/** What to run for the test files a preflight left out. A short list is named for one runnable
+ * command in the Lane folder; a long one is not worth a local run: the landing check is the full
+ * run. Never `trim:false` (that runs the whole deferred plan locally, minutes over the budget). */
+const RERUN_NAMED_FILES = 8;
+const rerunCommand = (root: string, files: string[]) =>
+  files.length && files.length <= RERUN_NAMED_FILES
+    ? `cd ${shellQuote(root)} && nforge heavy node ${
+        existsSync(join(root, 'tests/check-runtime.mjs')) ? '--import ./tests/check-runtime.mjs ' : ''
+      }--test ${files.map(shellQuote).join(' ')}`
+    : 'nothing to run here: the landing check is the full run and runs them';
 /** Runs exactly the files the last run stopped for time (under the same wall-time budget). */
 const stoppedCommand = (root: string, laneId: string) =>
   `nforge agent ${shellQuote(root)} preflight ${shellQuote(JSON.stringify({ laneId, retry: true }))}`;
@@ -1933,7 +1975,17 @@ export function runPreflight(
         // The clean environment also drops a surrounding test runner's protocol variable
         // (NODE_TEST_CONTEXT), which would swallow this run's own exit code.
         const env = { ...buildAndTestEnv };
-        const directory = mkdtempSync(join(tmpdir(), 'forge-preflight-'));
+        // A Lane-local TMPDIR sits inside the live checkout: a fixture made there would resolve to
+        // that checkout (Item 29024bd1). Tests get a TMPDIR outside every Forge checkout instead.
+        const wanted = env.TMPDIR ?? tmpdir();
+        const outside = tmpdirsOutsideCheckout(wanted);
+        const directory =
+          scratchIn(outside, 'forge-preflight-') ?? mkdtempSync(join(tmpdir(), 'forge-preflight-'));
+        if (outside.includes(dirname(directory)) && dirname(directory) !== wanted) {
+          const scratch = join(directory, 'tmp');
+          mkdirSync(scratch);
+          env.TMPDIR = env.TMP = env.TEMP = scratch;
+        }
         // Every group shares one compiled-module cache, removed with the directory (Item dceb1bef).
         // The clean environment never carries an outer one, so this preflight always owns it.
         env.FORGE_TEST_MODULE_DIRECTORY = join(directory, 'modules');
@@ -2203,7 +2255,7 @@ export function runPreflight(
   const evidence = preparedEvidence.get(plan);
   const skipped = notRun.length + stopped.length + environmentUnits.length + needsBrowser.length;
   const skippedFiles = [...(plan.local?.trimmedTests ?? []), ...notRun].sort();
-  const rerun = skippedFiles.length ? (plan.local?.rerun ?? rerunCommand(root, laneId)) : undefined;
+  const rerun = skippedFiles.length ? rerunCommand(root, skippedFiles) : undefined;
   const stoppedRerun = notRun.length ? stoppedCommand(root, laneId) : undefined;
   const emptyAtCeiling =
     !staticOnly && !plan.tests.length && !plan.reusedTests?.length ? plan.ceilingDeferred : undefined;

@@ -271,9 +271,13 @@ test('a tiny budget trims by time, names the trimmed files and the one command t
   assert.deepEqual(plan.deferredTests, ['tests/far.test.mjs']);
   assert.deepEqual(plan.local.trimmed, [{ tier: 'near', kept: 0, total: 1 }]);
   assert.deepEqual(plan.local.trimmedTests, ['tests/far.test.mjs']);
-  assert.match(plan.local.rerun, /preflight '\{"laneId":"[^"]+","trim":false\}'$/);
+  assert.match(
+    plan.local.rerun,
+    /nforge heavy node (--import \.\/tests\/check-runtime\.mjs )?--test 'tests\/far\.test\.mjs'$/,
+  );
+  assert.doesNotMatch(plan.local.rerun, /trim/);
   assert.match(plan.local.summary, /Trimmed near 0 of 1/);
-  assert.match(plan.local.summary, /1 trimmed file\(s\) are named in trimmedTests; run them: nforge agent /);
+  assert.match(plan.local.summary, /1 trimmed file\(s\) are named in trimmedTests; run them: cd /);
   assert.match(plan.local.summary, /1 test file\(s\) deferred; the queue check runs them first by default/);
   const receipt = f.run(plan);
   assert.equal(receipt.deferredTests, 1);
@@ -313,7 +317,7 @@ test('direct tests survive a trim to the local budget; the wall-time cap names t
   assert.equal(receipt.exitCode, 0);
   assert.deepEqual(receipt.incomplete, {
     mustRun: 1,
-    finish: `nforge agent '${f.root}' preflight '{"laneId":"${laneId}","retry":true,"trim":false}'`,
+    finish: `nforge agent '${f.root}' preflight '{"laneId":"${laneId}","retry":true}'`,
     estimateMinutes: 1,
   });
   assert.equal(receipt.tests, 1);
@@ -402,7 +406,7 @@ test('the run stops between groups when the local budget is spent and reports wh
   assert.equal(receipt.stoppedForTime, 1);
   assert.deepEqual(receipt.skipped, ['tests/far.test.mjs']);
   assert.deepEqual(receipt.stopped, ['tests/far.test.mjs']);
-  assert.match(receipt.rerun, /"trim":false/);
+  assert.match(receipt.rerun, /nforge heavy node .*--test /);
   assert.equal(receipt.deferredTests, 1);
   assert.equal(receipt.deferredTo, 'pre-queue');
   assert.equal(f.plan().reusedTests.includes('tests/far.test.mjs'), false);
@@ -429,7 +433,7 @@ test('8dbd2683: a 600 s ceiling stops any run, trim:false and finish included; a
   assert.equal(receipt.passed, false, 'stopped must-run files are never a pass');
   assert.deepEqual(receipt.stopped, [last]);
   assert.equal(receipt.deferredTo, 'pre-queue', 'the rest goes to the landing check');
-  assert.match(receipt.incomplete.finish, /"retry":true,"trim":false/);
+  assert.match(receipt.incomplete.finish, /"retry":true\}/);
   assert.match(
     said.join(''),
     /0 failed: the 0\.001 s run ceiling was reached \(longer local runs hold a test slot/,
@@ -679,7 +683,7 @@ test('537e73d9: every run names one outcome and its failed count; the exit statu
     notRun: tierTests.direct.slice(0, 20),
     secondsPerFile: 27,
   });
-  assert.equal(short.finish, `nforge agent '/lane' preflight '{"laneId":"L","retry":true,"trim":false}'`);
+  assert.equal(short.finish, `nforge agent '/lane' preflight '{"laneId":"L","retry":true}'`);
 });
 
 /** A fixture test that records the heavy lease it runs under (c180152a). */
@@ -868,4 +872,23 @@ test('dceb1bef: every test file of one preflight shares one module cache, remove
   const [a, b] = ['a', 'b'].map(name => readFileSync(join(f.root, `${name}.cache`), 'utf8'));
   assert.ok(a && a === b, 'both files read the one preflight cache');
   assert.equal(existsSync(a), false, 'the cache goes with the preflight directory');
+});
+
+test('a Lane-local TMPDIR is replaced for tests; a free one is kept; no free root keeps it (Item 29024bd1)', async t => {
+  const { tmpdirsOutsideCheckout, insideForgeCheckout } = await import('../dist/agent-preflight.js');
+  const { mkdirSync, mkdtempSync, rmSync, writeFileSync } = await import('node:fs');
+  const base = mkdtempSync(join(tmpdir(), 'forge-tmpcheck-'));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  const lane = join(base, 'lane');
+  mkdirSync(join(lane, '.forge'), { recursive: true });
+  writeFileSync(join(lane, '.forge', 'hosted-lane.json'), '{}');
+  const inside = join(lane, 'tmp');
+  mkdirSync(inside);
+  const free = join(base, 'free');
+  mkdirSync(free);
+  assert.equal(insideForgeCheckout(inside), true);
+  assert.equal(insideForgeCheckout(free), false);
+  assert.deepEqual(tmpdirsOutsideCheckout(free), [free]);
+  assert.deepEqual(tmpdirsOutsideCheckout(inside, [lane, free]), [free]);
+  assert.deepEqual(tmpdirsOutsideCheckout(inside, [lane, join(base, 'missing')]), []);
 });

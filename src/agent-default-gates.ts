@@ -300,8 +300,9 @@ export function finishGates(
               heavyOptions,
             );
             refuseStaticFailure(result);
-            const next = result.incomplete?.finish ?? result.stoppedRerun ?? run;
             const failed = preflightOutcome(result) === 'failed';
+            // A failure is fixed and run again: retry reruns only stopped files and refuses a failed stop.
+            const next = failed ? run : (result.incomplete?.finish ?? result.stoppedRerun ?? run);
             if (
               failed ||
               result.stoppedForTime ||

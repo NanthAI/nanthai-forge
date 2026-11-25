@@ -137,7 +137,7 @@ test('preflight: must-run files the budget stopped make the run NOT COMPLETE, sh
   assert.equal(receipt.exitCode, 0, 'nothing failed');
   assert.equal(receipt.passed, false, 'not a pass');
   assert.equal(receipt.incomplete.mustRun, 1);
-  assert.match(receipt.incomplete.finish, /preflight '\{"laneId":"[0-9a-f-]+","retry":true,"trim":false\}'/);
+  assert.match(receipt.incomplete.finish, /preflight '\{"laneId":"[0-9a-f-]+","retry":true\}'$/);
   const gate = finishGates(root, defaults({}), lane, changed).preflight;
   assert.equal(gate.status, 'incomplete', 'require advises: the landing check runs them');
   assert.equal(gate.mustRunNotRun, 1);

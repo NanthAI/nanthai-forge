@@ -842,8 +842,8 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   `ENVIRONMENT (not a failed run)` in the summary and `status: "environment"` in the land
   advisory, never FAILED. `incomplete` counts those files (`mustRun`, listed first in `stopped`)
   and, priced in `estimateMinutes` at this run's speed, the one command that finishes them,
-  `finish`: `preflight '{"laneId":"…","retry":true,"trim":false}'`, the stopped files with no
-  wall-time cap. `finish` is offered only when it fits one agent wait (540 s); a longer one would
+  `finish`: `preflight '{"laneId":"…","retry":true}'`, the stopped files only (a retry has no
+  wall-time cap). `finish` is offered only when it fits one agent wait (540 s); a longer one would
   outlive the agent's own command timeout, so the reply names landing alone. `land --save` reports it as
   `status: "incomplete"` with the same count and command; it advises and never refuses, since the
   landing check runs those files. A protected tier that fits the budget changes nothing. A failure ends the run the same way (`stoppedForFailure`): the rest
@@ -866,9 +866,9 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   (`rule`, `budgetSeconds`, `trimmedTiers`, `deferredTests`, `deferredTo: "pre-queue"`, `slowest`)
   say what was trimmed and why and which files were slowest. Every file skipped for time is named
   (`local.trimmedTests` in the plan; `skipped` in the receipt, trimmed plus not started), with one
-  command that runs exactly those files (`rerun`): `preflight '{"laneId":"…","trim":false}'` runs
-  every ranked local tier with no budget and no filler, and reused passes make it run only what
-  was skipped, so its results are recorded and learned like any other run. Trimmed and farther consumers (three
+  command that runs exactly those files (`rerun`): `cd LANE && nforge heavy node --test FILES` for up
+  to eight files; for more, `rerun` says the landing check is the full run and runs them (`trim:false`
+  is no longer suggested: it runs the whole deferred plan locally). Trimmed and farther consumers (three
   or more edges, dynamic) are
   `deferredTests`: they run first in the queue check by default. Explicit
   `acceptance.admissionCheck: "full"` runs them in the pre-queue Lane check instead. The receipt also reports build and

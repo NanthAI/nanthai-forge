@@ -35,7 +35,7 @@ export function mustRunNotRun(tierTests: Record<string, string[]> | undefined, n
 
 /** NOT COMPLETE details when a clean run left must-run files unstarted or skipped planned files for a
  * missing runtime (NEEDS); undefined otherwise, so a run whose protected tier fits its budget is unchanged. The finish command is `retry` (exactly the
- * stopped files, passes reused) with `trim:false` (no wall-time cap), so one run finishes them. It is
+ * stopped files, passes reused) under the same wall-time budget, so one run finishes them. It is
  * offered only when it fits one agent wait (`waitSeconds`): a longer one outlives the agent's own
  * command timeout, so the next step is to land and let the landing check run them. */
 export function incompletePreflight(input: {
@@ -57,7 +57,7 @@ export function incompletePreflight(input: {
     ...(mustRun && seconds <= (input.waitSeconds ?? AGENT_WAIT_SECONDS)
       ? {
           finish: `nforge agent ${shellQuote(input.root)} preflight ${shellQuote(
-            JSON.stringify({ laneId: input.laneId, retry: true, trim: false }),
+            JSON.stringify({ laneId: input.laneId, retry: true }),
           )}`,
         }
       : {}),
