@@ -279,19 +279,6 @@ async function insertVersion(
   }
 }
 
-/** Whether an Item of this id exists (the index generation, or the hosted Issue head). */
-export async function itemOwnsIntent(
-  ctx: QueryCtx | MutationCtx,
-  projectId: Id<'hostedProjects'>,
-  id: string,
-) {
-  const project = await ctx.db.get(projectId);
-  const generation = project && (await selectedGeneration(ctx, project));
-  return generation
-    ? Boolean(await indexRecord(ctx, recordPartition(generation), 'planningSearch', id))
-    : Boolean(await recordHead(ctx, projectId, 'issue', id));
-}
-
 /** The journal Intent `value` against its stored head. `hosted`: a Lane pinned it, so hosted paths own it.
  * `same`: the head already holds these bytes. With `write`, a missing Intent is stored at version 0 and a
  * changed one as the next version; without it a change is only reported (`different`). */

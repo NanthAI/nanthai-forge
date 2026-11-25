@@ -933,22 +933,11 @@ test('planned start joins a repaired markerless successor instead of recreating 
       });
     },
   });
-  const { page } = await import(moduleUrl('../convex/legacyItemShapes.ts'));
-  const old = process.env.CONVEX_CLOUD_URL;
-  process.env.CONVEX_CLOUD_URL = 'https://benevolent-wildebeest-974.convex.cloud';
-  try {
-    for (const family of ['intents', 'lanes'])
-      await s.call('fill', page, {
-        deployment: 'benevolent-wildebeest-974',
-        projectId: s.projectId,
-        family,
-        cursor: null,
-        apply: true,
-      });
-  } finally {
-    if (old === undefined) delete process.env.CONVEX_CLOUD_URL;
-    else process.env.CONVEX_CLOUD_URL = old;
-  }
+  // The one-off conversion bound the markerless successor to its Item.
+  const orphan = [...s.tables.projectHostedRecordHeads.values()].find(
+    row => row.kind === 'intent' && row.key === successor,
+  );
+  s.patch('projectHostedRecordHeads', orphan._id, { planningItemId: id });
   const reply = await s.begin(s.input({ kind: 'planned', intentId: id, outcome: 'Continue after repair' }));
   assert.equal(reply.intentId, successor);
   assert.equal(reply.lane.intentId, successor);

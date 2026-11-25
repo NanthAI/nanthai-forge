@@ -8,12 +8,11 @@ import { planningIntentHeads } from './projectPlanningIntentState';
 import { openIntentLane } from './projectHostedOpenLaneEvidence';
 import { recordHead } from './projectHostedRecords';
 import { latestItemIntentHead } from './projectItemIntentHeads';
-import { verifiedRollupMembership } from './projectItemMembershipVersion';
 import { planItemOpenLaneMark, planLaneItem } from './projectPlanLaneMarks';
 import { recordPartition } from './projectWorkIndexStore';
 import { intentCompletionTime } from './projectPlanRollupReopen';
 import type { QueryCtx } from './_generated/server';
-import type { Doc } from './_generated/dataModel';
+import type { Doc, Id } from './_generated/dataModel';
 
 export function rollupChecklist(body: string) {
   const { checked, open } = closingChecklist(body);
@@ -22,6 +21,13 @@ export function rollupChecklist(body: string) {
 
 type Chain = Awaited<ReturnType<typeof planningIntentHeads>>;
 type Lane = Awaited<ReturnType<typeof openIntentLane>>;
+/** Only a finished mark pass proves the running-work tally. */
+export const verifiedRollupMembership = (
+  project: Doc<'hostedProjects'>,
+  generationId: Id<'projectWorkGenerations'>,
+) =>
+  project.planLaneMarkCoverage?.generationId === generationId && project.planLaneMarkCoverage.cursor === null;
+
 const pin = (head: Chain[number] | Lane) =>
   head ? [head.key, head.recordId, head.version, head.status] : null;
 

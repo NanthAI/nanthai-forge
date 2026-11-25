@@ -9,7 +9,7 @@ import { readHostedRecord } from './projectHostedRecords';
 import { hostedLaneSchema } from '../src/hosted-lane';
 import { addPlanLane, changePlanLaneCascade, planLaneItem, removePlanLanes } from './projectPlanLaneMarks';
 import { landedAtLaneHead, laneOverlapHead } from './projectHostedOpenLaneEvidence';
-import { verifiedRollupMembership } from './projectItemMembershipVersion';
+import { verifiedRollupMembership } from './projectPlanRollupFacts';
 import { invariant } from '../src/errors';
 
 const phase = v.literal('lanes');

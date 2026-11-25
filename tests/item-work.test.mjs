@@ -709,3 +709,14 @@ test('a Lane older than the newest landing notes still reads its receipt, with i
     [s.noteReceipt, 'c'.repeat(64), revert],
   );
 });
+
+test('an Item is its bound Intents and Lanes: a head with no Item binding is not read as the Item’s', async () => {
+  const s = await fixture({ details: true });
+  for (const key of [s.itemId, s.open.id, s.noted.id, s.stamped.id, s.abandoned.id]) {
+    const head = [...s.tables.projectHostedRecordHeads.values()].find(row => row.key === key);
+    await s.ctx.db.patch(head._id, { planningItemId: undefined });
+  }
+  const work = await s.read();
+  assert.deepEqual(work.lanes, [], 'an unbound Lane is not listed');
+  assert.equal(work.intent, null, 'an unbound same-id Intent is not the Item’s state');
+});

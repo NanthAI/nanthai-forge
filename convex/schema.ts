@@ -322,7 +322,6 @@ const projectFields = {
   workStoreEventWindows: v.optional(v.array(v.object({ revision: v.number(), storeFirst: v.boolean() }))),
   workStore: v.optional(v.union(v.literal('dual'), v.literal('records'))),
   /** Durable one-time Item Intent and Lane membership repair frontier; true is complete. */
-  itemLaneMembership: v.optional(v.union(v.string(), v.literal(true))),
   /** Roll-up's independent coverage proof for existing open-Lane tally rows. */
   planLaneMarkCoverage: v.optional(
     v.object({ generationId: v.id('projectWorkGenerations'), cursor: v.union(v.string(), v.null()) }),

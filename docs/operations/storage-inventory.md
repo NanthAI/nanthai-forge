@@ -114,9 +114,9 @@ inventory above, and physical reclamation needs provider storage evidence.
 An Item's Intents and Lanes are the heads bound to it: every start and every Lane open writes the Item on the head,
 and every reader (Item Work, the Lanes list, Item history, landing comments, public Plan, purge, start) reads that
 binding through `by_project_and_kind_and_item` and nothing else. No reader derives membership from successor IDs or
-from a same-ID Intent that carries no binding. A new Intent head named like an existing Item is born bound to it
-(`projectWorkStore.storeIntent`). The one-off conversion `legacyItemShapes` binds older rows once per deployment and lives only in the pinned
-in-between release, see [legacy Item shapes](legacy-item-shapes.md).
+from a same-ID Intent that carries no binding. An Item's own same-ID Intent is born bound to it when the
+projection that creates the Item writes it (`projectWorkStore.storeIntent`). The one-off conversion that bound older rows lives only in the pinned in-between release, see
+[legacy Item shapes](legacy-item-shapes.md).
 
 Item membership (`846c635b`) replaces the start-time Intent walk and the full Lane history's per-Intent
 ranges after fill. `projectHostedRecordHeads.by_project_and_kind_and_item` adds one entry per current head,

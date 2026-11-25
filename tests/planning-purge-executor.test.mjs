@@ -716,28 +716,16 @@ async function pinAndContinue(s, itemId) {
   return successor;
 }
 
-/** The one-off conversion binds a markerless successor chain and its Lanes to their Item. */
-async function repairLegacyMembership(s) {
-  const { page } = await import(moduleUrl('../convex/legacyItemShapes.ts'));
-  const old = process.env.CONVEX_CLOUD_URL;
-  process.env.CONVEX_CLOUD_URL = 'https://benevolent-wildebeest-974.convex.cloud';
-  try {
-    for (const family of ['intents', 'lanes'])
-      for (let cursor = null, i = 0; i < 20; i++) {
-        const result = await page._handler(s.ctx, {
-          deployment: 'benevolent-wildebeest-974',
-          projectId: s.projectId,
-          family,
-          cursor,
-          apply: true,
-        });
-        if (result.next === null) break;
-        cursor = result.next;
-      }
-  } finally {
-    if (old === undefined) delete process.env.CONVEX_CLOUD_URL;
-    else process.env.CONVEX_CLOUD_URL = old;
-  }
+/** What the one-off conversion did on a deployment: bind a markerless successor chain and its Lanes to their Item. */
+async function repairLegacyMembership(s, itemId) {
+  const chain = new Set([itemId]);
+  for (let key = itemId, hop = 0; hop < 30; hop++) chain.add((key = successorIntentId(key)));
+  for (const head of [...s.tables.projectHostedRecordHeads.values()])
+    if (head.kind === 'intent' && chain.has(head.key) && head.planningItemId === undefined)
+      await s.ctx.db.patch(head._id, { planningItemId: itemId });
+  for (const head of [...s.tables.projectHostedRecordHeads.values()])
+    if (head.kind === 'lane' && chain.has(head.parent) && head.planningItemId === undefined)
+      await s.ctx.db.patch(head._id, { planningItemId: itemId });
 }
 
 async function oldSuccessor(s, itemId) {
@@ -775,7 +763,7 @@ test('incident 846c635b: purge leaves no words in 25 Intent histories (including
   }
   const markerless = await hostedRecords.recordHead(s.ctx, s.projectId, 'intent', successor);
   await s.ctx.db.patch(markerless._id, { planningItemId: undefined });
-  await repairLegacyMembership(s);
+  await repairLegacyMembership(s, itemId);
   // A legacy handoff note: the Intent header lists its summary and the note keeps the handoff's free text.
   const project = s.tables.hostedProjects.get(s.projectId);
   for (const row of workRecordRows(s.tables))
@@ -1311,7 +1299,7 @@ test('indexed archive purge retires an archive holding a repaired markerless suc
   const r2 = storage(t);
   const successor = await oldSuccessor(s, itemId);
   const old = await oldIntentSegment(s, r2, successor);
-  await repairLegacyMembership(s);
+  await repairLegacyMembership(s, itemId);
   s.tables.hostedProjects.get(s.projectId).journalRevision = 1;
   const worker = executor(s);
   await backfillArchive(s, worker.ctx);
@@ -1332,7 +1320,7 @@ test('a purge resumed across the Item membership cutover scrubs the old writerâ€
   const r2 = storage(t);
   const successor = await oldSuccessor(s, itemId);
   const old = await oldIntentSegment(s, r2, successor);
-  await repairLegacyMembership(s);
+  await repairLegacyMembership(s, itemId);
   const project = s.tables.hostedProjects.get(s.projectId);
   project.journalRevision = 1;
   const laneId = randomUUID();
@@ -1793,7 +1781,7 @@ test('purge waits for a pending archive on a repaired markerless successor, then
     }),
   );
   assert.deepEqual(capture.pending.intentKeys, [successor]);
-  await repairLegacyMembership(s);
+  await repairLegacyMembership(s, itemId);
   const { encodePlannedJournal } = await import(moduleUrl('../convex/projectJournalArchivePlan.ts'));
   for (const text of capture.texts) {
     const { body, pointer } = encodePlannedJournal(text, JSON.parse(text));
