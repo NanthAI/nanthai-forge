@@ -8,9 +8,31 @@ URL from the person who invited you. Open the app URL in your browser and pass
 the deployment URL to `nforge login`. You can build the CLI and read its packaged
 guides while you wait for access.
 
+## What you need installed
+
+Node 24.22.1+ (24.x) is the only supported Node; the CLI refuses others with
+`UNSUPPORTED_NODE`. Nothing else is needed for hosted work: no daemon, database,
+Docker or browser extension. A browser signs you in and shows the app.
+
+| Path | Node 24.22.1+ | npm | Git | Other |
+| --- | --- | --- | --- | --- |
+| Install the CLI from source (today; no npm package yet) | yes | yes | yes, to fetch the source checkout | none |
+| Hosted work: `login`, `clone`, `start`, `save`, `land`, `wait`, `pull`, `status` | yes (runs the CLI) | no | no | none |
+| Import from GitHub in the app (or `nforge import`) | yes for `nforge import`; the app needs only a browser | no | no: the import runs on the server | GitHub account; the Forge GitHub App for private repositories |
+| Host a plain directory (`nforge host`) | yes | no | no | none |
+| Import from a local clone (`nforge host` on a Git worktree) | yes | no | yes, 2.38 or later | none |
+| Mirror `main` to GitHub (`nforge github-sync`) or checks with submodules | yes | no | yes | GitHub access for the mirror |
+| Backups | yes | no | no | `tar` and `gzip` |
+
+Once the CLI is installed, hosted work never calls Git. A machine with no Git
+on `PATH` can run it after the CLI is installed another way. A git-free install
+through a published package comes with npm publishing. That fresh-machine run
+with no Git on `PATH` has not been done yet; it joins the new-user walkthrough
+(Item adfa4c84-2873-48b0-829f-3da4a6b2a860).
+
 ## Install the development CLI
 
-Use Node 24.22.1+ (24.x), npm and Git. In a new directory:
+Installing from source needs Node 24.22.1+ (24.x), npm and Git ([what you need installed](#what-you-need-installed) says why). In a new directory:
 
 ```sh
 git clone https://github.com/NanthAI/nanthai-forge.git
@@ -249,8 +271,8 @@ in its own sibling cache. Immediate `nforge pull` uses that clone without an ext
 A normal user never needs a Forge background process. `login`, `clone`, `start`,
 `save`, `land`, `wait`, `pull` and `status` are short commands: each runs, prints
 its result and exits. Nothing starts at login or boot, and no service, launchd or
-systemd unit, tray app or listener is installed. Git is needed only to fetch the
-Forge source checkout when you install from source (above); these commands run
+systemd unit, tray app or listener is installed. Git is not needed for these
+commands (see [what you need installed](#what-you-need-installed)); they run
 without Git on `PATH`. An idle clone sends no calls.
 
 Two things can stay running, both opt-in and each with one job:
