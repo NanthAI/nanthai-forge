@@ -4706,3 +4706,12 @@ test('a put with an itemId and no expectedVersion shows the update form; a batch
   const read = await list(p, { id: issue.itemId, reconcile: false });
   assert.match(read.item.body, /- \[ \] y/);
 });
+
+test('closing counts plain-bullet Done-when criteria that sit beside checkboxes (3e5a4e18)', async () => {
+  const { closingChecklist } = await import('../dist/planning-search.js');
+  const mixed =
+    'Why.\n\nDone-when:\n- [x] ticked line\n- plain criterion one\n1. plain criterion two\n\n## Decisions\n- a decision';
+  assert.deepEqual(closingChecklist(mixed).open, ['plain criterion one', 'plain criterion two']);
+  assert.deepEqual(closingChecklist('Done-when:\n- [x] a\n- [ ] b').open, ['b']);
+  assert.deepEqual(closingChecklist('Done-when:\n- [x] a\n- [x] b').open, []);
+});

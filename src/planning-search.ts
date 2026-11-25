@@ -48,7 +48,14 @@ export function closingChecklist(body: string) {
     if (match[1] === ' ') open.push(match[2]!.replace(/\s+/g, ' ').trim());
     else if (match[1] !== '~') checked++;
   }
-  return { checked, open: structured ? open : proseDoneWhenLines(lines.join('\n')) };
+  // Plain bullets under the Done-when heading beside checkboxes are criteria too (item 3e5a4e18): they cannot be
+  // ticked, so a person closes the Item.
+  return {
+    checked,
+    open: structured
+      ? [...open, ...proseDoneWhenLines(lines.join('\n'), true)]
+      : proseDoneWhenLines(lines.join('\n')),
+  };
 }
 
 export function doneWhenCounts(body: string): [number, number] | null {
@@ -63,7 +70,7 @@ export function doneWhenCounts(body: string): [number, number] | null {
 }
 
 /** The legacy prose gate: use only when there is no structured checklist. Prose needs a manual decision. */
-export function proseDoneWhenLines(body: string): string[] {
+export function proseDoneWhenLines(body: string, plainBulletsOnly = false): string[] {
   const heading = /^[ \t>#*_]*done[- ]when\b/im.exec(body);
   if (!heading) return [];
   const lines = body
@@ -75,6 +82,7 @@ export function proseDoneWhenLines(body: string): string[] {
   let text = /\w/.test(first);
   for (const line of lines.slice(1)) {
     if (/^#{1,6}\s/.test(line) || /^\*\*[^*]+\*\*:?$/.test(line)) break;
+    if (plainBulletsOnly && /^(?:[-*+]|\d+[.)])\s+\[[ xX~]\]/.test(line)) continue;
     if (/^(?:[-*+]|\d+[.)])\s+\S/.test(line))
       bullets.push(
         line
@@ -87,6 +95,7 @@ export function proseDoneWhenLines(body: string): string[] {
       if (!/\w/.test(first)) first = line;
     }
   }
+  if (plainBulletsOnly) return bullets;
   return bullets.length ? bullets : text ? [first || 'Done-when text'] : [];
 }
 

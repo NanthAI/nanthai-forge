@@ -593,6 +593,48 @@ test('window read lists each Item once across scan pages, keeps its older close 
   }
 });
 
+test('an Item that moves out of an Initiative and back is listed once on an initiative-filtered window read (friction 0f1264b0)', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-11-10T10:00:00.000Z') });
+  const s = await setup(t);
+  await s.ctx.db.patch(s.projectId, { workStore: 'records', workStoreWriters: ['planning'] });
+  addDeviceAndAccounts(s);
+  s.ctx.auth.getUserIdentity = async () => ({ subject: 'owner' });
+  const p = makePort(s);
+  const home = (await runPut(p, { kind: 'initiative', title: 'Home' })).itemId;
+  const away = (await runPut(p, { kind: 'initiative', title: 'Away' })).itemId;
+  const wanderer = (await runPut(p, { kind: 'issue', title: 'Wanders', initiativeId: home })).itemId;
+  const at = iso => t.mock.timers.setTime(Date.parse(iso));
+  at('2026-11-15T09:00:00.000Z');
+  await runPut(p, { planningItemId: wanderer, expectedVersion: 1, title: 'Wanders' + '!' });
+  at('2026-11-15T10:00:00.000Z');
+  await runPut(p, { planningItemId: wanderer, expectedVersion: 2, initiativeId: away });
+  at('2026-11-15T11:00:00.000Z');
+  await runPut(p, { planningItemId: wanderer, expectedVersion: 3, initiativeId: home });
+  at('2026-11-21T09:00:00.000Z');
+  const { readBacklogWindowAudit } = await import(moduleUrl('../convex/projectPlanningWindow.ts'));
+  const project = await s.ctx.db.get(s.projectId);
+  const seen = [];
+  let cursor = null;
+  let pages = 0;
+  do {
+    const page = await readBacklogWindowAudit(s.ctx, project, null, {
+      initiativeId: home,
+      from: '2026-11-15',
+      until: '2026-11-18',
+      cursor,
+      scanRows: 1,
+    });
+    seen.push(...page.items);
+    cursor = page.nextCursor;
+    assert.ok(++pages < 10, 'paging ends');
+  } while (cursor);
+  assert.deepEqual(
+    seen.map(item => item.itemId),
+    [wanderer],
+    'listed once',
+  );
+});
+
 test('window rows list the Decisions lines dated in the window across Items, without extra reads', async t => {
   t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-11-10T10:00:00.000Z') });
   const s = await setup(t);

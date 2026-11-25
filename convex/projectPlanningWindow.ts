@@ -121,15 +121,15 @@ async function classify(
   };
   const newestScanned = rows[0]!;
   if (scope.olderPage) {
-    const next = await lookup(newestScanned.version + 1);
-    if (next === undefined) return null;
-    if (
-      next &&
-      next.purged === undefined &&
-      next._creationTime <= scope.untilMs &&
-      (!scope.initiativeId || next.parent === scope.initiativeId)
-    )
-      return 'listed';
+    // A newer in-window version that matches the filter was listed on an earlier page. Walk every newer version, not
+    // only the immediate one: an Item that moved out of the initiative and back has a non-matching successor.
+    for (let version = newestScanned.version + 1, steps = 0; steps < PER_ITEM_LOOKUPS; version++, steps++) {
+      const next = await lookup(version);
+      if (next === undefined) return null;
+      if (!next || next._creationTime > scope.untilMs) break;
+      if (next.purged === undefined && (!scope.initiativeId || next.parent === scope.initiativeId))
+        return 'listed';
+    }
   }
   const scanned = new Map(rows.map(row => [row.version, row]));
   // In-window versions oldest last, then the version before the window (a gap is an exact point read).
