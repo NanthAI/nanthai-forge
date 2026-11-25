@@ -140,6 +140,7 @@ test('92f4bf04: one bounded prune read classifies retained terminal/open headers
     [changed, 'b'.repeat(64)],
   ]) {
     s.insert('projectHostedOverlapLanes', {
+      lastActivityAt: 4_000_000_000_000,
       projectId,
       laneId,
       intentId: 'intent',

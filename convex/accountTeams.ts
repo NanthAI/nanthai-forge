@@ -98,7 +98,7 @@ async function teamRow(ctx: QueryCtx, team: Doc<'teams'>, mine: Doc<'teamMembers
     ownerHandle: ownerRow?.handle ?? null,
     ...(owns && team.invitationEpoch !== undefined ? { canReadInvitations: true as const } : {}),
     members: rows.slice(0, MEMBERS_SHOWN).map(row => ({
-      handle: row.handle ?? null,
+      handle: row.handle,
       you: row.member === viewer,
       owner: row.member === team.owner,
       ...(owns ? { key: row.member } : {}),

@@ -95,6 +95,7 @@ export async function itemWorkFixture({
   if (overlap) await s.ctx.db.patch(overlap._id, stamp);
   else
     await s.ctx.db.insert('projectHostedOverlapLanes', {
+      lastActivityAt: 4_000_000_000_000,
       projectId: auth.projectId,
       laneId: stamped.id,
       intentId: itemId,

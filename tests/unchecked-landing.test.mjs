@@ -95,7 +95,7 @@ for (const revoke of ['removed', 'downgraded']) {
 async function teamFixture() {
   const f = await fixture();
   const team = f.insert('teams', { owner: 'owner', name: 'Release team', operationId: randomUUID() });
-  const membership = f.insert('teamMembers', { teamId: team, member: 'contributor' });
+  const membership = f.insert('teamMembers', { teamId: team, member: 'contributor', handle: null });
   const policy = f.tables.hostedProjects.get(f.projectId).autonomyPolicy;
   policy.acceptance.withoutCheck = choice('selected', [], [team]);
   return { ...f, team, membership };

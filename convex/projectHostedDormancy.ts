@@ -22,17 +22,8 @@ export function dormantCutoff(project: Project, now = Date.now()): number | null
   return days > 0 ? now - days * DAY_MS : null;
 }
 
-/** Last time a Lane's record was written: the overlap row's own field, else the presence time it
- * carried before the field existed. A row with neither is unknown, and unknown counts as live: missing
- * evidence never hides a Lane. Landing completions and `abandon-dormant` stamp such rows from the Lane record. */
-export const rowActivity = (row: Pick<Doc<'projectHostedOverlapLanes'>, 'lastActivityAt' | 'presenceRow'>) =>
-  row.lastActivityAt ?? row.presenceRow?.at ?? Infinity;
-
 /** Newest live open Lanes, at most `PEER_WINDOW`, from one indexed range on last activity. Dormant Lanes
- * are never read. Rows written before `lastActivityAt` existed sit in their own small range and are
- * filtered by the presence time they already hold, so a deployment needs no backfill; each leaves that
- * range at its Lane's next record write or, for a Lane that never writes again, when a landing completion
- * stamps it (`stampLegacyOverlapActivity`). With dormancy off this is the plain open-Lane read. */
+ * are never read. With dormancy off this is the plain open-Lane read. */
 export async function liveOpenOverlapLanes(
   ctx: QueryCtx,
   projectId: Id<'hostedProjects'>,
@@ -44,25 +35,13 @@ export async function liveOpenOverlapLanes(
       .withIndex('by_project_and_open', q => q.eq('projectId', projectId).eq('open', true))
       .order('desc')
       .take(PEER_WINDOW);
-  const [live, legacy] = await Promise.all([
-    ctx.db
-      .query('projectHostedOverlapLanes')
-      .withIndex('by_project_and_open_and_activity', q =>
-        q.eq('projectId', projectId).eq('open', true).gt('lastActivityAt', cutoff),
-      )
-      .order('desc')
-      .take(PEER_WINDOW),
-    ctx.db
-      .query('projectHostedOverlapLanes')
-      .withIndex('by_project_and_open_and_activity', q =>
-        q.eq('projectId', projectId).eq('open', true).eq('lastActivityAt', undefined),
-      )
-      .order('desc')
-      .take(PEER_WINDOW),
-  ]);
-  return [...live, ...legacy.filter(row => rowActivity(row) > cutoff)]
-    .sort((a, b) => (rowActivity(a) === rowActivity(b) ? 0 : rowActivity(b) > rowActivity(a) ? 1 : -1))
-    .slice(0, PEER_WINDOW);
+  return ctx.db
+    .query('projectHostedOverlapLanes')
+    .withIndex('by_project_and_open_and_activity', q =>
+      q.eq('projectId', projectId).eq('open', true).gt('lastActivityAt', cutoff),
+    )
+    .order('desc')
+    .take(PEER_WINDOW);
 }
 
 /** Input pages of one receipt read to find a Lane; a receipt past this is not searched further. */

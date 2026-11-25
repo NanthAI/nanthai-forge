@@ -51,7 +51,7 @@ export type OverlapLane = {
   stackRoot?: string;
   changes: string;
   complete: boolean;
-  /** Last Lane record write (ms), or the presence time of a row older than that field. */
+  /** Last Lane record write (ms); absent on the caller's own unsaved view of its Lane. */
   lastActivityAt?: number;
   presenceRow?: { at: number };
   /** Set when a Lane of the same Intent landed after this Lane went quiet: no presence, no advisory
@@ -359,10 +359,7 @@ export function hostedOverlapAdvice(
   for (const peer of peers) {
     if (!peer.open || peer.laneId === mine.laneId) continue;
     const quiet = peer.superseded?.laneHead === peer.head;
-    const idle =
-      idleBefore !== undefined &&
-      !requestedPath &&
-      (peer.lastActivityAt ?? peer.presenceRow?.at ?? Infinity) < idleBefore;
+    const idle = idleBefore !== undefined && !requestedPath && (peer.lastActivityAt ?? Infinity) < idleBefore;
     if (sameResolution(mine, peer) || sameStack(mine, peer)) continue;
     if (
       mine.intentId === peer.intentId &&

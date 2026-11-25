@@ -97,7 +97,7 @@ test('browser logical objects PUT directly to R2, verify checksums and reuse com
 });
 
 test('browser upload uses deployment R2 mode without the legacy project opt-in', async t => {
-  const { s } = await setup(t, { optIn: false }),
+  const { s } = await setup(t),
     input = archive();
   noConvexBytes(s);
   assert.deepEqual(

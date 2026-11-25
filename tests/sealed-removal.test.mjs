@@ -114,7 +114,12 @@ test('removing a direct grant does not mark a person who still writes through a 
   for (const table of ['teams', 'teamMembers', 'projectTeams']) h.s.tables[table] ??= new Map();
   h.s.tables.hostedProjects.get(h.project).teamLinks = 1;
   h.s.tables.teams.set('crew', { _id: 'crew', owner: 'fixture-owner', name: 'crew' });
-  h.s.tables.teamMembers.set('crew-m', { _id: 'crew-m', teamId: 'crew', member: 'fixture-member' });
+  h.s.tables.teamMembers.set('crew-m', {
+    _id: 'crew-m',
+    teamId: 'crew',
+    member: 'fixture-member',
+    handle: null,
+  });
   h.s.tables.projectTeams.set('crew-link', {
     _id: 'crew-link',
     projectId: h.project,

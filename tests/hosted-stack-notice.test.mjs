@@ -346,6 +346,7 @@ test('writeLanding announces a cancelled landing of a stacked Lane through the r
   f.tables.projectHostedOverlapLanes ??= new Map();
   const lane = (laneId, extra = {}) =>
     f.insert('projectHostedOverlapLanes', {
+      lastActivityAt: 4_000_000_000_000,
       projectId: f.projectId,
       laneId,
       intentId: randomUUID(),

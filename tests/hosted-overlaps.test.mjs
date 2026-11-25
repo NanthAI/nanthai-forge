@@ -443,6 +443,7 @@ test('20 open Lanes x 200 paths use one indexed peer read; history does not ente
   }
   for (let i = 0; i < 560; i++)
     s.insert('projectHostedOverlapLanes', {
+      lastActivityAt: 4_000_000_000_000,
       projectId: s.projectId,
       laneId: randomUUID(),
       intentId: randomUUID(),

@@ -21,7 +21,6 @@ async function running(t) {
   const submitted = await s.submit(selection),
     job = await s.activate(submitted.jobId);
   await s.callback(job, { status: 'heartbeat', sequence: 1 });
-  s.patch('hostedProjects', s.projectId, { r2Writes: true });
   const c = controls(t, s),
     dispatch = sourceDispatch(s.projectId, job);
   const args = {

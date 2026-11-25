@@ -1028,8 +1028,8 @@ token itself is not retained. When a person connects GitHub through Forge's own
 OAuth callback, their GitHub App user token is stored sealed in `users.githubToken`
 under `FORGE_GITHUB_TOKEN_KEYRING`, and private-repository checks read it there.
 With no saved connection the error says "Connect your GitHub account and selected
-repositories." The schema keeps `legacyGithubProvider`, `legacyPasskeyFlow` and the
-auth link event kind `legacy-passkey` only so stored rows still validate.
+repositories." The schema keeps the auth link event kind `legacy-passkey` only so stored
+receipts still validate.
 
 Successful GitHub links write an `authLinkEvents` audit receipt with the granting
 session, operation/request digest, method, identity and time, in the grant's

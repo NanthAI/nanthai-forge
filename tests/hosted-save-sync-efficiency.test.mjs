@@ -160,7 +160,6 @@ async function changedSave(
   const root = checkout(t, s, entry, state);
   if (scale) dogfood(s);
   const c = controls(t, s);
-  s.patch('hostedProjects', s.projectId, { r2Writes: true });
   const exchange = new ConvexExchange(
     testDeploymentOrigin('https://fixture.invalid'),
     'synthetic',
@@ -554,7 +553,6 @@ test('sync batches missing merge objects at 3,000-file scale and leaves unchange
     const submitted = await s.submitSync(request);
     const job = await s.activate(submitted.jobId);
     await s.callback(job, { status: 'heartbeat', sequence: 1 });
-    s.patch('hostedProjects', s.projectId, { r2Writes: true });
     if (!legacy) dogfood(s);
     const c = controls(t, s),
       dispatch = sourceDispatch(s.projectId, job),

@@ -35,7 +35,6 @@ async function fixture(t) {
       else process.env[k] = v;
     }
   });
-  s.patch('hostedProjects', s.projectId, { r2Writes: true });
   return {
     ...s,
     identity,

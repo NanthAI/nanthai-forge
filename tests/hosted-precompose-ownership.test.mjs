@@ -128,9 +128,11 @@ for (const history of [575, 1150])
     // Calls 69 -> 70 (under the ceiling), reads 1370 -> 1371, writes 454 -> 455 (Item 85f456c1, batch truth gap): the
     // batch's first landing of the hour schedules the person-order touch single landings already schedule (scheduler
     // write, run and its read). Summary and mark I/O are projection I/O, outside these source counts.
+    // Reads 1371 -> 1369 (Item c0af6cfa): the per-completion range read of overlap rows with no lastActivityAt is gone
+    // (2 completion ticks). Calls and writes unchanged.
     assert(
       budget.calls <= 71 &&
-        source.reduce((n, c) => n + c.documents, 0) <= 1371 &&
+        source.reduce((n, c) => n + c.documents, 0) <= 1369 &&
         source.reduce((n, c) => n + c.writes, 0) <= 455,
       JSON.stringify({
         ...budget,

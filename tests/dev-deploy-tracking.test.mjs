@@ -324,6 +324,7 @@ test('Item 8b6efb50: ancestry picks the first successful deploy >= sequence in l
     recordId,
   });
   s.insert('projectHostedOverlapLanes', {
+    lastActivityAt: 4_000_000_000_000,
     projectId,
     laneId,
     intentId,

@@ -29,7 +29,6 @@ const laneSchema = z
       )
       .optional(),
     pinned: z.boolean(),
-    indexed: z.boolean().nullable(),
   })
   .loose();
 const pageSchema = z
@@ -118,33 +117,23 @@ export async function abandonDormantLanes(
         : 'Nothing to abandon.',
     };
   const batch = abandonable.slice(0, command.limit);
-  // Spare capacity indexes the dormant Lanes that stay open, so later reads skip them without reading their rows.
-  const stamp = kept
-    .filter(lane => !lane.pinned && lane.indexed === false)
-    .slice(0, command.limit - batch.length);
-  if (!batch.length && !stamp.length)
-    return { phase: 'abandon-dormant', dryRun: false, ...base, abandoned: [], remaining: 0 };
+  if (!batch.length) return { phase: 'abandon-dormant', dryRun: false, ...base, abandoned: [], remaining: 0 };
   const done_ = parseHostedResponse(
     resultSchema,
     await session.mutation('projectHostedDormant:abandon', {
       authorityEpoch,
       abandon: batch.filter(lane => lane.abandonable).map(lane => lane.laneId),
       onMain: batch.filter(lane => !lane.abandonable).map(lane => ({ laneId: lane.laneId, head: lane.head })),
-      stamp: stamp.map(lane => lane.laneId),
     }),
   );
-  invariant(
-    done_.results.length === batch.length + stamp.length,
-    'SOURCE_UNAVAILABLE',
-    'The sweep reply differs.',
-  );
+  invariant(done_.results.length === batch.length, 'SOURCE_UNAVAILABLE', 'The sweep reply differs.');
   const abandoned = done_.results.filter(entry => entry.result === 'abandoned').map(entry => entry.laneId);
   return {
     phase: 'abandon-dormant',
     dryRun: false,
     ...base,
     abandoned,
-    skipped: done_.results.filter(entry => !['abandoned', 'stamped'].includes(entry.result)),
+    skipped: done_.results.filter(entry => entry.result !== 'abandoned'),
     remaining: abandonable.length - abandoned.length,
     undo: 'start --reopen {laneId} brings back an abandoned Lane with its saved head.',
   };

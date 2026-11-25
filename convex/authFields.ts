@@ -40,8 +40,6 @@ export const authTables = {
     githubId: v.optional(v.string()),
     /** Backfill found an unresolved competing verified identity claim. */
     githubConflict: v.optional(v.boolean()),
-    /** Historical: set by the finished account move; nothing reads it. Kept so stored rows still validate. */
-    legacyGithubProvider: v.optional(v.boolean()),
     githubLogin: v.optional(v.string()),
     /** One current linking proof/request and successful legacy ceremony receipt per user. */
     githubLink: v.optional(
@@ -51,10 +49,6 @@ export const authTables = {
         confirmed: v.boolean(),
         stateHash: v.optional(v.string()),
       }),
-    ),
-    /** Historical, like legacyGithubProvider: the finished existing-account passkey link. */
-    legacyPasskeyFlow: v.optional(
-      v.object({ operationId: v.string(), sessionId: v.string(), confirmed: v.boolean() }),
     ),
     email: v.optional(v.string()),
     emailVerified: v.boolean(),

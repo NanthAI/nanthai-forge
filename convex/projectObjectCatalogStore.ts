@@ -24,7 +24,6 @@ export function catalogEligible(row: Doc<'projectObjects'>) {
     row.stateParents === undefined &&
     row.stateSize === undefined &&
     row.statePhysical === undefined &&
-    row.stateTree === undefined &&
     row.recipeClosure === undefined &&
     !row.r2SweepKey &&
     !row.r2BackfillOperationId &&

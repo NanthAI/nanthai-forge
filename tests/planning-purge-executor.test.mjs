@@ -791,6 +791,7 @@ test('incident 846c635b: purge leaves no words in 25 Intent histories (including
       recordId: 'lane-record',
     });
     await s.ctx.db.insert('projectHostedOverlapLanes', {
+      lastActivityAt: 4_000_000_000_000,
       projectId: s.projectId,
       laneId,
       intentId,
@@ -1190,11 +1191,6 @@ async function purgeArchiveFixture(t, { history, indexed }) {
     const { ctx } = executor(s);
     const projectBefore = canonicalPayload(project);
     const pages = await backfillArchive(s, ctx, async pages => {
-      assert.equal(
-        project.planningArchiveIndexed,
-        undefined,
-        'a partial backfill leaves the full scan available',
-      );
       assert.ok(pages.every(page => page.segments <= 16));
     });
     assert.equal(
@@ -1328,6 +1324,7 @@ test('a purge resumed across the Item membership cutover scrubs the old writerâ€
     recordId: 'lane-record',
   });
   const overlap = await s.ctx.db.insert('projectHostedOverlapLanes', {
+    lastActivityAt: 4_000_000_000_000,
     projectId: s.projectId,
     laneId,
     intentId: successor,
@@ -1511,17 +1508,6 @@ test('a census mismatch keeps indexed purge disabled until a new pass verifies c
   assert.equal(r2.objects.has(own), false);
 });
 
-test('an old unchecked readiness marker uses the full archive scan', async t => {
-  const { s, itemId } = await deletedItem(t, { records: true, useAlias: false });
-  const r2 = storage(t);
-  const own = await archiveOneNote(s, r2, itemId);
-  const project = s.tables.hostedProjects.get(s.projectId);
-  project.journalRevision = 1;
-  project.planningArchiveIndexed = true;
-  assert.ok((await executor(s).run(itemId, randomUUID())).purgedAt);
-  assert.equal(r2.objects.has(own), false);
-});
-
 test('an unchecked selection receipt is not reused after the verified index becomes ready', async t => {
   const { s, itemId } = await deletedItem(t, { records: true, useAlias: false });
   const r2 = storage(t);
@@ -1546,43 +1532,6 @@ test('an unchecked selection receipt is not reused after the verified index beco
     hash: digest(receipt),
   });
   assert.ok((await worker.run(itemId, operationId)).purgedAt);
-  assert.equal(r2.objects.has(own), false);
-});
-
-test('a verified project marker moves into the receipt without reopening archived objects', async t => {
-  const { s, itemId } = await deletedItem(t, { records: true, useAlias: false });
-  const r2 = storage(t);
-  const own = await archiveOneNote(s, r2, itemId);
-  const project = s.tables.hostedProjects.get(s.projectId);
-  project.journalRevision = 1;
-  const worker = executor(s);
-  await backfillArchive(s, worker.ctx);
-  const { row } = await readArchiveCoverage(s.ctx, project);
-  await s.ctx.db.delete(row._id);
-  project.planningArchiveIndexed = 2;
-  project.planningArchiveEventRevision = 4;
-  r2.requests.length = 0;
-  const migrated = await modules.projectPlanningArchiveBackfillRun.run._handler(worker.ctx, {
-    projectId: s.projectId,
-  });
-  assert.deepEqual(migrated, { advanced: true, done: true, segments: 0, gets: 0, bytes: 0 });
-  assert.deepEqual(r2.requests, []);
-  assert.equal(project.planningArchiveIndexed, undefined);
-  assert.equal(project.planningArchiveEventRevision, undefined);
-  assert.deepEqual(await coverage(s), { ready: true, eventRevision: 4 });
-  project.planningArchiveEventRevision = 1;
-  assert.equal(
-    (await coverage(s)).eventRevision,
-    5,
-    'an older publisher after relocation invalidates the pin',
-  );
-  const replayed = await modules.projectPlanningArchiveBackfillRun.run._handler(worker.ctx, {
-    projectId: s.projectId,
-  });
-  assert.deepEqual(replayed, migrated);
-  assert.equal(project.planningArchiveEventRevision, undefined);
-  assert.deepEqual(await coverage(s), { ready: true, eventRevision: 5 });
-  assert.ok((await worker.run(itemId, randomUUID())).purgedAt);
   assert.equal(r2.objects.has(own), false);
 });
 

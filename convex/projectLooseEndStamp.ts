@@ -33,7 +33,7 @@ export async function stampLanePass(
       !row?.open ||
       !row.presenceRow ||
       row.head !== lane.head ||
-      (lane.since !== undefined && (row.lastActivityAt ?? Infinity) > lane.since) ||
+      (lane.since !== undefined && row.lastActivityAt > lane.since) ||
       (row.landed?.laneHead === row.head && !row.landed.revertedBy)
     )
       continue;

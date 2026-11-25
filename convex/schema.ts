@@ -1,12 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import { invitationState, invitationMail, invitationTables } from './projectInvitationFields';
-import {
-  journalTables,
-  journalReceiptTables,
-  planningArchiveBackfillProgress,
-  planningArchiveIndexVersion,
-} from './projectJournalFields';
+import { journalTables, journalReceiptTables, planningArchiveBackfillProgress } from './projectJournalFields';
 import { liveLineTables } from './projectLiveLineFields';
 import { publicDiscoveryTables } from './publicDiscoveryFields';
 import { landingReadTables } from './projectLandingReadFields';
@@ -81,7 +76,6 @@ export const syncResult = v.object({
   head: v.optional(v.string()),
 });
 export const jobFields = {
-  r2Writes: v.optional(v.boolean()),
   scope: v.string(),
   repository: v.string(),
   ref: v.string(),
@@ -102,9 +96,6 @@ export const jobFields = {
   analysisVersion: v.optional(v.string()),
   generation: v.number(),
   task: v.optional(v.id('_scheduled_functions')),
-  // Left on older rows by the retired hosted analysis worker (Item ef6aa22a); a rerun clears them.
-  remote: v.optional(v.boolean()),
-  workerClaimed: v.optional(v.boolean()),
   syncRevision: v.optional(v.number()),
   syncEventRevision: v.optional(v.number()),
   sync: v.optional(syncResult),
@@ -254,8 +245,6 @@ export const hostedWorkEventDocument = v.object({
 });
 export const projectRemoval = v.union(v.literal('trash'), v.literal('deleting'), v.literal('deleted'));
 export const projectPurgeBlocked = v.union(
-  /** Retired: the prefix purge no longer reads the global flag; kept for existing rows. */
-  v.literal('R2_MAINTENANCE_DISABLED'),
   v.literal('R2_PURGE_RETRY_EXHAUSTED'),
   v.literal('R2_PURGE_UNAUTHORIZED'),
   v.literal('R2_PURGE_SHARED'),
@@ -313,8 +302,6 @@ const projectFields = {
   journalRevision: v.optional(v.number()),
   /** Purge selection pins event bytes independently of append-only journal publication. */
   journalEventRewriteRevision: v.optional(v.number()),
-  /** Indexed purge is safe once every legacy archive is covered. New word-bearing publications advance its fence. */
-  planningArchiveIndexed: v.optional(v.union(v.literal(true), v.literal(planningArchiveIndexVersion))),
   planningArchiveBackfill: v.optional(
     v.union(
       v.object({ legacyRecords: v.boolean(), cursor: v.union(v.string(), v.null()) }),
@@ -429,9 +416,6 @@ const projectFields = {
   sourceAuthority: v.optional(sourceAuthority),
   /** Minimum State-source reader after a trusted complete physical root is committed. */
   sourceManifestVersion: v.optional(v.literal(2)),
-  /** Legacy, trees in packs (tried and dropped, docs/decisions.md): never written or read; tolerated so
-   * a project row written before the rollback still validates. Remove with `stateTree` on objects. */
-  stateTrees: v.optional(v.any()),
   sourceCutover: v.optional(v.object({ minimumCliVersion: v.string(), at: v.string() })),
   /** A legacy recovery published a root without complete writer membership. */
   metricContextGap: v.optional(v.string()),
@@ -470,11 +454,7 @@ const projectFields = {
   agentGuidance: v.optional(v.string()),
   exchangeCleanupCursor: v.optional(v.string()),
   exchangeCleanupDone: v.optional(v.boolean()),
-  /** Retired opt-in; kept for existing rows. Placement no longer reads it: bytes always go to R2. */
-  r2Writes: v.optional(v.boolean()),
   r2BackfillRevision: v.optional(v.number()),
-  /** Retired flag; kept for existing rows. Nothing writes or reads it. */
-  r2StorageUsed: v.optional(v.boolean()),
   r2PrefixPurged: v.optional(v.boolean()),
   owner: v.string(),
   key: v.string(),
@@ -568,7 +548,7 @@ export const projectContributorFields = {
   projectId: v.id('hostedProjects'),
   contributor: v.string(),
   agentGuidanceMaintainer: v.optional(v.boolean()),
-  /** Fixed-size fresh-operation counters; absent for memberships created before work budgets. */
+  /** Fixed-size fresh-operation counters; absent until the member's first counted operation. */
   workBudget: v.optional(
     v.object({ day: v.number(), checks: v.number(), composes: v.number(), submissions: v.number() }),
   ),
@@ -969,9 +949,9 @@ export default defineSchema({
   teamMembers: defineTable({
     teamId: v.id('teams'),
     member: v.string(),
-    /** The member's handle, kept current by convex/accountTeams.ts (Item a841a76d) so the account's team page reads
-     * handles with its rows; null for an account with no handle. Absent only until the one-time backfill. */
-    handle: v.optional(v.union(v.string(), v.null())),
+    /** The member's handle, kept current by convex/teamHandles.ts (Item a841a76d) so the account's team page reads
+     * handles with its rows; null for an account with no handle. */
+    handle: v.union(v.string(), v.null()),
     /** Daily work counters of a member who writes through a team grant (no contributor row to carry them). */
     workBudget: v.optional(
       v.object({ day: v.number(), checks: v.number(), composes: v.number(), submissions: v.number() }),

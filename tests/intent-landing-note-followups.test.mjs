@@ -734,7 +734,8 @@ test('later input pages merge Lane IDs into the same note using the existing com
   const ticks = f.counts.slice(start);
   const overlapTable = 'projectHostedOverlapLanes';
   const overlapReads = ticks.map(row => row.readRangesByTable[overlapTable] ?? 0);
-  assert.deepEqual(overlapReads, [101, 0, 0, 0, 0, 1], 'only the existing overlap retirement reads');
+  // 101 -> 100 (Item c0af6cfa): the first tick no longer reads the range of rows with no lastActivityAt.
+  assert.deepEqual(overlapReads, [100, 0, 0, 0, 0, 1], 'only the existing overlap retirement reads');
   t.diagnostic(
     JSON.stringify({
       overlapReads,

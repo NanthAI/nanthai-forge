@@ -30,6 +30,7 @@ async function fixture(selectedLaneId, [mineHead, peerHead] = ['mine', 'peer']) 
     [peerId, peerHead],
   ])
     f.insert('projectHostedOverlapLanes', {
+      lastActivityAt: 4_000_000_000_000,
       projectId: f.projectId,
       laneId: id,
       intentId: randomUUID(),

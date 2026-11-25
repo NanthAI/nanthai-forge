@@ -95,6 +95,7 @@ async function exerciseParkedNotice(t, startHolder) {
   for (const entry of [holder, follower]) {
     if (![...f.tables.projectHostedOverlapLanes.values()].some(row => row.laneId === entry.lane.laneId))
       f.insert('projectHostedOverlapLanes', {
+        lastActivityAt: 4_000_000_000_000,
         projectId: f.projectId,
         laneId: entry.lane.laneId,
         intentId: f.c.intentId,

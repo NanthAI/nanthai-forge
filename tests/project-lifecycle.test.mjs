@@ -759,7 +759,6 @@ test('permanent removal purges project briefing/guidance/policy in resumable bat
 test('delete retries coalesce the tracked R2 chain and owner-only list exposes resumable blockage', async () => {
   const s = fixture(),
     op = s.operation();
-  await s.ctx.db.patch('project', { r2Writes: true });
   await modules.projectLifecycle.permanentlyDelete._handler(s.ctx, op);
   s.tables.hostedProjects.get('project').removedAt -= purgeSettleMs;
   for (let i = 0; !s.tables.hostedProjects.get('project').r2Purge; i++) {
@@ -777,10 +776,10 @@ test('delete retries coalesce the tracked R2 chain and owner-only list exposes r
     }
     assert.equal(s.scheduled.length, count);
   }
-  await s.ctx.db.patch('project', { task: undefined, purgeBlocked: 'R2_MAINTENANCE_DISABLED' });
+  await s.ctx.db.patch('project', { task: undefined, purgeBlocked: 'R2_PURGE_RETRY_EXHAUSTED' });
   assert.equal(
     (await modules.projectBackups.list._handler(s.ctx, { ...page, removed: true })).page[0].purgeBlocked,
-    'R2_MAINTENANCE_DISABLED',
+    'R2_PURGE_RETRY_EXHAUSTED',
   );
   s.caller('other');
   assert.deepEqual((await modules.projectBackups.list._handler(s.ctx, page)).page, []);

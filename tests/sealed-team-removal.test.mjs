@@ -48,6 +48,7 @@ function team(h, id, members, role = 'write') {
       _creationTime: 1,
       teamId: id,
       member,
+      handle: null,
     });
   h.s.tables.projectTeams.set(`${id}-link`, {
     _id: `${id}-link`,

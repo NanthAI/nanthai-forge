@@ -8,7 +8,6 @@ import { receiptRow } from './projectJournalMaintenance';
 import { planningArchiveIndexVersion, type planningArchiveBackfillProgress } from './projectJournalFields';
 
 const operationId = 'planning-archive-coverage';
-const legacyProjectCoverageVersion = 2;
 export type ArchiveCoverage = {
   eventRevision: number;
   ready?: true;
@@ -17,11 +16,7 @@ export type ArchiveCoverage = {
 type ArchiveCoverageReceipt = ArchiveCoverage & { indexVersion: number };
 
 export function hasProjectArchiveCoverage(project: Doc<'hostedProjects'>) {
-  return (
-    project.planningArchiveIndexed !== undefined ||
-    project.planningArchiveBackfill !== undefined ||
-    project.planningArchiveEventRevision !== undefined
-  );
+  return project.planningArchiveBackfill !== undefined || project.planningArchiveEventRevision !== undefined;
 }
 
 /** Only the purge and archive maintenance paths read this receipt. */
@@ -31,9 +26,7 @@ export async function readArchiveCoverage(ctx: QueryCtx, project: Doc<'hostedPro
   const stored: ArchiveCoverageReceipt = row
     ? JSON.parse(row.envelope)
     : {
-        indexVersion: legacyProjectCoverageVersion,
-        // A boolean marker predates the independent coverage count.
-        ...(project.planningArchiveIndexed === legacyProjectCoverageVersion ? { ready: true } : {}),
+        indexVersion: planningArchiveIndexVersion,
         ...(progress && 'mode' in progress ? { progress } : {}),
         eventRevision: 0,
       };
@@ -60,7 +53,6 @@ export async function saveArchiveCoverage(
   else await ctx.db.insert('projectJournalReceipts', fields);
   if (hasProjectArchiveCoverage(project))
     await ctx.db.patch(project._id, {
-      planningArchiveIndexed: undefined,
       planningArchiveBackfill: undefined,
       planningArchiveEventRevision: undefined,
     });

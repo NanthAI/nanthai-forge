@@ -106,7 +106,7 @@ function inputFor(s, pin) {
   return input;
 }
 test('R2 backup upload, unknown commit reply reconciliation and browser/native restore use exact bytes without Convex storage', async t => {
-  const { s, fake } = await setup(t, { optIn: false }),
+  const { s, fake } = await setup(t),
     bytes = Buffer.alloc(3 * 1024 * 1024 + 7, 'x'),
     pin = pinOf(bytes);
   seed(s, pin);

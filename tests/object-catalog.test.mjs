@@ -634,7 +634,7 @@ test('review b1448b61 N2: a source submit commits only uploads of the project it
   const f = state([]);
   // One owner, two projects: an upload prepared for `other` must never stand as verified for `project`.
   for (const projectId of ['project', 'other'])
-    f.tables.hostedProjects.set(projectId, projectRow({ _id: projectId, r2Writes: true }));
+    f.tables.hostedProjects.set(projectId, projectRow({ _id: projectId }));
   const digest = hex('other-upload');
   const id = await f.ctx.db.insert('projectObjects', {
     projectId: 'other',
@@ -665,7 +665,7 @@ test("review 1d69905b: projectSourceRun:submit naming another project's upload i
   const f = state([]);
   // Same owner, both projects writable: only the project match tells them apart.
   for (const projectId of ['project', 'other'])
-    f.tables.hostedProjects.set(projectId, projectRow({ _id: projectId, r2Writes: true }));
+    f.tables.hostedProjects.set(projectId, projectRow({ _id: projectId }));
   const digest = hex('other-upload-at-submit');
   const id = await f.ctx.db.insert('projectObjects', {
     projectId: 'other',

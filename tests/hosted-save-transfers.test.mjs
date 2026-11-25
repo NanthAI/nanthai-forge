@@ -67,7 +67,6 @@ async function fixture(t) {
       else process.env[k] = v;
     }
   });
-  s.patch('hostedProjects', s.projectId, { r2Writes: true });
   await s.call('heartbeat', callbacks.callback, {
     projectId: s.projectId,
     callback: JSON.stringify(callback),

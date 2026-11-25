@@ -292,7 +292,9 @@ export const list = query({
                     ...(evidence ? { changes: evidence } : {}),
                     pinned: lane.pinned === true,
                     // False: the Lane's overlap row predates the activity index; abandon-dormant stamps it.
-                    indexed: overlap ? overlap.lastActivityAt !== undefined : null,
+                    // Older CLIs stamp a Lane when this is false; every row has its time now. Remove by 2026-12-31 with the
+                    // minimum-CLI bump (Item c0af6cfa F13).
+                    indexed: overlap ? true : null,
                   }
                 : {}),
             }

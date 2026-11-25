@@ -17,10 +17,9 @@ const prepare = (s, values) =>
   objects.prepareBatch._handler(s.ctx, { projectId: 'project', objects: values.map(pinOf) });
 const rows = s => [...s.tables.projectObjects.values()];
 
-test('a new project with no opt-in writes R2', async t => {
-  const { s } = await setup(t, { optIn: false }),
+test('a new project writes R2', async t => {
+  const { s } = await setup(t),
     [row] = await prepare(s, ['plain']);
-  assert.equal(s.tables.hostedProjects.get('project').r2Writes, undefined);
   assert.equal(row.uploadUrl, undefined);
   assert.equal(row.target.kind, 'r2');
   assert.equal(rows(s)[0].location, 'r2');
@@ -61,19 +60,16 @@ test('missing R2 configuration on a cloud deployment fails closed with a typed e
 });
 
 test('single-object prepare writes R2 like batches', async t => {
-  for (const options of [{}, { optIn: false }])
-    await t.test(JSON.stringify(options), async t => {
-      const { s } = await setup(t, options);
-      const pin = pinOf('single object'),
-        prepared = await objects.prepare._handler(s.ctx, { projectId: 'project', ...pin }),
-        [batch] = await prepare(s, ['single object']);
-      assert.equal(prepared.id, batch.id);
-      assert.equal(prepared.stored, false);
-      assert.deepEqual(prepared.target.headers, batch.target.headers);
-      assert.equal(prepared.target.kind, 'r2');
-      assert.equal(rows(s)[0].location, 'r2');
-      assert.equal(prepared.uploadUrl, undefined);
-    });
+  const { s } = await setup(t);
+  const pin = pinOf('single object'),
+    prepared = await objects.prepare._handler(s.ctx, { projectId: 'project', ...pin }),
+    [batch] = await prepare(s, ['single object']);
+  assert.equal(prepared.id, batch.id);
+  assert.equal(prepared.stored, false);
+  assert.deepEqual(prepared.target.headers, batch.target.headers);
+  assert.equal(prepared.target.kind, 'r2');
+  assert.equal(rows(s)[0].location, 'r2');
+  assert.equal(prepared.uploadUrl, undefined);
 });
 
 test('single-object prepare with missing R2 configuration inserts nothing', async t => {
@@ -236,11 +232,10 @@ test('the per-project R2 opt-in no longer exists', () => {
   assert.equal(commit.setR2WritesAdmin, undefined);
 });
 
-test('deployment R2 mode keeps new and pending objects in R2 without the legacy opt-in', async t => {
+test('deployment R2 mode keeps new and pending objects in R2', async t => {
   const { s } = await setup(t),
     [first] = await prepare(s, ['flip']);
   assert.ok(first.target);
-  s.tables.hostedProjects.get('project').r2Writes = false;
   const [second] = await prepare(s, ['flip']);
   assert.equal(second.uploadUrl, undefined);
   assert.equal(second.target.kind, 'r2');

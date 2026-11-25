@@ -37,10 +37,6 @@ export const objectFields = {
   stateParents: v.optional(v.array(v.string())),
   /** Trusted State-bound physical recipe root; absent until the writer is enabled. */
   statePhysical: v.optional(v.object({ sha256: v.string(), size: v.number() })),
-  /** Legacy, trees in packs (tried and dropped, docs/decisions.md): never written or read. Kept
-   * as a tolerated field so a row written before the rollback still validates; remove once no
-   * deployment holds one (the dev deployment's were stripped). */
-  stateTree: v.optional(v.any()),
   nonce: v.string(),
   storageId: v.optional(v.id('_storage')),
   ...backfillFields,

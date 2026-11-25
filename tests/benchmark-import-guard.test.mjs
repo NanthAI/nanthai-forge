@@ -380,8 +380,8 @@ test('unknown deletion reply replays the same operation and revision, and blocke
   guard = importBenchmarkGuard({ ...target, admin: s.admin, owner, journal });
   await guard.stop();
   assert.deepEqual(requests[0], requests[1]);
-  s.tables.hostedProjects.get('project').purgeBlocked = 'R2_MAINTENANCE_DISABLED';
-  await assert.rejects(guard.confirmDeleted(), /R2_MAINTENANCE_DISABLED/);
+  s.tables.hostedProjects.get('project').purgeBlocked = 'R2_PURGE_RETRY_EXHAUSTED';
+  await assert.rejects(guard.confirmDeleted(), /R2_PURGE_RETRY_EXHAUSTED/);
   assert.equal(guard.monitor.quiet(), false);
 });
 

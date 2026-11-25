@@ -28,7 +28,12 @@ function setup() {
     f.tables.teams.set(id, { _id: id, owner: 'owner', name: id, operationId: randomUUID() });
     f.tables.projectTeams.set(`link-${id}`, { _id: `link-${id}`, projectId: 'project', teamId: id, role });
     for (const member of members)
-      f.tables.teamMembers.set(`${id}-${member}`, { _id: `${id}-${member}`, teamId: id, member });
+      f.tables.teamMembers.set(`${id}-${member}`, {
+        _id: `${id}-${member}`,
+        teamId: id,
+        member,
+        handle: null,
+      });
   };
   team('crew', 'write', ['crew-mate', 'writer']);
   team('guests', 'read', ['guest-mate']);
@@ -75,7 +80,12 @@ test('linked teams that share members still list every writer up to the cap', as
     ['guests', ['a0', 'late']],
   ])
     for (const member of members)
-      f.tables.teamMembers.set(`${team}-${member}`, { _id: `${team}-${member}`, teamId: team, member });
+      f.tables.teamMembers.set(`${team}-${member}`, {
+        _id: `${team}-${member}`,
+        teamId: team,
+        member,
+        handle: null,
+      });
   f.tables.projectTeams.get('link-guests').role = 'write';
   const members = await planningMembers(f.ctx, f.project);
   assert.equal(members.length, 101); // the owner, 99 in the first team and the one new writer of the second

@@ -1443,6 +1443,7 @@ test('members fetch Lane refs as built commits; git diff main...lane equals the 
   };
   const head = storeState(s, projectId, source.repo, source.head, edits, 'Lane save: edit app');
   const lane = await s.ctx.db.insert('projectHostedOverlapLanes', {
+    lastActivityAt: 4_000_000_000_000,
     projectId,
     laneId,
     intentId: crypto.randomUUID(),
@@ -1665,6 +1666,7 @@ test('members fetch Lane refs as built commits; git diff main...lane equals the 
   // A base main never published, or a base tree that differs from the mirror's, is a named error.
   const other = crypto.randomUUID();
   await s.ctx.db.insert('projectHostedOverlapLanes', {
+    lastActivityAt: 4_000_000_000_000,
     projectId,
     laneId: other,
     intentId: crypto.randomUUID(),
@@ -1843,6 +1845,7 @@ test('a first Lane build lists the parent tree from the history packs and reads 
   );
   const laneId = crypto.randomUUID();
   await s.ctx.db.insert('projectHostedOverlapLanes', {
+    lastActivityAt: 4_000_000_000_000,
     projectId,
     laneId,
     intentId: crypto.randomUUID(),
@@ -2461,6 +2464,7 @@ test('an unmirrored project lists and serves Lane refs on the imported and Forge
   const lane = (baseHead, edits, message) => {
     const laneId = crypto.randomUUID();
     s.ctx.db.insert('projectHostedOverlapLanes', {
+      lastActivityAt: 4_000_000_000_000,
       projectId,
       laneId,
       intentId: crypto.randomUUID(),

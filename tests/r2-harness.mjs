@@ -19,9 +19,8 @@ const envNames = [
 ];
 export const pinOf = text => ({ digest: digest(text), size: Buffer.byteLength(text) });
 
-/** A Convex cloud deployment fixture (bytes always go to R2) with R2 credentials, plus a fake R2.
- * `optIn` only sets the retired per-project flag on the row; placement ignores it. */
-export async function setup(t, { optIn = true, credentials = true } = {}) {
+/** A Convex cloud deployment fixture (bytes always go to R2) with R2 credentials, plus a fake R2. */
+export async function setup(t, { credentials = true } = {}) {
   const saved = Object.fromEntries(envNames.map(name => [name, process.env[name]])),
     fake = await startFakeR2(),
     restore = fake.install(),
@@ -45,7 +44,6 @@ export async function setup(t, { optIn = true, credentials = true } = {}) {
   for (const [name, value] of Object.entries(env))
     if (credentials) process.env[name] = value;
     else delete process.env[name];
-  if (optIn) s.tables.hostedProjects.get('project').r2Writes = true;
   t.after(async () => {
     globalThis.fetch = r2Fetch;
     restore();

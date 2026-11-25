@@ -172,9 +172,11 @@ for (const history of [0, 575, 1150])
     // as its project's first landing of the hour, schedules the person-order touch a single landing already schedules
     // (its scheduler write, its run and that run's read; at most once per project per hour with landings). The line
     // summary's own read and write are projection I/O, outside these source counts.
+    // Reads 4422 -> 4413 (Item c0af6cfa): the per-completion range read of overlap rows with no lastActivityAt is gone
+    // (9 completion ticks); every row carries it. Calls and writes unchanged.
     assert(
       budget.calls <= 205 &&
-        source.reduce((n, c) => n + c.documents, 0) <= 4422 &&
+        source.reduce((n, c) => n + c.documents, 0) <= 4413 &&
         source.reduce((n, c) => n + c.writes, 0) <= 1395,
       JSON.stringify({
         ...budget,

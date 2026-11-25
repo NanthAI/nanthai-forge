@@ -107,7 +107,6 @@ async function setup(t, { fromBase = false, protectedPath = false } = {}) {
       };
     });
   const c = controls(t, s);
-  s.patch('hostedProjects', s.projectId, { r2Writes: true });
   const exchange = new ConvexExchange(
     testDeploymentOrigin('https://fixture.invalid'),
     'synthetic',

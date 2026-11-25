@@ -58,32 +58,27 @@ function noConvexWrites(s) {
   s.ctx.storage.generateUploadUrl = () =>
     assert.fail('opted-in artifacts must not generate Convex upload URLs');
 }
-function indexed(s, optIn = true) {
+function indexed(s) {
   s.tables.imports.set('indexed', {
     ...job('indexed'),
     visibility: 'public',
     phase: 'fetching',
     artifactKey: undefined,
-    r2Writes: optIn,
   });
 }
 
-test('server-built project artifacts go to R2 with or without the retired opt-in', async t => {
-  for (const options of [{}, { optIn: false }]) {
-    await t.test(JSON.stringify(options), async t => {
-      const { s, fake } = await setup(t, options),
-        bytes = Buffer.from('project artifact');
-      noConvexWrites(s);
-      await storeProjectArtifact(s.ctx, 'project', 'owner', bytes);
-      const [row] = s.tables.projectObjects.values();
-      assert.equal(row.location, 'r2');
-      assert.equal(fake.objects.size, 1);
-      assert.deepEqual(await rawContent(s.ctx, row, { sha256: row.digest, size: row.size }), bytes);
-      await storeProjectArtifact(s.ctx, 'project', 'owner', bytes);
-      assert.equal(s.tables.projectObjects.size, 1);
-      assert.equal(fake.objects.size, 1);
-    });
-  }
+test('server-built project artifacts go to R2', async t => {
+  const { s, fake } = await setup(t),
+    bytes = Buffer.from('project artifact');
+  noConvexWrites(s);
+  await storeProjectArtifact(s.ctx, 'project', 'owner', bytes);
+  const [row] = s.tables.projectObjects.values();
+  assert.equal(row.location, 'r2');
+  assert.equal(fake.objects.size, 1);
+  assert.deepEqual(await rawContent(s.ctx, row, { sha256: row.digest, size: row.size }), bytes);
+  await storeProjectArtifact(s.ctx, 'project', 'owner', bytes);
+  assert.equal(s.tables.projectObjects.size, 1);
+  assert.equal(fake.objects.size, 1);
 });
 
 test('a lost project-artifact commit reply retries one immutable R2 object', async t => {
@@ -203,32 +198,29 @@ test('a Go and C# import lists fetched text without adding downloads, R2 reads o
   assert.equal(artifact.documents['README.md'], '# Project\n🦎');
 });
 
-test('indexed imports and binary derivatives use R2 without the old flag or per-import opt-in', async t => {
-  for (const options of [{}, { optIn: false }])
-    await t.test(JSON.stringify(options), async t => {
-      const { s, fake } = await setup(t, options);
-      indexed(s, options.optIn !== false);
-      github(t);
-      await indexer.run._handler(s.ctx, { id: 'indexed', generation: 1 });
-      const original = s.tables.imports.get('indexed').artifactKey;
-      assert.match(original, /^r2blob:/);
-      const record = await derivedArtifact(
-        s.ctx,
-        original,
-        'export',
-        '',
-        async () => new Blob(['derived']),
-        async () => {},
-      );
-      assert.equal(Buffer.from(await derivedBytes(s.ctx, record)).toString(), 'derived');
-      assert.equal(fake.objects.size, 2);
-      assert.equal(s.files.size, 0);
-    });
+test('indexed imports and binary derivatives use R2', async t => {
+  const { s, fake } = await setup(t);
+  indexed(s);
+  github(t);
+  await indexer.run._handler(s.ctx, { id: 'indexed', generation: 1 });
+  const original = s.tables.imports.get('indexed').artifactKey;
+  assert.match(original, /^r2blob:/);
+  const record = await derivedArtifact(
+    s.ctx,
+    original,
+    'export',
+    '',
+    async () => new Blob(['derived']),
+    async () => {},
+  );
+  assert.equal(Buffer.from(await derivedBytes(s.ctx, record)).toString(), 'derived');
+  assert.equal(fake.objects.size, 2);
+  assert.equal(s.files.size, 0);
 });
 
 test('hosted imports still fail explicitly when R2 is unconfigured', async t => {
   const { s } = await setup(t, { credentials: false });
-  indexed(s, false);
+  indexed(s);
   github(t);
   await indexer.run._handler(s.ctx, { id: 'indexed', generation: 1 });
   const row = s.tables.imports.get('indexed');
@@ -297,7 +289,7 @@ test('explicit R2 cleanup deletes only its artifact and a late commit cannot rev
 
 test('artifact commit checks size and checksum', async t => {
   const { s, fake } = await setup(t);
-  indexed(s, false);
+  indexed(s);
   const pin = pinOf('expected');
   const row = await artifactStorage.reserve._handler(s.ctx, {
     namespace: 'v1/i/indexed/g/9',

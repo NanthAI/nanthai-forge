@@ -22,6 +22,7 @@ export const withSavedList = (s, row) =>
 export function slimOverlapLane({ changes = '[]', ...row }) {
   return {
     row: {
+      lastActivityAt: 4_000_000_000_000,
       ...row,
       pathSummary: presencePaths(changes),
       ...(buckets.hasSymbolFacts(changes) ? { symbolFacts: true } : {}),

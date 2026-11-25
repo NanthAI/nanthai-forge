@@ -14,8 +14,7 @@ export const get = internalQuery({
   handler: async (ctx, { id }) => {
     const job = await ctx.db.get(id);
     if (!job?.task || !['queued', 'fetching', 'indexing'].includes(job.phase)) return job;
-    // A job handed to the retired analysis worker (`remote`, Item ef6aa22a) has no callback left: it has stopped.
-    const task = job.remote ? null : await ctx.db.system.get(job.task);
+    const task = await ctx.db.system.get(job.task);
     if (!task || ['failed', 'canceled'].includes(task.state.kind)) {
       return {
         ...job,
@@ -49,9 +48,7 @@ export const begin = internalMutation({
           message: 'Restore this private import before re-indexing it.',
         });
       const task = previous.task ? await ctx.db.system.get(previous.task) : null;
-      // A job handed to the retired analysis worker (`remote`) has no callback left, so it is never still running.
       if (
-        !previous.remote &&
         ['queued', 'fetching', 'indexing'].includes(previous.phase) &&
         task &&
         ['pending', 'inProgress'].includes(task.state.kind)
@@ -70,8 +67,6 @@ export const begin = internalMutation({
         total: 0,
         generation,
         task: scheduled,
-        remote: undefined,
-        workerClaimed: undefined,
       });
       return { id: previous._id, run: true, generation };
     }

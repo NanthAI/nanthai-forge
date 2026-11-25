@@ -420,7 +420,7 @@ for (const mode of ['revoked', 'removed', 'rebound', 'corrupt', 'expired']) {
 
 test('mixed R2 and Convex-only Lane pages keep the real legacy byte path', async t => {
   const { setup, client, legacyObject } = await import('./r2-harness.mjs');
-  const { s, fake } = await setup(t, { optIn: false });
+  const { s, fake } = await setup(t);
   const exchange = client(s),
     values = [Buffer.from('legacy'), Buffer.from('modern'), Buffer.alloc(0)];
   const pins = values.map(bytes => ({ sha256: digest(bytes), size: bytes.length }));

@@ -312,7 +312,7 @@ test('pending r2 rows are not readable until committed', async t => {
 });
 
 test('legacy Convex rows: signDownloads signs nothing and the bytes still read', async t => {
-  const { s } = await setup(t, { optIn: false });
+  const { s } = await setup(t);
   await legacyObject(s, Buffer.from('plain'));
   assert.deepEqual(await sign(s, ['plain']), []);
   assert.equal((await client(s).downloadBatch(pins(['plain'])))[0].toString(), 'plain');

@@ -215,7 +215,7 @@ test('a byte-limited R2 page resumes at a large document without calling the pur
     s.insert('projectObjects', `large-${i}`, {
       projectId: foreignId,
       r2Key: prefix + i,
-      stateTree: '∑'.repeat(220_000),
+      nonce: '∑'.repeat(220_000),
     });
   const read = reader(s.ctx);
   const first = await read({ next: { section: 'objectKeys', cursor: null } });
@@ -236,7 +236,7 @@ test('a large-aliased file batch carries unprobed ids into the next read', async
     s.insert('projectObjects', `foreign-${key}`, {
       projectId: foreignId,
       storageId: key,
-      stateTree: 'x'.repeat(900_000),
+      nonce: 'x'.repeat(900_000),
     });
   for (let i = 0; i < keys.length; i += 2)
     s.insert('projectBackups', `backup-${i}`, {

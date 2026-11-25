@@ -3,7 +3,7 @@
 import type { QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { channelRow } from './projectHostedChannels';
-import { dormantCutoff, rowActivity } from './projectHostedDormancy';
+import { dormantCutoff } from './projectHostedDormancy';
 import { dormantHostedPresence } from './projectHostedPresence';
 import { nowOverlapSignals } from '../src/now-overlap-signals';
 import { overlapLaneChanges } from './projectHostedOverlapChanges';
@@ -25,7 +25,7 @@ async function openLanePage(ctx: QueryCtx, projectId: Id<'hostedProjects'>, cuto
   const page = [];
   let bytes = 0;
   let isDone = true;
-  // Dormant Lanes are never read: the live range first, then rows from before lastActivityAt existed.
+  // Dormant Lanes are never read.
   const rows = async function* () {
     if (cutoff === null) {
       yield* ctx.db
@@ -39,12 +39,6 @@ async function openLanePage(ctx: QueryCtx, projectId: Id<'hostedProjects'>, cuto
         q.eq('projectId', projectId).eq('open', true).gt('lastActivityAt', cutoff),
       )
       .order('desc');
-    for await (const row of ctx.db
-      .query('projectHostedOverlapLanes')
-      .withIndex('by_project_and_open_and_activity', q =>
-        q.eq('projectId', projectId).eq('open', true).eq('lastActivityAt', undefined),
-      ))
-      if (rowActivity(row) > cutoff) yield row;
   };
   for await (const slim of rows()) {
     // The Now signal needs every saved path: the Lane's list counts against the page.

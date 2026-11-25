@@ -969,7 +969,7 @@ test('narrow deletion status retains tombstones and checks the current owner and
   assert.equal(await read('project'), null);
 });
 
-test('legacy maintenance-blocked purge remains explicit without any wait or new confirmation', async t => {
+test('a storage-blocked purge remains explicit without any wait or new confirmation', async t => {
   const f = setup(t);
   f.client.mutation = async () =>
     f.project({
@@ -979,13 +979,13 @@ test('legacy maintenance-blocked purge remains explicit without any wait or new 
       revision: 8,
       currentBackup: null,
       removal: 'deleting',
-      purgeBlocked: 'R2_MAINTENANCE_DISABLED',
+      purgeBlocked: 'R2_PURGE_RETRY_EXHAUSTED',
     });
   await assert.rejects(
     deleteHostedProject(f.root, f.options, {
       client: f.client,
       subscribe: () => assert.fail('blocked status opens no subscription'),
     }),
-    code('R2_MAINTENANCE_DISABLED'),
+    code('R2_PURGE_RETRY_EXHAUSTED'),
   );
 });

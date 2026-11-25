@@ -103,7 +103,6 @@ test(exportTest, async t => {
   // Repeated hashes exercise deduplication before either describing or reading.
   files.push(...Array.from({ length: 100 }, (_, i) => ({ path: `shared/${i}`, bytes: files[i].bytes })));
   const s = await actionsFixture(files);
-  s.patch('hostedProjects', s.projectId, { r2Writes: true });
   // Execute the retained per-file resolver through a single-object fake control
   // transport to measure the old describe+grant boundary without another Git export.
   let beforeSourceControlCalls = 0;

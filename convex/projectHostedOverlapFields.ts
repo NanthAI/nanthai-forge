@@ -104,10 +104,8 @@ export const hostedOverlapTables = {
     /** This Lane's presence row and the activity time it last wrote, so presence costs no read. */
     presenceRow: v.optional(v.object({ id: v.id('projectHostedPresence'), at: v.number() })),
     /** Last Lane record write (ms): save, start, sync or landing. A Lane idle past the project's
-     * dormantAfterDays leaves overlap, presence and board reads through this index range. Absent on
-     * rows written before the field existed; reads cover them through presenceRow.at until the Lane's
-     * next write sets it. */
-    lastActivityAt: v.optional(v.number()),
+     * dormantAfterDays leaves overlap, presence and board reads through this index range. */
+    lastActivityAt: v.number(),
     /** Set once another Lane was stacked on this one (Issue dc62b120): the Lane's own save, abandon and
      * landing events then look up its dependents in projectHostedStackDependents. Absent for every Lane
      * nobody stacked on, which therefore pay no extra read. */

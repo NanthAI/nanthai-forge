@@ -183,16 +183,10 @@ test('an invited person who is not a member sees no team; a removed member sees 
   assert.deepEqual((await accountTeams.list._handler(s.ctx, page())).page, []);
 });
 
-test('handles stay current: set on insert, patched on a change, and backfilled once (a rerun writes nothing)', async () => {
+test('handles stay current: set on insert and patched on a change', async () => {
   const { s, team } = world();
   team('core', 'owner', ['owner', 'peer']);
   team('docs', 'peer', ['peer']);
-  // Rows from before handles were kept on the row.
-  for (const row of s.tables.teamMembers.values()) delete row.handle;
-  let result = await s.transaction(() => teamHandles.backfill._handler(s.ctx, {}));
-  assert.deepEqual(result, { rows: 3, patched: 3, isDone: true });
-  result = await s.transaction(() => teamHandles.backfill._handler(s.ctx, {}));
-  assert.deepEqual(result, { rows: 3, patched: 0, isDone: true });
   // A handle change reaches every membership of that person.
   s.tables.forgeAccounts.get('acct-peer').handle = 'renamed-peer';
   await s.transaction(() => teamHandles.syncTeamHandles(s.ctx, 'peer', 'renamed-peer'));

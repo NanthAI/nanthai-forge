@@ -27,6 +27,7 @@ async function adviceFixture(t, failTable = 'projectHostedLandingAttempts') {
   for (const entry of [mine, peer]) {
     if (![...f.tables.projectHostedOverlapLanes.values()].some(row => row.laneId === entry.lane.laneId))
       f.insert('projectHostedOverlapLanes', {
+        lastActivityAt: 4_000_000_000_000,
         projectId: f.projectId,
         laneId: entry.lane.laneId,
         intentId: entry.lane.intentId,

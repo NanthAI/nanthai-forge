@@ -35,8 +35,6 @@ async function inLandingQueue(ctx: MutationCtx, projectId: Id<'hostedProjects'>,
  * - `onMain`: the owner's CLI compared the paths this Lane changed with main's bytes and found them all
  *   there. The Lane is abandoned only while its saved head is still the one compared and its overlap row
  *   still holds the complete change list for that head. Same undo as `abandon`.
- * - `stamp`: a dormant Lane with other saved work stays open; only its overlap row gets the activity
- *   time it lacked, so later reads skip it through the activity index instead of reading its row.
  * - `reopen` (Undo, Item fc1831eb): a Lane this sweep set aside comes back as active, only while it is still
  *   abandoned at exactly the version the sweep returned; a Lane changed since is skipped as `changed`.
  * With `versions: true` each Lane set aside or reopened returns its new `version`, the pin its Undo sends (older
@@ -47,6 +45,8 @@ export const abandon = mutation({
     projectId: v.id('hostedProjects'),
     authorityEpoch: v.number(),
     abandon: v.array(v.string()),
+    /** Ignored: every overlap row carries its activity time. Older CLIs still send it. Remove by 2026-12-31 with
+     * the minimum-CLI bump (Item c0af6cfa F13). */
     stamp: v.optional(v.array(v.string())),
     onMain: v.optional(v.array(v.object({ laneId: v.string(), head: v.string() }))),
     reopen: v.optional(v.array(v.object({ laneId: v.string(), version: v.number() }))),
@@ -59,11 +59,10 @@ export const abandon = mutation({
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to change hosted work.');
       const project = await activeOwnedProject(ctx, input.projectId, user.subject);
       await hostedWriteProject(ctx, input.projectId, user.subject, input.authorityEpoch);
-      const stamp = input.stamp ?? [];
       const onMain = new Map((input.onMain ?? []).map(entry => [entry.laneId, entry.head]));
       const reopen = new Map((input.reopen ?? []).map(entry => [entry.laneId, entry.version]));
       invariant(
-        input.abandon.length + stamp.length + onMain.size + reopen.size <= DORMANT_BATCH,
+        input.abandon.length + onMain.size + reopen.size <= DORMANT_BATCH,
         'BAD_ARGUMENT',
         `Send at most ${DORMANT_BATCH} Lanes per call.`,
       );
@@ -72,7 +71,6 @@ export const abandon = mutation({
       const targets = [
         ...[...new Set(input.abandon)].map(id => [id, 'abandon'] as const),
         ...[...onMain.keys()].map(id => [id, 'on-main'] as const),
-        ...[...new Set(stamp)].map(id => [id, 'stamp'] as const),
         ...[...reopen.keys()].map(id => [id, 'reopen'] as const),
       ];
       for (const [laneId, intent] of targets) {
@@ -111,17 +109,13 @@ export const abandon = mutation({
         } else if (lane.state !== 'active') skip('not-open');
         else if (lane.pinned) skip('pinned');
         else if (cutoff === null || Date.parse(lane.at) > cutoff) skip('not-dormant');
-        else if (intent !== 'stamp' && (await inLandingQueue(ctx, input.projectId, laneId))) skip('in-queue');
+        else if (await inLandingQueue(ctx, input.projectId, laneId)) skip('in-queue');
         else {
           const row = await ctx.db
             .query('projectHostedOverlapLanes')
             .withIndex('by_project_and_lane', q => q.eq('projectId', input.projectId).eq('laneId', laneId))
             .unique();
-          if (intent === 'stamp') {
-            if (row && row.lastActivityAt === undefined)
-              await ctx.db.patch(row._id, { lastActivityAt: Date.parse(lane.at) });
-            skip(row ? 'stamped' : 'no-overlap-row');
-          } else if (
+          if (
             intent === 'on-main'
               ? !(row && row.head === lane.head && row.complete && onMain.get(laneId) === lane.head)
               : !(abandonClass(lane, row) || (await landedByReceipt(ctx, input.projectId, lane)))

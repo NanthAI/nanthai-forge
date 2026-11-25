@@ -874,7 +874,6 @@ test('contributor proposals publish and read committed R2 roots while retaining 
   const { fake } = await r2Setup(t);
   const s = await setup(t, { r2Ready: true }),
     c = await candidate(t, s);
-  s.tables.hostedProjects.get('project').r2Writes = true;
   const { workArchiveMetadata } = await import('../dist/work-archive-metadata.js');
   const { storeProjectArtifact } = await import(moduleUrl('../convex/projectArtifactActions.ts'));
   s.ctx.storage.store = () => assert.fail('R2 proposal must not store Convex bytes');
@@ -906,7 +905,6 @@ test('contributor proposals publish and read committed R2 roots while retaining 
 test('opted-in legacy archive metadata sidecars use R2 and preserve exact Work bytes', async t => {
   const { fake } = await r2Setup(t);
   const s = await setup(t, { r2Ready: true });
-  s.tables.hostedProjects.get('project').r2Writes = true;
   s.files.set('old-sidecar-original', {
     blob: new Blob([s.bytes], { type: 'application/gzip' }),
     metadata: { size: s.bytes.length, sha256: digest(s.bytes), contentType: 'application/gzip' },

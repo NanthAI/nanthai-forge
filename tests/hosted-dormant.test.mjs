@@ -15,7 +15,6 @@ const dormant = await import(moduleUrl('../convex/projectHostedDormant.ts'));
 const live = await import(moduleUrl('../convex/projectHostedLiveLanes.ts'));
 const nowOverlaps = await import(moduleUrl('../convex/projectNowOverlaps.ts'));
 const superseded = await import(moduleUrl('../convex/projectHostedSuperseded.ts'));
-const overlapLanded = await import(moduleUrl('../convex/projectHostedOverlapLanded.ts'));
 
 const PEER = 'user_PEERACCOUNT01';
 const DAY = 24 * 3_600_000;
@@ -187,81 +186,6 @@ test('presence and the start sibling list skip dormant Lanes too', async () => {
   assert(!ids.includes(stale.id), 'dormant Lane is not shown as a peer');
 });
 
-test('rows from before lastActivityAt existed are judged by their presence time until they next write', async () => {
-  const { read, lane, overlapRow, s } = await project();
-  const freshLegacy = await lane('Legacy but active', { idleMs: 60_000 });
-  const staleLegacy = await lane('Legacy and long idle', { idleMs: 5 * DAY });
-  for (const peer of [freshLegacy, staleLegacy]) {
-    const row = overlapRow(peer.id);
-    assert(row.lastActivityAt > 0, 'new rows carry the field');
-    s.patch('projectHostedOverlapLanes', row._id, { lastActivityAt: undefined });
-    assert.equal(overlapRow(peer.id).lastActivityAt, undefined);
-  }
-  const unknown = await lane('Legacy with no activity evidence at all', { idleMs: 9 * DAY });
-  s.patch('projectHostedOverlapLanes', overlapRow(unknown.id)._id, {
-    lastActivityAt: undefined,
-    presenceRow: undefined,
-  });
-  const lanes = noticeLanes(await read());
-  assert(lanes.has(freshLegacy.id), 'an active legacy row still notifies');
-  assert(!lanes.has(staleLegacy.id), 'an idle legacy row is left out without a backfill');
-  assert(lanes.has(unknown.id), 'unknown activity counts as live: missing evidence never hides a Lane');
-});
-
-test('a landing tick stamps legacy rows with unknown activity from their Lane record, so a dormant one stops notifying (ee9d5738)', async () => {
-  const { read, lane, overlapRow, s } = await project();
-  // Wave 5 shape: the Lane idled 64 h, its row predates lastActivityAt and holds no presence time.
-  const legacy = (row, extra = {}) =>
-    s.patch('projectHostedOverlapLanes', row._id, {
-      lastActivityAt: undefined,
-      presenceRow: undefined,
-      ...extra,
-    });
-  const dormantPeer = await lane('Dormant, row from before the activity index', { idleMs: 64 * 3_600_000 });
-  const livePeer = await lane('Live, row from before the activity index', { idleMs: 60_000 });
-  legacy(overlapRow(dormantPeer.id));
-  legacy(overlapRow(livePeer.id));
-  let lanes = noticeLanes(await read({ detail: true }));
-  assert(lanes.has(dormantPeer.id), 'before: unknown activity reads as live');
-  const stamp = () =>
-    s.transaction(
-      'stamp legacy',
-      { _handler: ctx => overlapLanded.stampLegacyOverlapActivity(ctx, s.projectId) },
-      {},
-    );
-  assert.equal(await stamp(), 2);
-  assert.equal(overlapRow(dormantPeer.id).lastActivityAt, Date.parse(dormantPeer.at), 'the Lane record time');
-  assert.equal(overlapRow(livePeer.id).lastActivityAt, Date.parse(livePeer.at));
-  lanes = noticeLanes(await read({ detail: true }));
-  assert(!lanes.has(dormantPeer.id), 'after: the dormant Lane is left out');
-  assert(lanes.has(livePeer.id), 'a live legacy Lane keeps notifying: real evidence, nothing hidden');
-  assert.equal(overlapRow(dormantPeer.id).open, true, 'the Lane and its row stay open with their work');
-  // Healed: one empty indexed range read, no Lane record read, no write.
-  assert.equal(await stamp(), 0);
-  const healed = s.counts.at(-1);
-  assert.deepEqual(
-    [healed.ranges, healed.readBytes, healed.writes],
-    [1, 0, 0],
-    JSON.stringify(healed.readRangesByTable),
-  );
-  // Bounded per tick; a row with no Lane record holds no open Lane and closes.
-  const many = [];
-  for (let i = 0; i < overlapLanded.LEGACY_STAMP_LIMIT + 2; i++)
-    many.push(await lane(`Legacy ${i}`, { idleMs: 5 * 86_400_000 }));
-  for (const peer of many) legacy(overlapRow(peer.id));
-  const orphan = many.at(-1);
-  for (const [id, head] of s.tables.projectHostedRecordHeads)
-    if (head.kind === 'lane' && head.key === orphan.id) s.tables.projectHostedRecordHeads.delete(id);
-  assert.equal(await stamp(), overlapLanded.LEGACY_STAMP_LIMIT);
-  assert.equal(await stamp(), 2);
-  assert.equal(await stamp(), 0);
-  assert.equal(overlapRow(orphan.id).open, false);
-  assert.equal(overlapRow(orphan.id).lastActivityAt, undefined, 'no time is invented for a missing record');
-  for (const peer of many.slice(0, -1)) assert.equal(overlapRow(peer.id).lastActivityAt, Date.parse(peer.at));
-  lanes = noticeLanes(await read({ detail: true }));
-  assert(many.every(peer => !lanes.has(peer.id)));
-});
-
 test('an Intent’s closed Lane and a parked Lane with saved work: only live work notifies', async () => {
   const { read, lane, readLane, write, overlapRow } = await project();
   const parked = await lane('Parked three days, never lands', { idleMs: 3 * DAY });
@@ -391,13 +315,8 @@ test('abandon-dormant: abandons landed and empty Lanes only, never saved-work or
       .transaction('abandon', dormant.abandon, { projectId: s.projectId, authorityEpoch: 1, ...args }, actor)
       .then(JSON.parse);
   await assert.rejects(abandon({ abandon: [landed.id] }, PEER), /./);
-  const done = await abandon({
-    abandon: [landed.id, empty.id, saved.id, pinned.id, fresh.id],
-    stamp: [saved.id],
-  });
-  const result = Object.fromEntries(
-    done.results.map(entry => [entry.laneId + (entry.result === 'stamped' ? ':stamp' : ''), entry.result]),
-  );
+  const done = await abandon({ abandon: [landed.id, empty.id, saved.id, pinned.id, fresh.id] });
+  const result = Object.fromEntries(done.results.map(entry => [entry.laneId, entry.result]));
   assert.equal(result[landed.id], 'abandoned');
   assert.equal(result[empty.id], 'abandoned');
   assert.equal(result[saved.id], 'has-saved-work');
@@ -414,29 +333,6 @@ test('abandon-dormant: abandons landed and empty Lanes only, never saved-work or
     ['not-open', 'not-open'],
   );
   await assert.rejects(abandon({ abandon: Array.from({ length: 26 }, () => randomUUID()) }), /at most 25/);
-});
-
-test('stamp indexes a dormant legacy Lane so later reads skip its row', async () => {
-  const { s, lane, overlapRow, read, setDormantDays } = await project();
-  const stale = await lane('Legacy and idle', { idleMs: 5 * DAY });
-  const row = overlapRow(stale.id);
-  s.patch('projectHostedOverlapLanes', row._id, { lastActivityAt: undefined });
-  setDormantDays(2);
-  await read();
-  const legacyRead = s.counts.at(-1).readBytesByTable.projectHostedOverlapLanes;
-  const done = JSON.parse(
-    await s.transaction('stamp', dormant.abandon, {
-      projectId: s.projectId,
-      authorityEpoch: 1,
-      abandon: [],
-      stamp: [stale.id],
-    }),
-  );
-  assert.equal(done.results[0].result, 'stamped');
-  assert(overlapRow(stale.id).lastActivityAt > 0);
-  await read();
-  const stamped = s.counts.at(-1).readBytesByTable.projectHostedOverlapLanes;
-  assert(stamped < legacyRead, `${stamped} < ${legacyRead}`);
 });
 
 /** A dormant Lane's work reaches main without its own completion tick (the tick was lost) or through another Lane. */
