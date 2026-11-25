@@ -10,7 +10,7 @@ import { clientSettingsFile } from './client-settings-path.js';
 import { ForgeError } from './errors.js';
 
 const file = (home: string) => join(home, '.config', 'forge', 'edit-hooks.json');
-type Settings = { enabled?: boolean; projects?: Record<string, boolean> };
+type Settings = { enabled?: boolean; projects?: Record<string, boolean>; addedDenyRules?: string[] };
 function read(home: string): Settings {
   return existsSync(file(home)) ? JSON.parse(readFileSync(file(home), 'utf8')) : {};
 }
@@ -54,6 +54,22 @@ export function setEditHooksEnabled(enabled: boolean, project?: string, home = h
   const settings = read(home);
   if (project) (settings.projects ??= {})[project] = enabled;
   else settings.enabled = enabled;
+  mkdirBelow(home, join(home, '.config', 'forge'));
+  if (!existsSync(file(home)) || JSON.stringify(read(home)) !== JSON.stringify(settings))
+    writeRecoveryState(file(home), settings);
+}
+/** Rules Forge itself inserted into `~/.claude/settings.json` `permissions.deny`, so uninstall
+ * removes only what Forge added and never strips a rule the user already had (Item f3495abe). */
+export function readAddedDenyRules(home = homedir()): string[] {
+  const rules = read(home).addedDenyRules;
+  return Array.isArray(rules) ? rules.filter((rule): rule is string => typeof rule === 'string') : [];
+}
+export function setAddedDenyRules(rules: readonly string[], home = homedir()) {
+  refuseRealUserState(file(home), 'Forge hook settings');
+  const settings = read(home);
+  const next = [...new Set(rules)];
+  if (next.length) settings.addedDenyRules = next;
+  else delete settings.addedDenyRules;
   mkdirBelow(home, join(home, '.config', 'forge'));
   if (!existsSync(file(home)) || JSON.stringify(read(home)) !== JSON.stringify(settings))
     writeRecoveryState(file(home), settings);

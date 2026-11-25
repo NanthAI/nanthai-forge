@@ -8,7 +8,12 @@ import { shellQuote } from './shell-quote.js';
 import { mkdirBelow } from './mkdir-below.js';
 import { writeRecoveryState, writeRecoveryText } from './recovery-state.js';
 import { ANTIGRAVITY_HOOKS, editAntigravityHooks } from './agent-antigravity-install.js';
-import { editHooksEnabled, setEditHooksEnabled } from './agent-hook-settings.js';
+import {
+  editHooksEnabled,
+  readAddedDenyRules,
+  setAddedDenyRules,
+  setEditHooksEnabled,
+} from './agent-hook-settings.js';
 import { editTarget, readEditMarkerIdentity } from './agent-edit-target.js';
 import { refuseRealUserState } from './test-isolation.js';
 import { invariant } from './errors.js';
@@ -22,7 +27,21 @@ import {
 } from './agent-hook-health.js';
 
 type Group = { matcher?: string; hooks: { type: string; command?: string; timeout?: number }[] };
-type Config = { hooks?: Record<string, Group[]>; [key: string]: unknown };
+type Config = {
+  hooks?: Record<string, Group[]>;
+  permissions?: { deny?: string[]; [key: string]: unknown };
+  [key: string]: unknown;
+};
+/** Credential-file read deny rules installed in Claude Code's user settings (`permissions.deny`,
+ * Item f3495abe). Guards the `Read` tool against common key/env files and Forge's own credential
+ * and sealed-key stores; removed cleanly by `uninstall-hooks`. */
+const CLAUDE_SECRET_DENY_RULES = [
+  'Read(**/*.pem)',
+  'Read(**/*.key)',
+  'Read(**/.env*)',
+  'Read(~/.config/forge/auth.json)',
+  'Read(~/.config/forge/sealed/**)',
+] as const;
 /** Only the named Forge command is added/removed; other client settings survive. */
 export function installEditHooks(
   root: string,
@@ -61,7 +80,11 @@ export function installEditHooks(
   const stopCommand = turnEndCommand(turnEndRunner(runner ?? own));
   const files = [join(home, '.claude', 'settings.json'), join(home, '.codex', 'hooks.json')];
   // Validate both client files before changing either one.
+  const claudeSettings = join(home, '.claude', 'settings.json');
+  const trackedDenyRules = readAddedDenyRules(home);
+  let nextTrackedDenyRules: string[] | null = null;
   const updates = files.map(path => {
+    const isClaude = path === claudeSettings;
     const before = existsSync(path) ? readFileSync(path, 'utf8') : null;
     const config: Config = before === null ? {} : JSON.parse(before);
     invariant(
@@ -75,9 +98,27 @@ export function installEditHooks(
       'BAD_ARGUMENT',
       'Client hooks must be an object.',
     );
+    if (isClaude) {
+      invariant(
+        config.permissions === undefined ||
+          (config.permissions &&
+            typeof config.permissions === 'object' &&
+            !Array.isArray(config.permissions)),
+        'BAD_ARGUMENT',
+        'Client permissions must be an object.',
+      );
+      invariant(
+        config.permissions?.deny === undefined ||
+          (Array.isArray(config.permissions.deny) &&
+            config.permissions.deny.every(entry => typeof entry === 'string')),
+        'BAD_ARGUMENT',
+        'Client permissions.deny must be an array of strings.',
+      );
+    }
     // An automatic run leaves hooks that point at another valid install alone; only an
     // explicit install-hooks takes them over. Missing or broken targets are still repaired.
     if (automatic && !uninstall && pointsAtOtherInstall(config, runner!)) return { path, before, config };
+    const removedAny = { hooks: false };
     config.hooks ??= {};
     for (const event of ['PreToolUse', 'UserPromptSubmit', 'Stop']) {
       invariant(
@@ -91,10 +132,12 @@ export function installEditHooks(
           'BAD_ARGUMENT',
           'Client hook group must contain hooks.',
         );
-      const groups = (config.hooks[event] ?? []).flatMap(group => {
+      const beforeGroups = config.hooks[event] ?? [];
+      const groups = beforeGroups.flatMap(group => {
         const hooks = group.hooks.filter(
           hook => !isForgeHook(hook.command, runner ?? own) && !isTurnEndHook(hook.command),
         );
+        if (hooks.length !== group.hooks.length) removedAny.hooks = true;
         return hooks.length === group.hooks.length ? [group] : hooks.length ? [{ ...group, hooks }] : [];
       });
       // UserPromptSubmit only fed the retired native turn store: installs now remove it.
@@ -112,6 +155,29 @@ export function installEditHooks(
         );
       if (groups.length) config.hooks[event] = groups;
       else delete config.hooks[event];
+    }
+    if (uninstall && removedAny.hooks && !Object.keys(config.hooks).length) delete config.hooks;
+    if (isClaude) {
+      if (!uninstall) {
+        const existing = config.permissions?.deny ?? [];
+        const missing = CLAUDE_SECRET_DENY_RULES.filter(rule => !existing.includes(rule));
+        if (missing.length) {
+          config.permissions ??= {};
+          config.permissions.deny = [...existing, ...missing];
+          nextTrackedDenyRules = [...new Set([...trackedDenyRules, ...missing])];
+        }
+      } else if (trackedDenyRules.length) {
+        const forgeRules = new Set<string>(trackedDenyRules);
+        if (config.permissions?.deny) {
+          const remaining = config.permissions.deny.filter(rule => !forgeRules.has(rule));
+          if (remaining.length !== config.permissions.deny.length) {
+            if (remaining.length) config.permissions.deny = remaining;
+            else delete config.permissions.deny;
+            if (!Object.keys(config.permissions).length) delete config.permissions;
+          }
+        }
+        nextTrackedDenyRules = [];
+      }
     }
     return { path, before, config };
   });
@@ -132,6 +198,7 @@ export function installEditHooks(
     writeRecoveryState(path, config);
     changed.push(path);
   }
+  if (nextTrackedDenyRules !== null) setAddedDenyRules(nextTrackedDenyRules, home);
   // Antigravity's entry is installed only by the person-run connect; an uninstall removes it too.
   if (uninstall) {
     const path = join(home, ANTIGRAVITY_HOOKS);

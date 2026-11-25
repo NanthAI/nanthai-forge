@@ -1,9 +1,12 @@
 ## Overlap before the first write
 
-The first successful command of the installed CLI installs Claude Code and Codex hooks, even with
+The first successful command of the installed CLI installs Claude Code and Codex hooks
+(plus Claude Code `permissions.deny` read rules for `*.pem`, `*.key`, `.env*`, and Forge's
+credential and sealed-key files under `~/.config/forge/`), even with
 `--ignore-scripts`. It prints changed files and the exact undo
-command. Installation is idempotent, preserves other hooks/settings and resolves
-the Lane from each edited path, covering every hosted/native Lane.
+command (`nforge x ROOT uninstall-hooks '{}'`, which removes both hooks and Forge's deny rules).
+Installation is idempotent, preserves other hooks/settings/permissions and resolves
+the Lane from each edited path, covering every hosted Lane.
 
 Hooks only ever point at the installed, auto-updated CLI (`forge-cli/current`). A
 Lane, temp or dev build (`node dist/cli-entry.js`) never writes them, not even

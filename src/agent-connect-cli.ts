@@ -146,7 +146,7 @@ function connect(root: string, directory: string, app: App, fixture: ConnectFixt
   const uninstallHooks = `nforge x ${shellQuote(root)} uninstall-hooks '{}'`;
   const hookPaths = ['.claude/settings.json', '.codex/hooks.json'];
   preview(
-    'First-run hooks: PreToolUse first-write notice for Edit, Write, MultiEdit, NotebookEdit and apply_patch, and the Stop turn-end guard.',
+    'First-run hooks: PreToolUse first-write notice for Edit, Write, MultiEdit, NotebookEdit and apply_patch, the Stop turn-end guard, and Claude Code credential-file read deny rules.',
   );
   let hookStatus: string;
   try {

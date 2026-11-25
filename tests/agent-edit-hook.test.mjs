@@ -95,3 +95,52 @@ test('malformed config preserves both clients and unrelated hooks sharing a Forg
     hooks: { PreToolUse: [{ matcher: 'Write', custom: true, hooks: [other] }] },
   });
 });
+
+test('Claude Code install adds credential read deny rules and uninstall removes only Forge-added rules (Item f3495abe)', t => {
+  const f = fixture(t),
+    home = join(f.root, 'fake-home');
+  mkdirSync(join(home, '.claude'), { recursive: true });
+  mkdirSync(join(home, '.codex'), { recursive: true });
+  const claude = join(home, '.claude/settings.json'),
+    codex = join(home, '.codex/hooks.json');
+  // User already denied .env* and a custom file before Forge installed anything.
+  const original = {
+    theme: 'dark',
+    permissions: { allow: ['Bash(npm test)'], deny: ['Read(custom-secret.txt)', 'Read(**/.env*)'] },
+  };
+  writeFileSync(claude, JSON.stringify(original));
+  writeFileSync(codex, JSON.stringify({}));
+  const installed = installEditHooks(f.root, undefined, false, home, false, { runner: RUNNER });
+  assert.equal(installed.status, 'installed');
+  assert.match(installed.undo, /uninstall-hooks/);
+  const claudeConfig = JSON.parse(readFileSync(claude, 'utf8'));
+  const codexConfig = JSON.parse(readFileSync(codex, 'utf8'));
+  assert.deepEqual(claudeConfig.permissions.allow, ['Bash(npm test)']);
+  assert.deepEqual(claudeConfig.permissions.deny, [
+    'Read(custom-secret.txt)',
+    'Read(**/.env*)',
+    'Read(**/*.pem)',
+    'Read(**/*.key)',
+    'Read(~/.config/forge/auth.json)',
+    'Read(~/.config/forge/sealed/**)',
+  ]);
+  assert.equal(codexConfig.permissions, undefined, 'Codex hooks.json has no permissions.deny schema');
+  // Second install is idempotent and does not duplicate deny rules.
+  const again = installEditHooks(f.root, undefined, false, home, false, { runner: RUNNER });
+  assert.deepEqual(again.changed, []);
+  assert.deepEqual(JSON.parse(readFileSync(claude, 'utf8')).permissions.deny, claudeConfig.permissions.deny);
+  // Uninstall removes only the rules Forge itself added; pre-existing Read(**/.env*) survives.
+  const removed = installEditHooks(f.root, undefined, true, home);
+  assert.equal(removed.status, 'uninstalled');
+  assert.deepEqual(JSON.parse(readFileSync(claude, 'utf8')), original);
+  // Malformed permissions.deny refuses without touching either client file.
+  writeFileSync(claude, JSON.stringify({ permissions: { deny: [42] } }));
+  const broken = readFileSync(claude, 'utf8');
+  const codexBefore = readFileSync(codex, 'utf8');
+  assert.throws(
+    () => installEditHooks(f.root, undefined, false, home, false, { runner: RUNNER }),
+    /permissions\.deny/,
+  );
+  assert.equal(readFileSync(claude, 'utf8'), broken);
+  assert.equal(readFileSync(codex, 'utf8'), codexBefore);
+});
