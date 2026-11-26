@@ -1,18 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-import { durableReplace } from './state/durability.js';
 import { clientCacheRoot, retainedRootSibling } from './root-paths.js';
 import { pinImportFacts } from '../scripts/test-import-cache.mjs';
-import {
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  renameSync,
-  writeFileSync,
-  mkdtempSync,
-  rmSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { availableParallelism, loadavg, tmpdir } from 'node:os';
 import { dirname, join, posix } from 'node:path';
@@ -22,6 +12,20 @@ import { commandKind, slotCapEnv } from './heavy-hold.js';
 import { safeRelative } from './files.js';
 import { AGENT_WAIT_SECONDS } from './agent-operation-wait.js';
 import { z } from 'zod';
+import {
+  type PreflightReceipt,
+  preflightReceiptSchema,
+  readPreflightReceipt,
+  writePreflightReceipt,
+} from './preflight-receipt.js';
+import {
+  PREFLIGHT_SECONDS_PER_FILE,
+  type PreflightFileStats,
+  preflightFileStats,
+  preflightSecondsPerFile,
+  recordFileStats,
+  recordPreflightTiming,
+} from './preflight-timings.js';
 import {
   alteredSurface,
   documentation,
@@ -47,11 +51,7 @@ import {
   keptPassedStatic,
   staticScopeKey,
 } from './preflight-kept-static.js';
-import {
-  dependenciesEnvironmentSchema,
-  dependenciesMissing,
-  runnerDependenciesMissing,
-} from './preflight-dependencies.js';
+import { dependenciesMissing, runnerDependenciesMissing } from './preflight-dependencies.js';
 import {
   runStaticChecks,
   STATIC_CHECK_TIMEOUT_MS,
@@ -110,7 +110,6 @@ import {
   PREFLIGHT_LOCAL_BUDGET_SECONDS,
   PREFLIGHT_RUN_CEILING_SECONDS,
   preflightTimeSettings,
-  preflightTimeSettingsSchema,
   type PreflightTimeSettings,
 } from './preflight-time-settings.js';
 export { PREFLIGHT_LOCAL_BUDGET_SECONDS, PREFLIGHT_RUN_CEILING_SECONDS } from './preflight-time-settings.js';
@@ -125,24 +124,15 @@ import {
 } from './package-graph.js';
 import { packageRunnerTests, packageTestSelection } from './package-test-selection.js';
 import { moduleGraphFor, moduleGraphKey, type ModuleGraph } from './module-graph.js';
-import {
-  filesystemEventHealth,
-  filesystemEnvironment,
-  filesystemEnvironmentSchema,
-} from './filesystem-event-health.js';
+import { filesystemEventHealth, filesystemEnvironment } from './filesystem-event-health.js';
 
-import {
-  missingProgramExit,
-  missingToolchain,
-  toolchainEnvironment,
-  toolchainEnvironmentSchema,
-} from './preflight-toolchain.js';
+import { missingProgramExit, missingToolchain, toolchainEnvironment } from './preflight-toolchain.js';
 import { hostedCheckSeconds } from './preflight-hosted-timing.js';
 
 export const preflightRuntime = { filesystemEventHealth };
 
-/** Default local cost per selected test file at concurrency 1, used for the time estimate. */
-export const PREFLIGHT_SECONDS_PER_FILE = 4;
+export { PREFLIGHT_SECONDS_PER_FILE, preflightFileStats, preflightSecondsPerFile, type PreflightFileStats };
+export { preflightReceiptSchema, readPreflightReceipt, type PreflightReceipt };
 /** Per-file kill limit (Item 168e4ed8). Signal: the file's measured seconds on this machine.
  * Formula: 3 x measured, at least PREFLIGHT_FILE_LIMIT_FLOOR_SECONDS; a file never timed here gets
  * PREFLIGHT_FILE_LIMIT_UNKNOWN_SECONDS. Override: preflight.fileTimeoutSeconds (forge.json or
@@ -223,132 +213,6 @@ function fitRunCeiling(
 const PREFLIGHT_GROUP_SECONDS = 30;
 const SOURCE_DIRS = ['src', 'web', 'convex', 'site', 'tests', 'scripts'];
 
-const reusedFromSchema = z.object({ head: z.string(), tree: z.string(), evidence: z.string() }).strict();
-export const preflightReceiptSchema = z
-  .object({
-    schema: z.literal(1),
-    laneId: z.string(),
-    head: z.string(),
-    tree: z
-      .string()
-      .regex(/^[0-9a-f]{64}$/)
-      .optional(),
-    tests: z.number().int().nonnegative(),
-    /** Only static commands ran; this receipt never satisfies the test gate. */
-    staticOnly: z.literal(true).optional(),
-    /** Land's quick head run of a plan over the gate's minutes (src/agent-default-gates.ts): a short
-     * budget of the top-ranked tests. Its failure refuses the land; otherwise it never satisfies the
-     * test gate, as staticOnly. */
-    quick: z.literal(true).optional(),
-    /** The test files this run passed or reused, as the land gate's 4-character keys (13ea93bf), when
-     * no evidence file records them (a land gate's own run plans without the checkout's file list). */
-    ran: z
-      .string()
-      .max(1024)
-      .regex(/^(?:[A-Za-z0-9_-]{4})*$/)
-      .optional(),
-    selection: z.string(),
-    exitCode: z.number().int().nullable(),
-    passed: z.boolean(),
-    /** What the run means, one word (preflightOutcome): passed, incomplete, environment or failed. */
-    outcome: z.enum(['passed', 'incomplete', 'environment', 'failed']).optional(),
-    /** Test files plus static checks that failed: 0 for every outcome but `failed`. */
-    failed: z.number().int().nonnegative().optional(),
-    durationMs: z.number().nonnegative(),
-    at: z.string(),
-    environment: z
-      .union([filesystemEnvironmentSchema, toolchainEnvironmentSchema, dependenciesEnvironmentSchema])
-      .optional(),
-    /** Why a failed run failed (not an environment result): the files and the start of its error
-     * output, so the refusal and the advice name the cause and not only an exit code (9ab983fd). */
-    failure: z
-      .object({ files: z.array(z.string()).max(10), excerpt: z.string().max(700) })
-      .strict()
-      .optional(),
-    evidence: z
-      .string()
-      .regex(/^[a-f0-9]{64}$/)
-      .optional(),
-    reusedTests: z.number().int().nonnegative().optional(),
-    reusedFrom: reusedFromSchema.optional(),
-    deferredTests: z.number().int().nonnegative().optional(),
-    /** Cheap repository-wide checks the landing check also runs; a failure here skips the tests. */
-    static: z
-      .array(
-        z
-          .object({
-            name: z.string(),
-            outcome: z.enum(['passed', 'failed', 'timed-out', 'pre-existing', 'unjudged', 'forge-metadata']),
-            ms: z.number().nonnegative(),
-            command: z.array(z.string()).optional(),
-            fix: z.array(z.string()).optional(),
-            excerpt: z.string().max(700).optional(),
-            files: z.array(z.string()).max(200).optional(),
-            advisory: z.string().max(700).optional(),
-          })
-          .strict(),
-      )
-      .optional(),
-    /** Planned tests not started because an earlier group had already failed. */
-    stoppedForFailure: z.number().int().nonnegative().optional(),
-    /** Files killed at the per-file limit (a fixture that never resolves), with their run time. */
-    timedOut: z
-      .array(z.object({ file: z.string(), seconds: z.number().nonnegative() }).strict())
-      .max(10)
-      .optional(),
-    /** The slowest test files of this run, so a long preflight names its cause. */
-    slowest: z
-      .array(z.object({ file: z.string(), ms: z.number().nonnegative() }).strict())
-      .max(3)
-      .optional(),
-    /** Selection rule, budget and cut, so a receipt says what was left for the pre-queue check. */
-    rule: z.string().optional(),
-    budgetSeconds: z.number().nonnegative().optional(),
-    timeSettings: preflightTimeSettingsSchema.optional(),
-    /** The run's wall-time ceiling (8dbd2683): `override` when an explicit budget raised it, `reached`
-     * when it stopped files. */
-    ceiling: z
-      .object({
-        seconds: z.number().positive(),
-        override: z.literal(true).optional(),
-        reached: z.literal(true).optional(),
-      })
-      .strict()
-      .optional(),
-    trimmedTiers: z.array(z.string()).optional(),
-    deferredTo: z.literal('pre-queue').optional(),
-    buildMs: z.number().nonnegative().optional(),
-    testMs: z.number().nonnegative().optional(),
-    /** Largest resident set of any test process; absent where the platform cannot report it. */
-    peakRssMb: z.number().nonnegative().optional(),
-    /** Tests that were planned to run here but not started because the time budget was spent. */
-    stoppedForTime: z.number().int().nonnegative().optional(),
-    /** Those files by name, in plan order (most relevant first). */
-    stopped: z.array(z.string()).optional(),
-    /** The one command that runs exactly the `stopped` files on the saved head. */
-    stoppedRerun: z.string().optional(),
-    /** Every local-tier file this run skipped for time (trimmed by the plan or not started). */
-    skipped: z.array(z.string()).optional(),
-    /** The one command that runs exactly the skipped files (passed ones are reused). */
-    rerun: z.string().optional(),
-    /** Must-run files the budget did not start: the run is NOT COMPLETE (passed is false, nothing
-     * failed), with the one command that finishes them. */
-    incomplete: z
-      .object({
-        mustRun: z.number().int().nonnegative(),
-        finish: z.string().optional(),
-        estimateMinutes: z.number().int().positive(),
-        /** Test files that skipped because a runtime they need is not installed here (fix 5). */
-        needs: z
-          .object({ runtime: z.string(), files: z.array(z.string()).min(1), next: z.string() })
-          .strict()
-          .optional(),
-      })
-      .strict()
-      .optional(),
-  })
-  .strict();
-export type PreflightReceipt = z.infer<typeof preflightReceiptSchema>;
 export type LocalSelection = {
   rule: string;
   budgetSeconds: number;
@@ -409,7 +273,7 @@ export type PreflightPlan =
       static?: StaticSelection;
       local?: LocalSelection;
       reusedTests?: string[];
-      reusedFrom?: z.infer<typeof reusedFromSchema>;
+      reusedFrom?: NonNullable<PreflightReceipt['reusedFrom']>;
       deltaPaths?: string[];
       totalEstimateMinutes?: number;
       /** Set when the server projection lacked this head's paths and the pinned State manifests supplied them. */
@@ -436,8 +300,6 @@ export type PreflightPlan =
 const preparedEvidence = new WeakMap<PreflightPlan, PreflightEvidence>();
 /** The changed paths a plan was made for, so a failing run can teach them (never printed). */
 const plannedPaths = new WeakMap<PreflightPlan, string[]>();
-const receiptPath = (root: string, laneId: string) =>
-  join(clientCacheRoot(root), 'agent', 'preflight', `${laneId}.json`);
 /** The same plan, run order and evidence with a different wall-time budget (land's quick head run):
  * no re-plan, and the run still records what it ran for the guard-set learner. */
 export function planWithBudget(
@@ -465,117 +327,6 @@ export function planWithBudget(
   return copy;
 }
 
-export function readPreflightReceipt(root: string, laneId: string): PreflightReceipt | null {
-  try {
-    return preflightReceiptSchema.parse(JSON.parse(readFileSync(receiptPath(root, laneId), 'utf8')));
-  } catch {
-    return null;
-  }
-}
-function retainedReceipt(receipt: PreflightReceipt) {
-  // Earlier CLIs validate this cache strictly. Keep its format across CLI rollbacks.
-  const { timeSettings, ...retained } = receipt;
-  void timeSettings;
-  return JSON.stringify(retained);
-}
-
-function writePreflightReceipt(root: string, receipt: PreflightReceipt) {
-  const path = receiptPath(root, receipt.laneId);
-  mkdirSync(join(path, '..'), { recursive: true, mode: 0o700 });
-  writeFileSync(`${path}.tmp`, retainedReceipt(receipt), { mode: 0o600 });
-  renameSync(`${path}.tmp`, path);
-}
-
-/** Learn from completed local runs, including build time and this machine's load.
- * Sibling Lanes share this clone-local disposable record. It is never uploaded. */
-const timingsPath = (root: string) =>
-  join(retainedRootSibling(root, '.forge-client'), 'agent', 'preflight-timings.json');
-const timingsSchema = z
-  .array(z.object({ tests: z.number().int().positive(), ms: z.number().positive() }).strict())
-  .max(8);
-export function preflightSecondsPerFile(root: string) {
-  // One run is a noisy sample (test mix, machine load), so prefer the last few completed runs.
-  try {
-    const runs = timingsSchema.parse(JSON.parse(readFileSync(timingsPath(root), 'utf8')));
-    const tests = runs.reduce((sum, run) => sum + run.tests, 0);
-    if (tests > 0)
-      return {
-        secondsPerFile: runs.reduce((sum, run) => sum + run.ms, 0) / tests / 1000,
-        basis: 'measured' as const,
-      };
-  } catch {
-    /* No rolling window yet: fall back to the latest completed run. */
-  }
-  try {
-    const sample = preflightReceiptSchema.parse(
-      JSON.parse(
-        readFileSync(
-          join(retainedRootSibling(root, '.forge-client'), 'agent', 'preflight-estimate.json'),
-          'utf8',
-        ),
-      ),
-    );
-    if (sample.passed && sample.tests > 0)
-      return { secondsPerFile: sample.durationMs / sample.tests / 1000, basis: 'measured' as const };
-  } catch {
-    /* A cold or corrupt model uses the documented fallback. */
-  }
-  return { secondsPerFile: PREFLIGHT_SECONDS_PER_FILE, basis: 'default' as const };
-}
-function recordTiming(root: string, receipt: PreflightReceipt) {
-  try {
-    let runs: z.infer<typeof timingsSchema> = [];
-    try {
-      runs = timingsSchema.parse(JSON.parse(readFileSync(timingsPath(root), 'utf8')));
-    } catch {
-      /* Start a fresh window. */
-    }
-    runs = [...runs, { tests: receipt.tests, ms: Math.max(1, receipt.durationMs) }].slice(-8);
-    mkdirSync(join(timingsPath(root), '..'), { recursive: true, mode: 0o700 });
-    durableReplace(timingsPath(root), JSON.stringify(runs));
-  } catch {
-    /* Estimates never invalidate a completed run. */
-  }
-}
-/** What earlier local runs saw per test file: smoothed run time and whether the last run failed.
- * A disposable clone-local record, never uploaded, bounded; it only orders and prices tests. */
-const fileStatsPath = (root: string) =>
-  join(retainedRootSibling(root, '.forge-client'), 'agent', 'preflight-files.json');
-const fileStatsSchema = z.record(
-  z.string(),
-  z.object({ ms: z.number().nonnegative(), failed: z.boolean() }).strict(),
-);
-export type PreflightFileStats = z.infer<typeof fileStatsSchema>;
-const MAX_FILE_STATS = 5000;
-export function preflightFileStats(root: string): PreflightFileStats {
-  try {
-    return fileStatsSchema.parse(JSON.parse(readFileSync(fileStatsPath(root), 'utf8')));
-  } catch {
-    return {};
-  }
-}
-function recordFileStats(
-  root: string,
-  observed: { passed: string[]; failed: string[]; ms: Record<string, number> },
-) {
-  try {
-    const stats = preflightFileStats(root);
-    for (const file of [...observed.passed, ...observed.failed]) {
-      const ms = observed.ms[file];
-      const previous = stats[file];
-      delete stats[file];
-      stats[file] = {
-        ms: ms === undefined ? (previous?.ms ?? 0) : previous ? (previous.ms + ms) / 2 : ms,
-        failed: observed.failed.includes(file),
-      };
-    }
-    const kept = Object.entries(stats).slice(-MAX_FILE_STATS);
-    mkdirSync(join(fileStatsPath(root), '..'), { recursive: true, mode: 0o700 });
-    durableReplace(fileStatsPath(root), JSON.stringify(Object.fromEntries(kept)));
-  } catch {
-    /* Ordering hints never invalidate a completed run. */
-  }
-}
 /** Within a tier, the tests that failed last time run first (likely to fail again, and a failure
  * ends the run); then, in direct, wide and near, the closest consumers (`ranks`: product hops, carrier
  * fan-in, helper hops); then, among equally close ones, the more relevant (`relevance`: recent landing
@@ -1274,7 +1025,7 @@ function planTests(
     let tests = [...new Set(selection.tests)];
     let reusedTests: string[] = [];
     let delta: string[] | undefined;
-    let reusedFrom: z.infer<typeof reusedFromSchema> | undefined;
+    let reusedFrom: PreflightReceipt['reusedFrom'];
     if (context && !saved) {
       // Sparse/mismatched local bytes cannot prove that an unseen consumer is independent.
       // Preserve local execution, put the complete manifest test inventory on the runner.
@@ -2372,18 +2123,7 @@ export function runPreflight(
   writePreflightReceipt(root, receipt);
   dropKeptStatic(root, laneId);
   process.stderr.write(`${runSummary(receipt, plan, typecheckUntouched)}\n`);
-  // An incomplete run is still a clean timing sample; only a pass seeds the fallback estimate.
-  if (receipt.incomplete && receipt.tests > 0) recordTiming(root, receipt);
-  if (receipt.passed && receipt.tests > 0) {
-    recordTiming(root, receipt);
-    const path = join(retainedRootSibling(root, '.forge-client'), 'agent', 'preflight-estimate.json');
-    try {
-      mkdirSync(join(path, '..'), { recursive: true, mode: 0o700 });
-      durableReplace(path, retainedReceipt(receipt));
-    } catch {
-      /* Estimates never invalidate a completed run. */
-    }
-  }
+  recordPreflightTiming(root, receipt);
   return quickTimedOut ? { ...receipt, quickTimedOut: true } : receipt;
 }
 
