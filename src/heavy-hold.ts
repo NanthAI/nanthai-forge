@@ -9,7 +9,9 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, renameSync, rmSync, writ
 import { loadavg, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ownerOnly } from './file-mode.js';
-import type { HeavyHold, HeavyKind } from './heavy-queue.js';
+import type { HeavyHold } from './heavy-queue.js';
+
+export { commandKind } from './heavy-test-preloads.js';
 
 /** Cores one slot may use: the cores shared by the slots, at least one. A slot limits jobs, not
  * CPU; without this each job ran up to cores - 1 test files (load 165 on 10 cores with 3 slots). */
@@ -171,20 +173,6 @@ export function slotCapEnv(env: NodeJS.ProcessEnv, cores: number, slots: number,
     },
     dispose: () => owned && rmSync(owned, { recursive: true, force: true }),
   };
-}
-
-/** The kind of a heavy command from its words, for the history only (the words are never stored). */
-export function commandKind(args: string[]): HeavyKind {
-  const text = ` ${args.join(' ')} `;
-  if (
-    /\s--test(?=[\s=])/.test(text) ||
-    /\b(?:npm|pnpm|yarn|bun)(?:\.cmd)?\s+(?:run\s+(?:(?:-s|--silent)\s+)?)?test\b/.test(text) ||
-    /\b(?:vitest|jest|mocha|preflight)\b/.test(text)
-  )
-    return 'test';
-  if (/\b(?:tsc|tsgo|vue-tsc|typecheck)\b/.test(text)) return 'typecheck';
-  if (/\b(?:build|esbuild|webpack|rollup|vite)\b/.test(text)) return 'build';
-  return 'other';
 }
 
 const minutes = (ms: number) => Math.round(ms / 6000) / 10;

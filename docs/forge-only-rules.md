@@ -126,11 +126,11 @@ ecosystem; rows that name an "any-ecosystem slice" Issue are live cases that sli
 | `src/package-graph-dotnet-js.ts` | `js-extension` | 1 | JS/TS test file names: a JS package with tests but no `test` script makes the package graph's selection full | each ecosystem's own test sources (Gradle `src/test`) |
 | `src/project-test-runner.ts` | `node-test` | 2 | recognises `node --test` in any project's test script | the same inference for vitest and jest |
 | `src/heavy-hold.ts` | `node-test` | 1 | the slot-cap preload restarts an uncapped `node --test` with the slot's `--test-concurrency` (7008ff18) | Go tools get `GOMAXPROCS`, rayon tools `RAYON_NUM_THREADS`; other test runners' own worker settings are not set yet |
-| `src/heavy-test-preloads.ts` | `node-test` | 1 | checks preloads, empty paths and build needs for `node --test` commands (direct, shell `-c` and package scripts) | the same guard for any project whose test script runs `node --test` |
+| `src/heavy-test-preloads.ts` | `node-test` | 1 | classifies `node --test` for preload checks, empty paths, build needs and hold history | the same classification applies to every Node project |
 | `src/work-docs-admission.ts` | `forge-folders` | 1 | docs admission of a native standard-check run | declared `docsPaths` |
 | `src/work-docs-admission.ts` | `npm-lockfile` | 1 | docs admission of a native standard-check run | declared `docsPaths` |
 | `src/integration-preview-checks.ts` | `npm-lockfile` | 2 | integration previews install with `npm ci` only for npm-locked projects | their check sets up its own dependencies |
-| `src/heavy-hold.ts` | `build-folders` | 1 | the hold history names a command a build from its words (`build`, `esbuild`, `webpack`, `rollup`, `vite`); the words are not stored | the word `build` (`cargo build`, `go build`, `gradle build`) classes every ecosystem's build; other tool names read as `other` |
+| `src/heavy-test-preloads.ts` | `build-folders` | 1 | the hold history classifies builds from command words (`build`, `esbuild`, `webpack`, `rollup`, `vite`) | the word `build` (`cargo build`, `go build`, `gradle build`) classifies builds in any ecosystem |
 | `src/actions-toolchains.ts` | `build-folders` | 1 | the dependency seed skips dependency, build and VCS folders of every ecosystem while finding lockfiles (432164bf) | the same list for every repository |
 | `src/npm-install.ts` | `npm-lockfile` | 1 | npm's own install reads its lockfile for scripted packages (slice H, 4ce67b9a) | pnpm, Yarn and Bun use their own (src/package-manager-install.ts) |
 | `src/package-manager.ts` | `package-json-config` | 5 | JS package managers keep `packageManager` and `workspaces` in package.json (slice H, 4ce67b9a) | non-JS repositories install with their own tooling |

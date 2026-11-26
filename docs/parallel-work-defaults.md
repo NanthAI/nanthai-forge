@@ -229,6 +229,8 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
   commands whose shell globs, variables or scripts expand to zero paths at runtime are refused by
   heavy's preload before any test runs. Explicit `nforge heavy npm test` (and `pnpm`/`yarn`/`bun
   test`) stays allowed for a deliberate full run.
+  Flags after a Node script path go to the script. For example, `nforge heavy node replay.mjs
+  --test TITLE` runs `replay.mjs` with its own `--test` argument.
 - A `node --test` that leaves out a preload the project's own `test` script passes (`--import`,
   `--require`, `-r`) is refused before heavy takes a slot, builds or runs anything. This covers a
   direct `node --test` and a node segment inside one `sh -c`/`bash -c`/`zsh -c` string (a `&&`,

@@ -7,10 +7,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { preloadRefusal } from '../dist/heavy-test-preloads.js';
+import { readHoldHistory } from '../dist/heavy-queue.js';
 
 const cli = resolve('dist/cli-entry.js');
 const project = (t, manifest) => {
@@ -27,6 +28,10 @@ test('a direct node --test is refused with the missing preloads and the correcte
     script('npm run build && node --import ./setup.mjs -r ./env.cjs --test tests/*.test.mjs'),
   );
   const refusal = preloadRefusal(['node', '--test', 'tests/a.test.mjs'], root);
+  assert.match(
+    preloadRefusal(['node', '--env-file-if-exists', 'missing.env', '--test', 'tests/a.test.mjs'], root),
+    /--import \.\/setup\.mjs/,
+  );
   assert.match(refusal, /refused before taking a slot/);
   assert.match(refusal, /--import \.\/setup\.mjs --require \.\/env\.cjs/);
   assert.match(
@@ -101,6 +106,42 @@ test('asks for nothing without a node --test script or a readable manifest', t =
       null,
       String(manifest),
     );
+});
+
+test('friction 368d2d2e: heavy passes a Node script its own --test flag without preparing a test run', t => {
+  const root = project(
+    t,
+    script('node --import ./setup.mjs --test tests/*.test.mjs', {
+      'build:core': "node -e \"require('fs').writeFileSync('build-ran','')\"",
+    }),
+  );
+  mkdirSync(join(root, 'src'));
+  writeFileSync(join(root, 'before.mjs'), '');
+  writeFileSync(join(root, 'coverage.mjs'), 'console.log(JSON.stringify(process.argv.slice(2)));');
+  const scriptArgs = ['--add', '--test', 'replay title'];
+  const slots = join(root, 'slots');
+  for (const command of [
+    [process.execPath, '--import', './before.mjs', 'coverage.mjs', ...scriptArgs],
+    ['sh', '-c', 'node coverage.mjs --add --test "replay title"'],
+  ]) {
+    const result = spawnSync(process.execPath, [cli, 'heavy', ...command], {
+      cwd: root,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        FORGE_HEAVY_DIR: slots,
+        FORGE_CLIENT_SETTINGS: join(root, 'client.json'),
+        FORGE_HEAVY_PARENT: '',
+      },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), scriptArgs);
+    assert.equal(existsSync(join(root, 'build-ran')), false, 'the script did not need a test build');
+  }
+  assert.deepEqual(
+    readHoldHistory(slots).map(hold => hold.kind),
+    ['other', 'other'],
+  );
 });
 
 test('heavy refuses a wrapped test without the preload before the build runs; a correct one still runs', t => {

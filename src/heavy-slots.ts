@@ -423,6 +423,7 @@ stopped (exit 124) and frees its slot; a signal to heavy reaches the command, wh
 has not exited 10 s later. When the command ends, anything it started that is still running stops too. A holder that never stopped itself is freed 5 min past its bound, unsignalled.
 Run long-lived servers (Vite/dev servers) directly, outside heavy.
 node --test with no test file path is refused (including inside sh -c, npm scripts or empty globs); name the files, or run nforge heavy npm test on purpose.
+In node SCRIPT [ARGS...], flags after SCRIPT are script arguments, including --test.
 `;
 /** Metadata contains only the executable basename, never arguments or environment. */
 export function heavySlotHolders(

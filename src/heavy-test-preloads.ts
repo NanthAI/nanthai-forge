@@ -9,6 +9,7 @@
 //    through a shell so a missing or stale `dist/` is built first.
 import { readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
+import type { HeavyKind } from './heavy-queue.js';
 
 const TEST_FLAG = '--test';
 const PRELOAD = new Set(['--import', '--require', '-r']);
@@ -62,10 +63,49 @@ const PKG_BUILTINS = new Set([
   'why',
 ]);
 
-/** Node options whose value is the next argument (a bare value is not a test file). */
+/** Node options that take a separate value before the script or test paths. */
 const NODE_VALUE_OPTIONS = new Set([
+  '--allow-fs-read',
+  '--allow-fs-write',
+  '--build-snapshot-config',
+  '--cpu-prof-dir',
+  '--cpu-prof-interval',
+  '--cpu-prof-name',
+  '--diagnostic-dir',
+  '--disable-proto',
+  '--disable-warning',
+  '--dns-result-order',
+  '--env-file-if-exists',
+  '--experimental-config-file',
+  '--experimental-package-map',
+  '--experimental-sea-config',
+  '--experimental-test-isolation',
+  '--experimental-test-tag-filter',
+  '--heap-prof-dir',
+  '--heap-prof-interval',
+  '--heap-prof-name',
+  '--heapsnapshot-near-heap-limit',
+  '--heapsnapshot-signal',
+  '--icu-data-dir',
   '--import',
+  '--input-type',
+  '--inspect-port',
+  '--inspect-publish-uid',
+  '--localstorage-file',
+  '--max-http-header-size',
+  '--max-old-space-size-percentage',
+  '--network-family-autoselection-attempt-timeout',
+  '--openssl-config',
+  '--redirect-warnings',
+  '--report-dir',
+  '--report-directory',
+  '--report-filename',
+  '--report-signal',
   '--require',
+  '--run',
+  '--secure-heap',
+  '--secure-heap-min',
+  '--snapshot-blob',
   '-r',
   '--loader',
   '--experimental-loader',
@@ -86,6 +126,23 @@ const NODE_VALUE_OPTIONS = new Set([
   '--test-isolation',
   '--test-global-setup',
   '--test-rerun-failures',
+  '--test-coverage-branches',
+  '--test-coverage-exclude',
+  '--test-coverage-functions',
+  '--test-coverage-include',
+  '--test-coverage-lines',
+  '--test-random-seed',
+  '--title',
+  '--tls-cipher-list',
+  '--tls-keylog',
+  '--trace-event-categories',
+  '--trace-event-file-pattern',
+  '--trace-require-module',
+  '--unhandled-rejections',
+  '--use-largepages',
+  '--v8-pool-size',
+  '--watch-kill-signal',
+  '--watch-path',
 ]);
 
 function unquoteShellWord(word: string): string {
@@ -239,10 +296,14 @@ export function nodeTestPathCount(args: string[]): number | null {
       paths += args.slice(index + 1).filter(path => path.trim()).length;
       break;
     }
-    if (arg.startsWith('-')) {
+    if (arg !== '-' && arg.startsWith('-')) {
       if (arg === TEST_FLAG) testing = true;
       else if (NODE_VALUE_OPTIONS.has(arg)) index++;
-    } else if (arg.trim()) paths++;
+    } else {
+      // Without --test, the first positional argument starts the script's argv.
+      if (!testing) return null;
+      if (arg.trim()) paths++;
+    }
   }
   return testing ? paths : null;
 }
@@ -393,12 +454,7 @@ export function needsCoreBuild(args: string[]): boolean {
   const shell = shellInvocation(args);
   if (!shell) return false;
   if (shell.kind === 'script') return true;
-  const parts = splitShellParts(shell.command);
-  for (let i = 0; i < parts.length; i += 2) {
-    const { words } = segmentCommandTokens(parts[i]!);
-    if (nodeTestPathCount(words) !== null) return true;
-  }
-  return false;
+  return nodeTestSegments(shell.command).found.length > 0;
 }
 
 /** Preload flags (`--import X`, `--import=X`, `--require X`, `-r X`) in one word list. */
@@ -426,6 +482,23 @@ function nodeTestSegments(text: string) {
   return { parts, found };
 }
 
+/** The kind of a heavy command from its words, for the history only (the words are never stored). */
+export function commandKind(args: string[]): HeavyKind {
+  const text = ` ${args.join(' ')} `;
+  const command = stripCommandPrefixes(args);
+  const shell = shellInvocation(command);
+  if (
+    nodeTestPathCount(command) !== null ||
+    (shell?.kind === 'inline' && nodeTestSegments(shell.command).found.length) ||
+    /\b(?:npm|pnpm|yarn|bun)(?:\.cmd)?\s+(?:run\s+(?:(?:-s|--silent)\s+)?)?test\b/.test(text) ||
+    /\b(?:vitest|jest|mocha|preflight)\b/.test(text)
+  )
+    return 'test';
+  if (/\b(?:tsc|tsgo|vue-tsc|typecheck)\b/.test(text)) return 'typecheck';
+  if (/\b(?:build|esbuild|webpack|rollup|vite)\b/.test(text)) return 'build';
+  return 'other';
+}
+
 /** The preloads of the project's `test` script (package.json in `cwd` only); a missing, unreadable
  * or non-node test script asks for nothing. */
 function wantedPreloads(cwd: string) {
@@ -447,8 +520,8 @@ export function preloadRefusal(args: string[], cwd: string): string | null {
   const first = args[0] ?? '';
   const shell = shellInvocation(args);
   const inline = shell?.kind === 'inline' ? shell : null;
-  const direct = isNodeBinary(first);
-  if (inline ? !inline.command.includes(TEST_FLAG) : !direct || !args.includes(TEST_FLAG)) return null;
+  const segments = inline ? nodeTestSegments(inline.command) : null;
+  if (segments ? !segments.found.length : nodeTestPathCount(args) === null) return null;
   const wanted = wantedPreloads(cwd);
   if (!wanted.size) return null;
   // A preload the caller exports in NODE_OPTIONS reaches the test runner too.
@@ -459,8 +532,8 @@ export function preloadRefusal(args: string[], cwd: string): string | null {
   };
   let missing: string[];
   let corrected: string;
-  if (inline) {
-    const { parts, found } = nodeTestSegments(inline.command);
+  if (inline && segments) {
+    const { parts, found } = segments;
     const all = new Set<string>();
     for (const { at, rawHeadEnd, words } of found) {
       const need = lacking(words.slice(1));
