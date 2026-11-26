@@ -15,12 +15,11 @@ export const recordCollectionKinds = {
 } as const satisfies Record<string, HostedRecordKind>;
 export const hostedRecordsReadSchema = z
   .object({
-    collection: z.enum(
-      Object.keys(recordCollectionKinds) as [
-        keyof typeof recordCollectionKinds,
-        ...Array<keyof typeof recordCollectionKinds>,
-      ],
-    ),
+    collection: z.enum([
+      ...(Object.keys(recordCollectionKinds) as Array<keyof typeof recordCollectionKinds>),
+      'landing-attempts',
+      'retained-landing-attempts',
+    ] as const),
     parentId: z.string().min(1).optional(),
     status: z.string().min(1).optional(),
     id: z.uuid().optional(),
@@ -28,6 +27,14 @@ export const hostedRecordsReadSchema = z
     cursor: z.string().nullable().default(null),
   })
   .strict()
+  .refine(
+    value =>
+      (value.collection !== 'landing-attempts' && value.collection !== 'retained-landing-attempts') ||
+      (value.status === undefined &&
+        value.version === undefined &&
+        (value.collection === 'landing-attempts' || value.id === undefined)),
+    'Select landing attempts by attempt id, submission parentId, or project page.',
+  )
   .refine(value => !(value.parentId && value.status), 'Choose parentId or status.')
   .refine(value => value.version === undefined || value.id, 'A version needs id.')
   .refine(

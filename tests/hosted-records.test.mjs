@@ -10,6 +10,7 @@ import { recordsFixture } from './hosted-records-fixture.mjs';
 import { temporaryDirectory } from '../scripts/test-temp.mjs';
 import { hostedAgentCli } from '../dist/hosted-agent-cli.js';
 import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
+import { readHostedAgentRecords } from '../dist/hosted-agent-record-read.js';
 import {
   canonicalPayload,
   hostedPayloadHash,
@@ -29,6 +30,7 @@ import { HOSTED_SNAPSHOT_EMPTY_ROOT, hostedSnapshotPageRoot } from '../dist/host
 const store = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 const snapshots = await import(moduleUrl('../convex/projectHostedSnapshots.ts'));
 const recordReads = await import(moduleUrl('../convex/projectHostedRecordReads.ts'));
+const { finishReadProjection } = await import(moduleUrl('../convex/projectFinishReadProjection.ts'));
 const metricSaves = await import(moduleUrl('../convex/projectMetricSaveHeads.ts'));
 const metricBackfill = await import(moduleUrl('../convex/projectMetricSaveHeadBackfill.ts'));
 const reads = await import(moduleUrl('../convex/projectHostedSnapshotRead.ts'));
@@ -198,6 +200,129 @@ test('canonical Lane/save/Candidate/job versions have exact indexed identity, si
       .length,
     0,
   );
+});
+
+test('landing attempt records page raw recheck rows within a project and enforce current member access', async () => {
+  const s = await setup();
+  const other = await s.setup();
+  const { projectId } = s.auth;
+  const submissionId = randomUUID();
+  const candidates = [];
+  for (let number = 0; number < 20; number++) {
+    const id = randomUUID();
+    const attempt = {
+      id,
+      projectId,
+      submissionId,
+      number,
+      parentAttemptId: candidates.at(-1)?.id ?? null,
+      at,
+      main: { head: hash, receiptId: 'main-receipt' },
+      candidate: { id: randomUUID(), head: nextHash, inputs: object },
+      check: {
+        runId: randomUUID(),
+        checkId: randomUUID(),
+        definition: hash,
+        configuration: hash,
+        environment: hash,
+      },
+      recheckReason: 'changed-main',
+    };
+    const row = { projectId, submissionId, number, attemptId: id, value: JSON.stringify(attempt) };
+    candidates.push(attempt);
+    await s.ctx.db.insert('projectHostedLandingAttempts', row);
+    await s.ctx.db.insert('projectHostedLandingAttempts', { ...row, projectId: other.projectId });
+  }
+  const address = { projectId };
+  const transport = {
+    address,
+    query: (_path, { request }) =>
+      s.run('landing attempt records', async () =>
+        JSON.parse(
+          await recordReads.read._handler(
+            { ...s.ctx, auth: { getUserIdentity: async () => ({ subject: 'owner' }) } },
+            { projectId, request },
+          ),
+        ),
+      ),
+  };
+  const read = args => readHostedAgentRecords(transport, { collection: 'landing-attempts', ...args });
+  const first = await read({ parentId: submissionId });
+  assert.deepEqual(
+    first.items.map(row => row.id),
+    candidates
+      .slice(4)
+      .toReversed()
+      .map(row => row.id),
+  );
+  assert.equal(first.items[0].recheckReason, 'changed-main');
+  assert(first.nextCursor);
+  const cost = s.counts.at(-1);
+  assert.deepEqual(
+    { ranges: cost.ranges, documents: cost.documents, writes: cost.writes },
+    {
+      ranges: 2,
+      documents: 17,
+      writes: 0,
+    },
+  );
+  assert(cost.readBytes < 48 * 1024);
+  await assert.rejects(read({ cursor: first.nextCursor }), code('BAD_ARGUMENT'));
+  const last = await read({ parentId: submissionId, cursor: first.nextCursor });
+  assert.deepEqual(
+    last.items.map(row => row.id),
+    candidates
+      .slice(0, 4)
+      .toReversed()
+      .map(row => row.id),
+  );
+  assert.equal(last.nextCursor, null);
+  const [old, failed] = candidates;
+  const stored = [...s.tables.projectHostedLandingAttempts.values()].find(
+    row => row.projectId === projectId && row.attemptId === failed.id,
+  );
+  await s.ctx.db.patch(stored._id, {
+    progress: JSON.stringify({
+      phase: 'terminal-failed',
+      observation: { state: 'terminal-failed', cause: 'check-failed', pendingReason: null },
+      // forge-path-fixture: synthetic
+      error: { code: 'CHECK_FAILED', message: 'Check failed. Runner at /Users/example/project.' },
+      acceptance: null,
+      settled: true,
+      version: 2,
+    }),
+  });
+  const { record: detail } = await read({ id: failed.id });
+  assert.deepEqual(detail.check, failed.check);
+  assert.equal(detail.progress.errorMessage, 'Check failed. Runner at ~/project.');
+  assert.equal((await read({})).items.length, 16);
+
+  const relocated = [...s.tables.projectHostedLandingAttempts.values()].find(
+    row => row.projectId === projectId && row.attemptId === old.id,
+  );
+  await s.ctx.db.insert(
+    'projectFinishReadRows',
+    finishReadProjection('projectHostedLandingAttempts', {
+      ...relocated,
+      sourceCreatedAt: relocated._creationTime,
+    }),
+  );
+  await s.ctx.db.delete(relocated._id);
+  const { record } = await read({ id: old.id });
+  assert.equal(record.retained, true);
+  assert.equal(record.runId, old.check.runId);
+  assert.equal(record.candidateHead, old.candidate.head);
+  assert.deepEqual((await read({ collection: 'retained-landing-attempts' })).items, [record]);
+  assert.deepEqual((await read({ collection: 'retained-landing-attempts', parentId: submissionId })).items, [
+    record,
+  ]);
+  await assert.rejects(
+    read({ collection: 'retained-landing-attempts', parentId: submissionId, cursor: first.nextCursor }),
+    code('BAD_ARGUMENT'),
+  );
+
+  await s.ctx.db.patch(projectId, { visibility: 'public', owner: 'different-owner' });
+  await assert.rejects(read({ id: candidates[0].id }), code('NOT_FOUND'));
 });
 
 test('exact job records keep retained versions and structured refusals through the CLI (friction 9bf13493)', async t => {

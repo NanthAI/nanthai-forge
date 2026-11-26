@@ -1,1 +1,3 @@
 Accepted landing reads include replay evidence for the checked and published bases, check clocks, censored attempts and order holds. Every replaced attempt names its replacement cause, and a landing that never waited reads `none` for its holds. Older observations stay explicitly unrecorded, and each project retains its own evidence with its existing landing history.
+
+Project members can also page live attempt records through `records`, including the rows behind unnamed rechecks, or page the compact index of retained attempts. Submission attempt history includes detailed evidence for relocated rows.

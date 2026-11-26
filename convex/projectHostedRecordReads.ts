@@ -8,6 +8,7 @@ import { hostedRecordBody, hostedRecordPage, readHostedRecord } from './projectH
 import { hostedRecordsReadSchema, recordCollectionKinds } from '../src/hosted-record-read';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { landingAttemptRecords } from './projectLandingAttemptRecords';
 
 /** One indexed page or one exact version, using the same current access and lifecycle overlays as
  * source operations. 100 heads / 128 KiB of indexed rows per page; O(page) record descriptors,
@@ -28,7 +29,12 @@ export async function journalRecordRead(
     const user = await ctx.auth.getUserIdentity();
     invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read hosted Work records.');
     const command = hostedRecordsReadSchema.parse(JSON.parse(input.request));
-    const kind = recordCollectionKinds[command.collection];
+    const { collection } = command;
+    if (collection === 'landing-attempts' || collection === 'retained-landing-attempts')
+      return JSON.stringify(
+        await landingAttemptRecords(ctx, input.projectId, user.subject, { ...command, collection }),
+      );
+    const kind = recordCollectionKinds[collection];
     if (command.id) {
       const row = await readHostedRecord(ctx, {
         projectId: input.projectId,
