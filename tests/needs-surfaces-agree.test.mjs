@@ -154,10 +154,11 @@ test('9b9057a9: with nothing held and nothing asked every surface says none', ()
   assert.equal(said.lineHeld, 0);
 });
 
-test('9b9057a9: past the read limit the line falls back to its own flag, never to a guess from a partial read', () => {
-  const partial = read([held('a', 'review')], { more: 5, moreIsLowerBound: true });
-  assert.equal(count.waitingLanes(count.needsYouLanes(partial, NOW)), undefined);
-  assert.equal(count.needsCount(partial, NOW).atLeast, true);
+test('a partial read keeps known FYI Lanes quiet while omitted marks use the line flag', () => {
+  const partial = read([held('a', 'review'), held('b', 'check-failed')], { more: 5, moreIsLowerBound: true });
+  const marks = [mark('a'), mark('b'), mark('omitted'), mark('omitted-fix', { fix: true })];
+  assert.deepEqual([...count.waitingLanes(count.needsYouLanes(partial, NOW), marks)], ['a', 'omitted']);
+  assert.deepEqual(count.needsCount(partial, NOW), { n: 1, atLeast: true });
 });
 
 test('9b9057a9: a hold with no landing outcome on record names its next step, on the board and on the Lane page', () => {

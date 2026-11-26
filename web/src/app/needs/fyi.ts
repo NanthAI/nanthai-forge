@@ -8,7 +8,7 @@
 // shows again. Nothing here holds work: approvals and questions are never FYI rows. Pure: tests/app-needs-fyi.test.mjs.
 import type { StateWord } from '../../ds';
 import type { SetupPreferences } from '../start/setup-model';
-import type { NowRow, TookOutRow } from './model';
+import type { NoticeRow, NowRow, ParkedRow, TookOutRow } from './model';
 import { laneTitle, whoOf } from './model';
 
 export type FyiState = { clearedAt: number | null; clearedSequence: number | null; dismissed: string[] };
@@ -67,7 +67,7 @@ export const focusHref = (touching: string, laneId: string) =>
   `${touching}?${new URLSearchParams({ lane: laneId })}`;
 export type Link = {
   label: string;
-  to: { place: string; section?: string; rest?: string };
+  to: { place: string; section?: string; rest?: string; anchor?: string };
   focusLane?: string;
 };
 export type FyiRow = {
@@ -160,6 +160,39 @@ function heldRows(held: readonly NowRow[]): FyiRow[] {
         ]
       : [],
   }));
+}
+
+function currentNoticeRows(notices: readonly NoticeRow[], parks: readonly ParkedRow[]): FyiRow[] {
+  return [
+    ...notices.map((row): FyiRow => ({
+      key: `notice:${row.kind}:${row.id}@${row.version ?? row.since ?? 0}`,
+      at: row.since ?? 0,
+      area: row.kind === 'deploy' ? 'outside' : 'code',
+      event: false,
+      word: row.word,
+      tag: row.tag,
+      title: row.head,
+      who: row.who ?? null,
+      fact: row.repair ? laneTitle(row.repair) : '',
+      next: row.next,
+      currentHold: true,
+      links: [...row.links],
+    })),
+    ...parks.map((row): FyiRow => ({
+      key: `parked:${row.laneId}@${row.since}`,
+      at: row.since,
+      area: 'code',
+      event: false,
+      word: 'Waiting its turn',
+      tag: row.tag,
+      title: laneTitle(row),
+      who: row.who,
+      fact: row.head,
+      next: row.park.reason,
+      currentHold: true,
+      links: [{ label: 'Open the Lane', to: { place: 'lanes', rest: row.laneId } }],
+    })),
+  ];
 }
 
 /** Reverts the reader ran, as FYI rows: the version is the time, so a later revert of the same Item shows again. */
@@ -284,11 +317,13 @@ export function fyiView(
   /** Expanded FYI keeps current holds visible even after the reader clears the history. */
   holdsAlways = false,
   took: readonly TookOutRow[] = [],
+  notices: readonly NoticeRow[] = [],
+  parks: readonly ParkedRow[] = [],
 ): FyiView {
   const cleared = read.state.clearedAt;
   const from = cleared ?? startOfDay(now);
   const hidden = new Set(read.state.dismissed);
-  const holds = heldRows(held);
+  const holds = [...heldRows(held), ...currentNoticeRows(notices, parks)];
   const kept = (row: FyiRow) =>
     !hidden.has(row.key) && (row.event ? row.at >= from : cleared === null || row.at > cleared);
   const rows = [

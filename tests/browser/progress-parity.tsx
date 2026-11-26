@@ -165,6 +165,7 @@ createRoot(document.getElementById('root')!).render(
         projectName={projectName}
         viewerHandle={params.has('missing-viewer') ? undefined : viewerHandle}
         feed={undefined}
+        needsRead={needs}
       />
     </ProjectFrame>
   </ConvexProvider>,

@@ -26,7 +26,7 @@ import { withRefreshHold } from './auth-hold';
 import { Device } from './Device';
 import { AccountFrame, BareFrame, ProjectFrame, PublicFrame, type FrameControls } from './frames';
 import { needsCount, needsRead, needsYouLanes, waitingLanes } from './needs/count';
-import { useDeployAttentionClock } from './needs/deploy-attention-clock';
+import { useAttentionClock } from './needs/attention-clock';
 import { Keys, useFrameKeys, type Go } from './keys';
 import { oldAddress, type OldAddress } from './old-address';
 import { hrefFor, isPublicProjectView, parseAppPath, signInHref, type AppRoute } from './paths';
@@ -350,12 +350,15 @@ function ProjectView({
     needsRead,
     project?.id ? { projectId: project.id as Id<'hostedProjects'> } : 'skip',
   );
-  // A parked Lane with no one named counts once 4 h idle, by the time the read arrived (count.ts parkShown).
+  // The existing attention clock redraws locally at the next deadline.
   const needsDrawnAt = useMemo(() => Date.now(), [needsLive]);
-  const needsAt = useDeployAttentionClock(needsLive?.deployStatus, needsDrawnAt);
+  const needsAt = useAttentionClock(needsLive, needsDrawnAt);
   const needs = useMemo(() => needsCount(needsLive, needsAt), [needsLive, needsAt]);
   // The Lanes behind that count, for the top bar's line and F: one rule, so none of them can disagree with it.
-  const waiting = useMemo(() => waitingLanes(needsYouLanes(needsLive, Date.now())), [needsLive]);
+  const waiting = useMemo(
+    () => waitingLanes(needsYouLanes(needsLive, needsAt), feed?.lanes),
+    [needsLive, needsAt, feed],
+  );
   const [picker, setPicker] = useState<readonly PickerEntry[] | null>(null);
   const asked = useRef(false);
   const name = project?.name ?? route.project;
@@ -414,6 +417,7 @@ function ProjectView({
         feedReadAt={lastLine.at}
         viewerHandle={controls.viewerHandle}
         needsRead={needsLive}
+        needsAt={needsAt}
       />
       {overlays((project?.id ?? null) as Id<'hostedProjects'> | null)}
     </ProjectFrame>

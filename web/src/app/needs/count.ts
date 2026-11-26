@@ -10,6 +10,7 @@
 import type { DeployStatusRead } from '../../../../src/deploy-status';
 import type { Id } from '../../../../convex/_generated/dataModel';
 import { makeFunctionReference } from 'convex/server';
+import { noticeAttention } from './notice-attention';
 
 export type HeldWhy =
   | 'conflict'
@@ -46,7 +47,7 @@ export type HeldLane = {
 };
 /** A Lane's park (Item e1633718, src/hosted-records.ts laneParkSchema): `to` is the holder's handle (`handle/run` for an agent run),
  * absent when no one is named; `by` who parked it; `at` when (ms). */
-export type Park = { to?: string; named: boolean; reason: string; at: number; by: string };
+export type Park = { to?: string; named: boolean; toAgent?: true; reason: string; at: number; by: string };
 /** Who a park waits on, as every screen names it: `@handle`, `handle/run`, a member the reader may not see, or no
  * one (null). */
 export function parkHolder(park: Pick<Park, 'to' | 'named'>) {
@@ -74,8 +75,10 @@ export type ParkedLane = {
 export const PARK_UNNAMED_AFTER_MS = 4 * 60 * 60_000;
 /** Whether a parked Lane shows now: compared when the view is drawn against the activity time the read holds, so
  * nothing ticks and an idle tab reads nothing. */
-export const parkShown = (row: Pick<ParkedLane, 'park' | 'at'>, now: number) =>
-  row.park.named || now - row.at >= PARK_UNNAMED_AFTER_MS;
+const parkAttention = (row: ParkedLane, now: number) => {
+  if (row.park.named) return row.park.toAgent || row.park.to?.includes('/') ? 'fyi' : 'viewer';
+  return now - row.at >= PARK_UNNAMED_AFTER_MS ? 'viewer' : 'ahead';
+};
 /** One question with choices addressed to the reader (convex/projectNeedsFyi.ts `messagesTo`). */
 export type Ask = {
   id: string;
@@ -92,15 +95,38 @@ export type Ask = {
   to?: string;
   recipientEnded?: true;
 };
-/** A shared-state decision a person settles (convex/projectNeedsMe.ts `notices`, Items 12fde646, 8b6efb50): work
- * reverted from main, work that still needs a fix, a GitHub mirror that stopped, or a failed deploy / post-deploy smoke.
- * It stays until the state changes. */
+/** An open approval request from projectHostedApprovals `openApprovalRequests`. */
+export type Approval = {
+  laneId: string;
+  kind: 'lane' | 'fork' | 'setting';
+  needsOwner: boolean;
+  label: string;
+  nextStep: string;
+  reason?: string;
+  requester?: string;
+  agent?: string;
+  head: string;
+  at: string;
+  membership?: boolean;
+  setting?: { origin: string };
+  /** Until when an agent's wait holds this settings request. */
+  waitUntil?: number;
+};
+
+/** Shared-state evidence that stays until its condition clears. */
 export type Notice = {
   kind: 'reverted' | 'needs-fix' | 'mirror' | 'deploy' | 'secrets';
   /** The reverted Intent's id, `mirror`, or `deploy:<target>`. */
   id: string;
   summary: string;
   next: string | null;
+  since?: number;
+  version?: string;
+  receiptId?: string;
+  tests?: readonly string[];
+  moreTests?: number;
+  who?: string;
+  repair?: Pick<HeldLane, 'laneId' | 'title' | 'actor' | 'agent'>;
   /** A revert somebody ran, offered to the Lane's owner (J08): never a hold on work. */
   taken?: Taken;
 };
@@ -119,6 +145,7 @@ export type NeedsRead = {
   notices?: readonly Notice[];
   deployStatus?: DeployStatusRead;
   noticesMore?: true;
+  noticesMoreSince?: number;
   /** What waits on a person in sealed secrets (convex/projectNeedsMe.ts `secrets`); write members only. */
   secrets?: number;
   /** Reverts the reader ran themselves (J08): FYI, never counted. `id` is the reverted Intent. */
@@ -133,117 +160,129 @@ export const needsRead = makeFunctionReference<'query', { projectId: Id<'hostedP
  * approval request or a landing held for review waits on the person who decides it; a failed check, a conflict, a
  * refusal or a wait is the Lane owner's to fix (FYI, with its next step), whoever owns it, since Needs you offers no
  * button for it. `canDecide`: the reader decides approvals in this project. */
-export function waitsOnPerson(lane: Pick<HeldLane, 'why'>, approval: boolean, canDecide: boolean) {
-  return canDecide && (approval || lane.why === 'review');
+function waitsOnPerson(lane: HeldLane, approval: boolean, canDecide: boolean) {
+  const review = lane.why === 'review' && (lane.url || lane.laneId || (lane.submissionId && lane.attemptId));
+  return canDecide && (approval || Boolean(review));
 }
 
-/** Item 12fde646: open settings and GitHub-connect requests an agent is blocked on right now (its waiter marked
- * `waitUntil` ahead of `now`). They wait on the person, so they count; a request no agent waits on stays asked
- * ahead. Read from the approvals payload the read already holds, compared at draw time (no timer, no call). */
-export function blockedRequestIds(payload: string, now: number, canDecide: boolean): ReadonlySet<string> {
-  if (!canDecide) return new Set();
+function approvalsOf(payload: string): { requests: Approval[]; complete: boolean } {
   try {
-    const parsed = JSON.parse(payload) as {
-      requests?: { kind: string; laneId: string; needsOwner?: boolean; waitUntil?: number }[];
-    };
-    return new Set(
-      (parsed.requests ?? [])
-        .filter(
-          r => r.kind === 'setting' && r.needsOwner && typeof r.waitUntil === 'number' && r.waitUntil > now,
-        )
-        .map(r => r.laneId),
-    );
+    const parsed = JSON.parse(payload) as { requests?: Approval[]; complete?: boolean };
+    if (parsed.requests !== undefined && !Array.isArray(parsed.requests)) {
+      return { requests: [], complete: false };
+    }
+    return { requests: parsed.requests ?? [], complete: parsed.complete !== false };
   } catch {
-    return new Set();
+    return { requests: [], complete: false };
   }
 }
 
-/** The approvals read stopped at its bound: a blocked request may be missing, so a count is a lower bound. */
-export function approvalsTruncated(payload: string): boolean {
-  try {
-    return (JSON.parse(payload) as { complete?: boolean }).complete === false;
-  } catch {
-    return true;
+/** Classify once by the action the reader can take. The page, badge and Lane marks use the same result. */
+export function needsAttention(read: NeedsRead, now: number) {
+  const { notices, nextAt: noticeAt, moreDue } = noticeAttention(read, now);
+  let nextAt = noticeAt;
+  const approvals = approvalsOf(read.approvals);
+  const asked = new Set<string>();
+  const blocked = new Set<string>();
+  for (const request of approvals.requests) {
+    if (!request?.needsOwner) continue;
+    if (request.kind === 'lane') asked.add(request.laneId);
+    if (
+      read.canDecide &&
+      request.kind === 'setting' &&
+      typeof request.waitUntil === 'number' &&
+      request.waitUntil > now
+    ) {
+      blocked.add(request.laneId);
+      nextAt = Math.min(nextAt, request.waitUntil);
+    }
   }
-}
-
-/** Lane ids with an open Lane approval request in the approvals payload. */
-export function laneRequests(payload: string): ReadonlySet<string> {
-  try {
-    const parsed = JSON.parse(payload) as { requests?: { kind: string; laneId: string }[] };
-    return new Set((parsed.requests ?? []).filter(r => r.kind === 'lane').map(r => r.laneId));
-  } catch {
-    return new Set();
+  const held = new Set(
+    read.held.filter(lane => waitsOnPerson(lane, asked.has(lane.laneId ?? ''), read.canDecide)),
+  );
+  const parked = [];
+  const parkedFyi = [];
+  for (const lane of read.parked ?? []) {
+    const attention = parkAttention(lane, now);
+    if (attention === 'viewer') parked.push(lane);
+    if (attention === 'fyi') parkedFyi.push(lane);
+    if (attention === 'ahead') nextAt = Math.min(nextAt, lane.at + PARK_UNNAMED_AFTER_MS);
   }
-}
-
-export function deployRequests(read: NeedsRead, now: number): Notice[] {
-  return (read.deployStatus?.targets ?? []).flatMap(target => {
-    const failure = target.failure;
-    if (failure?.attentionAt === undefined || failure.attentionAt > now) return [];
-    return [
-      {
-        kind: 'deploy',
-        id: target.target,
-        summary: `Find someone to look at the ${target.label} deploy in ${target.environment}.`,
-        next: `It has been failing for at least ${failure.attentionMinutes} minutes.`,
-      },
-    ];
-  });
-}
-
-/** The "Needs you" count: held Lanes that wait on a person, questions for the reader and Lanes parked for the
- * reader that show at `now`. Held or parked Lanes past the read's limit are not classified, so with any the count is
- * a lower bound. */
-export function needsCount(
-  read: NeedsRead | undefined,
-  now = Date.now(),
-): { n: number; atLeast: boolean } | undefined {
-  if (!read) return undefined;
-  const asked = laneRequests(read.approvals);
-  const held = read.held.filter(lane =>
-    waitsOnPerson(lane, asked.has(lane.laneId ?? ''), read.canDecide),
-  ).length;
-  const parked = (read.parked ?? []).filter(row => parkShown(row, now)).length;
-  const asks = (read.asks ?? []).filter(row => !row.ahead && !row.recipientSession).length;
-  const blocked = blockedRequestIds(read.approvals, now, read.canDecide).size;
+  const asks = new Set(
+    (read.asks ?? []).filter(row => !row.ahead && !row.recipientSession).map(row => row.id),
+  );
+  const actionable = notices.filter(notice => notice.action);
   return {
+    held,
+    parked,
+    parkedFyi,
+    asks,
+    blocked,
+    approvals,
+    nextAt,
+    notices: actionable,
+    fyiNotices: notices.filter(notice => !notice.action),
     n:
-      held +
-      asks +
-      parked +
-      blocked +
-      (read.notices?.filter(notice => notice.kind !== 'deploy').length ?? 0) +
-      deployRequests(read, now).length +
-      (read.secrets ?? 0),
+      held.size +
+      asks.size +
+      parked.length +
+      blocked.size +
+      actionable.length +
+      (read.secrets ? read.secrets - 1 : 0),
     atLeast:
       read.more > 0 ||
       read.parkedMore === true ||
       read.asksMore === true ||
       read.noticesMore === true ||
-      approvalsTruncated(read.approvals),
+      moreDue ||
+      !approvals.complete,
   };
+}
+
+export function needsCount(read: NeedsRead | undefined, now = Date.now()) {
+  if (!read) return undefined;
+  const { n, atLeast } = needsAttention(read, now);
+  return { n, atLeast };
 }
 
 /** The open Lanes that wait on the reader, by the rule above: held for a decision this reader makes, or parked for
  * them and shown now. Every screen that marks a held Lane (the top bar's line and F, the yard, the flow) takes it from
  * here, never its own rule, so they cannot disagree with the count (Item 9b9057a9). Undefined while the read is out. */
-export type NeedsYou = { lanes: ReadonlySet<string>; known: 'all' | 'partial' | 'unknown' };
+export type NeedsYou = {
+  lanes: ReadonlySet<string>;
+  known: 'all' | 'partial' | 'unknown';
+  covered?: ReadonlySet<string>;
+};
 export function needsYouLanes(read: NeedsRead | undefined, now: number): NeedsYou | undefined {
   if (!read) return undefined;
-  const asked = laneRequests(read.approvals);
+  const { held, parked } = needsAttention(read, now);
   const out = new Set<string>();
-  for (const lane of read.held) {
-    if (!waitsOnPerson(lane, asked.has(lane.laneId ?? ''), read.canDecide)) continue;
+  for (const lane of held) {
     if (lane.laneId) out.add(lane.laneId);
     for (const id of lane.laneIds ?? []) out.add(id);
   }
-  for (const row of read.parked ?? []) if (parkShown(row, now)) out.add(row.laneId);
-  return { lanes: out, known: read.more > 0 || read.parkedMore === true ? 'partial' : 'all' };
+  for (const row of parked) out.add(row.laneId);
+  if (read.more === 0 && !read.parkedMore) return { lanes: out, known: 'all' };
+  const covered = new Set(out);
+  for (const lane of read.held) {
+    if (lane.laneId) covered.add(lane.laneId);
+    for (const id of lane.laneIds ?? []) covered.add(id);
+  }
+  for (const lane of read.parked ?? []) covered.add(lane.laneId);
+  return { lanes: out, known: 'partial', covered };
 }
 /** Needs me's read failed: no held Lane is known to wait on the reader, and the page says it could not tell. */
 export const NEEDS_UNKNOWN: NeedsYou = { lanes: new Set(), known: 'unknown' };
-/** The Lanes known to wait on the reader, for a screen that marks held Lanes: only when every held Lane was
- * classified. Otherwise undefined, and the screen falls back to the line's own `fix` flag. */
-export const waitingLanes = (needs: NeedsYou | undefined): ReadonlySet<string> | undefined =>
-  needs?.known === 'all' ? needs.lanes : undefined;
+/** Preserve the shared rule for covered Lanes. Omitted marks can use the line's own flag. */
+export function waitingLanes(
+  needs: NeedsYou | undefined,
+  marks: readonly { laneId: string; held: boolean; fix?: true }[] = [],
+): ReadonlySet<string> | undefined {
+  if (!needs || needs.known === 'unknown') return undefined;
+  if (needs.known === 'all') return needs.lanes;
+  const waiting = new Set(needs.lanes);
+  for (const mark of marks) {
+    if (mark.held && !mark.fix && !needs.covered?.has(mark.laneId)) waiting.add(mark.laneId);
+  }
+  return waiting;
+}

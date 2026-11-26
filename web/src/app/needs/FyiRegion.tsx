@@ -21,6 +21,7 @@ const FILTERS: { value: 'all' | Area; text: string }[] = [
 
 /** "09:58" today, "Yesterday", or the date: when a row happened, in the reader's time. */
 function when(at: number, now: number) {
+  if (at <= 0 || !Number.isFinite(at)) return '';
   const day = new Date(now);
   day.setHours(0, 0, 0, 0);
   const date = new Date(at);
@@ -155,15 +156,21 @@ export function Fyi({
                 next={row.next}
                 actions={
                   <>
-                    {row.links.map(link => (
-                      <A
-                        key={link.label}
-                        className="lk"
-                        href={link.focusLane ? focusHref(href(link.to), link.focusLane) : href(link.to)}
-                      >
-                        {link.label}
-                      </A>
-                    ))}
+                    {row.links.map(link =>
+                      link.to.anchor ? (
+                        <a key={link.label} className="lk" href={`#${link.to.anchor}`}>
+                          {link.label}
+                        </a>
+                      ) : (
+                        <A
+                          key={link.label}
+                          className="lk"
+                          href={link.focusLane ? focusHref(href(link.to), link.focusLane) : href(link.to)}
+                        >
+                          {link.label}
+                        </A>
+                      ),
+                    )}
                     {row.taken ? (
                       <TakenKeys
                         target={row.taken}

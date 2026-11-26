@@ -18,6 +18,7 @@ import '../../web/src/app/app.css';
 import { ProjectFrame } from '../../web/src/app/frames';
 import type { LineFeed } from '../../web/src/app/Line';
 import { needsCount, type NeedsRead } from '../../web/src/app/needs/count';
+import { useAttentionClock } from '../../web/src/app/needs/attention-clock';
 import type { FyiRead } from '../../web/src/app/needs/fyi';
 import { stressText } from '../../web/src/ds/reference/stress-text';
 import type { LooseEndsRead } from '../../web/src/app/needs/loose-ends';
@@ -412,8 +413,7 @@ const conversationRead: NeedsRead = {
     },
   ],
 };
-// Item 12fde646: `?data=notices` is the busy project plus the shared-state decisions the rule keeps in Needs you: work
-// reverted from main, work still needing a fix, and a GitHub mirror that stopped.
+// The busy project has a revert and a stopped mirror to act on, plus a recent main fix to watch.
 const noticesRead: NeedsRead = {
   ...baseRead,
   notices: [
@@ -422,18 +422,45 @@ const noticesRead: NeedsRead = {
       id: uuid(700),
       summary: 'Reverted receipt 3f2a9c10: parser.test.mjs failed on main (run 7d41).',
       next: `nforge agent ROOT start '{"intentId":"${uuid(700)}"}'`,
+      since: ago(2),
     },
     {
       kind: 'needs-fix',
       id: uuid(701),
       summary: 'Fix needed for receipt 81c0d2aa: queue.test.mjs failed on main.',
       next: null,
+      since: ago(3),
     },
     {
       kind: 'mirror',
       id: 'mirror',
       summary: 'GitHub’s main moved without Forge, so the mirror to synthetic/mirror stopped.',
       next: 'the owner person brings GitHub’s commit into Forge in Settings → GitHub mirror',
+    },
+  ],
+};
+const FIX_CLOCK = Date.parse('2026-11-17T15:00:00Z');
+const fixAttentionRead: NeedsRead = {
+  ...baseRead,
+  held: [],
+  asks: [],
+  parked: [],
+  approvals: JSON.stringify({ requests: [], complete: true }),
+  notices: [
+    {
+      kind: 'needs-fix',
+      id: uuid(731),
+      summary: 'The check on main failed.',
+      next: null,
+      since: FIX_CLOCK - 20 * 60_000,
+      tests: ['queue.test.mjs'],
+      receiptId: uuid(732),
+      repair: {
+        laneId: uuid(730),
+        title: 'Repair the main check',
+        actor: 'sample-one',
+        agent: 'quiet-otter',
+      },
     },
   ],
 };
@@ -518,66 +545,68 @@ const endedAskRead: NeedsRead = {
   ],
 };
 const initialRead: NeedsRead =
-  variant === 'ended-ask'
-    ? endedAskRead
-    : variant === 'notices'
-      ? noticesRead
-      : variant === 'taken'
-        ? takenRead
-        : variant === 'conversation'
-          ? conversationRead
-          : variant === 'held-more'
-            ? extraRead
-            : worst || variant === 'towers'
-              ? worstRead
-              : calm || quiet || unavailable
-                ? {
-                    held: [],
-                    more: 0,
-                    moreIsLowerBound: false,
-                    approvals: JSON.stringify({ requests: [], complete: true }),
-                    canDecide: true,
-                    asks: [],
-                  }
-                : connect
+  variant === 'fix-attention'
+    ? fixAttentionRead
+    : variant === 'ended-ask'
+      ? endedAskRead
+      : variant === 'notices'
+        ? noticesRead
+        : variant === 'taken'
+          ? takenRead
+          : variant === 'conversation'
+            ? conversationRead
+            : variant === 'held-more'
+              ? extraRead
+              : worst || variant === 'towers'
+                ? worstRead
+                : calm || quiet || unavailable
                   ? {
                       held: [],
                       more: 0,
                       moreIsLowerBound: false,
-                      approvals: JSON.stringify({
-                        requests: [
-                          {
-                            ...approval(
-                              'setting:github-connect',
-                              'Mirror main to synthetic/repo so reviewers on GitHub see each landing.',
-                              4,
-                            ),
-                            kind: 'setting',
-                            setting: { origin: 'github-connect' },
-                          },
-                        ],
-                        complete: true,
-                      }),
+                      approvals: JSON.stringify({ requests: [], complete: true }),
                       canDecide: true,
                       asks: [],
                     }
-                  : cardHistory
+                  : connect
                     ? {
-                        ...baseRead,
-                        held: [
-                          lane(97, 'dependency', 1, {
-                            title:
-                              'Reconcile every saved API record with the released schema before switching the project to the new import route',
-                            dependsOn: {
-                              laneId: uuid(98),
-                              title:
-                                'Backfill the saved audit trail and confirm the imported record keeps the original revision, author and linked release across all projects',
+                        held: [],
+                        more: 0,
+                        moreIsLowerBound: false,
+                        approvals: JSON.stringify({
+                          requests: [
+                            {
+                              ...approval(
+                                'setting:github-connect',
+                                'Mirror main to synthetic/repo so reviewers on GitHub see each landing.',
+                                4,
+                              ),
+                              kind: 'setting',
+                              setting: { origin: 'github-connect' },
                             },
-                          }),
-                          ...baseRead.held,
-                        ],
+                          ],
+                          complete: true,
+                        }),
+                        canDecide: true,
+                        asks: [],
                       }
-                    : baseRead;
+                    : cardHistory
+                      ? {
+                          ...baseRead,
+                          held: [
+                            lane(97, 'dependency', 1, {
+                              title:
+                                'Reconcile every saved API record with the released schema before switching the project to the new import route',
+                              dependsOn: {
+                                laneId: uuid(98),
+                                title:
+                                  'Backfill the saved audit trail and confirm the imported record keeps the original revision, author and linked release across all projects',
+                              },
+                            }),
+                            ...baseRead.held,
+                          ],
+                        }
+                      : baseRead;
 type Mark = LineFeed['lanes'][number];
 const moving = (n: number, stage: Mark['stage'], minutes: number, check?: string): Mark => ({
   laneId: uuid(400 + n),
@@ -784,9 +813,12 @@ const deployStatus: NeedsRead['deployStatus'] = {
 
 function Fixture() {
   const [read, setRead] = useState(variant === 'deploys' ? { ...initialRead, deployStatus } : initialRead);
+  const timed = variant === 'fix-attention';
+  const now = useAttentionClock(timed ? read : undefined, timed ? FIX_CLOCK : NOW);
   const [feed, setFeed] = useState(variant === 'loading' ? undefined : fixtureFeed);
   Object.assign(window, {
     drawerReads,
+    recoverMain: () => setRead(current => ({ ...current, notices: [] })),
     advanceFlow: (step: 'save' | 'land' | 'unrelated') =>
       setFeed(current => {
         const laneId = uuid(400);
@@ -811,7 +843,7 @@ function Fixture() {
       route={route}
       name={projectName}
       feed={feed}
-      needs={needsCount(read, NOW)}
+      needs={needsCount(read, now)}
       projects={null}
       controls={{ onPalette: () => {}, onKeys: () => {}, viewerHandle: 'sample-one', onPicker: () => {} }}
     >
@@ -880,7 +912,7 @@ function Fixture() {
             />
           ) : null
         }
-        now={NOW}
+        now={now}
       />
     </ProjectFrame>
   );

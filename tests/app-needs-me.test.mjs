@@ -344,7 +344,13 @@ test('e1633718: a Lane parked for the reader counts at once; one parked with no 
     { ...input, parked: [parked('p3', { ...named.park, to: 'sample-one/quiet-otter' }, 50)] },
     60,
   );
-  assert.equal(run.parked[0].head, 'Title p3 is parked for your agent run quiet-otter.');
+  assert.equal(run.parkedFyi[0].head, 'Title p3 is parked for your agent run quiet-otter.');
+  assert.equal(run.count, 0);
+  assert.equal(
+    countModule.needsAttention(input, early).nextAt,
+    early + 1,
+    'wake when the park needs the reader',
+  );
 });
 
 test('e1633718: the Lane page says who a parked Lane waits on, how long, and why', () => {
@@ -468,6 +474,11 @@ test('12fde646: a settings request an agent is blocked on counts in Needs you an
   );
   assert.equal(view.count, 1);
   assert.equal(needsCount(read([], [blocked, idle]), now).n, 1);
+  assert.equal(
+    countModule.needsAttention(read([], [blocked, idle]), now).nextAt,
+    blocked.waitUntil,
+    'wake when the request stops needing the reader',
+  );
   assert.equal(needsView(read([], [idle]), now).count, 0);
 });
 
@@ -488,7 +499,7 @@ test('12fde646: a blocked agent that gave up drops out of the count (mark cleare
   assert.equal(needsCount({ ...read([], [blocked]), canDecide: false }, now).n, 0);
 });
 
-test('a failed deploy becomes a request after the configured time and only if unowned', () => {
+test('a failed deploy becomes an investigation for the owner at the configured deadline', () => {
   const now = Date.parse('2026-11-26T11:00:00Z');
   const failure = {
     key: 'failure',
@@ -509,7 +520,9 @@ test('a failed deploy becomes a request after the configured time and only if un
     },
   };
   assert.equal(needsCount(input, now - 1).n, 0);
-  assert.equal(needsView(input, now - 1).count, 0);
+  const fresh = needsView(input, now - 1);
+  assert.equal(fresh.count, 0);
+  assert.equal(fresh.fyiNotices[0].links[0].to.anchor, 'deploy-status-api');
   assert.equal(needsCount(input, now).n, 1);
   const view = needsView(input, now);
   assert.equal(view.count, 1);
@@ -521,6 +534,110 @@ test('a failed deploy becomes a request after the configured time and only if un
   delete failure.attentionAt;
   assert.equal(needsView(input, now).count, 0);
   assert.equal(needsCount(input, now).n, 0);
+  failure.work = { kind: 'lane', id: 'deploy-repair', who: 'sample-one/quiet-otter' };
+  assert.equal(needsView(input, now - 1).fyiNotices[0].who, 'sample-one/quiet-otter');
+  assert.equal(needsView(input, now).notices[0].action.to.rest, 'deploy-repair');
+  assert.equal(needsView({ ...input, canDecide: false }, now).count, 0);
+});
+
+test('a Lane parked for an agent stays FYI for the person on that account', () => {
+  const parked = {
+    laneId: 'parked-agent',
+    intentId: 'parked-item',
+    title: 'Finish staging the repair',
+    actor: 'sample-one',
+    agent: 'quiet-otter',
+    park: { named: true, to: 'sample-one/amber-fox', by: 'sample-one', reason: 'Verify staging', at: 10 },
+    at: 10,
+  };
+  const input = { ...read([], []), parked: [parked] };
+  const now = 5 * 60 * 60_000;
+  const view = needsView(input, now);
+  assert.equal(view.parked.length, 0);
+  assert.equal(view.parkedFyi[0].park.to, 'sample-one/amber-fox');
+  assert.equal(needsCount(input, now).n, 0);
+});
+
+test('a review without a decision destination and a granted request stay FYI', () => {
+  const input = read(
+    [held(null, 'review', 1), held('granted', 'unknown', 2)],
+    [request('granted', 'lane', { needsOwner: false })],
+  );
+  const view = needsView(input, 3);
+  assert.deepEqual(view.now, []);
+  assert.equal(view.fyi.length, 2);
+  assert.equal(needsCount(input, 3).n, 0);
+});
+
+for (const why of [
+  'conflict',
+  'check-failed',
+  'infra',
+  'stale-head',
+  'rejected',
+  'dependency',
+  'withdrawn',
+  'unknown',
+]) {
+  test(`a ${why} hold without a viewer action stays FYI`, () => {
+    const input = read([held('agent-lane', why, 1)], []);
+    const view = needsView(input, 2);
+    assert.deepEqual(view.now, []);
+    assert.equal(view.fyi[0].why, why);
+    assert.equal(needsCount(input, 2).n, 0);
+  });
+}
+
+test('e5c142ef: an agent’s main fix stays FYI until the investigation window opens, then clears on recovery', () => {
+  const since = Date.parse('2026-11-26T10:00:00Z');
+  const deadline = since + 60 * 60_000;
+  const input = {
+    ...read([], []),
+    notices: [
+      {
+        id: 'fix-item',
+        kind: 'needs-fix',
+        summary: 'Main failed.',
+        next: null,
+        since,
+        tests: ['queue.test.mjs'],
+        receiptId: 'failed-receipt',
+        repair: {
+          laneId: 'repair-lane',
+          title: 'Repair the main check',
+          actor: 'sample-one',
+          agent: 'quiet-otter',
+        },
+      },
+    ],
+  };
+  const fresh = needsView(input, deadline - 1);
+  assert.equal(fresh.count, 0);
+  assert.deepEqual(needsCount(input, deadline - 1), { n: 0, atLeast: false });
+  assert.equal(fresh.notices.length, 0);
+  const [fyi] = fresh.fyiNotices;
+  assert.equal(fyi.who, 'sample-one/quiet-otter');
+  assert.match(fyi.head, /queue\.test\.mjs/);
+  assert.equal(
+    fyi.links.some(link => link.to.rest === 'repair-lane'),
+    true,
+  );
+  assert.equal(
+    fyi.links.some(link => link.to.rest === 'failed-receipt'),
+    true,
+  );
+
+  const late = needsView(input, deadline);
+  assert.deepEqual(needsCount(input, deadline), { n: 1, atLeast: false });
+  assert.equal(late.count, 1);
+  assert.equal(late.fyiNotices.length, 0);
+  assert.deepEqual(late.notices[0].action, {
+    label: 'Investigate the Lane',
+    to: { place: 'lanes', rest: 'repair-lane' },
+  });
+  assert.equal(needsView({ ...input, canDecide: false }, deadline).count, 0);
+  assert.equal(needsView({ ...input, notices: [] }, deadline).fyiNotices.length, 0);
+  assert.equal(needsCount({ ...input, notices: [] }, deadline).n, 0);
 });
 
 test('a1e71a48: session-directed and ended-session questions stay out of actionable asks and count; AnswerKeys maps error codes to plain words', async () => {
@@ -643,12 +760,12 @@ test('J08: a card is worded for a person, never from the board text: no raw id o
       tookOut: [{ id: uuid(11), laneId: uuid(12), title: uuid(13), by: 'sample-one', agent: null, at: 2000 }],
     };
     const view = needsView(input, 5000);
-    for (const row of view.notices) {
+    for (const row of [...view.notices, ...view.fyiNotices]) {
       assert.doesNotMatch(row.head, RAW, `${row.kind} head`);
       assert.doesNotMatch(row.next ?? '', RAW, `${row.kind} next`);
     }
     assert.equal(
-      view.notices[0].head,
+      view.fyiNotices[0].head,
       'A change was taken out of main.',
       'a bare summary falls back to plain words',
     );
@@ -683,7 +800,7 @@ test('J08: a card is worded for a person, never from the board text: no raw id o
     assert.match(fyi.rows[0].fact, /You took this change out/);
     assert.deepEqual(fyi.rows[0].taken, { laneId: uuid(12), intentId: uuid(11), title: uuid(13) });
     for (const row of fyi.rows) assert.doesNotMatch(`${row.title} ${row.fact}`, RAW);
-    assert.equal(view.count, 4, 'only the four current Needs you notices count');
+    assert.equal(view.count, 2, 'the mirror and direct revert offer are the available actions');
   });
 });
 

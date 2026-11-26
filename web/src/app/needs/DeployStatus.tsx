@@ -6,6 +6,7 @@ import { Glyph, Key } from '../../ds';
 import { A } from '../frames';
 import { hrefFor } from '../paths';
 import type { PlaceProps } from '../screens';
+import { deployStatusId } from './notice-attention';
 
 type Seen = (target: string, key: string) => Promise<void>;
 const sinceFormat = new Intl.DateTimeFormat(undefined, {
@@ -14,8 +15,6 @@ const sinceFormat = new Intl.DateTimeFormat(undefined, {
   hour: 'numeric',
   minute: '2-digit',
 });
-
-export const deployStatusId = (target: string) => `deploy-status-${target}`;
 
 export function DeployStatusLines({
   status,

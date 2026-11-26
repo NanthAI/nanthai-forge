@@ -23,6 +23,7 @@ export type PlaceProps = {
   viewerHandle: string | undefined;
   /** The shell's Needs me read (App.tsx), shared so a place never subscribes to it again. */
   needsRead?: NeedsRead | undefined;
+  needsAt?: number;
 };
 
 /** What an account page gets from the account frame. */

@@ -307,7 +307,7 @@ export function buildYard(
   needsYou: NeedsYou = NEEDS_UNKNOWN,
 ): Yard {
   const waitsOnYou = needsYou.lanes;
-  const waiting = waitingLanes(needsYou);
+  const waiting = waitingLanes(needsYou, feed.lanes);
   const meta = new Map(lanes.map(lane => [lane.laneId, lane]));
   const entries = currentEntries(queue?.entries ?? []);
   const perItem = new Map<string, number>();

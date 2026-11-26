@@ -43,6 +43,8 @@ const NOTE_CHARS = 240;
 /** The most revert / fix-needed notices one read lists (Item 12fde646): they sit on the project row this read already
  * holds, so listing them adds no read; the rest are counted by `noticesMore`. */
 const NEEDS_ME_NOTICE_LIMIT = 20;
+const REPAIR_LANE_LIMIT = 30;
+const REPAIR_LANE_BYTES = 64 * 1024;
 
 export const needsMeWhy = v.union(
   v.literal('conflict'),
@@ -121,6 +123,7 @@ export const needsMeResult = v.object({
         park: v.object({
           to: v.optional(v.string()),
           named: v.boolean(),
+          toAgent: v.optional(v.literal(true)),
           reason: v.string(),
           at: v.number(),
           by: v.string(),
@@ -141,6 +144,18 @@ export const needsMeResult = v.object({
         id: v.string(),
         summary: v.string(),
         next: v.union(v.string(), v.null()),
+        since: v.optional(v.number()),
+        receiptId: v.optional(v.string()),
+        tests: v.optional(v.array(v.string())),
+        moreTests: v.optional(v.number()),
+        repair: v.optional(
+          v.object({
+            laneId: v.string(),
+            title: v.union(v.string(), v.null()),
+            actor: v.union(v.string(), v.null()),
+            agent: v.union(v.string(), v.null()),
+          }),
+        ),
         /** A revert somebody ran, offered to the Lane's owner (J08): the card says who took which Lane out and when. */
         taken: v.optional(v.object(takenOutShape)),
       }),
@@ -177,6 +192,7 @@ export const needsMeResult = v.object({
     }),
   ),
   noticesMore: v.optional(v.literal(true)),
+  noticesMoreSince: v.optional(v.number()),
   /** What waits on a person in the project's sealed secrets (Item 41a0df87): removed people still listed, names to
    * rotate and waiting proposals, from the counter on the project row. Write members only; absent when zero. */
   secrets: v.optional(v.number()),
@@ -302,8 +318,50 @@ type Notice = {
   id: string;
   summary: string;
   next: string | null;
+  since?: number;
+  receiptId?: string;
+  tests?: string[];
+  moreTests?: number;
+  repair?: { laneId: string; title: string | null; actor: string; agent: string | null };
   taken?: TakenOut;
 };
+
+/** A bounded page supplies optional links to open work on the affected Intent. The notice controls attention
+ * even when this page cannot name the Lane. */
+async function addRepairLinks(ctx: QueryCtx, projectId: Id<'hostedProjects'>, notices: Notice[]) {
+  const since = new Map(
+    notices.flatMap(row =>
+      row.kind === 'needs-fix' && row.since !== undefined ? [[row.id, row.since] as const] : [],
+    ),
+  );
+  if (!since.size) return;
+  const earliest = Math.min(...since.values());
+  const { page } = await ctx.db
+    .query('projectHostedPresence')
+    .withIndex('by_project_and_at', q => q.eq('projectId', projectId).gte('at', earliest))
+    .order('desc')
+    .paginate({
+      cursor: null,
+      numItems: REPAIR_LANE_LIMIT,
+      maximumRowsRead: REPAIR_LANE_LIMIT,
+      maximumBytesRead: REPAIR_LANE_BYTES,
+    });
+  const repairs = new Map<string, NonNullable<Notice['repair']>>();
+  for (const lane of page) {
+    const at = since.get(lane.intentId);
+    if (at === undefined || lane.at < at || lane.park || repairs.has(lane.intentId)) continue;
+    repairs.set(lane.intentId, {
+      laneId: lane.laneId,
+      title: withoutRawId(lane.goal) || null,
+      actor: lane.actor,
+      agent: lane.agent ?? null,
+    });
+  }
+  for (const row of notices) {
+    const repair = repairs.get(row.id);
+    if (row.kind === 'needs-fix' && repair) row.repair = repair;
+  }
+}
 
 /** The GitHub mirror, only when it stopped on a conflict a person settles (GitHub's main moved, GitHub refused the push,
  * or the push failed): the same words as Settings → GitHub mirror. A mirror that is level, behind or retrying asks
@@ -433,7 +491,11 @@ export const read = query({
           title: await titleOf(row),
           actor: row.actor,
           agent: row.agent ?? null,
-          park: { ...row.park, named: Boolean(row.park.to) },
+          park: {
+            ...row.park,
+            named: Boolean(row.park.to),
+            ...(row.park.to?.includes('/') ? { toAgent: true as const } : {}),
+          },
           at: row.at,
         });
       }
@@ -449,8 +511,23 @@ export const read = query({
       const notices: Notice[] = [];
       const tookOut: (TakenOut & { id: string })[] = [];
       let noticesMore = false;
+      let noticesMoreSince = Infinity;
       if (team) {
-        noticesMore = fixes.length > NEEDS_ME_NOTICE_LIMIT;
+        for (const fix of fixes.slice(NEEDS_ME_NOTICE_LIMIT)) {
+          if (fix.state === 'needs-fix') {
+            const since = typeof fix.at === 'string' ? Date.parse(fix.at) : NaN;
+            if (owner && Number.isFinite(since)) noticesMoreSince = Math.min(noticesMoreSince, since);
+            continue;
+          }
+          const taken = takenOutOf(fix);
+          if (
+            taken?.owner === user.subject &&
+            taken.by !== user.subject &&
+            !taken.back &&
+            !taken.left.includes(user.subject)
+          )
+            noticesMore = true;
+        }
         for (const fix of fixes.slice(0, NEEDS_ME_NOTICE_LIMIT)) {
           // A revert somebody ran (J08): FYI for whoever ran it, an offer for the Lane's owner when that is someone
           // else, nothing for the rest; once brought back or left out it is gone. Entries without these fields (a main
@@ -472,12 +549,27 @@ export const read = query({
             id: fix.intentId,
             summary,
             next: typeof fix.undo === 'string' ? fix.undo.slice(0, NOTE_CHARS) : null,
+            ...(typeof fix.at === 'string' && Number.isFinite(Date.parse(fix.at))
+              ? { since: Date.parse(fix.at) }
+              : {}),
+            ...(typeof fix.receiptId === 'string' ? { receiptId: fix.receiptId } : {}),
+            ...(Array.isArray(fix.tests)
+              ? {
+                  tests: fix.tests
+                    .slice(0, 3)
+                    .filter((file: unknown): file is string => typeof file === 'string'),
+                }
+              : {}),
+            ...(typeof fix.moreTests === 'number' ? { moreTests: fix.moreTests } : {}),
           });
         }
       }
-      const mirror = team && owner ? await stoppedMirror(ctx, project) : null;
+      const [mirror, deployStatus] = await Promise.all([
+        team && owner ? stoppedMirror(ctx, project) : null,
+        deployStatusForViewer(ctx, project, user.subject),
+        addRepairLinks(ctx, projectId, notices),
+      ]);
       if (mirror) notices.push(mirror);
-      const deployStatus = await deployStatusForViewer(ctx, project, user.subject);
       return {
         held,
         parked,
@@ -485,6 +577,7 @@ export const read = query({
         ...(deployStatus ? { deployStatus } : {}),
         ...(tookOut.length ? { tookOut } : {}),
         ...(noticesMore ? { noticesMore: true as const } : {}),
+        ...(Number.isFinite(noticesMoreSince) ? { noticesMoreSince } : {}),
         ...(secrets ? { secrets } : {}),
         parkedMore: parks.length > NEEDS_ME_PARKED_LIMIT,
         more: Math.max(0, marks.length - NEEDS_ME_HELD_LIMIT),

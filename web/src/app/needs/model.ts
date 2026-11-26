@@ -7,43 +7,22 @@
 import type { StateWord } from '../../ds';
 import { landingHold } from '../../../../src/hosted-landing-hold';
 import { heldState, heldWhyState } from '../lane-state';
+import type { AttentionNotice } from './notice-attention';
 import {
-  approvalsTruncated,
-  blockedRequestIds,
-  deployRequests,
-  laneRequests,
+  needsAttention,
   parkHolder,
-  parkShown,
   parkWords,
-  waitsOnPerson,
+  type Approval,
   type Ask,
   type HeldLane,
   type HeldWhy,
   type NeedsRead,
-  type Notice,
   type Park,
   type ParkedLane,
   type Taken,
 } from './count';
 
-export type { Ask, HeldLane, HeldWhy, NeedsRead, Notice, Park, ParkedLane, Taken } from './count';
-/** One open request from the approvals payload (projectHostedApprovals `openApprovalRequests`). */
-export type Approval = {
-  laneId: string;
-  kind: 'lane' | 'fork' | 'setting';
-  needsOwner: boolean;
-  label: string;
-  nextStep: string;
-  reason?: string;
-  requester?: string;
-  agent?: string;
-  head: string;
-  at: string;
-  membership?: boolean;
-  setting?: { origin: string };
-  /** Until when an agent's wait holds this settings request (ms); future = an agent is blocked on it. */
-  waitUntil?: number;
-};
+export type { Approval, Ask, HeldLane, HeldWhy, NeedsRead, Notice, Park, ParkedLane, Taken } from './count';
 export type NowRow = HeldLane & {
   word: StateWord;
   /** The kind, in the state's colour: what holds it. */
@@ -80,7 +59,7 @@ export function protectedApprovalCopy(row: HeldLane) {
   return row.reviewCheck === 'not-configured' ? `${reason} No check is set up.` : reason;
 }
 /** Work reverted from main, work that needs a fix, or a stopped mirror (Item 12fde646): a shared-state decision. */
-export type NoticeRow = Notice & { word: StateWord; tag: string; head: string };
+export type NoticeRow = AttentionNotice & { word: StateWord; tag: string; head: string };
 /** A revert the reader ran: an FYI row with the Lane to bring back. */
 export type TookOutRow = Taken & { id: string };
 /** A Lane parked for the reader (Item e1633718): named to the reader, or the reader's own Lane parked with no one
@@ -101,10 +80,12 @@ export type NeedsView = {
   askedAhead?: AskRow[];
   /** Questions directed at an agent session (live or ended): never live answer keys here, never counted. */
   sessionAsks?: AskRow[];
-  /** Lanes parked for the reader that show now (count.ts `parkShown`): counted. */
+  /** Lanes parked for the reader that show now: counted. */
   parked: ParkedRow[];
+  parkedFyi: ParkedRow[];
   /** Shared-state decisions (work reverted from main, a stopped mirror): counted, and kept until the state changes. */
   notices: NoticeRow[];
+  fyiNotices: NoticeRow[];
   /** Reverts the reader ran themselves (J08): FYI rows, never counted. */
   tookOut: TookOutRow[];
   /** Held, but nothing for a person to decide (count.ts `waitsOnPerson`): FYI rows, never counted. */
@@ -213,15 +194,6 @@ export function laneTitle(
     : `Submission ${lane.submissionId?.slice(0, 8) ?? ''}`;
 }
 
-function approvalsOf(payload: string): { requests: Approval[]; complete: boolean } {
-  try {
-    const parsed = JSON.parse(payload) as { requests?: Approval[]; complete?: boolean };
-    return { requests: parsed.requests ?? [], complete: parsed.complete !== false };
-  } catch {
-    return { requests: [], complete: false };
-  }
-}
-
 const aheadWord = (request: Approval): StateWord =>
   request.kind === 'fork' ? 'Waiting its turn' : 'Needs you';
 function aheadHead(request: Approval) {
@@ -244,7 +216,9 @@ function parkedRow(row: ParkedLane): ParkedRow {
       ? `${title} is parked, no one named.`
       : run
         ? `${title} is parked for your agent run ${run}.`
-        : `${title} is parked for you.`,
+        : row.park.toAgent
+          ? `${title} is parked for an agent.`
+          : `${title} is parked for you.`,
     tag: row.park.named ? 'Parked' : 'Parked, no one named',
     who: row.park.by || null,
     mark: row.laneId.slice(0, 8),
@@ -277,24 +251,31 @@ function takenHead(taken: Taken) {
   const title = readable(taken.title?.replace(/\s+/g, ' ').trim());
   return `${whoOf(taken.by, taken.agent) ?? 'Someone'} took ${title ? `“${title}”` : 'a change'} out of main.`;
 }
-function noticeRow(notice: Notice): NoticeRow {
+function noticeRow(notice: AttentionNotice): NoticeRow {
+  const tests = notice.tests?.map(readable).filter(Boolean) ?? [];
+  const testSummary = tests.length
+    ? `${tests.join(', ')}${notice.moreTests ? ` and ${notice.moreTests} more` : ''} failed on main.`
+    : null;
+  const who = notice.who ?? whoOf(notice.repair?.actor, notice.repair?.agent);
   return {
     ...notice,
-    word: notice.kind === 'reverted' ? 'Check failed' : 'Needs you',
-    tag: noticeTags[notice.kind],
-    head: notice.taken ? takenHead(notice.taken) : (readable(notice.summary) ?? noticeFallback[notice.kind]),
+    ...(who ? { who } : {}),
+    word: notice.kind === 'reverted' || !notice.action ? 'Check failed' : 'Needs you',
+    tag: notice.kind === 'deploy' && !notice.action ? 'Deploy failed' : noticeTags[notice.kind],
+    head: notice.taken
+      ? takenHead(notice.taken)
+      : (testSummary ?? readable(notice.summary) ?? noticeFallback[notice.kind]),
     next: readable(notice.next),
   };
 }
 
-/** `now` decides only which Lanes parked with no one named show (count.ts `parkShown`); the page passes the time
- * its reads arrived, so nothing ticks. */
+/** Classify the read at the shell's draw time or the next recorded attention deadline. */
 export function needsView(read: NeedsRead, now = Date.now()): NeedsView {
-  const { requests, complete } = approvalsOf(read.approvals);
+  const attention = needsAttention(read, now);
+  const { requests, complete } = attention.approvals;
   const laneApprovals = new Map(
     requests.filter(request => request.kind === 'lane').map(request => [request.laneId, request]),
   );
-  const asked = laneRequests(read.approvals);
   const perItem = new Map<string, number>();
   for (const lane of read.held)
     if (lane.intentId) perItem.set(lane.intentId, (perItem.get(lane.intentId) ?? 0) + 1);
@@ -303,7 +284,7 @@ export function needsView(read: NeedsRead, now = Date.now()): NeedsView {
       const approval = laneApprovals.get(lane.laneId ?? '') ?? null;
       const why: HeldWhy = lane.why === 'unknown' && approval ? 'review' : lane.why;
       const who = whoOf(lane.actor, lane.agent);
-      const waits = waitsOnPerson({ why }, asked.has(lane.laneId ?? ''), read.canDecide);
+      const waits = attention.held.has(lane);
       // A dependency the read names: the Lane it lands after, by name (Item 9e748e41).
       const after =
         why === 'dependency' && lane.dependsOn
@@ -337,65 +318,36 @@ export function needsView(read: NeedsRead, now = Date.now()): NeedsView {
   const messageRows = (read.asks ?? [])
     .map(ask => ({ ...ask, who: whoOf(ask.actor, ask.agent) }))
     .sort((a, b) => a.at - b.at);
-  const asks = messageRows.filter(row => !row.ahead && !row.recipientSession);
+  const asks = messageRows.filter(row => attention.asks.has(row.id));
   const askedAhead = messageRows.filter(row => Boolean(row.ahead) && !row.recipientSession);
   const sessionAsks = messageRows.filter(row => Boolean(row.recipientSession));
-  const parked = (read.parked ?? [])
-    .filter(row => parkShown(row, now))
-    .map(parkedRow)
-    .sort((a, b) => a.since - b.since);
+  const parked = attention.parked.map(parkedRow).sort((a, b) => a.since - b.since);
   // A Lane request holds that Lane's landing, so it is drawn on the held row, never twice (rule 9). Asked before the
   // Lane holds a landing (request-approval, then wait), it holds nothing yet and is listed ahead (Item 0a99ab23).
   const heldLanes = new Set(read.held.map(lane => lane.laneId));
-  const blockedIds = blockedRequestIds(read.approvals, now, read.canDecide);
+  const blockedIds = attention.blocked;
   const listed = requests
     // Only a request still waiting for the owner is listed: a granted or declined one is the Lane page's to show
     // (Item 4f1f7984).
     .filter(request => request.needsOwner && (request.kind !== 'lane' || !heldLanes.has(request.laneId)));
   const ahead = listed.filter(request => !blockedIds.has(request.laneId)).map(aheadRow);
   const blocked = listed.filter(request => blockedIds.has(request.laneId)).map(aheadRow);
-  const deploys = deployRequests(read, now);
-  const notices = (read.notices ?? []).filter(notice => notice.kind !== 'deploy');
   return {
     now: waiting,
     asks,
     ...(askedAhead.length ? { askedAhead } : {}),
     ...(sessionAsks.length ? { sessionAsks } : {}),
     parked,
-    // Sealed secrets that wait on the reader (Item 41a0df87): one row that points at Settings, Secrets, where each is.
+    parkedFyi: attention.parkedFyi.map(parkedRow),
     tookOut: [...(read.tookOut ?? [])],
-    notices: [
-      ...notices.map(noticeRow),
-      ...deploys.map(noticeRow),
-      ...(read.secrets
-        ? [
-            noticeRow({
-              kind: 'secrets',
-              id: 'secrets',
-              summary: `${read.secrets.toLocaleString()} ${read.secrets === 1 ? 'secret change waits' : 'secret changes wait'} on you.`,
-              next: 'Each is done in a terminal; the Secrets page lists them.',
-            }),
-          ]
-        : []),
-    ],
+    notices: attention.notices.map(noticeRow),
+    fyiNotices: attention.fyiNotices.map(noticeRow),
     fyi,
     ahead,
     blocked,
-    count:
-      waiting.length +
-      asks.length +
-      parked.length +
-      blocked.length +
-      notices.length +
-      deploys.length +
-      (read.secrets ?? 0),
+    count: attention.n,
     atLeast: read.more > 0 || read.parkedMore === true || read.asksMore === true,
-    countAtLeast:
-      read.more > 0 ||
-      read.parkedMore === true ||
-      read.asksMore === true ||
-      read.noticesMore === true ||
-      approvalsTruncated(read.approvals),
+    countAtLeast: attention.atLeast,
     approvalsComplete: complete,
   };
 }

@@ -50,6 +50,7 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
       hash = '',
       query = {},
       locale,
+      clock,
       ready = '.dock[data-dock] .region',
     } = {},
   ) {
@@ -78,6 +79,7 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
       } catch {}
     });
     const page = await context.newPage();
+    if (clock) await page.clock.install({ time: clock });
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     page.on('console', message => message.type() === 'error' && errors.push(message.text()));
@@ -854,7 +856,7 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
     );
 
     await t.test(
-      '12fde646: work reverted from main and a stopped mirror are in Needs you, counted, and link to where to act',
+      'an audit revert keeps its link in FYI and a stopped mirror counts in Needs you',
       async t => {
         const page = await open(t, DESK, 'notices');
         const shell = await page.locator('header.top a.needs .cnt').textContent();
@@ -864,16 +866,15 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
           shell,
           'the shell count is the page count',
         );
-        assert.equal(shell, '7', 'the 4 other decisions plus the revert, the fix and the mirror');
+        assert.equal(shell, '5', 'the 4 other decisions plus the mirror');
         const rows = needs.locator('.dec');
         // Notices come first, so they are among the rows shown before "Show more".
         const tags = await rows.locator('.needs-card-status').allTextContents();
-        for (const tag of ['Reverted from main', 'Fix needed', 'GitHub mirror'])
-          assert.ok(
-            tags.some(text => text.includes(tag)),
-            `${tag} is a Needs you row`,
-          );
-        const reverted = rows.filter({ hasText: 'Reverted receipt 3f2a9c10' });
+        assert.ok(tags.some(text => text.includes('GitHub mirror')));
+        assert.ok(tags.every(text => !/Fix needed|Reverted from main/.test(text)));
+        const reverted = region(page, 'FYI')
+          .locator('.fyi-row')
+          .filter({ hasText: 'Reverted receipt 3f2a9c10' });
         assert.equal(
           await reverted.locator('.why').count(),
           0,
@@ -902,6 +903,51 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
     );
 
     await t.test(
+      'e5c142ef: a fresh agent fix is quiet and linked in FYI, then offers investigation until main recovers',
+      async t => {
+        const page = await open(t, DESK, 'fix-attention', 'dark', {
+          hash: '#fyi',
+          clock: '2026-11-17T15:00:00Z',
+        });
+        const needs = region(page, 'Needs you');
+        const badge = page.locator('header.top a.needs .cnt');
+        const fresh = region(page, 'FYI')
+          .locator('.fyi-row')
+          .filter({ hasText: 'queue.test.mjs failed on main' });
+        await fresh.waitFor();
+        assert.equal(await badge.textContent(), '0');
+        assert.equal(await needs.getAttribute('data-weight'), 'watch');
+        assert.equal(await needs.getByText('Fix needed', { exact: true }).count(), 0);
+        const agent = fresh.locator('.who[data-kind="agent"]');
+        assert.equal(await agent.locator('.a-run').textContent(), 'quiet-otter');
+        assert.equal(await agent.getByText('@sample-one', { exact: true }).count(), 1);
+        assert.match(
+          await fresh.getByRole('link', { name: 'Open the Lane' }).getAttribute('href'),
+          /\/lanes\/.*730$/,
+        );
+        assert.match(
+          await fresh.getByRole('link', { name: 'View the landing' }).getAttribute('href'),
+          /\/code\/.*732$/,
+        );
+
+        await page.clock.fastForward(40 * 60_000);
+        const investigate = needs.getByRole('link', { name: 'Investigate the Lane' });
+        await investigate.waitFor();
+        assert.match(await investigate.getAttribute('href'), /\/lanes\/.*730$/);
+        assert.equal(await badge.textContent(), '1');
+        assert.equal(await needs.locator('.ph .cnt').textContent(), '1');
+        assert.equal(await needs.getAttribute('data-weight'), 'act');
+        assert.equal(await fresh.count(), 0);
+
+        await page.evaluate(() => window.recoverMain());
+        await investigate.waitFor({ state: 'detached' });
+        assert.equal(await badge.textContent(), '0');
+        assert.equal(await needs.getAttribute('data-weight'), 'watch');
+        assert.equal(await page.evaluate(() => window.intervals), 0);
+      },
+    );
+
+    await t.test(
       'J08: a change taken out of main is FYI for who took it and an offer for the Lane owner; no card shows a raw id or an agent command',
       async t => {
         const raw = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|\bnforge\b/i;
@@ -912,11 +958,7 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
             const needs = region(page, 'Needs you');
             const fyi = region(page, 'FYI');
             const shell = await page.locator('header.top a.needs .cnt').textContent();
-            assert.equal(
-              shell,
-              '3',
-              `${label}: the offer and the two audit notices count; the FYI row does not`,
-            );
+            assert.equal(shell, '1', `${label}: only the direct offer counts`);
             // The offer says who took which Lane out and when, with two answers; nothing is held for it.
             const offer = needs.locator('.dec', { hasText: 'Stream parser: handle split UTF-8' });
             assert.equal(await offer.locator('h3').textContent(), 'Stream parser: handle split UTF-8', label);
@@ -941,9 +983,12 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
               label,
             );
             assert.equal(
-              await page.locator('b', { hasText: 'until you decide' }).first().textContent(),
-              '2 things hold work until you decide.',
-              `${label}: the headline counts the two holds, not the offer`,
+              await page
+                .locator('b', { hasText: 'A change you own was taken out of main.' })
+                .first()
+                .textContent(),
+              'A change you own was taken out of main.',
+              `${label}: the headline describes the offer`,
             );
             // The reader's own revert is an FYI row, never a Needs you card.
             assert.equal(await needs.getByText('Retry the upload on a dropped socket').count(), 0, label);

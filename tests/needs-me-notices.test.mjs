@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 // Item 12fde646: Needs you holds the shared-state decisions the rule keeps there. Work reverted from main (or still
-// needing a fix) and a GitHub mirror that stopped on a conflict come from rows the read already holds, bounded, and
-// count like any other decision; a mirror that only lags asks nobody, and only the owner is told about the mirror.
+// needing a fix) and a GitHub mirror that stopped on a conflict come from rows the read already holds. The stop
+// counts for the owner; a fix has a recovery window and keeps its evidence in FYI.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -51,14 +51,34 @@ function stopped() {
 }
 const read = (f, actor = 'owner') => f.call('needs', needs.read, { projectId: f.projectId }, actor);
 
-test('work reverted from main and a stopped mirror are in Needs you, counted, and the mirror is the owner’s', async () => {
+test('only the mirror counts until the main fix window passes, and an editing agent Lane is linked', async () => {
   const f = stopped();
   const ids = [randomUUID(), randomUUID()];
+  const at = '2026-11-26T10:00:00.000Z';
+  const receiptId = randomUUID();
   f.patch('hostedProjects', f.projectId, {
     needsFix: {
       [ids[0]]: fix('reverted', 'Reverted receipt r1: a.test.mjs failed.'),
-      [ids[1]]: fix('needs-fix', 'Fix needed for receipt r2.'),
+      [ids[1]]: JSON.stringify({
+        ...JSON.parse(fix('needs-fix', 'Fix needed for receipt r2.')),
+        at,
+        receiptId,
+        tests: ['queue.test.mjs'],
+        moreTests: 2,
+      }),
     },
+  });
+  const repairLane = randomUUID();
+  f.insert('projectHostedPresence', {
+    projectId: f.projectId,
+    laneId: repairLane,
+    intentId: ids[1],
+    actor: 'owner',
+    agent: 'quiet-otter',
+    goal: 'Repair the queue check',
+    paths: [],
+    pathCount: 0,
+    at: Date.parse(at) + 1000,
   });
   const mine = await read(f);
   assert.deepEqual(mine.notices.map(({ kind, id }) => [kind, id]).sort(), [
@@ -70,12 +90,24 @@ test('work reverted from main and a stopped mirror are in Needs you, counted, an
     mine.notices.find(notice => notice.kind === 'mirror').summary,
     /GitHub’s main moved without Forge/,
   );
-  const view = needsView(mine);
-  assert.equal(view.notices.length, 3);
-  assert.deepEqual(needsCount(mine), { n: 3, atLeast: false }, 'the shell count is the page count');
+  const now = Date.parse(at);
+  const view = needsView(mine, now);
+  assert.equal(mine.held.length, 0);
+  assert.equal(view.notices.length, 1);
+  assert.deepEqual(needsCount(mine, now), { n: 1, atLeast: false }, 'the shell count is the page count');
+  assert.deepEqual(view.fyiNotices.map(row => row.kind).sort(), ['needs-fix', 'reverted']);
+  const repair = view.fyiNotices.find(row => row.kind === 'needs-fix');
+  assert.equal(repair.since, now);
+  assert.equal(repair.receiptId, receiptId);
+  assert.equal(repair.head, 'queue.test.mjs and 2 more failed on main.');
+  assert.equal(repair.repair.laneId, repairLane);
+  assert.equal(repair.repair.agent, 'quiet-otter');
+  const overdue = needsView(mine, now + 60 * 60_000).notices.find(row => row.kind === 'needs-fix');
+  assert.equal(overdue.action.label, 'Investigate the Lane');
+  assert.equal(overdue.action.to.rest, repairLane);
 });
 
-test('a mirror that only lags asks nobody, and notices are bounded with the rest counted', async () => {
+test('a mirror that only lags asks nobody, and FYI overflow leaves the badge exact', async () => {
   const f = mirrorControlsFixture(false, 'synthetic/mirror');
   const many = Object.fromEntries(
     Array.from({ length: 25 }, () => [randomUUID(), fix('reverted', 'Reverted.')]),
@@ -83,12 +115,12 @@ test('a mirror that only lags asks nobody, and notices are bounded with the rest
   f.patch('hostedProjects', f.projectId, { needsFix: many });
   const reply = await read(f);
   assert.equal(reply.notices.length, 20, 'at most 20 are listed');
-  assert.equal(reply.noticesMore, true);
+  assert.equal(reply.noticesMore, undefined);
   assert(
     reply.notices.every(notice => notice.kind === 'reverted'),
     'no mirror notice while the mirror is level',
   );
-  assert.deepEqual(needsCount(reply), { n: 20, atLeast: true });
+  assert.deepEqual(needsCount(reply), { n: 0, atLeast: false });
 });
 
 test('a reader of a public project who cannot write sees no notice (failing test names stay with the team)', async () => {
@@ -103,14 +135,20 @@ test('a reader of a public project who cannot write sees no notice (failing test
   assert.equal(needsCount(stranger).n, 0);
 });
 
-test('more notices than the read lists make the Needs you count a lower bound, not the Held page’s Lane count', async () => {
+test('overdue investigation notices beyond the read limit make the count a lower bound', async () => {
   const f = mirrorControlsFixture(false, 'synthetic/mirror');
+  const at = '2026-11-26T10:00:00.000Z';
   f.patch('hostedProjects', f.projectId, {
     needsFix: Object.fromEntries(
-      Array.from({ length: 21 }, () => [randomUUID(), fix('reverted', 'Reverted.')]),
+      Array.from({ length: 21 }, () => [
+        randomUUID(),
+        JSON.stringify({ ...JSON.parse(fix('needs-fix', 'The check on main failed.')), at }),
+      ]),
     ),
   });
-  const view = needsView(await read(f));
+  const reply = await read(f);
+  assert.deepEqual(needsCount(reply, Date.parse(at)), { n: 0, atLeast: false });
+  const view = needsView(reply, Date.parse(at) + 60 * 60_000);
   assert.equal(view.countAtLeast, true);
   assert.match(needsSentence(view).bold, /^At least 20 things hold work/);
   assert.equal(view.atLeast, false, 'the held-Lane read was complete');

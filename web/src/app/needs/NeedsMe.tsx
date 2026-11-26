@@ -28,7 +28,18 @@ import { useMutation, useQuery } from 'convex/react';
 import { makeFunctionReference } from 'convex/server';
 import { api } from '../../../../convex/_generated/api';
 import type { Id } from '../../../../convex/_generated/dataModel';
-import { Band, Dock, Key, Region, Standing, State, useDockLayout, useFold, type DockLayout } from '../../ds';
+import {
+  Band,
+  Dock,
+  Key,
+  Region,
+  Standing,
+  State,
+  Who,
+  useDockLayout,
+  useFold,
+  type DockLayout,
+} from '../../ds';
 import { Announcer, useAnnounce } from '../../ds/behaviour/announce';
 import { usePageCritical } from '../../ui/page-critical';
 import { A } from '../frames';
@@ -50,9 +61,8 @@ import { navigate, useSearch } from '../router';
 import { AnswerKeys, HandBackDetails } from '../discussion/ConversationEntry';
 import { answerFailureReason, type Answer, type DismissAsk } from '../discussion/conversation';
 import { useAnswer, useDismissAsk } from '../discussion/useConversation';
-import { needsRead } from './count';
-import { DeployStatusLines, deployStatusId } from './DeployStatus';
-import { useDeployAttentionClock } from './deploy-attention-clock';
+import { DeployStatusLines } from './DeployStatus';
+import type { NoticeLink } from './notice-attention';
 import { focusHref, fyiView, type FyiRead, type FyiState } from './fyi';
 import { Capped, CAP } from './Capped';
 import { fyiDismiss, fyiRead } from './fyi-reads';
@@ -110,8 +120,9 @@ export default function NeedsMe({
   feedError,
   feedReadAt,
   viewerHandle,
+  needsRead: read,
+  needsAt,
 }: PlaceProps) {
-  const read = useQuery(needsRead, { projectId });
   const markSeen = useMutation(markDeploySeen);
   const seeDeploy = async (target: string, key: string) => {
     await markSeen({ projectId, target, key });
@@ -156,6 +167,7 @@ export default function NeedsMe({
         drawer={props => <StationDrawer {...props} projectId={projectId} />}
         conflicts={conflicts}
         read={read}
+        attentionAt={needsAt}
         seeDeploy={seeDeploy}
         fyi={fyi}
         counts={counts}
@@ -241,6 +253,7 @@ export function NeedsMeView({
   settingDetail,
   seeDeploy,
   conflicts,
+  attentionAt,
   now,
 }: Pick<PlaceProps, 'route' | 'projectName' | 'feed' | 'feedError' | 'feedReadAt'> & {
   drawer?: (props: DrawerProps) => ReactNode;
@@ -265,15 +278,15 @@ export function NeedsMeView({
   seeDeploy?: (target: string, key: string) => Promise<void>;
   /** Each Conflict Lane's open notices, for its hover on the picture. */
   conflicts?: ReadonlyMap<string, readonly ConflictNote[] | undefined>;
-  /** The drawing time, for tests; otherwise the time the reads arrived (nothing ticks). */
+  /** The shell's classification time, shared with the badge. */
+  attentionAt?: number | undefined;
+  /** The drawing time, for tests; otherwise the time the reads arrived. */
   now?: number;
 }) {
-  // Drawn times are relative to when the view was drawn; nothing ticks (idle costs nothing). A Lane parked with no one
-  // named shows once 4 h idle by this same time (count.ts parkShown).
-  // The line feed draws the picture's day, so a new landing redraws against a new time too.
   const readAt = useMemo(() => now ?? Date.now(), [read, fyi, feed, now]);
-  const drawnAt = useDeployAttentionClock(now === undefined ? read?.deployStatus : undefined, readAt);
-  const view = useMemo(() => (read ? needsView(read, drawnAt) : null), [read, drawnAt]);
+  const classifiedAt = attentionAt ?? readAt;
+  const drawnAt = Math.max(classifiedAt, readAt);
+  const view = useMemo(() => (read ? needsView(read, classifiedAt) : null), [read, classifiedAt]);
   const items = progressOf(counts);
   const phone = useSyncExternalStore(
     watchPhone,
@@ -291,12 +304,16 @@ export function NeedsMeView({
     if (!show) announce(text);
   };
   const list = useMemo(
-    () => (fyi && view ? fyiView(fyi, view.fyi, drawnAt, false, view.tookOut) : null),
+    () =>
+      fyi && view
+        ? fyiView(fyi, view.fyi, drawnAt, false, view.tookOut, view.fyiNotices, view.parkedFyi)
+        : null,
     [fyi, view, drawnAt],
   );
   // Open by default (owner 2026-11-19): a folded Loose ends left an empty-looking box beside FYI.
   const looseFold = useFold('needs-loose', true);
   const at = (patch: Partial<ProjectRoute>) => hrefFor({ ...route, section: '', rest: '', ...patch });
+  const noticeHref = ({ anchor, ...to }: NoticeLink['to']) => (anchor ? `#${anchor}` : at(to));
   const open = useSearch().get('open');
   const section = location.hash;
   const previousSection = useRef('');
@@ -452,6 +469,7 @@ export function NeedsMeView({
                     ...view.now.map(r => r.landing?.submissionId ?? r.laneId),
                     ...view.asks.map(r => r.id),
                     ...view.parked.map(r => r.laneId),
+                    ...view.blocked.map(r => r.laneId),
                     ...view.notices.map(r => `${r.kind}:${r.id}`),
                   ].join()
                 : 0
@@ -492,15 +510,7 @@ export function NeedsMeView({
                               taken={taken}
                               announce={announce}
                               drawnAt={drawnAt}
-                              href={
-                                row.taken
-                                  ? at({ place: 'lanes', rest: row.taken.laneId })
-                                  : row.kind === 'mirror'
-                                    ? at({ place: 'settings', section: 'mirror' })
-                                    : row.kind === 'secrets'
-                                      ? at({ place: 'settings', section: 'secrets' })
-                                      : at({ place: 'plan', rest: row.id })
-                              }
+                              href={noticeHref}
                             />
                           ) : 'question' in row ? (
                             <Ahead
@@ -594,7 +604,7 @@ export function NeedsMeView({
                       <NoticeCard
                         key={row.id}
                         row={row}
-                        href={`#${deployStatusId(row.id)}`}
+                        href={noticeHref}
                         taken={taken}
                         announce={announce}
                         drawnAt={drawnAt}
@@ -703,7 +713,9 @@ export function NeedsMeView({
             })
           }
           history={() =>
-            fyi && view ? fyiView(fyi, [...view.now, ...view.fyi], drawnAt, true, view.tookOut) : null
+            fyi && view
+              ? fyiView(fyi, view.fyi, drawnAt, true, view.tookOut, view.fyiNotices, view.parkedFyi)
+              : null
           }
           sectionLinked={section === '#fyi'}
           headingRef={fyiHeading}
@@ -920,12 +932,15 @@ function NoticeCard({
   drawnAt,
 }: {
   row: NoticeRow;
-  href: string;
+  href: (to: NoticeLink['to']) => string;
   taken: TakenActions | undefined;
   announce: (text: string) => void;
   drawnAt: number;
 }) {
   const offer = row.taken;
+  const since = offer?.at ?? row.since;
+  const action = row.action;
+  const actionHref = action ? href(action.to) : undefined;
   return (
     <NeedsCard
       className="dec"
@@ -933,37 +948,44 @@ function NoticeCard({
       next={offer || row.kind === 'deploy' ? null : row.next}
       status={
         <>
-          {offer ? <span>{waited(offer.at, drawnAt)} ago</span> : null}
+          {since !== undefined ? <span>{waited(since, drawnAt)} ago</span> : null}
           <State word={offer ? 'Done' : row.word}>{offer ? 'Taken out of main' : row.tag}</State>
         </>
       }
       actions={
         <>
           {offer ? (
-            <>
-              <TakenKeys
-                target={{ laneId: offer.laneId, intentId: row.id }}
-                title={offer.title}
-                actions={taken}
-                announce={announce}
-              />
-              <A className="btn ghost sm" href={href}>
-                Open the Lane
+            <TakenKeys
+              target={{ laneId: offer.laneId, intentId: row.id }}
+              title={offer.title}
+              actions={taken}
+              announce={announce}
+            />
+          ) : null}
+          {action ? (
+            action.to.anchor ? (
+              <a className="btn ghost sm" href={actionHref}>
+                {action.label}
+              </a>
+            ) : (
+              <A className="btn ghost sm" href={actionHref!}>
+                {action.label}
               </A>
-            </>
-          ) : row.kind === 'deploy' ? (
-            <a className="btn ghost sm" href={href}>
-              View deploy status
-            </a>
-          ) : (
-            <A className="btn ghost sm" href={href}>
-              {row.kind === 'mirror'
-                ? 'Open the mirror'
-                : row.kind === 'secrets'
-                  ? 'Open Secrets'
-                  : 'Open the Item'}
-            </A>
-          )}
+            )
+          ) : null}
+          {row.links
+            .filter(link => href(link.to) !== actionHref)
+            .map(link =>
+              link.to.anchor ? (
+                <a key={link.label} className="lk" href={href(link.to)}>
+                  {link.label}
+                </a>
+              ) : (
+                <A key={link.label} className="lk" href={href(link.to)}>
+                  {link.label}
+                </A>
+              ),
+            )}
         </>
       }
     >
@@ -972,9 +994,11 @@ function NoticeCard({
           {whoOf(offer.by, offer.agent) ?? 'Someone'} took this change out. Its Lane keeps its saved work.
           Bring it back to fix it and land it again, or leave it out.
         </p>
-      ) : row.kind === 'deploy' && row.next ? (
+      ) : row.who || (row.kind === 'deploy' && row.next) ? (
         <p className="meta" dir="auto">
-          {row.next}
+          {row.who ? <Who handle={row.who} /> : null}
+          {row.who && row.kind === 'deploy' && row.next ? ' · ' : null}
+          {row.kind === 'deploy' ? row.next : null}
         </p>
       ) : null}
     </NeedsCard>
