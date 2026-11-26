@@ -8,6 +8,7 @@ import { batchesFixture, states } from '../hosted-landing-batches-fixture.mjs';
 import { landingApi } from '../hosted-finish-fixture.mjs';
 import { metricAliasProjectionCounts } from '../observer-projection-budget.mjs';
 import { storageClock } from '../storage-clock.mjs';
+import { captureWriteSites } from '../landing-cost-write-sites.mjs';
 export const overlapBase = 'export const a = 0;\n// gap\nexport const b = 0;\n';
 export const overlapEdits = [
   'export const a = 1;\n// gap\nexport const b = 0;\n',
@@ -39,6 +40,7 @@ export async function drive(
     fixture = {},
     prepare,
     afterStep,
+    onWriteSites,
   },
 ) {
   // Check passes, compose stamps and scheduled tasks use the same simulated time.
@@ -54,6 +56,7 @@ export async function drive(
     count: 0,
   });
   const entries = f.tables.hostedProjects.get(f.projectId).checkEntries;
+  const writeSites = onWriteSites && captureWriteSites(f);
   if (ownerApprovalPaths) {
     const policy = f.tables.hostedProjects.get(f.projectId).autonomyPolicy;
     f.patch('hostedProjects', f.projectId, {
@@ -190,5 +193,6 @@ export async function drive(
       }),
     ),
   );
+  onWriteSites?.(writeSites);
   return result;
 }

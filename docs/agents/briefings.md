@@ -169,6 +169,13 @@ A brief or a lead comment on the Issue can override one for that slice.
   band. Past it, the guard names the scenario and the delta, and the change re-pins that row with
   its reason; a feature-sized move (a new fact on a row, an extra read) always does. Where the band
   numbers come from is written beside `WIRED_BYTE_BAND` in the file.
+  These ratchets and the scripted landing mix show write-byte changes by fixture transaction, writer
+  and destination table. The write trace uses raw document bytes, so its totals include writes accounted
+  for separately by some ledger rows. To refresh a trace when its cost pin changes, run the affected
+  test with `FORGE_RECORD_LANDING_COST_WRITE_SITES=1`. The `writeSites` diagnostic gives the row and its
+  named byte totals. In `tests/landing-cost-write-baseline.mjs`, the first data line lists the sites
+  in column order and each following line holds a row name and its byte vector. Append new sites to the
+  list and update the affected vector in that order. An absent site has zero bytes.
 - **Metrics reads are narrow; wide ones are the lead's.** Measure your own slice with
   `nforge agent ROOT metrics '{"from":"YOUR_START_UTC"}'`: it defaults to the last 3 hours with
   90 minutes of context and refuses more than 12 hours or `contextDays` above 0.25 before any server

@@ -23,6 +23,7 @@ import { WIRED, wiredProblems } from './keep-the-run-scenarios.mjs';
 import { metricAliasProjectionCounts } from './observer-projection-budget.mjs';
 import { storageClock } from './storage-clock.mjs';
 import { armed, assertQueueProgress } from './queue-sim/invariants.mjs';
+import { captureWriteSites, reportWriteSites, writeSiteDelta } from './landing-cost-write-sites.mjs';
 const stale = await import(moduleUrl('../convex/projectHostedLandingStaleChecks.ts'));
 const mainAudit = await import(moduleUrl('../convex/projectHostedMainAudit.ts'));
 const { summary: checkSummary } = await import(moduleUrl('../convex/projectHostedCheckRead.ts'));
@@ -121,7 +122,17 @@ async function drainExcept(f, held, stop = () => false) {
  * effects are drained when `stop` says so. */
 async function mainMoves(
   t,
-  { paths, contents, mode = 'strict', count = 2, minutes = 12, concurrency = 1, held = new Set(), stop } = {},
+  {
+    paths,
+    contents,
+    mode = 'strict',
+    count = 2,
+    minutes = 12,
+    concurrency = 1,
+    held = new Set(),
+    stop,
+    traceWrites = false,
+  } = {},
 ) {
   const f = await fixture(t, {
     memberPaths: paths,
@@ -149,11 +160,12 @@ async function mainMoves(
     firstChecks: queueRow(f)?.checkHistory?.first,
     calls: f.counts.length,
   };
+  const writeSites = traceWrites ? captureWriteSites(f) : undefined;
   await f.rawChecks.pass(await f.rawChecks.activate(runs[0].id));
   await drain(f, task => task.name === 'projectHostedAcceptance:complete');
   await drainExcept(f, held, stop ? task => stop(f, task) : undefined);
   assert.equal(current(f, 0).phase, 'landed');
-  return { f, runs, before };
+  return { f, runs, before, writeSites };
 }
 /** A red run: a test fails on the run already running (the fixture's `fail` would re-activate it). */
 const failRun = async (f, id) => {
@@ -728,7 +740,7 @@ test('A5: an empty sweep with the switch on reads zero DB bytes and schedules no
  * runner's ingest and source resolve (17.4 calls), which the table credits. */
 async function lifecycle(t, { paths, mode, red, on }) {
   if (!on) switchOff(t);
-  const { f, runs, before } = await mainMoves(t, { paths, mode });
+  const { f, runs, before, writeSites } = await mainMoves(t, { paths, mode, traceWrites: true });
   const kept = runOf(f, runs[1].id).status === 'running';
   for (let wave = 0; states(f).some(s => s.observation.state === 'pending'); wave++) {
     assert(wave < 20, JSON.stringify(states(f)));
@@ -748,6 +760,7 @@ async function lifecycle(t, { paths, mode, red, on }) {
     calls: costs.length,
     readBytes: costs.reduce((sum, cost) => sum + cost.readBytes, 0),
     writeBytes: costs.reduce((sum, cost) => sum + cost.writeBytes, 0),
+    writeSites,
     aliasWriteBytes: costs.reduce((sum, cost) => sum + metricAliasProjectionCounts(cost).writeBytes, 0),
   };
 }
@@ -762,7 +775,9 @@ for (const [name, options, kind] of [
     storageClock(t, { elapsed: true });
     const retire = await lifecycle(t, { ...options, on: false });
     const keep = await lifecycle(t, { ...options, on: true });
-    t.diagnostic(JSON.stringify({ name, retire, keep }));
+    const { writeSites: retireSites, ...retireTotals } = retire;
+    const { writeSites: keepSites, ...keepTotals } = keep;
+    t.diagnostic(JSON.stringify({ name, retire: retireTotals, keep: keepTotals }));
     assert.equal(retire.kept, false);
     assert.equal(keep.kept, true);
     assert.equal(keep.phase, retire.phase, 'the same outcome');
@@ -780,6 +795,7 @@ for (const [name, options, kind] of [
     // band fails too, so WIRED and the prices built on it (keep-the-run-scenarios.mjs) ratchet down with
     // the change that earned it. Item 168e4ed8: small stored-byte growth no longer re-pins the row.
     const problems = wiredProblems(kind, WIRED[kind], delta);
+    reportWriteSites(t, `WIRED.${kind}`, writeSiteDelta(retireSites, keepSites), problems.length > 0);
     assert.deepEqual(problems, [], problems.join('\n'));
   });
 

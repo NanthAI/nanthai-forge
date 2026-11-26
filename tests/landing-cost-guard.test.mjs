@@ -37,6 +37,7 @@ import {
 import { speedBudgets } from '../dist/speed-budgets.js';
 import { addGuardFailure, ranEvidence } from '../dist/preflight-guard-learning.js';
 import { formatCostVerdicts, judgeCost, judgeCosts } from '../dist/cost-budgets.js';
+import { captureWriteSites, reportWriteSites } from './landing-cost-write-sites.mjs';
 
 const prior = Object.fromEntries(Object.keys(synthetic).map(k => [k, process.env[k]]));
 test.beforeEach(t => {
@@ -210,8 +211,15 @@ test('S3 report callbacks retain only a nine-index header and never touch report
  * mutations), action executions (scheduled and nested), R2 requests by class and bytes put. */
 function meter(
   f,
-  { extraShard = false, extraSetupSeconds = 0, extraR2Read = false, checksumEcho = false } = {},
+  {
+    extraShard = false,
+    extraSetupSeconds = 0,
+    extraR2Read = false,
+    checksumEcho = false,
+    traceWrites = false,
+  } = {},
 ) {
+  const writeSites = traceWrites ? captureWriteSites(f) : undefined;
   // Signed synthetic runner usage, including job-side setup, makes shard fanout visible even
   // when the number of check runs is unchanged. No wall-clock measurement or real sleep.
   if (extraShard) f.rawChecks.setPlanOverrides({ shardCount: 3 });
@@ -342,6 +350,7 @@ function meter(
           return tables;
         }, {}),
         writeBytes: sum('writeBytes'),
+        writeSites,
         feed: {
           events: f.tables.projectFeedEvents.size,
           arrivalIndexes: indexStorage(
@@ -858,10 +867,20 @@ test('one cohort uploads its exact metadata in a single drive and resumes before
 
 let baseline;
 test('cost guard: the scripted landing mix stays within its per-landing cost ledger', async t => {
-  const started = performance.now();
-  baseline = await measureLandingCosts(t, { indexExports: true });
+  const wallTime = performance.now.bind(performance);
+  const started = wallTime();
+  fixedClock(t, { elapsed: true });
+  baseline = await measureLandingCosts(t, { indexExports: true, traceWrites: true });
+  const verdicts = judgeCosts(costs, costGuard, 'landing-fixture', baseline.measured);
+  const ledgerChanged = verdicts.some(v => v.status !== 'pass');
+  const scenarioTotals = Object.fromEntries(
+    Object.entries(baseline.scenarios).map(([name, { writeSites: sites, ...totals }]) => {
+      reportWriteSites(t, `landing-fixture.${name}`, sites, ledgerChanged);
+      return [name, totals];
+    }),
+  );
   t.diagnostic(`liveLinePairedMix ${JSON.stringify(baseline.measured)}`);
-  t.diagnostic(`scenarios ${JSON.stringify(baseline.scenarios)}`);
+  t.diagnostic(`scenarios ${JSON.stringify(scenarioTotals)}`);
   const mixed = Object.values(baseline.scenarios);
   const calls = mixed.reduce(
     (n, s) => n + s.queries + s.observerQueries + s.mutations + s.v8Actions + s.nodeActions,
@@ -908,7 +927,7 @@ test('cost guard: the scripted landing mix stays within its per-landing cost led
       arrivalIndexEntries: mixed.reduce((n, s) => n + s.feed.arrivalIndexes.entries, 0),
       arrivalIndexKeyBytes: mixed.reduce((n, s) => n + s.feed.arrivalIndexes.keyBytes, 0),
       acceptanceReadBytes: mixed.reduce((n, s) => n + s.feed.acceptanceReadBytes, 0),
-      wallMs: performance.now() - started,
+      wallMs: wallTime() - started,
       peakRssKiB: process.resourceUsage().maxRSS,
     })}`,
   );
@@ -924,7 +943,6 @@ test('cost guard: the scripted landing mix stays within its per-landing cost led
   // stopped GitHub mirror is named; the row changes only on a terminal stop or resume.
   assertCommandWeight('landServerSolo', landServer);
   t.diagnostic(JSON.stringify({ landServerSolo: landServer }));
-  const verdicts = judgeCosts(costs, costGuard, 'landing-fixture', baseline.measured);
   const lines = formatCostVerdicts(verdicts);
   // Warnings and ratchet notices go to the check log; only a fail stops the landing.
   for (const line of lines) t.diagnostic(line);
@@ -1010,7 +1028,7 @@ test('cost guard: the scripted landing mix stays within its per-landing cost led
         `scenario ${i}: stored index ${metric} must not grow without a storage decision`,
       );
     }
-  t.diagnostic(`measured in ${Math.round(performance.now() - started)} ms`);
+  t.diagnostic(`measured in ${Math.round(wallTime() - started)} ms`);
   assert.equal(baseline.landings, 6);
   assert(
     // 167/6: +2 hour-bucket touch runs over 165/6, each fixture project seeding an owner and 150 members (Item 3d5d8839).

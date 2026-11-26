@@ -17,6 +17,7 @@ import { fixture, drain, settle, pendingTasks } from './hosted-stale-check-fixtu
 import { HOLD_ORDER, MEASURED, measuredProblems } from './keep-the-run-scenarios.mjs';
 import { metricAliasProjectionCounts } from './observer-projection-budget.mjs';
 import { storageClock } from './storage-clock.mjs';
+import { captureWriteSites, reportWriteSites } from './landing-cost-write-sites.mjs';
 const prior = Object.fromEntries(Object.keys(synthetic).map(k => [k, process.env[k]]));
 test.before(() => Object.assign(process.env, synthetic));
 test.after(() => {
@@ -64,6 +65,7 @@ async function measureScenario(t, name) {
   if (!idle) await f.add(1);
   await drain(f);
   const before = f.counts.length;
+  const writeSites = captureWriteSites(f);
   const [a, b] = f.runs();
   const running = b ? await f.rawChecks.activate(b.id) : null;
   await f.rawChecks.pass(await f.rawChecks.activate(a.id));
@@ -106,6 +108,7 @@ async function measureScenario(t, name) {
     documents: costs.reduce((sum, cost) => sum + cost.documents, 0),
     readBytes: costs.reduce((sum, cost) => sum + cost.readBytes, 0),
     writeBytes: costs.reduce((sum, cost) => sum + cost.writeBytes, 0),
+    writeSites,
     aliasWriteBytes: costs.reduce((sum, cost) => sum + metricAliasProjectionCounts(cost).writeBytes, 0),
     // f65d8024: each existing feed event writes a measured 33-byte commit field.
     // Include only that field in the exact-cost allowance. New events' other bytes still count.
@@ -118,10 +121,11 @@ async function measureScenario(t, name) {
   };
   const byName = {};
   for (const cost of costs) byName[cost.name] = (byName[cost.name] ?? 0) + 1;
+  const { writeSites: _sites, ...totals } = measured;
   t.diagnostic(
     JSON.stringify({
       name,
-      ...measured,
+      ...totals,
       runs: f.runs().length,
       gates: f.runs().map(r => r.gate?.mode ?? 'none'),
       byName,
@@ -139,7 +143,10 @@ async function measureScenario(t, name) {
     const bytes = value => Buffer.byteLength(JSON.stringify(value));
     const written = bytes(row) + Math.max(...attempts.map(bytes));
     t.diagnostic(JSON.stringify({ holdOrderWrite: written }));
-    assert(written <= HOLD_ORDER.writeBytes, `hold-order write ${written} > ${HOLD_ORDER.writeBytes}`);
+    if (!(written <= HOLD_ORDER.writeBytes)) {
+      reportWriteSites(t, `MEASURED.${name}`, measured.writeSites, true);
+      assert.fail(`HOLD_ORDER.writeBytes (${name}): ${HOLD_ORDER.writeBytes} → ${written} B`);
+    }
   }
   // Idle costs nothing: once settled, another drain makes no call at all.
   const settled = f.counts.length;
@@ -158,6 +165,7 @@ for (const [name, baseline] of Object.entries(MEASURED))
       measured,
       measured.feedCommitBytes + measured.aliasWriteBytes,
     );
+    reportWriteSites(t, `MEASURED.${name}`, measured.writeSites, problems.length > 0);
     assert.deepEqual(problems, [], problems.join('\n'));
   });
 

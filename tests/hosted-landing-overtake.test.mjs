@@ -6,6 +6,8 @@ import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixt
 import { moduleUrl } from './convex-module.mjs';
 import { drive, overlapBase, overlapEdits } from './queue-sim/overtake-drive.mjs';
 import { storageClock } from './storage-clock.mjs';
+import { reportWriteSites } from './landing-cost-write-sites.mjs';
+import { isDeepStrictEqual } from 'node:util';
 const { generationStartedAfterPass, overtakeOlder, overtakeMark, sealedOlder, unsealedBy, olderRiskOnly } =
   await import(moduleUrl('../src/landing-overtake.ts'));
 const { PASS_HELD } = await import(moduleUrl('../src/landing-speed-alerts.ts'));
@@ -323,6 +325,19 @@ const canonicalReplayCost = ({ calls, readBytes, writeBytes, aliasWriteBytes }) 
   writeBytes: writeBytes - 144 - aliasWriteBytes,
 });
 
+async function guardReplayCost(t, row, input, pin) {
+  let sites;
+  const replay = await drive(t, { ...input, onWriteSites: captured => (sites = captured) });
+  const measured = canonicalReplayCost(replay);
+  reportWriteSites(t, row, sites, !isDeepStrictEqual(measured, pin));
+  assert.deepEqual(
+    measured,
+    pin,
+    `${row} cost moved; ratchet this row to the measured cost, with the reason`,
+  );
+  return replay;
+}
+
 test('incident replay 70a9bd2f: global-risk A/C overtake meets the unchanged 1.5x solo timing bar', async t => {
   storageClock(t, { elapsed: true });
   const CHECK = 1000;
@@ -335,7 +350,6 @@ test('incident replay 70a9bd2f: global-risk A/C overtake meets the unchanged 1.5
     duration: (i, nth) => CHECK + (i === 1 && nth === 1 ? 20 : 0),
   };
   const before = await drive(t, { ...pairInput, unknownAdmissionRisk: true });
-  const pair = await drive(t, pairInput);
   assert(before.landedAt[1] > 1.5 * solo.landedAt[0], 'the original path reproduces the miss');
   // Accepted pre-cancellation control: 121 calls, 1,822,710 read / 676,662 write B.
   // Early retirement now improves the unknown-risk arm too (102 calls), so it
@@ -406,12 +420,11 @@ test('incident replay 70a9bd2f: global-risk A/C overtake meets the unchanged 1.5
   // and +378 write bytes for the pair, with unchanged calls.
   // Item 8947a779: each landing's save-to-main time joins its day's histogram in the main summary's existing write
   // (twelve counters, no new call): +105 read and +140 write bytes for the pair, with unchanged calls.
-  const measured = canonicalReplayCost(pair);
-  assert.deepEqual(
-    measured,
-    { calls: 103, readBytes: 1_666_721, writeBytes: 569_059 },
-    'the 70a9bd2f pair cost moved; ratchet this row to the measured cost, with the reason',
-  );
+  const pair = await guardReplayCost(t, '70a9bd2f pair', pairInput, {
+    calls: 103,
+    readBytes: 1_666_721,
+    writeBytes: 569_059,
+  });
   assert.equal(pair.idle, 0, 'the settled pair has no idle queue work');
   assert.equal(pair.runs[0], 1);
   assert.equal(pair.runs[1], 1, 'C runs the exact combined tree instead of a wasted solo admission');
@@ -432,9 +445,6 @@ test('70a9bd2f: admission pipeline calls and metadata bytes stay bounded at 4000
     duration: (i, nth) => 1000 + (i === 1 && nth === 1 ? 20 : 0),
   };
   await drive(t, { ...input, unknownAdmissionRisk: true });
-  const after = await drive(t, input);
-  assert(after.landedAt[1] <= 1500, 'one check duration plus bounded source/queue progress');
-  assert.deepEqual(after.runs, [1, 1]);
   // Same pre-cancellation control ceiling as the small replay, measured at 4000
   // files. The live unknown-risk arm now benefits from early retirement too.
   // DB reads 1,827,467 -> 1,901,561 (Item 9a04d916, compose settle; owner-approved +$0.02/1k), as in the small replay.
@@ -475,12 +485,13 @@ test('70a9bd2f: admission pipeline calls and metadata bytes stay bounded at 4000
   // Item 411727ba (settle): the same landing-row read saved per finish wake at 4,000 files: 37,467 fewer read bytes.
   // Item c0af6cfa: the same `reportStorage: 'r2'` field on each run row: +462 read and +378 write bytes at 4,000 files.
   // Item 8947a779: the same day histogram on the summary row: +105 read and +140 write bytes at 4,000 files.
-  const measured = canonicalReplayCost(after);
-  assert.deepEqual(
-    measured,
-    { calls: 103, readBytes: 1_671_233, writeBytes: 571_252 },
-    'the 70a9bd2f 4,000-file cost moved; ratchet this row to the measured cost, with the reason',
-  );
+  const after = await guardReplayCost(t, '70a9bd2f 4,000-file pair', input, {
+    calls: 103,
+    readBytes: 1_671_233,
+    writeBytes: 571_252,
+  });
+  assert(after.landedAt[1] <= 1500, 'one check duration plus bounded source/queue progress');
+  assert.deepEqual(after.runs, [1, 1]);
   assert.equal(after.idle, 0);
 });
 
