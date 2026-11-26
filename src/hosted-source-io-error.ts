@@ -76,7 +76,14 @@ export const transientSourceStatus = (status: number) =>
  * arbitrary messages, stacks, response bodies, URLs, headers or source bytes. */
 export function logSourceFailure(
   error: unknown,
-  identity: { jobId: string; step: number; index?: number; generation?: number; stepCause?: string | null },
+  identity: {
+    jobId: string;
+    step: number;
+    index?: number;
+    generation?: number;
+    stepCause?: string | null;
+    path?: SourceStepPath;
+  },
   stage: string,
   started: number,
   timing?: SourcePhaseTiming,
@@ -94,34 +101,35 @@ export function logSourceFailure(
       generation: identity.generation ?? null,
       // sourceStepCause (why the step ran); `cause` below is why it failed.
       ...(stepCause ? { stepCause } : {}),
+      ...(identity.path ? { path: identity.path } : {}),
       ...cause,
       object: io?.object && /^[a-f0-9]{64}$/.test(io.object) ? io.object : null,
     }),
   );
 }
-/** One bounded line per completed step or failed attempt so the existing log-stream
- * instrument can split source memory-time by job kind and phase without a
- * metrics read. Counts and identifiers only; never URLs, messages or bytes. */
-/** Why a source step runs, for its log line (Item 686ecdde Fix 3): `save`, `register`, a sync's mode
- * (`sync`, `revert`, `resolution`, `resolve`), or a compose: `compose` on the main its request
- * expected, `recompose` when main moved since that request (a race or a named recompose), with a
- * `batch-` prefix for a cohort. Read from the state the step's begin already loaded: no extra read. */
+export const composeCauses = [
+  'compose',
+  'recompose',
+  'precompose',
+  'batch-compose',
+  'batch-recompose',
+] as const;
+type SourceStepPath = 'v8-small' | 'node-full';
+
+/** The begin transaction already loaded the owning record. Older compose records only distinguish cohorts. */
 export function sourceStepCause(jobKind: string | undefined, state: unknown): string | null {
   if (jobKind === 'save') return 'save';
   if (jobKind === 'register-state') return 'register';
   const value = (state ?? {}) as {
     work?: { mode?: unknown };
     batch?: unknown;
-    main?: { object?: { sha256?: unknown } };
-    request?: { expectedMain?: { head?: unknown } };
+    cause?: unknown;
   };
   if (jobKind === 'sync') return typeof value.work?.mode === 'string' ? value.work.mode : null;
   if (jobKind !== 'compose') return null;
-  const main = value.main?.object?.sha256,
-    expected = value.request?.expectedMain?.head;
-  if (typeof main !== 'string' || typeof expected !== 'string') return null;
-  return `${value.batch ? 'batch-' : ''}${main === expected ? 'compose' : 'recompose'}`;
+  return composeCauses.find(cause => cause === value.cause) ?? (value.batch ? 'batch-compose' : 'compose');
 }
+/** One bounded line per completed step or failed attempt for the existing log stream. */
 export function logSourceStep(
   identity: { jobId: string; step: number },
   fields: {
@@ -129,6 +137,7 @@ export function logSourceStep(
     kind: string | null;
     /** sourceStepCause, carried in the step's begin payload. */
     cause?: string | null;
+    path?: SourceStepPath;
     from: string | null;
     to: string | null;
     objects: number;
@@ -160,6 +169,7 @@ export function logSourceStep(
       ...(fields.outcome ? { outcome: fields.outcome } : {}),
       kind: name(fields.kind),
       ...(name(fields.cause ?? null) ? { cause: name(fields.cause ?? null) } : {}),
+      ...(fields.path ? { path: fields.path } : {}),
       from: name(fields.from),
       to: name(fields.to),
       objects: count(fields.objects),

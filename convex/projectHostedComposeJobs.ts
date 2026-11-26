@@ -3,6 +3,7 @@
 import { sourceFailurePhase, sourceRetryFailureMessage } from '../src/hosted-source-retry';
 import { sourceProgress } from './projectSourceProgress';
 import { v } from 'convex/values';
+import { smallComposeStateBytes } from '../src/hosted-source-small-compose';
 import { sourceWorkerPlan } from '../src/convex-source-provider';
 import { makeFunctionReference } from 'convex/server';
 import { mutation, internalMutation, internalAction } from './cliServer';
@@ -97,6 +98,7 @@ export async function submitHostedCompose(
     row.jobId,
     'projectHostedComposeJobs',
     inline,
+    !!(state.batch || state.main.recipe || state.main.object.size > smallComposeStateBytes),
   );
   return {
     payload: canonicalPayload(await sourceProgress(ctx, input.projectId, row.jobId, started.job)),

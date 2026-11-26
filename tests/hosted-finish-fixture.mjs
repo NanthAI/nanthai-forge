@@ -85,6 +85,7 @@ export const isFinishWake = name =>
   name === 'projectHostedFinishDriver:drive' ||
   name === 'projectHostedFinishDriver:settle' ||
   name === 'projectHostedFinishDriver:retry';
+export const isSourceStep = name => /^projectConvexSource(?:Node)?:step$/.test(name ?? '');
 /** Item 9a04d916: run one finish wake to its IO. A settle or retry mutation runs the step;
  * the IO it hands to a drive on the same wake id runs too. */
 export async function runFinishWake(f, task) {
@@ -560,8 +561,7 @@ export async function finishFixture(
         if (stop === 'before-source' && task.name.endsWith(':dispatch'))
           throw new Error('synthetic crash before source job');
         // The platform error the 2026-10-30 queue stall step action died on.
-        if (stop === 'step-fetch-failed' && task.name === 'projectConvexSource:step')
-          throw new TypeError('fetch failed');
+        if (stop === 'step-fetch-failed' && isSourceStep(task.name)) throw new TypeError('fetch failed');
         metrics.convexSourceCalls.push(task.name);
         if (task.name.endsWith(':dispatch')) metrics.sourceJobs++;
         const executeSource = async (name, args) => {
@@ -592,7 +592,7 @@ export async function finishFixture(
         await executeSource(task.name, input);
         // A small result publishes inside the step's own commit (1eef1b43): the step action dies
         // right after that commit returned.
-        if (stop === 'after-source-publish' && /^projectConvexSource(Node)?:step$/.test(task.name))
+        if (stop === 'after-source-publish' && isSourceStep(task.name))
           throw new Error('synthetic crash after source publication');
         if (stop === 'after-source-callback' && task.name.endsWith(':dispatch')) {
           // Advance the exact source steps before simulating a lost completed reply.
@@ -728,8 +728,22 @@ export async function finishFixture(
       bytes = c.objects.get(hash);
     assert(bytes, 'metadata request only targets a synthetic committed object');
     metrics.transfers++;
-    metrics.downloadBytes += bytes.length;
-    return new Response(bytes);
+    const range = new Headers(init?.headers).get('range');
+    if (!range) {
+      metrics.downloadBytes += bytes.length;
+      return new Response(bytes);
+    }
+    const match = /^bytes=(\d+)-(\d+)$/.exec(range);
+    assert(match, 'a packed fixture requests an explicit byte interval');
+    const start = Number(match[1]),
+      end = Number(match[2]);
+    assert(start <= end && end < bytes.length, 'the interval fits its synthetic pack');
+    const body = bytes.subarray(start, end + 1);
+    metrics.downloadBytes += body.length;
+    return new Response(body, {
+      status: 206,
+      headers: { 'content-range': `bytes ${start}-${end}/${bytes.length}` },
+    });
   });
   t.after(() => {
     assert.notEqual(globalThis.fetch, originalFetch);

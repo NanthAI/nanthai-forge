@@ -6,8 +6,38 @@ import { randomUUID } from 'node:crypto';
 import { composeFixture, api, jobApi, code, maxima } from './hosted-compose-fixture.mjs';
 import { saveBytes } from '../dist/hosted-save.js';
 import { convexSourceRuntime } from '../dist/convex-source-provider.js';
+import { buildObjectRecipe } from '../dist/object-chunks.js';
+import { moduleUrl } from './convex-module.mjs';
+const { dispatch } = await import(moduleUrl('../convex/projectConvexSourceStore.ts'));
 const selected = async s =>
   s.selection([await s.lane(s.state([s.file('a.txt', 'A\nb\nc\n'), s.hidden], [s.baseline.sha256]))]);
+for (const route of ['small raw', 'large raw', 'recipe-backed'])
+  test(`compose dispatch uses the correct first runtime for a ${route} main`, async () => {
+    const s = await composeFixture({
+      baselineFiles:
+        route === 'large raw'
+          ? Array.from({ length: 6500 }, (_, i) => [`src/nested/generated/module-${i}.ts`, 'shared'])
+          : [],
+    });
+    if (route === 'recipe-backed') {
+      const built = buildObjectRecipe(s.objects.get(s.baseline.sha256));
+      const recipe = s.put(built.bytes);
+      const main = [...s.tables.projectObjects.values()].find(row => row.digest === s.baseline.sha256);
+      s.patch('projectObjects', main._id, { recipe: { digest: recipe.sha256, size: recipe.size } });
+    }
+    const x = await selected(s);
+    assert.equal((await s.prepare(x)).state.cause, 'compose');
+    await s.stage(x);
+    await s.submit(x);
+    const task = s.scheduled.find(task => task.name === 'projectConvexSource:dispatch');
+    assert(task);
+    await s.call('composeDispatch', dispatch, task.args);
+    const steps = s.scheduled.filter(task => /^projectConvexSource(?:Node)?:step$/.test(task.name));
+    assert.deepEqual(
+      steps.map(task => task.name),
+      [route === 'small raw' ? 'projectConvexSource:step' : 'projectConvexSourceNode:step'],
+    );
+  });
 test('ordered multi-Lane compose publishes one clean immutable Candidate and leaves Lane/main untouched', async () => {
   const s = await composeFixture(),
     a = await s.lane(s.state([s.file('a.txt', 'A\nb\nc\n'), s.hidden], [s.baseline.sha256])),

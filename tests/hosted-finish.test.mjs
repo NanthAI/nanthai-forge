@@ -1258,6 +1258,7 @@ test('Convex source recompose reaches the ordinary checked finish receipt withou
     const landed = await f.current(state.id);
     assert.equal(landed.submission.phase, 'landed');
     assert.equal(f.tables.projectSourceSteps.size, 1);
+    assert.equal(JSON.parse([...f.tables.projectHostedComposes.values()].at(-1).value).cause, 'recompose');
     assert(f.metrics.convexSourceCalls.includes('projectConvexSource:step'));
     assert(f.metrics.convexSourceCalls.length <= 10);
     assert(f.metrics.convexStorageCalls <= 2);

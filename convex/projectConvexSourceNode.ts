@@ -221,6 +221,7 @@ async function runNodeSourceStep(
               runtime: 'node',
               kind: state.jobKind ?? null,
               cause: state.cause ?? null,
+              ...(state.jobKind === 'compose' ? { path: 'node-full' } : {}),
               from,
               to: fanout ? 'fanout' : result!.cursor.phase,
               objects: result!.metrics.objects,
@@ -288,7 +289,17 @@ async function runNodeSourceStep(
           const domain = sourceDomainError(error);
           if (!domain || domain.code === 'SOURCE_JOB_FENCED') throw error;
           const measured = clock.summary();
-          logSourceFailure(error, { ...input, stepCause: state.cause }, 'step', started, measured);
+          logSourceFailure(
+            error,
+            {
+              ...input,
+              stepCause: state.cause,
+              ...(state.jobKind === 'compose' ? { path: 'node-full' } : {}),
+            },
+            'step',
+            started,
+            measured,
+          );
           await ctx.runMutation(reference('projectConvexSourceStore:commit'), {
             ...input,
             cursor: state.cursor,

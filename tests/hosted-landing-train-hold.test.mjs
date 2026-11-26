@@ -3,6 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
+import { isSourceStep } from './hosted-finish-fixture.mjs';
 import { LANDING_STALL_MS } from '../dist/landing-stall.js';
 import { HOSTED_TRAIN_HOLD_MS } from '../dist/hosted-landing-batch.js';
 const prior = Object.fromEntries(Object.keys(synthetic).map(k => [k, process.env[k]]));
@@ -18,7 +19,7 @@ const queueOf = f => [...f.tables.projectHostedLandingQueues.values()][0];
 const stateOf = (f, id) => states(f).find(s => s.id === id);
 const queueWakes = f => f.pending().filter(t => t.name === 'projectHostedLandingDriver:drive');
 async function untilStep(f) {
-  for (let tick = 0; f.pending()[0]?.name !== 'projectConvexSource:step'; tick++) {
+  for (let tick = 0; !isSourceStep(f.pending()[0]?.name); tick++) {
     assert(tick < 100, 'the source step is reached');
     await f.execute(f.pending()[0]);
   }
@@ -62,7 +63,7 @@ test('incident replay 2026-10-30: a batch whose compose stays dead cannot block 
     assert(task, 'the queue keeps a wake while a later entry waits');
     if (Date.now() < failedAt + HOSTED_TRAIN_HOLD_MS && stateOf(f, later.id).phase === 'queued')
       assert.deepEqual(new Set(queueOf(f).train), new Set(members), 'a live hold keeps the train');
-    if (task.name === 'projectConvexSource:step') {
+    if (isSourceStep(task.name)) {
       // The batch compose never recovers: every retry dies the same way.
       await assert.rejects(f.execute(task, 'step-fetch-failed'), /fetch failed/);
       continue;

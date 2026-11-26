@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
-import { finishFixture } from './hosted-finish-fixture.mjs';
+import { finishFixture, isSourceStep } from './hosted-finish-fixture.mjs';
 import { LANDING_STALL_MS } from '../dist/landing-stall.js';
 import {
   HOSTED_FINISH_COMPOSE_WATCHDOG_MS,
@@ -23,7 +23,7 @@ const finishWakes = (f, submissionId) =>
     .pending()
     .filter(t => t.name === 'projectHostedFinishDriver:retry' && t.args[0].submissionId === submissionId);
 async function untilStep(f) {
-  for (let tick = 0; f.pending()[0]?.name !== 'projectConvexSource:step'; tick++) {
+  for (let tick = 0; !isSourceStep(f.pending()[0]?.name); tick++) {
     assert(tick < 100, 'the source step is reached');
     await f.execute(f.pending()[0]);
   }
@@ -114,7 +114,7 @@ test('a repeatedly failed step settles terminally instead of losing its last com
   for (let tick = 0; f.pending().length; tick++) {
     assert(tick < 200, 'no unbounded poller');
     const task = f.pending()[0];
-    if (task.name === 'projectConvexSource:step') {
+    if (isSourceStep(task.name)) {
       steps++;
       await assert.rejects(f.execute(task, 'step-fetch-failed'), /fetch failed/);
       continue;

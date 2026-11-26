@@ -121,6 +121,7 @@ export const prepare = mutation({
           ? await semanticBaseSequence(ctx, input.projectId, ownIntent.base.receiptId)
           : 0;
       const state: ComposeState = {
+        cause: 'compose',
         ...(peers.length
           ? { semanticPlan: { primaryIntentId: request.intentId, afterSequence, members: peers } }
           : {}),

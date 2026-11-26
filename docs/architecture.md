@@ -1743,6 +1743,12 @@ and blobs actually read by the native reducer. Ancestry comes from verified Stat
 bytes, never client display flags. Native merge still holds manifests and the
 blobs needed for text merging in memory; this is not a constant-memory guarantee.
 
+Convex routes cohort composes and composes whose pinned main is recipe-backed or
+over 768 KiB straight to Node. Small raw composes can finish in V8. On the Node
+path, recorded parent metadata can rule out a direct fast-forward of large tips
+before their bodies are read. Cohorts publish their final result in the last
+member's merge step using the State it already loaded or generated.
+
 Composition also parses every JS/TS (`.js .mjs .cjs .ts .mts .cts .tsx .jsx`),
 Python (`.py .pyi`), Java, Rust and JSON file
 that two inputs both changed and the line merge combined. A line merge cannot see

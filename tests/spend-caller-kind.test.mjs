@@ -73,8 +73,8 @@ test('the spend ledger splits calls by caller and source steps by cause, keeping
     usageStats: { ...completion.usageStats, databaseIoReadBytes: io, databaseIoWriteBytes: 0 },
     ...extra,
   });
-  const step = cause =>
-    JSON.stringify({ event: 'forge-source-step', job: 'j', step: 1, kind: 'compose', cause });
+  const step = (cause, path) =>
+    JSON.stringify({ event: 'forge-source-step', job: 'j', step: 1, kind: 'compose', cause, path });
   const events = [
     spendEvent(log('a', ['FORGE_CALLER agent'], 300), 'dev'),
     spendEvent(log('b', ['FORGE_CALLER agent'], 200), 'dev'),
@@ -86,7 +86,10 @@ test('the spend ledger splits calls by caller and source steps by cause, keeping
     // Not a known word, or two kinds in one call: no claim is kept.
     spendEvent(log('e', ['FORGE_CALLER root'], 1), 'dev'),
     spendEvent(log('f', ['FORGE_CALLER agent', 'FORGE_CALLER web'], 1), 'dev'),
-    spendEvent(log('g', [step('recompose')], 11, { identifier: 'projectConvexSourceNode.js:step' }), 'dev'),
+    spendEvent(
+      log('g', [step('recompose', 'node-full')], 11, { identifier: 'projectConvexSourceNode.js:step' }),
+      'dev',
+    ),
     spendEvent(
       log('h', [step('compose'), step('recompose')], 13, { identifier: 'projectConvexSourceNode.js:step' }),
       'dev',
@@ -98,7 +101,25 @@ test('the spend ledger splits calls by caller and source steps by cause, keeping
   );
   assert.deepEqual(
     events.map(event => event.attribution ?? null),
-    [null, null, null, null, null, null, null, 'source-step/recompose', null],
+    [null, null, null, null, null, null, null, 'source-step/recompose/node-full', null],
+  );
+  for (const [cause, path] of [
+    ['compose', 'v8-small'],
+    ['precompose', 'v8-small'],
+    ['recompose', 'node-full'],
+    ['batch-compose', 'node-full'],
+    ['batch-recompose', 'node-full'],
+  ]) {
+    const event = spendEvent(log(cause, [step(cause, path)], 0), 'dev');
+    assert.equal(event.attribution, `source-step/${cause}/${path}`);
+    const [row] = daySummary(event.day, [event]).perAttribution;
+    assert.deepEqual(row.usage, event.usage);
+  }
+  assert.equal(spendEvent(log('legacy', [step('compose')], 0), 'dev').attribution, 'source-step/compose');
+  assert.equal(
+    spendEvent(log('mixed-path', [step('compose', 'v8-small'), step('compose', 'node-full')], 0), 'dev')
+      .attribution,
+    undefined,
   );
   const report = daySummary(events[0].day, events);
   assert.deepEqual(
@@ -118,23 +139,23 @@ test('the spend ledger splits calls by caller and source steps by cause, keeping
 });
 
 test('a source step names its cause from the state it already loaded', t => {
-  const compose = (main, expected, batch) => ({
-    main: { object: { sha256: main } },
-    request: { expectedMain: { head: expected } },
-    ...(batch ? { batch: {} } : {}),
+  const compose = cause => ({
+    cause,
+    main: { object: { sha256: 'same-head' } },
+    request: { expectedMain: { head: 'same-head' } },
   });
   assert.equal(sourceStepCause('save', null), 'save');
   assert.equal(sourceStepCause('register-state', null), 'register');
   assert.equal(sourceStepCause('sync', { work: { mode: 'resolve' } }), 'resolve');
-  assert.equal(sourceStepCause('compose', compose('a', 'a')), 'compose');
-  // Main moved since the Lane's request: a race or a named recompose.
-  assert.equal(sourceStepCause('compose', compose('b', 'a')), 'recompose');
-  assert.equal(sourceStepCause('compose', compose('b', 'a', true)), 'batch-recompose');
-  assert.equal(sourceStepCause('compose', {}), null);
+  for (const cause of ['compose', 'recompose', 'precompose', 'batch-compose', 'batch-recompose'])
+    assert.equal(sourceStepCause('compose', compose(cause)), cause);
+  assert.equal(sourceStepCause('compose', { batch: {} }), 'batch-compose');
+  assert.equal(sourceStepCause('compose', {}), 'compose');
   const lines = captured(t, 'warn');
   const fields = {
     runtime: 'node',
     kind: 'compose',
+    path: 'node-full',
     from: 'input',
     to: 'done',
     objects: 0,
@@ -144,6 +165,7 @@ test('a source step names its cause from the state it already loaded', t => {
   logSourceStep({ jobId: 'j', step: 0 }, { ...fields, cause: 'recompose', started: performance.now() });
   logSourceStep({ jobId: 'j', step: 1 }, { ...fields, cause: 'Not A Code', started: performance.now() });
   assert.equal(JSON.parse(lines[0]).cause, 'recompose');
+  assert.equal(JSON.parse(lines[0]).path, 'node-full');
   assert.equal('cause' in JSON.parse(lines[1]), false);
 });
 

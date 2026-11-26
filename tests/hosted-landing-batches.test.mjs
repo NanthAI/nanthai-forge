@@ -30,6 +30,12 @@ test('incident replay: four finishes in one minute share one full check and one 
   assert(Math.max(...arrivals) - Math.min(...arrivals) < 60_000);
   assert.equal(f.runs().length, 0, 'eligible finishes defer check reservation to selection');
   await f.drain();
+  assert(
+    f.metrics.convexSourceCalls.includes('projectConvexSourceNode:step'),
+    'a cohort schedules its Node source step directly',
+  );
+  assert(!f.metrics.convexSourceCalls.includes('projectConvexSource:step'), 'no V8 cohort wrapper');
+  assert.equal(JSON.parse([...f.tables.projectHostedComposes.values()].at(-1).value).cause, 'batch-compose');
   assert.equal(f.runs().length, 1);
   const run = f.runs()[0];
   assert.equal(run.gate.mode, 'full');
@@ -306,6 +312,10 @@ for (const firstSeconds of [undefined, 480])
     await f.drain();
     const replacement = f.runs().find(run => run.status === 'queued');
     assert.notEqual(replacement.id, first.id);
+    assert.equal(
+      JSON.parse([...f.tables.projectHostedComposes.values()].at(-1).value).cause,
+      'batch-recompose',
+    );
     await f.passChecks();
     stampExecution(f, replacement.id, 1200);
     await f.drain();

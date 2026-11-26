@@ -22,6 +22,7 @@ import {
   readJson,
   verifySourceObject,
   sourceStepBytes,
+  sourceStepComputeBytes,
   sourceStepObjects,
   yieldStep,
   stepStop,
@@ -524,7 +525,7 @@ export async function runSourceStep(
           // A fresh source would parse and allocate every large input tree a second time.
           mergeSource.resetGenerated();
         }
-        if (m.bytes > 2 * 1024 * 1024 && !again) {
+        if (m.bytes > sourceStepComputeBytes && !again) {
           yieldStep(m, 'compute-bytes');
           break;
         }

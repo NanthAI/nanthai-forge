@@ -908,7 +908,8 @@ test('cost guard: the scripted landing mix stays within its per-landing cost led
   );
   const feedEvents = mixed.reduce((n, s) => n + s.feed.events, 0);
   // Item 8b7ab7a9: grouping the cohort's metadata IO replaces serial finish hops.
-  assert.equal(calls, 248, 'feed writes introduce no Convex call in the current six-landing mix');
+  // Item 686ecdde: the two cohort composes skip their V8 wrapper actions (248 -> 246).
+  assert.equal(calls, 246, 'the six-landing mix skips both cohort V8 wrappers');
   assert.equal(feedEvents, 6, 'one terminal feed row per accepted Lane on the fixture mix');
   // f65d8024: the approved commit cursor adds 33 document bytes and two scoped
   // keys totaling 357 modeled key bytes per event and per fixture landing.
@@ -1689,6 +1690,7 @@ test('storage per landing ratchets every table on fresh and dogfood-shaped check
   // Item 3abaec5e: the terminal path count adds 20 B fresh and 23/16 B dogfood to the existing
   // request, and 22 B fresh and 14 B dogfood to the immediate observation projection. The S2
   // dogfood journal keeps another 7 B of timing on the retained request, as before.
+  // Item 686ecdde: the dogfood recompose record stores its 24 B cause field for the spend meter.
   for (const [name, scenario] of Object.entries(scenarios)) {
     const indexBudget = storageBudgets[name].indexes;
     const aliasBudget = storageBudgets[name].metricAliases;

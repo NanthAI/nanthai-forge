@@ -21,6 +21,7 @@ export const batchSchema = z
       .optional(),
     at: z.iso.datetime(),
     composeOperationId: z.uuid(),
+    recomposing: z.literal(true).optional(),
     checkOperationId: z.uuid(),
     /** `split`: retired into parallel halves; `failed`: platform retries exhausted. */
     phase: z.enum(['composing', 'checking', 'fallback', 'landed', 'superseded', 'split', 'failed']),

@@ -3,6 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { batchesFixture, states, synthetic, batchStore } from './hosted-landing-batches-fixture.mjs';
+import { isSourceStep } from './hosted-finish-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { hostedFinishBackoff } from '../dist/hosted-finish.js';
 const wake = await import(moduleUrl('../convex/projectHostedFinishWake.ts'));
@@ -55,7 +56,7 @@ function causalCancellation(f) {
 }
 async function sourcePending(f) {
   for (let n = 0; n < 100; n++) {
-    if (f.pending().some(t => t.name === 'projectConvexSource:step')) return batches(f)[0];
+    if (f.pending().some(t => isSourceStep(t.name))) return batches(f)[0];
     await f.execute(f.pending()[0]);
   }
   assert.fail('the shared compose owns a source step');

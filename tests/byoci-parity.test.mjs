@@ -310,7 +310,7 @@ test('parity: a combined failure names the member whose module the failing test 
 // cohort on the new main and checks it once more, with either check. Incident-sized State manifests
 // make that compose span several source steps; the cohort never splits and no member rechecks alone.
 test('parity: a late pass after main moved rechecks the cohort once, even when its compose spans steps', async t => {
-  const big = Array.from({ length: 4500 }, (_, i) => [
+  const big = Array.from({ length: 10_000 }, (_, i) => [
     `packages/area-${i % 40}/src/module-${String(i).padStart(5, '0')}-with-a-long-name.ts`,
     'export {};\n',
   ]);
@@ -325,10 +325,12 @@ test('parity: a late pass after main moved rechecks the cohort once, even when i
       await f.passChecks();
       await f.drain();
     }
-    const stops = [...f.tables.projectSourceSteps.values()].flatMap(row =>
-      (row.timing?.steps ?? []).map(step => step.stop),
+    const recompose = [...f.tables.projectHostedComposes.values()].find(
+      row => JSON.parse(row.value).cause === 'batch-recompose',
     );
-    assert(stops.includes('compute-bytes'), `${arm}: a compose yielded mid-merge like the incident`);
+    assert(recompose, `${arm}: main movement restarted the cohort compose`);
+    const worker = [...f.tables.projectSourceSteps.values()].find(row => row.jobId === recompose.jobId);
+    assert((worker?.timing?.steps?.length ?? 0) > 1, `${arm}: the recompose resumed a second source step`);
     outcomes[arm] = {
       phases: states(f).map(s => [s.phase, s.error?.code ?? null]),
       runs: f.runs().length,

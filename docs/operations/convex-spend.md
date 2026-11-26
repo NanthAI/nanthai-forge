@@ -273,10 +273,13 @@ lowercase `a/b` grammar. The day summary then splits the function by label in
 reads canonical rows, `compact` a compact projection, and `context`, `inputs` and
 `save-heads` the follow-up lookups. The line also carries the call's own
 `documentsRead` and `bytesRead`, which stay in the provider log. It adds no read or call.
-A source step's `forge-source-step` line carries its `cause`
-(`save`, `register`, a sync mode, `compose`, or `recompose` when main moved since
-the Lane's request; `batch-` for a cohort). A call with one cause and no read-shape
-label gets the label `source-step/<cause>`, so source-step compute splits by cause.
+A source step's `forge-source-step` line carries its `cause` (`save`, `register`,
+a sync mode, or the compose operation's recorded cause). Compose causes are
+`compose`, `recompose`, `precompose`, `batch-compose` and `batch-recompose`.
+Compose steps also report `path` as `v8-small` or `node-full`. A call with one
+cause and path and no read-shape label uses `source-step/<cause>/<path>` for its
+calls, compute and egress. Legacy lines and other source steps without a path
+use `source-step/<cause>`.
 
 Every row also keeps its caller kind, a code-chosen word: each public function's
 guard (`convex/cliServer.ts`) prints one `FORGE_CALLER <kind>` line. `web` is a

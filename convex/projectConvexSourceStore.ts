@@ -81,6 +81,7 @@ export async function startConvexSource(
   args: { projectId: Id<'hostedProjects'>; jobId: string; input: string },
   /** The caller runs step 0 itself (`runConvexSourceStep`); set when this call created the row. */
   inline?: { started: boolean },
+  nodeCompose = false,
 ) {
   const input = JSON.parse(args.input),
     job = await loadSourceJob(ctx, args.projectId, args.jobId);
@@ -106,6 +107,7 @@ export async function startConvexSource(
     reserved = await reserveSourceProvider(ctx, { ...args, input, token });
   if (!reserved.create) return canonicalPayload({ status: 'unknown' });
   const executionId = `convex:${input.dispatchKey}`;
+  const directNode = job.jobKind === 'compose' && nodeCompose;
   await recordSourceProvider(ctx, { ...args, input, token, executionId });
   const rowId = await ctx.db.insert('projectSourceSteps', {
     projectId: args.projectId,
@@ -114,13 +116,14 @@ export async function startConvexSource(
     executionId,
     step: 0,
     cursor: null,
+    ...(directNode ? { nodeCompose: true as const } : {}),
     ...(process.env.FORGE_PHYSICAL_MANIFESTS === '1' ? { physicalManifests: true as const } : {}),
     timing: { queuedAt: Date.now(), scheduledAt: Date.now(), steps: [] },
   });
   const scheduledId = await ctx.scheduler.runAfter(
     inline ? inlineFallbackMs : 0,
     makeFunctionReference<'action'>(
-      inline || job.jobKind === 'save' || job.jobKind === 'compose'
+      !directNode && (inline || job.jobKind === 'save' || job.jobKind === 'compose')
         ? 'projectConvexSource:step'
         : 'projectConvexSourceNode:step',
     ),
@@ -253,7 +256,9 @@ async function retrySourceStep(
   const scheduledId = await ctx.scheduler.runAfter(
     startAt - now,
     makeFunctionReference<'action'>(
-      row.step === 0 && (row.inlineFallback || job.jobKind === 'save' || job.jobKind === 'compose')
+      row.step === 0 &&
+        !row.nodeCompose &&
+        (row.inlineFallback || job.jobKind === 'save' || job.jobKind === 'compose')
         ? 'projectConvexSource:step'
         : 'projectConvexSourceNode:step',
     ),
@@ -560,7 +565,7 @@ export const commit = sourceMutation({
 /** All control transitions are local calls in one transaction. Scheduling the
  * first action and recording its execution identity commit atomically. */
 export const dispatch = internalMutation({
-  args: identity,
+  args: { ...identity, nodeCompose: v.optional(v.boolean()) },
   returns: v.union(v.literal('idle'), v.literal('observed'), v.literal('unknown')),
   handler: async (ctx, args) => (await dispatchConvexSource(ctx, args)).result,
 });
@@ -568,7 +573,7 @@ export const dispatch = internalMutation({
  * is left to the caller (`started` says so) behind a delayed fallback. */
 export async function dispatchConvexSource(
   ctx: MutationCtx,
-  args: { projectId: Id<'hostedProjects'>; jobId: string },
+  { nodeCompose, ...args }: { projectId: Id<'hostedProjects'>; jobId: string; nodeCompose?: boolean },
   inline = false,
 ) {
   const started = { started: false };
@@ -588,6 +593,7 @@ export async function dispatchConvexSource(
               ctx,
               { ...args, input: canonicalPayload(input) },
               inline ? started : undefined,
+              nodeCompose,
             ),
           );
         } catch (error) {

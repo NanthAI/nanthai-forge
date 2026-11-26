@@ -52,24 +52,23 @@ export function ioAttribution(log) {
   return labels.length === 1 ? labels[0] : null;
 }
 
-/** The cause label of a source step's `forge-source-step` or failure line (src/hosted-source-io-error.ts), so
- * source-step compute splits by save, compose, recompose and sync mode. Kept only when the call
- * printed one cause (a chained action that ran two kinds stays unlabelled). */
+/** A call with a single source step cause and path owns its measured usage. Older lines had only a cause. */
 export function sourceStepCause(log) {
-  const causes = new Set(
+  const attributions = new Set(
     messages(log).flatMap(message => {
       if (!/^\{"event":"forge-source-(?:step|failure)"/.test(message)) return [];
       try {
         // A failed attempt names why the step ran as `stepCause` (its `cause` is why it failed).
-        const { event, cause: done, stepCause } = JSON.parse(message);
+        const { event, cause: done, stepCause, path } = JSON.parse(message);
         const cause = event === 'forge-source-step' ? done : stepCause;
-        return typeof cause === 'string' && /^[a-z-]{1,32}$/.test(cause) ? [cause] : [];
+        if (typeof cause !== 'string' || !/^[a-z-]{1,32}$/.test(cause)) return [];
+        return [[cause, ...(['v8-small', 'node-full'].includes(path) ? [path] : [])].join('/')];
       } catch {
         return [];
       }
     }),
   );
-  return causes.size === 1 ? `source-step/${[...causes][0]}` : null;
+  return attributions.size === 1 ? `source-step/${[...attributions][0]}` : null;
 }
 
 /** Who made a call: a public function's guard (convex/cliServer.ts) prints `agent`, `cli` (a
@@ -124,6 +123,7 @@ export function spendEvent(log, deployment) {
       ]),
     )
     .digest('hex');
+  const attribution = ioAttribution(log) ?? sourceStepCause(log);
   return {
     kind: 'execution',
     id,
@@ -133,9 +133,7 @@ export function spendEvent(log, deployment) {
     identifier: log.identifier,
     acceptedLandings: acceptedLandings(log),
     caller: callerKind(log),
-    ...((ioAttribution(log) ?? sourceStepCause(log))
-      ? { attribution: ioAttribution(log) ?? sourceStepCause(log) }
-      : {}),
+    ...(attribution ? { attribution } : {}),
     usage: {
       calls: 1,
       io: sum(usage.databaseIoReadBytes, usage.databaseIoWriteBytes),

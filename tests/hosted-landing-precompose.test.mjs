@@ -527,6 +527,7 @@ test('a failed speculative source job leaves the original entry queued for ordin
       _handler: async ctx => {
         const { row, value } = await finishStore.loadFinish(ctx, identity);
         const source = await finishCompose.prepareFinishCompose(ctx, identity, value);
+        assert.equal(source.state.cause, 'precompose');
         await operations.finishHostedOperation(ctx, {
           projectId: f.projectId,
           actor: source.row.actor,

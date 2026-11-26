@@ -15,11 +15,14 @@ export async function startSubmittedSource(
   jobId: string,
   api: 'projectHostedSaveJobs' | 'projectHostedSyncJobs' | 'projectHostedComposeJobs',
   inline = false,
+  nodeCompose = false,
 ) {
   const job = await loadSourceJob(ctx, projectId, jobId),
     terminal = job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled';
   if (inline && !terminal) {
-    const dispatched = await dispatchConvexSource(ctx, { projectId, jobId }, true);
+    // Dispatch in this transaction as usual. A known Node compose starts on its
+    // own scheduled action instead of running through the submitting V8 action.
+    const dispatched = await dispatchConvexSource(ctx, { projectId, jobId, nodeCompose }, !nodeCompose);
     return { job: await loadSourceJob(ctx, projectId, jobId), run: dispatched.inline };
   }
   await ctx.scheduler.runAfter(
@@ -27,7 +30,7 @@ export async function startSubmittedSource(
     makeFunctionReference<'action' | 'mutation'>(
       terminal ? `${api}:complete` : 'projectConvexSource:dispatch',
     ),
-    { projectId, jobId },
+    { projectId, jobId, ...(!terminal && nodeCompose ? { nodeCompose: true } : {}) },
   );
   return { job, run: false };
 }

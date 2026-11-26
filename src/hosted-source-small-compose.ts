@@ -22,7 +22,7 @@ import type { SourceWorkerTransport } from './hosted-source-worker-reader.js';
 
 // Routing bounds, never source limits. Three 4k-file manifests fit; larger, recursive,
 // stacked, batch and content merges retain the resumable Node implementation.
-const stateBytes = 768 * 1024;
+export const smallComposeStateBytes = 768 * 1024;
 const same = (a: NativeFile | undefined, b: NativeFile | undefined) =>
   a?.blob === b?.blob && a?.mode === b?.mode;
 export async function runSmallSourceCompose(
@@ -108,7 +108,7 @@ export async function runSmallSourceCompose(
       plan.inputs.pages !== 1 ||
       plan.dependencies.pages !== 1 ||
       plan.main.recipe ||
-      plan.main.object.size > stateBytes
+      plan.main.object.size > smallComposeStateBytes
     )
       return null;
     const manifests = [plan.dependencies, plan.inputs];
@@ -143,7 +143,7 @@ export async function runSmallSourceCompose(
       'SOURCE_JOB_INVALID',
       'Compose State differs from head.',
     );
-    if (entry.state.recipe || entry.state.object.size > stateBytes) return null;
+    if (entry.state.recipe || entry.state.object.size > smallComposeStateBytes) return null;
     const tips = [...new Map([plan.main, entry.state].map(ref => [ref.object.sha256, ref])).values()];
     await io.prepareRead?.(tips.map(ref => ref.object));
     const states = new Map(
@@ -173,7 +173,7 @@ export async function runSmallSourceCompose(
       invariant(ref?.object.sha256 === baseId, 'SOURCE_HASH_MISMATCH', 'Merge base changed.');
       if (
         ref.recipe ||
-        ref.object.size > stateBytes ||
+        ref.object.size > smallComposeStateBytes ||
         tips.reduce((n, r) => n + r.object.size, ref.object.size) > 2 * 1024 * 1024
       )
         return null;

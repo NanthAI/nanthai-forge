@@ -299,6 +299,7 @@ export async function prepareFinishCompose(ctx: MutationCtx, input: LandingIdent
   }
   const project = await hostedWriteProject(ctx, input.projectId, state.actor, request.authorityEpoch);
   const stateValue: ComposeState = {
+    cause: pending.precompose ? 'precompose' : 'recompose',
     retryUntil: Date.parse(pending.at) + HOSTED_FINISH_COMPOSE_WATCH_WINDOW_MS,
     ownerProvenance: 1,
     ...(value.restoreBases ? { restoreBases: value.restoreBases } : {}),

@@ -415,6 +415,7 @@ export async function retryLandingBatch(
     input,
     {
       ...retained,
+      recomposing: true,
       ...(recheck ? { recheck } : {}),
       // Recomposition may repeat before a provider run exists. Carry the already selected cause.
       ...(cause === undefined ? {} : { nextCheckCause: cause }),

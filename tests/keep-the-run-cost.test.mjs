@@ -13,6 +13,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { synthetic, states } from './hosted-landing-batches-fixture.mjs';
 import { fixture, drain, settle, pendingTasks } from './hosted-stale-check-fixture.mjs';
 import { HOLD_ORDER, MEASURED, measuredProblems } from './keep-the-run-scenarios.mjs';
@@ -178,11 +179,22 @@ for (const [name, baseline] of Object.entries(MEASURED))
   });
 
 test('52e56db7 incident replay: two strict red runs measure identical database bytes', async t => {
+  const ids = [];
+  const replay = run => {
+    let next = 0;
+    // Gzip retains run IDs in the timing-history write. Reuse the same IDs in
+    // both arms so the exact count measures the replay, not UUID entropy.
+    run.mock.method(crypto, 'randomUUID', () => {
+      const index = next++;
+      return (ids[index] ??= randomUUID());
+    });
+    return measureScenario(run, strictRed);
+  };
   let first;
   await t.test('first run', async run => {
-    first = await measureScenario(run, strictRed);
+    first = await replay(run);
   });
   await t.test('second run', async run => {
-    assert.deepEqual(await measureScenario(run, strictRed), first);
+    assert.deepEqual(await replay(run), first);
   });
 });

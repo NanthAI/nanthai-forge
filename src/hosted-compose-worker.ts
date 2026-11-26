@@ -31,8 +31,6 @@ const sameFile = (a: Pick<NativeFile, 'blob' | 'mode'> | null | undefined, b: ty
  * intermediate heads keeps each path's base entry, recorded when first changed,
  * so it signs the same paths as one whole composition. */
 export function changedPaths(bases: ComposeBases, before: NativeFile[], after: NativeFile[]) {
-  const remaining = new Map<string, NativeFile>();
-  for (const file of after) remaining.set(file.path, file);
   const changed = new Set<string>();
   // A path absent from both lists is still a net deletion if it was on
   // the original base. The walk settles the paths that are still present.
@@ -46,9 +44,33 @@ export function changedPaths(bases: ComposeBases, before: NativeFile[], after: N
     } else if (sameFile(original, next)) changed.delete(path);
     else changed.add(path);
   };
-  for (const file of before) {
+  // Most State paths stay in the same order across a merge. Compare the common
+  // prefix and suffix in place, then index only the unmatched middle.
+  let start = 0,
+    beforeEnd = before.length,
+    afterEnd = after.length;
+  while (start < beforeEnd && start < afterEnd && before[start]!.path === after[start]!.path) {
+    const file = before[start]!;
+    record(file.path, file, after[start]);
+    start++;
+  }
+  while (beforeEnd > start && afterEnd > start && before[beforeEnd - 1]!.path === after[afterEnd - 1]!.path) {
+    beforeEnd--;
+    afterEnd--;
+  }
+  const remaining = new Map<string, NativeFile>();
+  for (let index = start; index < afterEnd; index++) {
+    const file = after[index]!;
+    remaining.set(file.path, file);
+  }
+  for (let index = start; index < beforeEnd; index++) {
+    const file = before[index]!;
     record(file.path, file, remaining.get(file.path));
     remaining.delete(file.path);
+  }
+  for (let index = beforeEnd; index < before.length; index++) {
+    const file = before[index]!;
+    record(file.path, file, after[afterEnd++]);
   }
   for (const [path, file] of remaining) record(path, undefined, file);
   return [...changed].sort();

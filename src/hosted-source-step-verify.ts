@@ -9,6 +9,7 @@ import type { SourceWorkerTransport } from './hosted-source-worker-reader.js';
 import { invariant } from './errors.js';
 import { sourceValidation } from './hosted-source-validation.js';
 export const sourceStepBytes = 8 * 1024 * 1024,
+  sourceStepComputeBytes = 2 * 1024 * 1024,
   sourceStepObjects = 100;
 export type VerifyCursor = { ref: WorkerObject; pending: TreeRef[]; hash: SourceHashState; length: number };
 export type StepMeter = {

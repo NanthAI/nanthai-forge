@@ -19,6 +19,7 @@ import { composeRequestSchema, composeInputSchema, COMPOSE_ALGORITHM } from '../
 import { saveObjectSchema, saveWorkerObjectSchema } from '../src/hosted-save';
 import { notifyFinishCompose } from './projectHostedFinishWake';
 import { invariant } from '../src/errors';
+import { composeCauses } from '../src/hosted-source-io-error';
 import type { SaveIdentity } from './projectHostedSaveStore';
 const count = z.number().int().nonnegative();
 const progress = z
@@ -26,6 +27,8 @@ const progress = z
   .strict();
 export const composeStateSchema = z
   .object({
+    // Telemetry on the operation record only. It does not change the hashed worker input.
+    cause: z.enum(composeCauses).optional(),
     // Read-only compatibility for already pinned compose inputs; new plans omit this field.
     candidateFiles: z.literal(true).optional(),
     retryUntil: z.number().int().nonnegative().optional(),

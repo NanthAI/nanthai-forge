@@ -18,7 +18,14 @@ import { MemoryMergeSource, MemorySourceReader } from './hosted-source-memory.js
 import { buildHostedComposeState, changedPaths, type ComposeBases } from './hosted-compose-worker.js';
 import { buildHostedSyncState } from './hosted-sync-worker.js';
 import { syncStateDelta } from './hosted-sync-delta.js';
-import { readJson, sourceStepBytes, full, yieldStep, type StepMeter } from './hosted-source-step-verify.js';
+import {
+  readJson,
+  sourceStepBytes,
+  sourceStepComputeBytes,
+  full,
+  yieldStep,
+  type StepMeter,
+} from './hosted-source-step-verify.js';
 import type { SourceStepCursor, StepTransport } from './hosted-source-step.js';
 import { sourceWindows, stateSummary } from './hosted-source-fanout.js';
 import { mapSourceOrdered } from './hosted-source-parallel.js';
@@ -161,9 +168,28 @@ export async function prepareMergeStep(
     const plan = compose,
       right = (c.selections[0] as { head: string }).head,
       left = plan.base.head;
-    const tips = [...new Set([left, right])].filter(id => !c.parents[id]);
+    let tips = [...new Set([left, right])].filter(id => !c.parents[id]);
     // Both tips are read in one action so their manifests also sign changed paths.
     const size = tips.reduce((sum, id) => sum + c.inventory[id]!.object.size, 0);
+    if (left !== right && tips.length && size > sourceStepComputeBytes && io.stateParents && io.prepareRead) {
+      // The ordinary tip read resolves these same descriptors. Recorded parents can rule
+      // out a direct fast-forward before either large body occupies the merge heap.
+      for (const id of tips) io.expectState?.(id);
+      await io.prepareRead(tips.map(id => c.inventory[id]!.object));
+      const leftParents = c.parents[left] ?? io.stateParents(left);
+      const rightParents = c.parents[right] ?? io.stateParents(right);
+      if (leftParents && rightParents && !leftParents.includes(right) && !rightParents.includes(left)) {
+        for (const id of tips) {
+          const parents = id === left ? leftParents : rightParents;
+          c.parents[id] = [...parents];
+          c.states.push(...parents);
+          const generation = io.stateGeneration?.(id);
+          if (generation !== undefined) (c.generations ??= {})[id] = generation;
+          else c.generationFallback = true;
+        }
+        tips = [];
+      }
+    }
     if (tips.length && (full(m) || (m.objects && m.bytes + size > sourceStepBytes))) {
       yieldStep(m, 'bytes');
       return;
@@ -479,14 +505,14 @@ export async function computeMergeStep(
   }
   // Member accounting starts with the first quantum; an older in-flight cursor has none.
   if (plan.batch && c.index === 0) c.batchMerged ??= [];
-  if (terminal) {
+  const publish = async (c: SourceStepCursor, selected?: WorkerObject) => {
     invariant(c.head, 'SOURCE_JOB_INVALID', 'Compose has no selected head.');
     if (plan.batch && c.batchMerged) assertBatchAccounted(plan.batch.members, c.batchMerged, c.batchDropped);
     const own = source.objects.get(c.head),
       generated = own && source.outputState(own),
       adopted = io.composePhysicalState && c.head !== mainId && !generated;
     let mainRef = plan.main,
-      finalRef = c.inventory[c.head];
+      finalRef = selected ?? c.inventory[c.head];
     if (adopted && io.probeStates) {
       // The cursor retains logical pins, not the action's physical descriptors.
       // Fetch both exact rows in one bounded window; either row may already be warm.
@@ -545,8 +571,8 @@ export async function computeMergeStep(
     ]);
     c.output = outputs.at(-1)!;
     c.phase = 'done';
-    return;
-  }
+  };
+  if (terminal) return publish(c);
   const entry = composeLaneSchema.safeParse(c.selections[c.index]);
   const value = entry.success ? entry.data : composeDependencySchema.parse(c.selections[c.index]);
   const inputs = buildComposePages(entry.success ? [value] : []),
@@ -589,6 +615,7 @@ export async function computeMergeStep(
       : null,
   );
   let manifest = composeResultSchema.parse(JSON.parse(source.object(result.output.sha256).toString('utf8')));
+  const clean = manifest.result.status === 'clean';
   const member =
     manifest.result.status === 'conflict' &&
     !!plan.batch &&
@@ -641,7 +668,6 @@ export async function computeMergeStep(
       ),
     );
   // Publish exactly one listing in the last batch quantum while the final State is resident.
-  // The later terminal quantum only references this pin; it never re-reads a whole State.
   let candidateFiles = c.candidateFiles;
   if (plan.batch && c.index + 1 === c.selections.length && (member || manifest.result.status === 'clean')) {
     const finalHead = member
@@ -668,52 +694,52 @@ export async function computeMergeStep(
   // The quantum commits below, after its last await. Any await above can throw
   // SourceCalculationsPending, and the step re-runs this same index; moving the
   // cursor first skipped a batch member without merging or dropping it (Issue 55bcad06).
-  if (bases && !(plan.batch && manifestConflict(result, source))) c.composeBases = [...bases];
-  if (docsPaths.length) c.docsPaths = docsPaths;
-  if (candidateFiles) c.candidateFiles = candidateFiles;
-  c.index++;
+  const next: SourceStepCursor = {
+    ...c,
+    index: c.index + 1,
+    ...(bases && (!plan.batch || clean) ? { composeBases: [...bases] } : {}),
+    ...(docsPaths.length ? { docsPaths } : {}),
+    ...(candidateFiles ? { candidateFiles } : {}),
+  };
+  let selected: WorkerObject | undefined;
   if (member && 'candidateId' in value) {
     invariant(manifest.result.status === 'conflict', 'SOURCE_JOB_INVALID', 'Retain the rejected merge.');
-    (c.batchDropped ??= []).push({
-      candidateId: value.candidateId,
-      ...(againstMain ? { againstMain: true as const } : {}),
-      conflicts: manifest.result.conflicts,
-      paths: manifest.result.paths,
-      more: manifest.result.more,
-    });
+    next.batchDropped = [
+      ...(c.batchDropped ?? []),
+      {
+        candidateId: value.candidateId,
+        ...(againstMain ? { againstMain: true as const } : {}),
+        conflicts: manifest.result.conflicts,
+        paths: manifest.result.paths,
+        more: manifest.result.more,
+      },
+    ];
   } else if (manifest.result.status === 'conflict') {
-    c.output = result.output;
-    c.head = null;
-    c.phase = 'done';
+    next.output = result.output;
+    next.head = null;
+    next.phase = 'done';
   } else {
-    c.head = manifest.result.state.sha256;
-    c.inventory[c.head] = { object: manifest.result.state, recipe: null };
+    next.head = manifest.result.state.sha256;
+    selected = c.inventory[next.head] ?? { object: manifest.result.state, recipe: null };
     if (
       plan.batch &&
       c.batchMerged &&
       'candidateId' in value &&
       plan.batch.members.includes(value.candidateId)
     )
-      c.batchMerged.push(value.candidateId);
-    if (c.index === c.selections.length && !plan.batch) {
-      const own = source.objects.get(c.head);
-      if (io.composePhysicalState && c.head !== plan.main.object.sha256 && !(own && source.outputState(own)))
-        await io.composePhysicalState(
-          manifest.result.state,
-          source.state(c.head).files,
-          plan.main.object.sha256,
-        );
-      c.output = output;
-      c.phase = 'done';
+      next.batchMerged = [...c.batchMerged, value.candidateId];
+    if (next.index === c.selections.length && !plan.batch) {
+      const own = source.objects.get(next.head);
+      if (io.composePhysicalState && next.head !== mainId && !(own && source.outputState(own)))
+        await io.composePhysicalState(manifest.result.state, source.state(next.head).files, mainId);
+      next.output = output;
+      next.phase = 'done';
     }
   }
-}
-
-function manifestConflict(result: { output: { sha256: string } }, source: MemoryMergeSource) {
-  return (
-    composeResultSchema.parse(JSON.parse(source.object(result.output.sha256).toString('utf8'))).result
-      .status === 'conflict'
-  );
+  if (plan.batch && next.phase !== 'done' && next.index === c.selections.length)
+    await publish(next, selected);
+  if (selected) c.inventory[selected.object.sha256] = selected;
+  Object.assign(c, next);
 }
 
 /** The selected sync roots, not the prefetched frontier, define the proof. */

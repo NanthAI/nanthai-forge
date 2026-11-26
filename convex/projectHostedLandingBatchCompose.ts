@@ -124,6 +124,7 @@ export async function prepareBatchCompose(ctx: MutationCtx, input: BatchIdentity
       },
     });
     const state: ComposeState = {
+      cause: batch.recomposing ? 'batch-recompose' : 'batch-compose',
       request,
       ownerInputs,
       ...(earlyResolutions.length ? { earlyResolutions } : {}),

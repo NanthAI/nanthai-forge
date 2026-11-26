@@ -2,7 +2,7 @@
 // Copyright 2026 Ferdinando Valsecchi
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { finishFixture } from './hosted-finish-fixture.mjs';
+import { finishFixture, isSourceStep } from './hosted-finish-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 const jobs = await import(moduleUrl('../convex/projectSourceJobs.ts'));
 const store = await import(moduleUrl('../convex/projectConvexSourceStore.ts'));
@@ -52,8 +52,10 @@ async function fixture(t, shape = 'terminal') {
   f.moveMain();
   await f.passChecks();
   const target =
-    shape === 'children' || shape === 'fork' ? 'projectConvexSourceTask:run' : 'projectConvexSource:step';
-  for (let i = 0; !f.pending().some(x => x.name === target); i++) {
+    shape === 'children' || shape === 'fork'
+      ? task => task.name === 'projectConvexSourceTask:run'
+      : task => isSourceStep(task.name);
+  for (let i = 0; !f.pending().some(target); i++) {
     assert(i < 30);
     await f.execute();
   }
@@ -104,7 +106,7 @@ for (const watchdogFirst of [false, true])
         watchedJob = JSON.stringify(await load());
       }
     });
-    await f.execute(f.pending().find(x => x.name === 'projectConvexSource:step'));
+    await f.execute(f.pending().find(x => isSourceStep(x.name)));
     assert.equal(commits, 1);
     assertPins(await load(), original);
     if (watchdogFirst) {
@@ -161,7 +163,7 @@ for (const shape of ['serial', 'fork', 'child-continue', 'child-join'])
         const batch = f.tables.projectSourceBatches.get(task.batchId);
         assert.equal(batch.completed, batch.total - 1, 'this completion would schedule the parent join');
       }
-    } else action = f.pending().find(x => x.name === 'projectConvexSource:step');
+    } else action = f.pending().find(x => isSourceStep(x.name));
     const { original, deadline } = await nearDeadline(x);
     const retained = f.tables.projectSourceSteps.get(row._id);
     const cause = {
