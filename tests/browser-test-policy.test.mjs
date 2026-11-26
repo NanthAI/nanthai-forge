@@ -163,6 +163,7 @@ test('1dd4e095: a Candidate adding a -browser fixture gets browser coverage and 
 for (const path of [
   ...allBrowser,
   'tests/billing-fixture.mjs',
+  'tests/browser-fixture.mjs',
   'tests/fixtures/owner-decisions-preview.tsx',
   'tests/browser/lanes-yard.tsx',
   'tests/browser-runtime.mjs',

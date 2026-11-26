@@ -8,14 +8,13 @@
 // rows keep their stop words. Set FORGE_LANE_SHOTS to a folder to save screenshots at desk and phone width, both themes.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium } from 'playwright';
 import { chromiumLaunchOptions } from './browser-runtime.mjs';
+import { buildBrowserFixture, routeBrowserFixture } from './browser-fixture.mjs';
 
-const root = fileURLToPath(new URL('../', import.meta.url));
 const shots = process.env.FORGE_LANE_SHOTS || null;
 const DESK = { width: 1440, height: 1000 };
 const PHONE = { width: 390, height: 844 };
@@ -24,37 +23,12 @@ const FIXTURE = 'tests/browser/lanes-progress.tsx';
 // check goes from 3.1 to 3.7 (model.ts CHECK_FROM/TO) and a passed one rests at 3.85 (Item 85f456c1).
 const placeAt = minutes => 3.1 + 0.6 * Math.min(1, minutes / 10);
 
-async function buildFixture(out) {
-  const { build } = await import(pathToFileURL(join(root, 'node_modules/vite/dist/node/index.js')).href);
-  const result = await build({
-    configFile: join(root, 'web/vite.config.ts'),
-    root: join(root, 'web'),
-    mode: 'hosted',
-    logLevel: 'error',
-    build: { outDir: out, emptyOutDir: true, rolldownOptions: { input: { fixture: join(root, FIXTURE) } } },
-  });
-  const output = (Array.isArray(result) ? result[0] : result).output;
-  const entry = output.find(item => item.isEntry && item.facadeModuleId?.endsWith(FIXTURE));
-  const chunks = new Map(output.map(item => [item.fileName, item]));
-  const css = new Set();
-  const seen = new Set();
-  const walk = name => {
-    if (seen.has(name)) return;
-    seen.add(name);
-    const chunk = chunks.get(name);
-    for (const file of chunk?.viteMetadata?.importedCss ?? []) css.add(file);
-    for (const next of [...(chunk?.imports ?? []), ...(chunk?.dynamicImports ?? [])]) walk(next);
-  };
-  walk(entry.fileName);
-  return `<!doctype html><html lang="en" data-ds data-theme="dark"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Lanes progress fixture</title>${[...css].map(file => `<link rel="stylesheet" href="/${file}">`).join('')}</head><body><div id="root"></div><script type="module" src="/${entry.fileName}"></script></body></html>`;
-}
-
 test('the yard: a running check says its time, sits by elapsed / usual and glides at no frame cost', async t => {
   const launchOptions = chromiumLaunchOptions(t);
   if (!launchOptions) return;
   const out = mkdtempSync(join(tmpdir(), 'forge-lanes-progress-'));
   if (shots) mkdirSync(shots, { recursive: true });
-  const html = await buildFixture(out);
+  const { html } = await buildBrowserFixture(out, { entry: FIXTURE, title: 'Lanes progress fixture' });
   const browser = await chromium.launch(launchOptions);
   async function open(t, viewport, query = '', options = {}) {
     const context = await browser.newContext({ viewport, ...options });
@@ -62,20 +36,7 @@ test('the yard: a running check says its time, sits by elapsed / usual and glide
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     page.on('console', message => message.type() === 'error' && errors.push(message.text()));
-    await page.route('**/*', async route => {
-      const url = new URL(route.request().url());
-      if (url.protocol === 'data:') return route.continue();
-      if (url.hostname !== 'forge.test') return route.abort();
-      if (url.pathname === '/progress.html') return route.fulfill({ contentType: 'text/html', body: html });
-      const file = join(out, url.pathname.slice(1));
-      if (!existsSync(file)) return route.fulfill({ status: 404, body: '' });
-      const contentType = file.endsWith('.js')
-        ? 'text/javascript'
-        : file.endsWith('.css')
-          ? 'text/css'
-          : 'text/html';
-      return route.fulfill({ contentType, body: readFileSync(file) });
-    });
+    await routeBrowserFixture(page, out, html, { paths: ['/progress.html'] });
     await page.goto(`https://forge.test/progress.html${query}`);
     await page
       .locator('.yard .ln')

@@ -6,57 +6,26 @@
 // axe-clean with no sideways scroll at desk and phone width in both themes.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { createRequire } from 'node:module';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium } from 'playwright';
 import { chromiumLaunchOptions } from './browser-runtime.mjs';
+import { axePath, buildBrowserFixture, routeBrowserFixture } from './browser-fixture.mjs';
 
-const root = fileURLToPath(new URL('../', import.meta.url));
-const axePath = createRequire(import.meta.url).resolve('axe-core/axe.min.js');
 const DESK = { width: 1440, height: 1000 };
 const PHONE = { width: 390, height: 844 };
 const LANE = '7a2b4c6d-8e9f-4a1b-8c3d-5e6f7a8b9c0d';
 const SUBMISSION = '5d1c7a0e-0000-4000-8000-000000000501';
 
-async function buildFixture(out) {
-  const { build } = await import(pathToFileURL(join(root, 'node_modules/vite/dist/node/index.js')).href);
-  const result = await build({
-    configFile: join(root, 'web/vite.config.ts'),
-    root: join(root, 'web'),
-    mode: 'hosted',
-    logLevel: 'error',
-    build: {
-      outDir: out,
-      emptyOutDir: true,
-      rolldownOptions: { input: { fixture: join(root, 'tests/browser/approve-redirect.tsx') } },
-    },
-  });
-  const output = (Array.isArray(result) ? result[0] : result).output;
-  const entry = output.find(
-    item => item.isEntry && item.facadeModuleId?.endsWith('tests/browser/approve-redirect.tsx'),
-  );
-  const chunks = new Map(output.map(item => [item.fileName, item]));
-  const css = new Set();
-  const seen = new Set();
-  const walk = name => {
-    if (seen.has(name)) return;
-    seen.add(name);
-    const chunk = chunks.get(name);
-    for (const file of chunk?.viteMetadata?.importedCss ?? []) css.add(file);
-    for (const next of [...(chunk?.imports ?? []), ...(chunk?.dynamicImports ?? [])]) walk(next);
-  };
-  walk(entry.fileName);
-  return `<!doctype html><html lang="en" data-ds data-theme="dark"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Approve link fixture</title>${[...css].map(file => `<link rel="stylesheet" href="/${file}">`).join('')}</head><body><div id="root"></div><script type="module" src="/${entry.fileName}"></script></body></html>`;
-}
-
 test('0a99ab23: /approve looks its link up once and opens the Lane page in place', async t => {
   const launchOptions = chromiumLaunchOptions(t);
   if (!launchOptions) return;
   const out = mkdtempSync(join(tmpdir(), 'forge-approve-redirect-'));
-  const html = await buildFixture(out);
+  const { html } = await buildBrowserFixture(out, {
+    entry: 'tests/browser/approve-redirect.tsx',
+    title: 'Approve link fixture',
+  });
   const browser = await chromium.launch(launchOptions);
   async function open(t, viewport, query) {
     const context = await browser.newContext({ viewport, locale: 'en-US' });
@@ -64,20 +33,7 @@ test('0a99ab23: /approve looks its link up once and opens the Lane page in place
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     page.on('console', message => message.type() === 'error' && errors.push(message.text()));
-    await page.route('**/*', async route => {
-      const url = new URL(route.request().url());
-      if (url.hostname !== 'forge.test') return route.abort();
-      if (url.pathname === '/approve' || url.pathname === '/start')
-        return route.fulfill({ contentType: 'text/html', body: html });
-      const file = join(out, url.pathname.slice(1));
-      if (!existsSync(file)) return route.fulfill({ status: 404, body: '' });
-      const contentType = file.endsWith('.js')
-        ? 'text/javascript'
-        : file.endsWith('.css')
-          ? 'text/css'
-          : 'text/html';
-      return route.fulfill({ contentType, body: readFileSync(file) });
-    });
+    await routeBrowserFixture(page, out, html, { paths: ['/approve', '/start'] });
     // A page before the link, so Back shows where the reader came from.
     await page.goto('https://forge.test/start');
     await page.goto(`https://forge.test/approve?${query}`);

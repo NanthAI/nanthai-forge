@@ -6,52 +6,33 @@
 // tokens and the design system's, compared or not.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { createServer } from 'node:http';
-import { createRequire } from 'node:module';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium } from 'playwright';
 import { chromiumLaunchOptions } from './browser-runtime.mjs';
+import { axePath, buildBrowserFixture, serveBrowserFixture } from './browser-fixture.mjs';
 
-const root = fileURLToPath(new URL('../', import.meta.url));
-const axePath = createRequire(import.meta.url).resolve('axe-core/axe.min.js');
 const FIXTURE = 'tests/browser/setting-change.tsx';
-
-async function buildFixture(out) {
-  const { build } = await import(pathToFileURL(join(root, 'node_modules/vite/dist/node/index.js')).href);
-  const result = await build({
-    configFile: join(root, 'web/vite.config.ts'),
-    root: join(root, 'web'),
-    mode: 'hosted',
-    logLevel: 'error',
-    build: { outDir: out, emptyOutDir: true, rolldownOptions: { input: { fixture: join(root, FIXTURE) } } },
-  });
-  const output = (Array.isArray(result) ? result[0] : result).output;
-  const entry = output.find(item => item.isEntry && item.facadeModuleId?.endsWith(FIXTURE));
-  const css = output.filter(item => item.fileName.endsWith('.css')).map(item => item.fileName);
-  return ds =>
-    `<!doctype html><html lang="en" ${ds ? 'data-ds' : ''} data-theme="dark"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>Settings change fixture</title>${css.map(file => `<link rel="stylesheet" href="/${file}">`).join('')}</head><body style="margin:0;background:var(--bg, var(--fx-bg));color:var(--text, var(--fx-text))"><div id="root"></div><script type="module" src="/${entry.fileName}"></script></body></html>`;
-}
 
 test('a held settings change: no sideways scroll, hidden characters shown, axe clean', async t => {
   const launchOptions = chromiumLaunchOptions(t);
   if (!launchOptions) return;
   const out = mkdtempSync(join(tmpdir(), 'forge-setting-change-'));
-  const page = await buildFixture(out);
-  const server = createServer((request, response) => {
-    const url = new URL(request.url, 'http://fixture');
-    if (url.pathname === '/') {
-      response.setHeader('content-type', 'text/html');
-      return response.end(page(url.searchParams.has('ds')));
-    }
-    const file = join(out, url.pathname);
-    if (!file.startsWith(out) || !existsSync(file)) return response.writeHead(404).end();
-    response.setHeader('content-type', file.endsWith('.js') ? 'text/javascript' : 'text/css');
-    response.end(readFileSync(file));
-  }).listen(0, '127.0.0.1');
-  await new Promise(resolve => server.once('listening', resolve));
+  const built = await buildBrowserFixture(out, {
+    entry: FIXTURE,
+    title: 'Settings change fixture',
+    bodyStyle: 'margin:0;background:var(--bg, var(--fx-bg));color:var(--text, var(--fx-text))',
+  });
+  const server = await serveBrowserFixture(out, url =>
+    url.pathname === '/'
+      ? built.page({
+          htmlAttrs: url.searchParams.has('ds')
+            ? 'lang="en" data-ds data-theme="dark"'
+            : 'lang="en" data-theme="dark"',
+        })
+      : null,
+  );
   const browser = await chromium.launch(launchOptions);
   try {
     for (const ds of [false, true])
@@ -59,9 +40,7 @@ test('a held settings change: no sideways scroll, hidden characters shown, axe c
         for (const width of [1440, 390, 375]) {
           const context = await browser.newContext({ viewport: { width, height: 900 } });
           const tab = await context.newPage();
-          await tab.goto(
-            `http://127.0.0.1:${server.address().port}/?${ds ? 'ds&' : ''}${none ? 'none' : ''}`,
-          );
+          await tab.goto(`${server.url}/?${ds ? 'ds&' : ''}${none ? 'none' : ''}`);
           await tab.waitForSelector('.sc');
           assert.equal(
             await tab.evaluate(() => document.querySelector('.sc-details').open),
@@ -95,7 +74,7 @@ test('a held settings change: no sideways scroll, hidden characters shown, axe c
         }
   } finally {
     await browser.close();
-    server.close();
+    await server.close();
     rmSync(out, { recursive: true, force: true });
   }
 });

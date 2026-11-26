@@ -7,16 +7,13 @@
 // Set FORGE_TOPBAR_SHOTS to a folder to save screenshots of the top bar.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { createRequire } from 'node:module';
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium, webkit } from 'playwright';
 import { chromiumLaunchOptions } from './browser-runtime.mjs';
+import { axePath, buildBrowserFixture, routeBrowserFixture } from './browser-fixture.mjs';
 
-const root = fileURLToPath(new URL('../', import.meta.url));
-const axePath = createRequire(import.meta.url).resolve('axe-core/axe.min.js');
 const shots = process.env.FORGE_TOPBAR_SHOTS || null;
 const FIXTURE = 'tests/browser/top-bar-main.tsx';
 const cases = [
@@ -34,52 +31,11 @@ const railLinks = {
   Account: ['Projects', 'Billing', 'People and teams', 'Sign-in and devices', 'Your data', 'tidepool-ingest'],
 };
 
-async function buildFixture(out) {
-  const { build } = await import(pathToFileURL(join(root, 'node_modules/vite/dist/node/index.js')).href);
-  const result = await build({
-    configFile: join(root, 'web/vite.config.ts'),
-    root: join(root, 'web'),
-    mode: 'hosted',
-    logLevel: 'error',
-    build: { outDir: out, emptyOutDir: true, rolldownOptions: { input: { fixture: join(root, FIXTURE) } } },
+const routeFixture = (page, out, html, requests) =>
+  routeBrowserFixture(page, out, html, {
+    paths: ['/top.html'],
+    onExternal: requests ? url => requests.push(url.href) : undefined,
   });
-  const output = (Array.isArray(result) ? result[0] : result).output;
-  const entry = output.find(item => item.isEntry && item.facadeModuleId?.endsWith(FIXTURE));
-  const chunks = new Map(output.map(item => [item.fileName, item]));
-  const css = new Set();
-  const seen = new Set();
-  const walk = name => {
-    if (seen.has(name)) return;
-    seen.add(name);
-    const chunk = chunks.get(name);
-    for (const file of chunk?.viteMetadata?.importedCss ?? []) css.add(file);
-    for (const next of [...(chunk?.imports ?? []), ...(chunk?.dynamicImports ?? [])]) walk(next);
-  };
-  walk(entry.fileName);
-  return `<!doctype html><html lang="en" data-ds data-theme="dark"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Top bar fixture</title>${[...css].map(file => `<link rel="stylesheet" href="/${file}">`).join('')}</head><body style="margin:0"><div id="root"></div><script type="module" src="/${entry.fileName}"></script></body></html>`;
-}
-
-async function routeFixture(page, out, html, requests) {
-  await page.route('**/*', async route => {
-    const url = new URL(route.request().url());
-    if (url.protocol === 'data:') return route.continue();
-    if (url.hostname !== 'forge.test') {
-      requests?.push(url.href);
-      return route.abort();
-    }
-    if (url.pathname === '/top.html') return route.fulfill({ contentType: 'text/html', body: html });
-    const file = join(out, url.pathname.slice(1));
-    if (!existsSync(file)) return route.fulfill({ status: 404, body: '' });
-    const contentType = file.endsWith('.js')
-      ? 'text/javascript'
-      : file.endsWith('.css')
-        ? 'text/css'
-        : file.endsWith('.woff2')
-          ? 'font/woff2'
-          : 'text/html';
-    return route.fulfill({ contentType, body: readFileSync(file) });
-  });
-}
 
 const expected = {
   0: { desk: 'main · 0 today', phone: 'main · 0' },
@@ -121,7 +77,11 @@ test('the top bar main segment and side rails stay accessible at responsive widt
   const out = mkdtempSync(join(tmpdir(), 'forge-top-bar-'));
   t.after(() => rmSync(out, { recursive: true, force: true }));
   if (shots) mkdirSync(shots, { recursive: true });
-  const html = await buildFixture(out);
+  const { html } = await buildBrowserFixture(out, {
+    entry: FIXTURE,
+    title: 'Top bar fixture',
+    bodyStyle: 'margin:0',
+  });
   const browser = await chromium.launch(launchOptions);
   try {
     for (const { land, width, theme } of cases)

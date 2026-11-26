@@ -6,43 +6,27 @@
 // 390 px both render the page.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium } from 'playwright';
 import { chromiumLaunchOptions } from './browser-runtime.mjs';
+import { buildBrowserFixture, routeBrowserFixture } from './browser-fixture.mjs';
 
-const root = fileURLToPath(new URL('../', import.meta.url));
 const DESK = { width: 1440, height: 1000 };
 const PHONE = { width: 390, height: 844 };
-
-async function buildFixture(out) {
-  const { build } = await import(pathToFileURL(join(root, 'node_modules/vite/dist/node/index.js')).href);
-  const result = await build({
-    configFile: join(root, 'web/vite.config.ts'),
-    root: join(root, 'web'),
-    mode: 'hosted',
-    logLevel: 'error',
-    define: { 'process.env.NODE_ENV': '"development"' },
-    build: {
-      outDir: out,
-      emptyOutDir: true,
-      rolldownOptions: { input: { fixture: join(root, 'tests/browser/lane-duplicate-keys.tsx') } },
-    },
-  });
-  const output = (Array.isArray(result) ? result[0] : result).output;
-  const entry = output.find(
-    item => item.isEntry && item.facadeModuleId?.endsWith('tests/browser/lane-duplicate-keys.tsx'),
-  );
-  return `<!doctype html><html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Duplicate keys</title></head><body><div id="root"></div><script type="module" src="/${entry.fileName}"></script></body></html>`;
-}
 
 test('f9309eec: the review screen renders repeated source rows without a duplicate-key error', async t => {
   const launchOptions = chromiumLaunchOptions(t);
   if (!launchOptions) return;
   const out = mkdtempSync(join(tmpdir(), 'forge-lane-keys-'));
-  const html = await buildFixture(out);
+  const { html } = await buildBrowserFixture(out, {
+    entry: 'tests/browser/lane-duplicate-keys.tsx',
+    title: 'Duplicate keys',
+    htmlAttrs: 'lang="en"',
+    css: false,
+    define: { 'process.env.NODE_ENV': '"development"' },
+  });
   const browser = await chromium.launch(launchOptions);
   try {
     for (const viewport of [DESK, PHONE]) {
@@ -51,22 +35,7 @@ test('f9309eec: the review screen renders repeated source rows without a duplica
       const errors = [];
       page.on('pageerror', error => errors.push(error.message));
       page.on('console', message => message.type() === 'error' && errors.push(message.text()));
-      await page.route('**/*', async route => {
-        const url = new URL(route.request().url());
-        if (url.protocol === 'data:') return route.continue();
-        if (url.hostname !== 'forge.test') return route.abort();
-        if (url.pathname === '/keys.html') return route.fulfill({ contentType: 'text/html', body: html });
-        const file = join(out, url.pathname.slice(1));
-        if (!existsSync(file)) return route.fulfill({ status: 404, body: '' });
-        return route.fulfill({
-          contentType: file.endsWith('.js')
-            ? 'text/javascript'
-            : file.endsWith('.css')
-              ? 'text/css'
-              : 'text/html',
-          body: readFileSync(file),
-        });
-      });
+      await routeBrowserFixture(page, out, html, { paths: ['/keys.html'] });
       await page.goto('https://forge.test/keys.html');
       await page
         .locator('section[aria-label="The change"]')

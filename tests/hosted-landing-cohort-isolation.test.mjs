@@ -42,107 +42,114 @@ async function finish(f) {
 }
 const rowOf = (f, id) =>
   [...f.tables.projectHostedLandingRequests.values()].find(row => row.submissionId === id);
+const COHORT_START = Date.UTC(2026, 10, 10, 12);
+
+async function runMixedCohortReplay(t, { history = 0, startAt = COHORT_START } = {}) {
+  const f = await batchesFixture(t, {
+    // Pin the fake clock inside one account-order hour unless a test specifically exercises an hour crossing.
+    startAt,
+    count: 10,
+    batching: 'default',
+    batchMaxSize: 3,
+    memberPaths: [
+      'independent-0',
+      'collision',
+      'independent-2',
+      'collision',
+      'independent-4',
+      'independent-5',
+    ],
+  });
+  for (let index = 0; index < history; index++) {
+    f.insert('projectHostedLandingRequests', {
+      projectId: f.projectId,
+      channel: 'main',
+      submissionId: randomUUID(),
+      operationId: randomUUID(),
+      actor: 'owner',
+      sequence: -index - 1,
+      runnable: false,
+      phase: 'landed',
+      batchable: false,
+      runId: null,
+      attemptId: randomUUID(),
+      value: JSON.stringify({ phase: 'landed', id: randomUUID() }),
+    });
+    f.insert('projectHostedAcceptances', {
+      projectId: f.projectId,
+      receiptId: randomUUID(),
+      submissionId: randomUUID(),
+      attemptId: randomUUID(),
+      sequence: index + 100,
+      value: 'unrelated receipt history must not be read',
+    });
+  }
+  const before = f.counts.length,
+    started = performance.now();
+  await drain(f);
+  assert.equal(current(f, 3).phase, 'queued');
+  assert.equal(current(f, 4).phase, 'checking');
+  assert.equal(current(f, 5).phase, 'checking');
+  assert.equal(f.runs().length, 4, 'clean survivors open later pipeline slots');
+  const cohort = batches(f).find(batch => batch.id === current(f, 4).batchId);
+  const generation = cohort.composeOperationId,
+    runId = cohort.runId;
+  const attempt = current(f, 4).attemptId;
+  assert.equal(f.currentMain().head, f.entries[0].request.expectedMain.head);
+  // A clean successor can finish first but cannot publish before its predecessor.
+  await f.rawChecks.pass(await f.rawChecks.activate(runId));
+  await drain(f);
+  assert.equal(current(f, 4).phase, 'ready');
+  assert.equal(current(f, 3).phase, 'queued', 'speculative conflict remains advisory');
+  await f.rawChecks.pass(await f.rawChecks.activate(f.runs()[0].id));
+  await drain(f);
+  assert.equal(current(f, 3).error?.code, 'COMPOSITION_CONFLICT');
+  assert.equal(current(f, 4).phase, 'landed');
+  assert.equal(current(f, 4).attemptId, attempt);
+  assert.equal(batches(f).find(batch => batch.id === cohort.id).composeOperationId, generation);
+  await finish(f);
+  assert.equal(f.runs().length, 4, 'no additional exact checks');
+  assert.equal(f.metrics.sourceJobs, 4, 'one source job per original cohort, no survivor recompose');
+  for (const state of states(f).filter(state => state.phase === 'landed'))
+    assert.equal(
+      state.batchDiagnostic,
+      undefined,
+      'successful cohorts never receive individual fallback prose',
+    );
+  const files = JSON.parse(f.c.objects.get(f.currentMain().head)).files;
+  for (const [index, entry] of f.entries.entries()) {
+    if (index === 3) continue;
+    const own = JSON.parse(f.c.objects.get(entry.candidate.result.head)).files;
+    for (const file of own)
+      assert(files.some(accepted => accepted.path === file.path && accepted.blob === file.blob));
+  }
+  const calls = f.counts.slice(before);
+  const source = calls.map(observerProjectionBudget);
+  const budget = {
+    history,
+    calls: calls.length,
+    reads: calls.reduce((n, c) => n + c.documents, 0),
+    writes: calls.reduce((n, c) => n + c.writes, 0),
+    maxReads: Math.max(...calls.map(c => c.documents)),
+    maxWrites: Math.max(...calls.map(c => c.writes)),
+    sourceReads: source.reduce((n, c) => n + c.documents, 0),
+    sourceWrites: source.reduce((n, c) => n + c.writes, 0),
+    sourceJobs: f.metrics.sourceJobs,
+    checks: f.runs().length,
+    wallMs: performance.now() - started,
+    peakRssBytes: process.resourceUsage().maxRSS * 1024,
+  };
+  return { f, calls, source, budget };
+}
 
 for (const history of [0, 575, 1150])
   test(`mixed cohort replay with ${history} retained entries: survivors check before settlement and reuse their exact generation`, async t => {
-    const f = await batchesFixture(t, {
-      // This budget covers the cohort within one account-order hour. Clock
-      // rollover has its own replay in hosted-landing-admission-default.
-      startAt: Date.UTC(2026, 10, 10, 12),
-      count: 10,
-      batching: 'default',
-      batchMaxSize: 3,
-      memberPaths: [
-        'independent-0',
-        'collision',
-        'independent-2',
-        'collision',
-        'independent-4',
-        'independent-5',
-      ],
-    });
-    for (let index = 0; index < history; index++) {
-      f.insert('projectHostedLandingRequests', {
-        projectId: f.projectId,
-        channel: 'main',
-        submissionId: randomUUID(),
-        operationId: randomUUID(),
-        actor: 'owner',
-        sequence: -index - 1,
-        runnable: false,
-        phase: 'landed',
-        batchable: false,
-        runId: null,
-        attemptId: randomUUID(),
-        value: JSON.stringify({ phase: 'landed', id: randomUUID() }),
-      });
-      f.insert('projectHostedAcceptances', {
-        projectId: f.projectId,
-        receiptId: randomUUID(),
-        submissionId: randomUUID(),
-        attemptId: randomUUID(),
-        sequence: index + 100,
-        value: 'unrelated receipt history must not be read',
-      });
-    }
-    const before = f.counts.length,
-      started = performance.now();
-    await drain(f);
-    assert.equal(current(f, 3).phase, 'queued');
-    assert.equal(current(f, 4).phase, 'checking');
-    assert.equal(current(f, 5).phase, 'checking');
-    assert.equal(f.runs().length, 4, 'clean survivors open later pipeline slots');
-    const cohort = batches(f).find(batch => batch.id === current(f, 4).batchId);
-    const generation = cohort.composeOperationId,
-      runId = cohort.runId;
-    const attempt = current(f, 4).attemptId;
-    assert.equal(f.currentMain().head, f.entries[0].request.expectedMain.head);
-    // A clean successor can finish first but cannot publish before its predecessor.
-    await f.rawChecks.pass(await f.rawChecks.activate(runId));
-    await drain(f);
-    assert.equal(current(f, 4).phase, 'ready');
-    assert.equal(current(f, 3).phase, 'queued', 'speculative conflict remains advisory');
-    await f.rawChecks.pass(await f.rawChecks.activate(f.runs()[0].id));
-    await drain(f);
-    assert.equal(current(f, 3).error?.code, 'COMPOSITION_CONFLICT');
-    assert.equal(current(f, 4).phase, 'landed');
-    assert.equal(current(f, 4).attemptId, attempt);
-    assert.equal(batches(f).find(batch => batch.id === cohort.id).composeOperationId, generation);
-    await finish(f);
-    assert.equal(f.runs().length, 4, 'no additional exact checks');
-    assert.equal(f.metrics.sourceJobs, 4, 'one source job per original cohort, no survivor recompose');
-    for (const state of states(f).filter(state => state.phase === 'landed'))
-      assert.equal(
-        state.batchDiagnostic,
-        undefined,
-        'successful cohorts never receive individual fallback prose',
-      );
-    const files = JSON.parse(f.c.objects.get(f.currentMain().head)).files;
-    for (const [index, entry] of f.entries.entries()) {
-      if (index === 3) continue;
-      const own = JSON.parse(f.c.objects.get(entry.candidate.result.head)).files;
-      for (const file of own)
-        assert(files.some(accepted => accepted.path === file.path && accepted.blob === file.blob));
-    }
-    const calls = f.counts.slice(before);
+    const { f, calls, source, budget } = await runMixedCohortReplay(t, { history });
     assert.deepEqual(
       calls.filter(c => ['accountOrderTouch', 'statsClose'].includes(c.name)).map(c => c.name),
       ['accountOrderTouch'],
       'the fixed-hour replay includes one account-order update and no hour close',
     );
-    const budget = {
-      history,
-      calls: calls.length,
-      reads: calls.reduce((n, c) => n + c.documents, 0),
-      writes: calls.reduce((n, c) => n + c.writes, 0),
-      maxReads: Math.max(...calls.map(c => c.documents)),
-      maxWrites: Math.max(...calls.map(c => c.writes)),
-      sourceJobs: f.metrics.sourceJobs,
-      checks: f.runs().length,
-      wallMs: performance.now() - started,
-      peakRssBytes: process.resourceUsage().maxRSS * 1024,
-    };
-    const source = calls.map(observerProjectionBudget);
     // Reads 3997 -> 3999 (incident c329d191): each of the two order-woken heads
     // cancels the stall alarm armed with its wake when it lands.
     // Reads 3999 -> 4107 (0b12fcfe): the completion tick reads each landed Lane's Intent head (and its
@@ -211,6 +218,33 @@ for (const history of [0, 575, 1150])
     assert.equal(f.counts.length, idle, 'zero idle calls');
     t.diagnostic(JSON.stringify(budget));
   });
+
+// Friction 97bba830 (receipt f4f8e60e, check ac85c3b3): attempt 1 failed with sourceWrites=1396 (>1395)
+// when check ac85c3b3 spanned 03:00:00Z. The 30 s landing-driver wake crossed the UTC hour boundary
+// between batch publications, scheduling a second accountProjectOrder:touch (+1 call, +1 sourceRead,
+// +1 sourceWrite) with zero deviceAttempts/accountLimits writes and unchanged isolation invariants.
+test('97bba830: crossing a UTC hour boundary adds one account-order update without counter clash or isolation race', async t => {
+  let sameHour, crossing;
+  await t.test('same-hour baseline', async st => {
+    sameHour = await runMixedCohortReplay(st, { startAt: COHORT_START });
+  });
+  await t.test('hour-boundary crossing', async st => {
+    crossing = await runMixedCohortReplay(st, { startAt: Date.UTC(2026, 10, 23, 2, 59, 58) });
+  });
+  assert.equal(crossing.f.now(), Date.UTC(2026, 10, 23, 3, 0, 28));
+  assert.equal(
+    crossing.calls.filter(c => c.written.includes('deviceAttempts')).length,
+    0,
+    'no accountLimits counter-row clash',
+  );
+  assert.deepEqual(
+    crossing.calls.filter(c => ['accountOrderTouch', 'statsClose'].includes(c.name)).map(c => c.name),
+    ['accountOrderTouch', 'accountOrderTouch'],
+  );
+  assert.equal(crossing.budget.calls - sameHour.budget.calls, 1);
+  assert.equal(crossing.budget.sourceReads - sameHour.budget.sourceReads, 1);
+  assert.equal(crossing.budget.sourceWrites - sameHour.budget.sourceWrites, 1);
+});
 
 // Item 9a04d916: the completed shared compose is consumed by the leader's settle mutation,
 // not the drive action, so the race holds both hops back.

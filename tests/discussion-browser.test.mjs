@@ -7,62 +7,33 @@
 // at desk and phone width in both themes. Set FORGE_DISCUSSION_SHOTS to a folder to also save the screenshots.
 import test from 'node:test';
 import { chromiumLaunchOptions, settleBrowserPage } from './browser-runtime.mjs';
+import { axePath, buildBrowserFixture, repoRoot, routeBrowserFixture } from './browser-fixture.mjs';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { createRequire } from 'node:module';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium } from 'playwright';
 
-const root = fileURLToPath(new URL('../', import.meta.url));
-const axePath = createRequire(import.meta.url).resolve('axe-core/axe.min.js');
 const shots = process.env.FORGE_DISCUSSION_SHOTS || null;
 const DESK = { width: 1440, height: 1000 };
 const PHONE = { width: 390, height: 844 };
-const fixture = join(root, 'tests/browser/discussion.tsx');
 // A one-pixel picture: what the download route answers for an attachment the page asks to show.
 const png = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
   'base64',
 );
 
-/** Build the fixture module as a page script, linking only the stylesheets its own chunks import. */
-async function buildFixture(out) {
-  const { build } = await import(pathToFileURL(join(root, 'node_modules/vite/dist/node/index.js')).href);
-  const result = await build({
-    configFile: join(root, 'web/vite.config.ts'),
-    root: join(root, 'web'),
-    mode: 'hosted',
-    logLevel: 'error',
-    // The page reads its sign-in token from the auth package; the fixture has no sign-in, so it gets a fixed one.
-    resolve: { alias: { '@convex-dev/auth/react': join(root, 'tests/browser/auth-stub.ts') } },
-    build: { outDir: out, emptyOutDir: true, rolldownOptions: { input: { fixture } } },
-  });
-  const output = (Array.isArray(result) ? result[0] : result).output;
-  const entry = output.find(
-    item => item.isEntry && item.facadeModuleId?.endsWith('tests/browser/discussion.tsx'),
-  );
-  const chunks = new Map(output.map(item => [item.fileName, item]));
-  const css = new Set();
-  const seen = new Set();
-  const walk = name => {
-    if (seen.has(name)) return;
-    seen.add(name);
-    const chunk = chunks.get(name);
-    for (const file of chunk?.viteMetadata?.importedCss ?? []) css.add(file);
-    for (const next of [...(chunk?.imports ?? []), ...(chunk?.dynamicImports ?? [])]) walk(next);
-  };
-  walk(entry.fileName);
-  return `<!doctype html><html lang="en" data-ds data-theme="dark"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Discussion fixture</title>${[...css].map(file => `<link rel="stylesheet" href="/${file}">`).join('')}</head><body><div id="root"></div><script type="module" src="/${entry.fileName}"></script></body></html>`;
-}
-
 test('the Item page discussion: lazy reads, inert member HTML, readers, posting, axe and widths', async t => {
   const launchOptions = chromiumLaunchOptions(t);
   if (!launchOptions) return;
   const out = mkdtempSync(join(tmpdir(), 'forge-discussion-'));
   if (shots) mkdirSync(shots, { recursive: true });
-  const html = await buildFixture(out);
+  // The page reads its sign-in token from the auth package; the fixture has no sign-in, so it gets a fixed one.
+  const { html } = await buildBrowserFixture(out, {
+    entry: 'tests/browser/discussion.tsx',
+    title: 'Discussion fixture',
+    resolve: { alias: { '@convex-dev/auth/react': join(repoRoot, 'tests/browser/auth-stub.ts') } },
+  });
   const browser = await chromium.launch(launchOptions);
   async function open(t, viewport, query = '', handle = null, expected = []) {
     const context = await browser.newContext({ viewport });
@@ -83,23 +54,17 @@ test('the Item page discussion: lazy reads, inert member HTML, readers, posting,
       // The member text's outside image must never be requested; anything else failing is an error.
       errors.push(`failed ${request.url().slice(0, 80)} ${request.failure()?.errorText}`);
     });
-    await page.route('**/*', async route => {
-      const url = new URL(route.request().url());
-      if (url.protocol === 'data:') return route.continue();
-      if (handle && (await handle(route, url))) return;
-      if (url.hostname !== 'forge.test') return route.abort();
-      if (url.pathname === '/discussion/attachment')
-        return route.fulfill({ status: 200, contentType: 'image/png', body: png });
-      if (url.pathname === '/discussion.html' || url.pathname.startsWith('/sample-one/synthetic/plan/'))
-        return route.fulfill({ contentType: 'text/html', body: html });
-      const file = join(out, url.pathname.slice(1));
-      if (!existsSync(file)) return route.fulfill({ status: 404, body: '' });
-      const contentType = file.endsWith('.js')
-        ? 'text/javascript'
-        : file.endsWith('.css')
-          ? 'text/css'
-          : 'text/html';
-      return route.fulfill({ contentType, body: readFileSync(file) });
+    await routeBrowserFixture(page, out, html, {
+      handle: async (route, url) => {
+        if (handle && (await handle(route, url))) return true;
+        if (url.hostname === 'forge.test' && url.pathname === '/discussion/attachment') {
+          await route.fulfill({ status: 200, contentType: 'image/png', body: png });
+          return true;
+        }
+        return false;
+      },
+      matchHtml: url =>
+        url.pathname === '/discussion.html' || url.pathname.startsWith('/sample-one/synthetic/plan/'),
     });
     const path = query.includes('stress')
       ? '/sample-one/synthetic/plan/7be2c41a-0000-4000-8000-000000000001'

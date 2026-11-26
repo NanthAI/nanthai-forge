@@ -10,17 +10,14 @@
 // folder to also save the screenshots.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { createRequire } from 'node:module';
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium, firefox, webkit } from 'playwright';
 import { chromiumLaunchOptions } from './browser-runtime.mjs';
+import { axePath, buildBrowserFixture, routeBrowserFixture } from './browser-fixture.mjs';
 import { checkDesktopDock, checkPhoneDock } from './browser/needs-me-dock.mjs';
 
-const root = fileURLToPath(new URL('../', import.meta.url));
-const axePath = createRequire(import.meta.url).resolve('axe-core/axe.min.js');
 const shots = process.env.FORGE_NEEDS_SHOTS || null;
 const DESK = { width: 1440, height: 1000 };
 const PHONE = { width: 390, height: 844 };
@@ -30,51 +27,16 @@ const FIXTURES = {
   '/progress.html': 'tests/browser/progress-parity.tsx',
 };
 
-async function buildFixture(out) {
-  const { build } = await import(pathToFileURL(join(root, 'node_modules/vite/dist/node/index.js')).href);
-  const result = await build({
-    configFile: join(root, 'web/vite.config.ts'),
-    root: join(root, 'web'),
-    mode: 'hosted',
-    logLevel: 'error',
-    build: {
-      outDir: out,
-      emptyOutDir: true,
-      rolldownOptions: {
-        input: Object.fromEntries(
-          Object.entries(FIXTURES).map(([url, file]) => [url.slice(1, -5), join(root, file)]),
-        ),
-      },
-    },
-  });
-  const output = (Array.isArray(result) ? result[0] : result).output;
-  const chunks = new Map(output.map(item => [item.fileName, item]));
-  return Object.fromEntries(
-    Object.entries(FIXTURES).map(([url, path]) => {
-      const entry = output.find(item => item.isEntry && item.facadeModuleId?.endsWith(path));
-      const css = new Set();
-      const seen = new Set();
-      const walk = name => {
-        if (seen.has(name)) return;
-        seen.add(name);
-        const chunk = chunks.get(name);
-        for (const file of chunk?.viteMetadata?.importedCss ?? []) css.add(file);
-        for (const next of [...(chunk?.imports ?? []), ...(chunk?.dynamicImports ?? [])]) walk(next);
-      };
-      walk(entry.fileName);
-      const html = `<!doctype html><html lang="en" data-ds data-theme="dark"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Needs me fixture</title>${[...css].map(file => `<link rel="stylesheet" href="/${file}">`).join('')}</head><body><div id="root"></div><script type="module" src="/${entry.fileName}"></script></body></html>`;
-      return [url, html];
-    }),
-  );
-}
-
 test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and widths in both themes', async t => {
   const launchOptions = chromiumLaunchOptions(t);
   if (!launchOptions) return;
   const out = mkdtempSync(join(tmpdir(), 'forge-needs-me-'));
   t.after(() => rmSync(out, { recursive: true, force: true }));
   if (shots) mkdirSync(shots, { recursive: true });
-  const html = await buildFixture(out);
+  const { pages: html } = await buildBrowserFixture(out, {
+    entries: FIXTURES,
+    title: 'Needs me fixture',
+  });
   const browser = await chromium.launch(launchOptions);
   async function open(
     t,
@@ -118,20 +80,7 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     page.on('console', message => message.type() === 'error' && errors.push(message.text()));
-    await page.route('**/*', async route => {
-      const url = new URL(route.request().url());
-      if (url.protocol === 'data:') return route.continue();
-      if (url.hostname !== 'forge.test') return route.abort();
-      if (html[url.pathname]) return route.fulfill({ contentType: 'text/html', body: html[url.pathname] });
-      const file = join(out, url.pathname.slice(1));
-      if (!existsSync(file)) return route.fulfill({ status: 404, body: '' });
-      const contentType = file.endsWith('.js')
-        ? 'text/javascript'
-        : file.endsWith('.css')
-          ? 'text/css'
-          : 'text/html';
-      return route.fulfill({ contentType, body: readFileSync(file) });
-    });
+    await routeBrowserFixture(page, out, html);
     const search = new URLSearchParams({ data, theme, ...query });
     await page.goto(`https://forge.test${fixture}?${search}`);
     // The dock fixture is ready when its grips attach; other fixtures supply their own ready marker.
