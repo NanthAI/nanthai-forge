@@ -158,7 +158,12 @@ function fixture(
     projectId: 'synthetic-project',
     request: { expectedHead: candidate.sha256, expectedEnvironment: 'b'.repeat(64) },
     candidate: { base: { head: base.sha256 } },
-    check: { executable: 'node', args: ['scripts/forge-check.mjs'], definition: 'c'.repeat(64) },
+    check: {
+      executable: 'node',
+      args: ['scripts/forge-check.mjs'],
+      recipe: 'forge-standard-v1',
+      definition: 'c'.repeat(64),
+    },
     configuration: { provider: 'github-actions', runtime: hostedActionsRuntime },
     fence: 1,
     executionId: '123',
@@ -3603,6 +3608,25 @@ test('single execution uses the planning runner; distributed jobs and pack artif
   const script = readFileSync('scripts/hosted-actions-job.mjs', 'utf8');
   assert.match(script, /single_shard=\$\{result\.singleShard\}/);
   assert.match(script, /matrix=\[\]\\nsingle_shard=\\npack_refresh=false/);
+});
+
+test('a same-name command without the recipe prepares one opaque Actions job', async t => {
+  const s = fixture(t);
+  s.run.check = {
+    executable: 'node',
+    args: ['scripts/forge-check.mjs'],
+    definition: 'c'.repeat(64),
+  };
+  s.run.request.expectedHead = s.state([s.entry('scripts/forge-check.mjs', 'process.exit(0);')]).sha256;
+  const prepared = await prepareActionsJob(
+    s.client,
+    join(s.directory, 'candidate'),
+    join(s.directory, 'objects'),
+  );
+  assert.equal(prepared.recipe.standard, false);
+  assert.equal(prepared.singleShard, 'static');
+  assert.deepEqual(prepared.matrix, []);
+  assert.deepEqual(prepared.recipe.command, ['node', 'scripts/forge-check.mjs']);
 });
 
 for (const exitCode of [0, 7])

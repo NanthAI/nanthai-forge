@@ -1662,6 +1662,7 @@ test('storage per landing ratchets every table on fresh and dogfood-shaped check
   // fixture the compose and step copies add 121 B and 104 B respectively. Freeze elapsed
   // time so exact JSON byte ceilings measure fields rather than runner load.
   fixedClock(t, { elapsed: true });
+  // Item a2457f95: an explicit recipe adds 33 JSON bytes per opted-in check run.
   const scenarios = {
     fresh: await landingStorage(t, false, { capsules: true, journals: true }),
     dogfood: await landingStorage(t, true, { capsules: true, journals: true }),

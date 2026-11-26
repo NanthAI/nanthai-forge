@@ -36,7 +36,11 @@ const healthy = {
 test.beforeEach(t => t.mock.method(preflightRuntime, 'filesystemEventHealth', () => healthy));
 
 const manifest = (staticChecks, scripts = {}) =>
-  JSON.stringify({ type: 'module', scripts, forge: { preflight: { static: staticChecks } } });
+  JSON.stringify({
+    type: 'module',
+    scripts,
+    forge: { checkRecipe: 'forge-standard-v1', preflight: { static: staticChecks } },
+  });
 
 test('without a declaration only a conventionally named formatter check runs; an unknown check script is never guessed', () => {
   assert.deepEqual(staticChecks('{"scripts":{"check":"npm test"}}'), []);
@@ -326,7 +330,11 @@ test('budget the ranked tiers leave over runs the cheapest timed tests the budge
 });
 
 const guardManifest = guards =>
-  JSON.stringify({ type: 'module', scripts: {}, forge: { preflight: { guards } } });
+  JSON.stringify({
+    type: 'module',
+    scripts: {},
+    forge: { checkRecipe: 'forge-standard-v1', preflight: { guards } },
+  });
 const runtimeGuard = {
   name: 'runtime',
   tests: ['tests/runtime-guard.test.mjs'],

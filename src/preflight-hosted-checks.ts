@@ -8,7 +8,7 @@ import {
   validExercisedScope,
 } from '../scripts/test-queue-proof.mjs';
 import { scrubText } from './client-error-text.js';
-import { STANDARD_CHECK_ENTRY } from './standard-check.js';
+import { FORGE_CHECK_RECIPE } from './standard-check.js';
 import type { readSource } from './files.js';
 import type { NativeFile } from './state/format.js';
 import type { changedStatePaths, scanSecretPaths } from './secret-scan.js';
@@ -54,7 +54,7 @@ export function reportPreflightChecks(
     const selected = new Set(paths);
     selected.add(reads.allowFile);
     selected.add(REGISTRY);
-    selected.add(STANDARD_CHECK_ENTRY);
+    selected.add('package.json');
     const index = (files: readonly NativeFile[]) =>
       new Map(files.filter(file => selected.has(file.path)).map(file => [file.path, file]));
     const current = index(main);
@@ -130,9 +130,6 @@ function previewQueueProof(
   read: (file: NativeFile) => Buffer | undefined,
   deadline: number,
 ) {
-  // This is the checkout signature of the standard Forge recipe. Finish checks
-  // the selected definition before turning a finding into a refusal.
-  if (!after.has(STANDARD_CHECK_ENTRY)) return undefined;
   // A header-only edit of a core path (the Lane's bytes against main's) is not core.
   // Past the deadline the read throws, so the path stays core.
   const text = (file: NativeFile | undefined) => {
@@ -147,6 +144,16 @@ function previewQueueProof(
         : [undefined, undefined],
   );
   if (!changed) return undefined;
+  // Forge's source manifest opts into this local preview. Finish still checks
+  // the pinned check definition before turning a finding into a refusal.
+  const manifest = after.get('package.json');
+  if (!manifest || manifest.mode === 'symlink') return undefined;
+  try {
+    if (JSON.parse(read(manifest)?.toString('utf8') ?? '{}').forge?.checkRecipe !== FORGE_CHECK_RECIPE)
+      return undefined;
+  } catch {
+    return undefined;
+  }
   const candidate = (path: string) => {
     if (performance.now() >= deadline) throw new Error();
     const base = before.get(path);

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
+import { FORGE_CHECK_RECIPE } from './standard-check.js';
 import { z } from 'zod';
 import { declaredInputSchema } from './work-input-types.js';
 import { docsPathsSchema, globalRiskPathsSchema } from './docs-paths.js';
@@ -53,6 +54,7 @@ export const checkSchema = z.object({
   measureResources: z.boolean().optional(),
   declaredInputs: z.array(declaredInputSchema).optional(),
   actions: checkActions.optional(),
+  recipe: z.literal(FORGE_CHECK_RECIPE).optional(),
   selection: checkSelectionDeclaration.optional(),
   docsPaths: docsPathsSchema.optional(),
   globalRiskPaths: globalRiskPathsSchema.optional(),
@@ -76,6 +78,7 @@ export const defineCheckCommandSchema = z.object({
   measureResources: z.boolean().optional(),
   declaredInputs: z.array(declaredInputSchema).optional(),
   actions: checkActions.optional(),
+  recipe: z.literal(FORGE_CHECK_RECIPE).optional(),
   selection: checkSelectionDeclaration.optional(),
   docsPaths: docsPathsSchema.optional(),
   globalRiskPaths: globalRiskPathsSchema.optional(),

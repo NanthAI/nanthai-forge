@@ -19,7 +19,7 @@ import { LANDING_MESSAGE_BYTES } from '../dist/landing-message.js';
 const requestOf = call => (call.args.request ? JSON.parse(call.args.request) : call.args);
 
 const files = {
-  'package.json': '{"type":"module"}',
+  'package.json': '{"type":"module","forge":{"checkRecipe":"forge-standard-v1"}}',
   'scripts/forge-check.mjs': '',
   'tests/docs.test.mjs':
     "import test from 'node:test'; import fs from 'node:fs'; test('document remains readable', () => fs.readFileSync(new URL('../README.md', import.meta.url)));\n",

@@ -54,6 +54,7 @@ function fixture(t) {
       name: 'verify',
       executable: process.execPath,
       args: ['scripts/forge-check.mjs'],
+      recipe: 'forge-standard-v1',
       environmentLabel: 'synthetic',
       definition: 'a'.repeat(64),
       at: new Date().toISOString(),

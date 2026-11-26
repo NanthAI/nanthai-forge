@@ -148,6 +148,7 @@ async function replay(t, scenario, reason, lookups) {
           name: 'team-check',
           executable: 'node',
           args: ['scripts/forge-check.mjs'],
+          recipe: 'forge-standard-v1',
           environmentLabel: 'clean',
         },
       },

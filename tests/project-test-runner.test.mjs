@@ -105,8 +105,13 @@ test("Forge's Node layout is never inferred from tests/*.test.mjs alone: an outs
   const bare = resolve({ scripts: { test: 'node --test' } }, outside);
   assert.ok(runnerTestPath(bare.runner, 'lib/y.test.js'));
   assert.deepEqual(runnerCommand(bare.runner, ['tests/x.test.mjs']), ['node', '--test', 'tests/x.test.mjs']);
-  // With Forge's own check entry present the same manifest is Forge's layout.
-  const forge = resolve({ scripts: { test: 'node --test' } }, [...outside, 'scripts/forge-check.mjs']);
+  // Another repository can use the same filename without choosing Forge's layout.
+  const sameName = [...outside, 'scripts/forge-check.mjs'];
+  assert.equal(resolve({ scripts: { test: 'node --test' } }, sameName).runner.layout, 'generic');
+  const forge = resolve(
+    { scripts: { test: 'node --test' }, forge: { checkRecipe: 'forge-standard-v1' } },
+    sameName,
+  );
   assert.equal(forge.runner.layout, 'forge-node');
   assert.deepEqual(forge.runner.globs, ['tests/*.test.mjs']);
   // A project that declares the runner chooses it.
@@ -183,7 +188,11 @@ test('the runner is inferred from the test script, then dependencies, then Node 
   assert.equal(resolve(undefined, ['lib/a.test.js']).status, 'unavailable');
   assert.equal(files.runner.layout, 'generic');
   assert.equal(
-    resolve({}, ['scripts/forge-check.mjs', 'tests/a.test.mjs', 'tests/fixture.mjs']).runner.layout,
+    resolve({ forge: { checkRecipe: 'forge-standard-v1' } }, [
+      'scripts/forge-check.mjs',
+      'tests/a.test.mjs',
+      'tests/fixture.mjs',
+    ]).runner.layout,
     'forge-node',
   );
 
@@ -364,7 +373,10 @@ test('semantic union tests run with the project runner; Forge layout keeps its c
     ),
   };
   const base = [process.execPath, '-e', ''];
-  const forge = resolve({}, ['scripts/forge-check.mjs', 'tests/a.test.mjs']);
+  const forge = resolve({ forge: { checkRecipe: 'forge-standard-v1' } }, [
+    'scripts/forge-check.mjs',
+    'tests/a.test.mjs',
+  ]);
   assert.deepEqual(
     semanticCheckCommand(base, plan, process.execPath, [], forge),
     semanticCheckCommand(base, plan, process.execPath),

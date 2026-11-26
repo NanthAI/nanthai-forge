@@ -922,7 +922,7 @@ for (const scenario of [
       'Synthetic candidate',
       new Date().toISOString(),
     );
-    run.check = { ...run.check, args: ['scripts/forge-check.mjs'] };
+    run.check = { ...run.check, args: ['scripts/forge-check.mjs'], recipe: 'forge-standard-v1' };
     // Optimistic/recovery candidates must override an inherited full environment,
     // exactly as local preparation does. Ordinary checks and audits stay full.
     run.environment.env = scenario.normal ? {} : { FORGE_CHECK_FULL: '1' };
@@ -1054,7 +1054,7 @@ test('benchmark one and four shard plans match the Forge Actions plan and execut
     'tests/b.test.mjs': '// synthetic b\n',
     'tests/x.test.mjs': '// synthetic x\n',
   });
-  run.check = { ...run.check, args: ['scripts/forge-check.mjs'] };
+  run.check = { ...run.check, args: ['scripts/forge-check.mjs'], recipe: 'forge-standard-v1' };
   run.environment.env = { FORGE_CHECK_FULL: '1' };
   const previous = { ...process.env };
   t.after(() => {
@@ -1143,6 +1143,7 @@ test('duration-balanced Actions recipe reuses pinned shard membership after hist
     'package-lock.json': '{}\n',
   });
   run.check.args = ['scripts/forge-check.mjs'];
+  run.check.recipe = 'forge-standard-v1';
   run.environment.env = { FORGE_CHECK_FULL: '1' };
   setPolicy(
     work.store,
@@ -2125,7 +2126,7 @@ for (const shardResult of ['success', 'failure', 'oom'])
       'tests/a.test.mjs': '// chosen fixture',
       'tests/b.test.mjs': '// unrelated fixture',
     });
-    run.check = { ...run.check, args: ['scripts/forge-check.mjs'] };
+    run.check = { ...run.check, args: ['scripts/forge-check.mjs'], recipe: 'forge-standard-v1' };
     run.checkSelection = { scope: 'partial', reason: 'Explicit fixture list', tests: ['tests/a.test.mjs'] };
     work.store.locked(() => {
       const tx = work.store.records();
@@ -2229,6 +2230,7 @@ test('Actions landing verdict preserves single-failure quarantine but fails repe
     identity = `${file} :: synthetic flake`;
   const { work, run } = fixture(t, { [file]: '// synthetic flake' });
   run.check.args = ['scripts/forge-check.mjs'];
+  run.check.recipe = 'forge-standard-v1';
   run.comparisonBase = run.base;
   async function execute(passed, staticFailed = false, retry = true) {
     const current = {

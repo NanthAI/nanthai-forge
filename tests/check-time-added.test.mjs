@@ -35,6 +35,7 @@ const forgeCheck = {
   name: 'forge',
   executable: 'node',
   args: ['scripts/forge-check.mjs'],
+  recipe: 'forge-standard-v1',
   environmentLabel: 'clean',
 };
 /** Deterministic noise in [-1, 1]. */

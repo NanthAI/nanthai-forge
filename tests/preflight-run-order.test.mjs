@@ -275,7 +275,7 @@ function lane(t, record = false) {
   const root = join(dir, 'lane');
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const files = new Map([
-    ['package.json', '{"type":"module","scripts":{}}'],
+    ['package.json', '{"type":"module","scripts":{},"forge":{"checkRecipe":"forge-standard-v1"}}'],
     ['scripts/forge-check.mjs', ''],
     ['src/queue.ts', 'export const queue = [];'],
     ['tests/queue.test.mjs', "import '../dist/queue.js';"],
@@ -524,7 +524,7 @@ test('13ea93bf 2026-11-20 timeline-id miss: a test that runs a changed module th
   const dir = mkdtempSync(join(tmpdir(), 'forge-run-order-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const files = new Map([
-    ['package.json', '{"type":"module","scripts":{}}'],
+    ['package.json', '{"type":"module","scripts":{},"forge":{"checkRecipe":"forge-standard-v1"}}'],
     ['scripts/forge-check.mjs', ''],
     ['src/timeline.ts', 'export const id = (x) => `accepted:${x}`;'],
     ['src/intent-timeline.ts', "import { id } from './timeline.js';\nexport const rows = () => [id('v')];"],

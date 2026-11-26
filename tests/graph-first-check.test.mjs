@@ -235,6 +235,7 @@ test('only a declared configured command qualifies; Forge’s own recipe keeps f
     graphFirstCheck({
       executable: 'node',
       args: ['scripts/forge-check.mjs'],
+      recipe: 'forge-standard-v1',
       selection: { scope: 'changed-paths' },
     }),
     false,
@@ -517,7 +518,14 @@ test('configure-check and check-settings propose the scope only for an undeclare
   assert.deepEqual(proposal.selection, { scope: 'changed-paths' });
   assert.equal(proposal.line, PACKAGES_RUN_LINE);
   assert.equal(commandScopeProposal(ci()), null);
-  assert.equal(commandScopeProposal({ executable: 'node', args: ['scripts/forge-check.mjs'] }), null);
+  assert.equal(
+    commandScopeProposal({
+      executable: 'node',
+      args: ['scripts/forge-check.mjs'],
+      recipe: 'forge-standard-v1',
+    }),
+    null,
+  );
 });
 
 test('selection fallback names a graph-first full run', () => {

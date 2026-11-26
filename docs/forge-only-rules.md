@@ -55,7 +55,7 @@ ecosystem; rows that name an "any-ecosystem slice" Issue are live cases that sli
 | File | Rule | Hits | Why it is Forge-only | Other repositories get |
 | --- | --- | --- | --- | --- |
 | `src/standard-check.ts` | `check-entry` | 2 | defines the standard check entry | — (the predicate itself) |
-| `src/standard-check.ts` | `standard-from-args` | 2 | the one predicate for Forge's check | — (the predicate itself) |
+| `src/standard-check.ts` | `standard-from-args` | 1 | verifies the command after the definition opts into the recipe | their configured command stays opaque |
 | `src/owner-approval-paths.ts` | `check-entry` | 1 | recognizes the exact stored legacy approval list and applies the current CI defaults | their configured check and setup entries and their own path patterns |
 | `src/github-actions-workflow.ts` | `check-entry` | 2 | the workflow Forge generates for its standard check | their own configured command and workflow |
 | `src/hosted-actions-export.ts` | `check-entry` | 1 | the marker inside that generated workflow | their own configured command |
@@ -150,6 +150,7 @@ ecosystem; rows that name an "any-ecosystem slice" Issue are live cases that sli
 | `src/landing-environment.ts` | `package-json-config` | 1 | Forge's own runtime manifest pins the landing runtime | not used |
 | `src/remote-check-plan.ts` | `package-json-config` | 1 | the project test runner declaration (any-ecosystem slice F, e89be958) | after F: a neutral root file |
 | `src/shared-dependencies.ts` | `package-json-config` | 6 | Lane dependency sharing is npm-only (any-ecosystem slice H, 4ce67b9a) | each Lane installs with its own tooling |
+| `src/preflight-hosted-checks.ts` | `package-json-config` | 2 | reads the checkout’s explicit recipe marker for a local proof preview | hosted recipe comes from the pinned check definition |
 | `src/workspace-test-runner.ts` | `package-json-config` | 1 | the project test runner declaration (any-ecosystem slice F, e89be958) | after F: a neutral root file |
 | `src/code-imports.ts` | `js-extension` | 1 | contract import signals are JS/TS-only (any-ecosystem slice E, 7e97573d) | after E: contract unknown, never independence |
 | `src/contract-exports.ts` | `js-extension` | 1 | contract export facts are JS/TS-only (any-ecosystem slice E, 7e97573d) | after E: contract unknown, never independence |

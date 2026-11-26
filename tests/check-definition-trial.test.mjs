@@ -17,7 +17,12 @@ import {
   selectionModules,
 } from '../dist/check-definition-trial.js';
 
-const standardCheck = { executable: 'node', args: ['scripts/forge-check.mjs'], definition: 'c'.repeat(64) };
+const standardCheck = {
+  executable: 'node',
+  args: ['scripts/forge-check.mjs'],
+  recipe: 'forge-standard-v1',
+  definition: 'c'.repeat(64),
+};
 /** A small synthetic tree: one source file, its test, and an unrelated test. */
 const tree = (extra = []) =>
   new Map([

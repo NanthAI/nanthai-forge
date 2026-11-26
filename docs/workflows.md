@@ -361,7 +361,8 @@ nforge x ROOT configure-check '{"command":{"name":"integration","executable":"no
 
 ### Check command scope
 
-Forge's own recipe (`node scripts/forge-check.mjs`) selects and shards test files itself. Any other
+A check definition that specifies `"recipe":"forge-standard-v1"` for
+`node scripts/forge-check.mjs` opts into Forge's own test selection and sharding. Any other
 configured command (`x configure-check {command}`) runs in full, in one job, unless
 its check declares more. Either way it receives the changed paths:
 

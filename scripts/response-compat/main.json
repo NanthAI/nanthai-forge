@@ -3227,6 +3227,10 @@
               ],
               "additionalProperties": false
             },
+            "recipe": {
+              "type": "string",
+              "const": "forge-standard-v1"
+            },
             "selection": {
               "type": "object",
               "properties": {

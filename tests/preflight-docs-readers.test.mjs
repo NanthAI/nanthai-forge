@@ -27,7 +27,7 @@ test.beforeEach(t =>
 const fixture = () =>
   new Map(
     Object.entries({
-      'package.json': '{"type":"module","scripts":{}}',
+      'package.json': '{"type":"module","scripts":{},"forge":{"checkRecipe":"forge-standard-v1"}}',
       'scripts/forge-check.mjs': '',
       'src/a.ts': 'export const n = 1;',
       'tests/a.test.mjs': "import '../dist/a.js';",

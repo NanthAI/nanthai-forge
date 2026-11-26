@@ -15,7 +15,7 @@ import {
 } from './test-script-runner.js';
 export { FILES_PLACEHOLDER, SCRIPT_DEPTH, type RunnerPart } from './test-script-runner.js';
 import { declaredPreflight } from './project-config.js';
-import { STANDARD_CHECK_ENTRY } from './standard-check.js';
+import { FORGE_CHECK_RECIPE } from './standard-check.js';
 
 /** How a project runs its test files: which paths are tests (`globs`) and the argv that runs some of
  * them (`command`; an element `{files}` expands to the files, else they are appended). Preflight, the
@@ -36,7 +36,7 @@ import { STANDARD_CHECK_ENTRY } from './standard-check.js';
  * An unrecognized `test` script (a task runner, make, another language) is not guessed: tests are
  * `unavailable` with a reason, never Forge's layout. `layout: 'forge-node'` (Node's runner over
  * `tests/*.test.mjs`) keeps Forge's import-graph selector and is never inferred from that file
- * layout alone: a project declares it, or it has Forge's own check entry (STANDARD_CHECK_ENTRY);
+ * layout alone: a project declares it in preflight or selects Forge's check recipe in its manifest;
  * an outside `node --test` project with the same folders gets the generic runner. `packages` runs package commands; any other
  * runner selects by path and, in local preflight, by a generic JS/TS import graph (src/js-import-graph.ts). */
 export type TestRunner = {
@@ -220,7 +220,7 @@ export function projectTestRunner(
   const scripts = record(manifest.scripts) ? manifest.scripts : {};
   let known: Set<string> | undefined;
   const all = () => (known ??= new Set(paths()));
-  const forgeShape = () => all().has(STANDARD_CHECK_ENTRY);
+  const forgeShape = record(manifest.forge) && manifest.forge.checkRecipe === FORGE_CHECK_RECIPE;
   if (typeof scripts.test === 'string') {
     const found = scriptRunner(scripts, () => execPrefix(manifest, all()));
     // `node --test` with no path runs Node's own patterns; top-level `tests/*.test.mjs` files keep
@@ -229,7 +229,7 @@ export function projectTestRunner(
       found &&
       'globs' in found &&
       found.globs === NODE_GLOBS &&
-      forgeShape() &&
+      forgeShape &&
       [...all()].some(matcher([FORGE_TEST_GLOB]))
     )
       found.globs = [FORGE_TEST_GLOB];
@@ -241,7 +241,7 @@ export function projectTestRunner(
           runner: {
             ...found,
             source: 'test-script',
-            layout: layout(found.program, found.globs, forgeShape()),
+            layout: layout(found.program, found.globs, forgeShape),
           },
         }
       : graphRunner(
@@ -265,7 +265,7 @@ export function projectTestRunner(
   const node = packageJson === undefined ? [] : [...files].filter(matcher(NODE_GLOBS));
   if (node.length) {
     // Top-level `tests/*.test.mjs` files keep the import-graph selector that reads that layout.
-    const globs = forgeShape() && node.some(matcher([FORGE_TEST_GLOB])) ? [FORGE_TEST_GLOB] : NODE_GLOBS;
+    const globs = forgeShape && node.some(matcher([FORGE_TEST_GLOB])) ? [FORGE_TEST_GLOB] : NODE_GLOBS;
     return {
       status: 'available',
       runner: {
@@ -273,7 +273,7 @@ export function projectTestRunner(
         program: 'node',
         globs,
         command: ['node', '--test', FILES_PLACEHOLDER],
-        layout: layout('node', globs, forgeShape()),
+        layout: layout('node', globs, forgeShape),
       },
     };
   }

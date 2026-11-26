@@ -246,7 +246,7 @@ function lane(t, bytes = {}) {
   const root = join(dir, 'lane');
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const all = {
-    'package.json': '{"type":"module","scripts":{}}',
+    'package.json': '{"type":"module","scripts":{},"forge":{"checkRecipe":"forge-standard-v1"}}',
     'scripts/forge-check.mjs': '',
     'src/a.ts': 'export const n = 1;',
     'tests/a.test.mjs': "import '../src/a.ts';",
@@ -289,7 +289,11 @@ test("a demoted declared guard reserves none of the learned set's room and still
   const make = demote => {
     const guards = [{ name: 'decl', tests: [decl], inputs: ['src/**'], ...(demote ? { demote: true } : {}) }];
     const made = lane(t, {
-      'package.json': JSON.stringify({ type: 'module', scripts: {}, forge: { preflight: { guards } } }),
+      'package.json': JSON.stringify({
+        type: 'module',
+        scripts: {},
+        forge: { checkRecipe: 'forge-standard-v1', preflight: { guards } },
+      }),
       [decl]: body,
     });
     storeGuardCandidates(made.root, candidates([{ file: GUARD, failures: 2, checkSeconds: 2 }]));

@@ -95,7 +95,12 @@ function fixture(t, extra = []) {
       base,
       comparisonBase: base,
       head,
-      check: { executable: process.execPath, args: ['scripts/forge-check.mjs'], definition: 'a'.repeat(64) },
+      check: {
+        executable: process.execPath,
+        args: ['scripts/forge-check.mjs'],
+        recipe: 'forge-standard-v1',
+        definition: 'a'.repeat(64),
+      },
       environment: { env: { FORGE_CHECK_SCOPED: '1' } },
     };
     const forge = await remoteCheckPlan(store, run, directory, 4);

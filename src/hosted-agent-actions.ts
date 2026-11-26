@@ -163,6 +163,8 @@ export async function checkSelection(
           definition: z.string(),
           executable: z.string().optional(),
           args: z.array(z.string()).optional(),
+          recipe: z.string().optional(),
+          id: z.string().optional(),
         })
         .nullable(),
       configuration: z
@@ -181,16 +183,14 @@ export async function checkSelection(
     'RUNNER_UNAVAILABLE',
     'Configure this hosted check and its runner first.',
   );
-  const { definition, executable, args } = settings.check;
+  const { definition } = settings.check;
   if (
     onStandardCheck &&
     (command.expectedDefinition ?? definition) === definition &&
     (command.expectedConfiguration ?? settings.configurationDigest) === settings.configurationDigest &&
     (command.expectedEnvironment ?? settings.configuration.environmentFingerprint) ===
       settings.configuration.environmentFingerprint &&
-    executable &&
-    args &&
-    isStandardForgeCheck({ executable, args })
+    isStandardForgeCheck(settings.check)
   )
     onStandardCheck();
   // From the settings row this selection already read: the receipt names public logs plainly.

@@ -94,6 +94,7 @@ export function hostedCheckDefinition(command: unknown, id: string, at: string) 
     ...(c.measureResources ? { measureResources: true } : {}),
     ...(c.declaredInputs?.length ? { declaredInputs: c.declaredInputs } : {}),
     ...(c.actions ? { actions: c.actions } : {}),
+    ...(c.recipe ? { recipe: c.recipe } : {}),
     ...(c.selection ? { selection: c.selection } : {}),
     ...(c.docsPaths?.length ? { docsPaths: [...new Set(c.docsPaths)] } : {}),
     ...(c.globalRiskPaths?.length ? { globalRiskPaths: [...new Set(c.globalRiskPaths)] } : {}),

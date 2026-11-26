@@ -21,7 +21,7 @@ function lane(t, bytes = {}) {
   const root = join(dir, 'lane');
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const all = {
-    'package.json': '{"type":"module","scripts":{}}',
+    'package.json': '{"type":"module","scripts":{},"forge":{"checkRecipe":"forge-standard-v1"}}',
     'scripts/forge-check.mjs': '',
     'src/a.ts': 'export const n = 1;',
     'tests/a.test.mjs': "import '../src/a.ts';",

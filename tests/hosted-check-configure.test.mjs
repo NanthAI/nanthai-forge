@@ -41,6 +41,7 @@ const command = {
   name: 'verify',
   executable: 'node',
   args: ['scripts/forge-check.mjs'],
+  recipe: 'forge-standard-v1',
   environmentLabel: 'clean',
 };
 

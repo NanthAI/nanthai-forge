@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
-import { isStandardForgeCheck } from '../dist/standard-check.js';
+import { FORGE_CHECK_RECIPE, isStandardForgeCheck } from '../dist/standard-check.js';
 import {
   checkEntryPaths,
   firstCheckRisk,
@@ -16,7 +16,8 @@ import {
 } from '../dist/first-check-risk.js';
 import { runActionsCheck } from '../scripts/github-actions-check.mjs';
 
-const forgeCheck = { executable: 'node', args: ['scripts/forge-check.mjs'] };
+const sameName = { executable: 'node', args: ['scripts/forge-check.mjs'] };
+const forgeCheck = { ...sameName, recipe: FORGE_CHECK_RECIPE };
 const benchCheck = { executable: 'bash', args: ['.bench/ci.sh'] };
 const forgeEnv = [
   'NODE_OPTIONS',
@@ -27,19 +28,30 @@ const forgeEnv = [
   'FORGE_GIT_TIMEOUT_MS',
 ];
 
-test('one predicate names Forge standard check and nothing else', () => {
+test('the standard recipe requires a check definition to opt in', () => {
   for (const executable of ['node', '/usr/local/bin/node'])
     assert.equal(isStandardForgeCheck({ ...forgeCheck, executable }), true, executable);
   assert.equal(isStandardForgeCheck({ ...forgeCheck, executable: '/opt/n24' }, '/opt/n24'), true);
   for (const check of [
     benchCheck,
-    { executable: '/opt/n24', args: ['scripts/forge-check.mjs'] },
-    { executable: 'bun', args: ['scripts/forge-check.mjs'] },
-    { executable: 'node', args: ['scripts/forge-check.mjs', '--full'] },
+    sameName,
+    { ...forgeCheck, executable: '/opt/n24', args: ['scripts/forge-check.mjs'] },
+    { ...forgeCheck, executable: 'bun' },
+    { ...forgeCheck, args: ['scripts/forge-check.mjs', '--full'] },
     { executable: 'node', args: ['scripts/test-cached.ts'] },
-    { executable: 'nodejs', args: ['scripts/forge-check.mjs'] },
+    { ...forgeCheck, executable: 'nodejs' },
   ])
     assert.equal(isStandardForgeCheck(check), false, JSON.stringify(check));
+});
+
+test('the exact existing Forge verify definition stays scoped during the rollout', () => {
+  const pin = {
+    id: '3ecda28c-1e01-4daf-bf7b-56fba8b6ec8e',
+    definition: '1e44d21954404961eea10fe40365e41d20a4663ce60615f5f4accd380b0c5630',
+  };
+  assert(isStandardForgeCheck({ ...sameName, ...pin }));
+  assert(!isStandardForgeCheck({ ...sameName, ...pin, id: 'another-project-check' }));
+  assert(!isStandardForgeCheck({ ...sameName, ...pin, definition: 'another-definition' }));
 });
 
 function actionsRun(t, plan, { npmLocked = false } = {}) {

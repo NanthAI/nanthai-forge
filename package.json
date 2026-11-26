@@ -10,6 +10,7 @@
   },
   "forge": {
     "cliProtocolVersion": 1,
+    "checkRecipe": "forge-standard-v1",
     "preflight": {
       "static": [
         {

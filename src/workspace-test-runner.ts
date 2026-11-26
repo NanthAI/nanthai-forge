@@ -7,9 +7,8 @@ import { checkoutPackageGraph } from './package-graph-checkout.js';
 import type { PackageGraph } from './package-graph.js';
 import { packageTestSelection } from './package-test-selection.js';
 import { PROJECT_LOCKFILES } from './project-lockfile.js';
-import { STANDARD_CHECK_ENTRY } from './standard-check.js';
 
-/** The project test runner of a checked-out workspace (its package.json or forge.json, its lockfile, Forge's check entry and
+/** The project test runner of a checked-out workspace (its package.json or forge.json, its lockfile and
  * the test files at hand), for running semantic union tests there. Reads three small files, runs nothing. */
 export function workspaceTestRunner(directory: string, tests: string[]): TestRunnerResolution {
   let packageJson: string | undefined;
@@ -28,10 +27,7 @@ export function workspaceTestRunner(directory: string, tests: string[]): TestRun
   const packages = () => (graph ??= checkoutPackageGraph(directory));
   const resolved = resolveTestRunner(
     packageJson,
-    () => [
-      ...tests,
-      ...[...PROJECT_LOCKFILES, STANDARD_CHECK_ENTRY].filter(file => existsSync(join(directory, file))),
-    ],
+    () => [...tests, ...PROJECT_LOCKFILES.filter(file => existsSync(join(directory, file)))],
     { forgeJson, packages },
   );
   if (resolved.status !== 'available' || resolved.runner.layout !== 'packages') return resolved;

@@ -42,6 +42,8 @@ const lane = {
   laneId: '11111111-1111-4111-8111-111111111111',
   head: 'a'.repeat(64),
 };
+const forgeManifest = { type: 'module', forge: { checkRecipe: 'forge-standard-v1' } };
+const manifest = JSON.stringify(forgeManifest);
 const defaults = overrides => effectiveAgentDefaults(overrides);
 const notice = (file, noticeId = `n-${file}`) => ({
   noticeId,
@@ -58,8 +60,7 @@ function repo(t, files = {}) {
     root = join(dir, 'lane');
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const all = {
-    'package.json': '{"type":"module"}',
-    // Forge's own check entry: the project shape that selects Forge's Node layout.
+    'package.json': manifest,
     'scripts/forge-check.mjs': '',
     'tests/b.test.mjs': "import test from 'node:test';\ntest('b', () => {});\n",
     ...files,
@@ -465,7 +466,7 @@ test('a passing local run with degraded file events is a pass (tests ran, no pro
 test('an unhealthy diagnostic never converts a build failure into an environment advisory', t => {
   const root = repo(t, {
     'package.json': JSON.stringify({
-      type: 'module',
+      ...forgeManifest,
       scripts: { 'build:core': 'node -e "process.exit(1)"' },
     }),
   });
@@ -528,7 +529,7 @@ test('save advice reflects real unsaved bytes and never nudges a live landing', 
       kind: 'forge-source-state',
       parents: [],
       files: [
-        { path: 'package.json', blob: digest('{"type":"module"}'), mode: 'file' },
+        { path: 'package.json', blob: digest(manifest), mode: 'file' },
         { path: 'scripts/forge-check.mjs', blob: digest(''), mode: 'file' },
         { path: 'tests/b.test.mjs', blob: digest(body), mode: 'file' },
       ],
@@ -554,7 +555,7 @@ test('save advice reflects real unsaved bytes and never nudges a live landing', 
   utimesSync(join(root, 'package.json'), saved + 5 * 60, saved + 5 * 60);
   assert.equal(unsavedMinutes(root, now), 40);
   // A new file is unsaved work too.
-  writeFileSync(join(root, 'package.json'), '{"type":"module"}');
+  writeFileSync(join(root, 'package.json'), manifest);
   writeFileSync(join(root, 'tests/new.test.mjs'), 'new');
   utimesSync(join(root, 'tests/new.test.mjs'), saved + 15 * 60, saved + 15 * 60);
   assert.equal(unsavedMinutes(root, now), 30);

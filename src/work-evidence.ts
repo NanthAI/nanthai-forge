@@ -71,6 +71,7 @@ export function recordEvidence(
     ...(command.measureResources ? { measureResources: true } : {}),
     ...(command.declaredInputs?.length ? { declaredInputs: command.declaredInputs } : {}),
     ...(command.actions ? { actions: command.actions } : {}),
+    ...(command.recipe ? { recipe: command.recipe } : {}),
     ...(command.selection ? { selection: command.selection } : {}),
     ...(command.docsPaths?.length ? { docsPaths: [...new Set(command.docsPaths)] } : {}),
     ...(command.globalRiskPaths?.length ? { globalRiskPaths: [...new Set(command.globalRiskPaths)] } : {}),

@@ -14,6 +14,7 @@ export const todayKeeps = ({ globalMover, paths, changed }) =>
 export const STANDARD_ENTRIES = checkRunEntryPaths({
   executable: '/usr/local/bin/node',
   args: ['scripts/forge-check.mjs'],
+  recipe: 'forge-standard-v1',
 });
 
 /** Today's `global`: the mover touches a global-risk file for this check. */

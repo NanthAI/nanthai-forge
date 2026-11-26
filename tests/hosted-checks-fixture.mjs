@@ -24,6 +24,7 @@ export const command = {
   name: 'verify',
   executable: 'node',
   args: ['scripts/forge-check.mjs'],
+  recipe: 'forge-standard-v1',
   environmentLabel: 'clean',
 };
 /** `candidateFields` adds fields to the seeded Candidate (for example its governance paths);

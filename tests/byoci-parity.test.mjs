@@ -43,7 +43,7 @@ const tree = [
   ['.repos/vendor/one', 'e02e9d405b8848909f4f746b61b12a663f631c7c', 'gitlink'],
   ['.repos/vendor/two', '493909133db04153348eabc503f4e30cf0033d96', 'gitlink'],
 ];
-const standard = { executable: 'node', args: ['scripts/forge-check.mjs'] };
+const standard = { executable: 'node', args: ['scripts/forge-check.mjs'], recipe: 'forge-standard-v1' };
 const project = {
   executable: 'bash',
   args: ['ci/check.sh'],

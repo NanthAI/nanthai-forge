@@ -43,7 +43,7 @@ function fixture(t, fail = false) {
   const root = join(dir, 'lane');
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const bytes = new Map([
-    ['package.json', '{"type":"module","scripts":{}}'],
+    ['package.json', '{"type":"module","scripts":{},"forge":{"checkRecipe":"forge-standard-v1"}}'],
     ['scripts/forge-check.mjs', ''],
     ['src/a.ts', `export const n = ${fail ? 0 : 1};`],
     ['src/b.ts', 'export const n = 1;'],

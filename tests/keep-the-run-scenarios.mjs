@@ -298,10 +298,11 @@ export const fullListUsd = c => servingUsd(c) + c.calls * RATES.perCall + c.gbHo
 // Item c0af6cfa: the `reportStorage: 'r2'` field (21 bytes) on every new run row moves red by -375 read and -295 write bytes.
 // Item 3abaec5e: retained gate mode and reason ride existing check replay writes. The carry delta
 // moves by +1,092 read bytes, and the scoped-recheck delta by +770 read and +451 write bytes. Calls stay exact.
+// Item a2457f95: the opted-in recipe adds 33 bytes to each check row. Calls stay exact.
 export const WIRED = {
-  carry: { calls: -2, readBytes: 188_304, writeBytes: 18_883 },
-  'scoped-recheck': { calls: 8, readBytes: 326_714, writeBytes: 90_401 },
-  red: { calls: -17, readBytes: -383_886, writeBytes: -141_900 },
+  carry: { calls: -2, readBytes: 188_700, writeBytes: 18_883 },
+  'scoped-recheck': { calls: 8, readBytes: 327_328, writeBytes: 90_401 },
+  red: { calls: -17, readBytes: -384_170, writeBytes: -141_900 },
 };
 
 /** Convex delta of one kept run against the retire it replaces (positive = the keep costs more). */

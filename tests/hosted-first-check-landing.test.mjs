@@ -854,10 +854,10 @@ test('own check command: first-check landing costs no more Convex calls or DB IO
 
 test('check entries are the repository files a command names, in any form', () => {
   // Forge's own check also declares its extra inputs (src/standard-check.ts).
-  assert.deepEqual(checkEntryPaths({ executable: 'node', args: ['scripts/forge-check.mjs'] }), [
-    'scripts/forge-check.mjs',
-    ...STANDARD_CHECK_INPUTS,
-  ]);
+  assert.deepEqual(
+    checkEntryPaths({ executable: 'node', args: ['scripts/forge-check.mjs'], recipe: 'forge-standard-v1' }),
+    ['scripts/forge-check.mjs', ...STANDARD_CHECK_INPUTS],
+  );
   assert.deepEqual(checkEntryPaths({ executable: 'bash', args: ['.bench/ci.sh'] }), ['.bench/ci.sh']);
   assert.deepEqual(checkEntryPaths({ executable: './ci/run.sh', args: ['--config=ci/run.json'] }), [
     'ci/run.sh',
@@ -1075,7 +1075,11 @@ test('the global-risk list is path-only and any listed file rechecks', () => {
     'tests/check-runtime.mjs',
   ])
     assert.equal(firstCheckRisk(path), null, path);
-  const forgeEntries = checkEntryPaths({ executable: 'node', args: ['scripts/forge-check.mjs'] });
+  const forgeEntries = checkEntryPaths({
+    executable: 'node',
+    args: ['scripts/forge-check.mjs'],
+    recipe: 'forge-standard-v1',
+  });
   for (const path of ['scripts/forge-check.mjs', 'scripts/verify.mjs', 'tests/check-runtime.mjs'])
     assert.equal(firstCheckRisk(path, forgeEntries), 'check script or check contract', path);
   // Files the project's check definition runs are global on any runner.

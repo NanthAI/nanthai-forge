@@ -37,7 +37,7 @@ import {
 } from '../dist/agent-preflight.js';
 
 const common = {
-  'package.json': '{"type":"module"}',
+  'package.json': '{"type":"module","forge":{"checkRecipe":"forge-standard-v1"}}',
   'scripts/forge-check.mjs': '',
   'tests/docs.test.mjs':
     "import test from 'node:test'; import fs from 'node:fs'; test('document remains readable', () => fs.readFileSync(new URL('../README.md', import.meta.url)));\n",
@@ -669,6 +669,7 @@ async function queueProofFixture(t, { attach, standard = true, preflight = 'advi
     review: { session: randomUUID(), receipt: randomUUID() },
   };
   const base = {
+    'package.json': '{"forge":{"checkRecipe":"forge-standard-v1"}}',
     'scripts/forge-check.mjs': '',
     [source]: 'Before the landing change',
     [REGISTRY]: JSON.stringify({ replays: [{ incident: '2bf85ddf', test: testName, paths: [source] }] }),
@@ -699,7 +700,8 @@ async function queueProofFixture(t, { attach, standard = true, preflight = 'advi
     if (getFunctionName(ref) !== 'projectHostedCheckDefinitions:current') return text;
     const settings = JSON.parse(text);
     settings.check.executable = 'node';
-    settings.check.args = [standard ? 'scripts/forge-check.mjs' : 'scripts/custom-check.mjs'];
+    settings.check.args = ['scripts/forge-check.mjs'];
+    if (standard) settings.check.recipe = 'forge-standard-v1';
     return JSON.stringify(settings);
   };
   await s.transport().dispatch('open', { laneId: s.lane.laneId });

@@ -422,10 +422,11 @@ test('incident replay 70a9bd2f: global-risk A/C overtake meets the unchanged 1.5
   // (twelve counters, no new call): +105 read and +140 write bytes for the pair, with unchanged calls.
   // Item 3abaec5e: the accepted path count on existing request and observation rows adds 180 read and
   // 84 write bytes for the pair. Calls, timing and idle work stay unchanged.
+  // Item a2457f95: the opted-in recipe adds 990 read and 693 write bytes on existing rows.
   const pair = await guardReplayCost(t, '70a9bd2f pair', pairInput, {
     calls: 103,
-    readBytes: 1_666_901,
-    writeBytes: 569_143,
+    readBytes: 1_667_891,
+    writeBytes: 569_836,
   });
   assert.equal(pair.idle, 0, 'the settled pair has no idle queue work');
   assert.equal(pair.runs[0], 1);
@@ -490,8 +491,8 @@ test('70a9bd2f: admission pipeline calls and metadata bytes stay bounded at 4000
   // Item 3abaec5e: the same 180 read and 84 write bytes for the accepted path count at 4,000 files.
   const after = await guardReplayCost(t, '70a9bd2f 4,000-file pair', input, {
     calls: 103,
-    readBytes: 1_671_413,
-    writeBytes: 571_336,
+    readBytes: 1_672_403,
+    writeBytes: 572_029,
   });
   assert(after.landedAt[1] <= 1500, 'one check duration plus bounded source/queue progress');
   assert.deepEqual(after.runs, [1, 1]);

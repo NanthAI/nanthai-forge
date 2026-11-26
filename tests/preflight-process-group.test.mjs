@@ -36,7 +36,10 @@ async function lane(t, testText, fileTimeoutSeconds, more = {}) {
   const files = {
     'package.json': JSON.stringify({
       type: 'module',
-      ...(fileTimeoutSeconds ? { forge: { preflight: { fileTimeoutSeconds } } } : {}),
+      forge: {
+        checkRecipe: 'forge-standard-v1',
+        ...(fileTimeoutSeconds ? { preflight: { fileTimeoutSeconds } } : {}),
+      },
     }),
     'scripts/forge-check.mjs': '',
     'tests/docs.test.mjs': testText,

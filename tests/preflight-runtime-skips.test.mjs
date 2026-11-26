@@ -53,7 +53,11 @@ const withEnv = (t, name, value) => {
 };
 
 const manifest = forge =>
-  JSON.stringify({ type: 'module', scripts: {}, forge: { preflight: { static: [], ...forge } } });
+  JSON.stringify({
+    type: 'module',
+    scripts: {},
+    forge: { checkRecipe: 'forge-standard-v1', preflight: { static: [], ...forge } },
+  });
 const browserTest = body => `import test from 'node:test';\nimport '../src/screen.ts';\n${body}\n`;
 const skipping = browserTest(
   `test('screen renders', t => { t.skip('Playwright Chromium is not installed.'); });`,

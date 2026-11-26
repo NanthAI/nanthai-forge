@@ -48,7 +48,7 @@ test('comment-only means the parser sees the same program', () => {
 const graph = () =>
   new Map(
     Object.entries({
-      'package.json': '{"scripts":{}}',
+      'package.json': '{"scripts":{},"forge":{"checkRecipe":"forge-standard-v1"}}',
       'scripts/forge-check.mjs': '',
       'src/a.ts': 'export const n = 1;',
       'src/b.ts': "import './a.js';",
@@ -81,7 +81,7 @@ test('preflight finds comment-only paths from the base State in the local object
   const root = join(dir, 'lane');
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const bytes = graph();
-  bytes.set('package.json', '{"type":"module","scripts":{}}');
+  bytes.set('package.json', '{"type":"module","scripts":{},"forge":{"checkRecipe":"forge-standard-v1"}}');
   const store = join(clientCacheRoot(root), 'objects');
   mkdirSync(store, { recursive: true });
   const put = body => {
@@ -160,7 +160,7 @@ test('a changed test with a "Writes N -> M" cost comment is named required in th
   const root = join(dir, 'lane');
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const bytes = graph();
-  bytes.set('package.json', '{"type":"module","scripts":{}}');
+  bytes.set('package.json', '{"type":"module","scripts":{},"forge":{"checkRecipe":"forge-standard-v1"}}');
   const store = join(clientCacheRoot(root), 'objects');
   mkdirSync(store, { recursive: true });
   const put = body => {

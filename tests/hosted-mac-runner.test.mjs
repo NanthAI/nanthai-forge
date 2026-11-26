@@ -736,6 +736,7 @@ test('a standard machine check retains the exact selection emitted by its comman
       name: 'verify',
       executable: process.execPath,
       args: ['scripts/forge-check.mjs'],
+      recipe: 'forge-standard-v1',
       environmentLabel: 'clean',
     },
     [],
@@ -758,6 +759,7 @@ test('a hosted machine standard check refuses a deleted queue path without attac
     name: 'verify',
     executable: process.execPath,
     args: ['scripts/forge-check.mjs'],
+    recipe: 'forge-standard-v1',
     environmentLabel: 'clean',
   };
   const wake = 'convex/projectHostedFinishWake.ts';
@@ -821,6 +823,7 @@ for (const [name, standard] of [
           name: 'forge',
           executable: process.execPath,
           args: ['scripts/forge-check.mjs'],
+          recipe: 'forge-standard-v1',
           environmentLabel: 'clean',
         }
       : {

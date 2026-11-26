@@ -510,18 +510,14 @@ test('the tests read selects packages for a Rust repository with no package.json
   assert.equal(selection.runner.label, 'package commands (cargo)');
   assert.equal(selection.command, 'cargo test -p fx-api -p fx-cli');
   assert.deepEqual(selection.tests, []);
-  // Forge's own layout reads no manifests for the graph.
+  const paths = ['package.json', 'scripts/forge-check.mjs', 'tests/a.test.mjs', 'x/go.mod'];
+  const manifest = { scripts: { test: 'node --test tests/*.test.mjs' } };
   const forge = new Map([
-    ['package.json', JSON.stringify({ scripts: { test: 'node --test tests/*.test.mjs' } })],
+    ['package.json', JSON.stringify({ ...manifest, forge: { checkRecipe: 'forge-standard-v1' } })],
   ]);
-  assert.deepEqual(
-    contractManifestPaths(forge, ['package.json', 'scripts/forge-check.mjs', 'tests/a.test.mjs', 'x/go.mod']),
-    [],
-  );
-  // An outside project with the same folders is not Forge's layout: its manifests are read.
-  assert.deepEqual(contractManifestPaths(forge, ['package.json', 'tests/a.test.mjs', 'x/go.mod']), [
-    'x/go.mod',
-  ]);
+  assert.deepEqual(contractManifestPaths(forge, paths), []);
+  const sameFiles = new Map([['package.json', JSON.stringify(manifest)]]);
+  assert.deepEqual(contractManifestPaths(sameFiles, paths), ['x/go.mod']);
 });
 
 test('a scoped configured command gets FORGE_CHECK_PACKAGES from the checkout manifests; a full run does not', t => {

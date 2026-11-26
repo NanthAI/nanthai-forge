@@ -31,7 +31,13 @@ it scope ([check command scope](../workflows.md#check-command-scope)). A scoped 
 graph's affected packages (`FORGE_CHECK_PACKAGES`) and, when they have tests, a runner for their
 per-ecosystem commands (`FORGE_CHECK_PACKAGES_RUN`, one line in the repository's CI script); an
 Intent without a contract gets a scoped first check when the graph selects a minority of packages. Candidate sources must
-include the Actions-aware standard check script to use Forge's test selection.
+install the Actions-aware check script and configure its definition with
+`"recipe":"forge-standard-v1"` to use Forge's test selection. For the Forge
+repository's `verify` check, use this recipe with `node scripts/forge-check.mjs`.
+The repository's `forge.checkRecipe` in `package.json` selects the same recipe
+for local preflight. The operator's rollout pin keeps Forge's already configured verify
+definition and its in-flight runs on the same recipe. A replacement definition
+selects the recipe in its own settings.
 
 **Checks that do not apply skip, never wait.** A project has one configured landing
 check and no per-check path filters, so no required check can sit pending because a

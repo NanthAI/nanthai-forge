@@ -1,22 +1,33 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
+import { optedInDistributionCheck } from './forge-distribution-checks.js';
+
 /** Forge's own standard check: `node scripts/forge-check.mjs`.
  *
- * The one place that decides whether a check is Forge's own recipe. Forge's
+ * A definition must opt in before Forge runs its standard recipe. Forge's
  * test selection, worker settings and extra check inputs apply only to it; any
  * other configured command runs as its project defines it, on any CI.
  */
+export const FORGE_CHECK_RECIPE = 'forge-standard-v1';
 export const STANDARD_CHECK_ENTRY = 'scripts/forge-check.mjs';
 
 /** True for Forge's standard check. `execPath` also accepts the running Node
  * binary by its exact path (native callers pass `process.execPath`). */
 export function isStandardForgeCheck(
-  check: { executable: string; args: readonly string[] },
+  check: {
+    executable?: string | undefined;
+    args?: readonly string[] | undefined;
+    recipe?: string | undefined;
+    id?: string | undefined;
+    definition?: string | undefined;
+  },
   execPath?: string,
 ): boolean {
   return (
-    check.args.length === 1 &&
+    (check.recipe === FORGE_CHECK_RECIPE || optedInDistributionCheck(check)) &&
+    check.args?.length === 1 &&
     check.args[0] === STANDARD_CHECK_ENTRY &&
+    check.executable !== undefined &&
     (/(?:^|\/)node$/.test(check.executable) || (execPath !== undefined && check.executable === execPath))
   );
 }
