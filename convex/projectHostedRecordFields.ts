@@ -48,6 +48,8 @@ export const hostedRecordFields = {
   restoreBases: v.optional(v.string()),
   /** Trusted source-worker output; byte bodies remain in R2. */
   candidateFiles: v.optional(v.object({ sha256: v.string(), size: v.number() })),
+  /** The pinned listing is a standalone source object at its canonical R2 key. */
+  candidateFilesDirect: v.optional(v.literal(true)),
   digest: v.string(),
   bytes: v.number(),
   /** Canonical journal-row hash for digest-only Work migration comparisons. */

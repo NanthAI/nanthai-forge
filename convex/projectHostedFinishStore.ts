@@ -18,6 +18,7 @@ import { hostedFinishSchema, type HostedFinish } from '../src/hosted-finish';
 import { landingObservation, type HostedLandingState } from '../src/hosted-landing';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { readHostedRecord } from './projectHostedRecords';
+import { recordRecomposeAlert } from './projectHostedLandingRecomposeAlerts';
 import { hostedRecordSchema } from '../src/hosted-records';
 import { wakeLandingQueue } from './projectHostedLandingWake';
 import { invariant } from '../src/errors';
@@ -53,6 +54,7 @@ export async function initializeFinish(ctx: MutationCtx, state: HostedLandingSta
   });
   let source = state.request.finish.reviewedSource;
   let restoreBases: HostedFinish['restoreBases'];
+  let singleSelectionHead: HostedFinish['singleSelectionHead'];
   let recoveryRunId: string | undefined;
   if (source) {
     // Browser approval selects the canonical Candidate, irrespective of who
@@ -90,6 +92,7 @@ export async function initializeFinish(ctx: MutationCtx, state: HostedLandingSta
       'Finish selects the original completed composition.',
     );
     source = original.state.request;
+    singleSelectionHead = original.state.singleSelectionHead;
     restoreBases = original.state.restoreBases;
     recoveryRunId = original.row.culpritRunId;
     // The first attempt's compose cost rides on the landing row this call's caller writes next.
@@ -187,6 +190,7 @@ export async function initializeFinish(ctx: MutationCtx, state: HostedLandingSta
     value: canonicalPayload(
       hostedFinishSchema.parse({
         source,
+        ...(singleSelectionHead ? { singleSelectionHead } : {}),
         check,
         pending: null,
         ...(restoreBases ? { restoreBases } : {}),
@@ -218,6 +222,17 @@ export async function failFinish(
     error: { code, message },
   };
   await writeLanding(ctx, row, next, false, releaseRun);
+  if (code === 'SOURCE_RECOMPOSE_INVARIANT')
+    await recordRecomposeAlert(
+      ctx,
+      input.projectId,
+      state.batchId ?? state.batchOriginId ?? state.id,
+      state.id,
+      message,
+      state.request.finish?.composeOperationId
+        ? { actor: state.actor, operationId: state.request.finish.composeOperationId }
+        : undefined,
+    );
   await settleLandingOperation(ctx, next);
   await wakeLandingQueue(ctx, { projectId: input.projectId, channel: state.request.channel });
 }

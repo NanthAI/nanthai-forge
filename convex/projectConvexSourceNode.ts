@@ -183,6 +183,7 @@ async function runNodeSourceStep(
             for (const ref of joined.outputs) if (ref) results.push(await loadTaskData(ref, durable.read));
             applySourceFanout(cursor, joined, results, ref => enqueueSourceObject(cursor, ref));
           }
+          if (state.composeDeltas) io.composeDeltas = state.composeDeltas;
           const from = cursor.phase;
           // Consecutive quanta share descriptors and verified bytes, then commit once. Each
           // quantum still drops its parsed merge heap; fan-out remains a durable boundary.
@@ -221,7 +222,9 @@ async function runNodeSourceStep(
               runtime: 'node',
               kind: state.jobKind ?? null,
               cause: state.cause ?? null,
-              ...(state.jobKind === 'compose' ? { path: 'node-full' } : {}),
+              ...(state.jobKind === 'compose'
+                ? { path: result!.cursor.fastDisjoint ? 'node-fast-disjoint' : 'node-full' }
+                : {}),
               from,
               to: fanout ? 'fanout' : result!.cursor.phase,
               objects: result!.metrics.objects,
@@ -294,7 +297,9 @@ async function runNodeSourceStep(
             {
               ...input,
               stepCause: state.cause,
-              ...(state.jobKind === 'compose' ? { path: 'node-full' } : {}),
+              ...(state.jobKind === 'compose'
+                ? { path: domain.code === 'SOURCE_RECOMPOSE_INVARIANT' ? 'node-fast-disjoint' : 'node-full' }
+                : {}),
             },
             'step',
             started,
@@ -308,7 +313,9 @@ async function runNodeSourceStep(
             failure: domain.code,
             cause: joinedFailure ?? sourceFailureCause(error, 'step', started, measured),
             timing: clock.value(),
-            ...(domain.code === 'SOURCE_STATE_TOO_LARGE' ? { failureReason: domain.message } : {}),
+            ...(domain.code === 'SOURCE_STATE_TOO_LARGE' || domain.code === 'SOURCE_RECOMPOSE_INVARIANT'
+              ? { failureReason: domain.message }
+              : {}),
           });
           return null;
         }

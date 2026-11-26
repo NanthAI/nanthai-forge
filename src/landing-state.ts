@@ -26,6 +26,7 @@ export type LandingStateName =
   | 'cancelled'
   | 'stale-head'
   | 'rejected'
+  | 'recompose-stopped'
   | 'superseded'
   | 'unknown';
 type View = { label: string; tone: StateTone; pending: boolean; nextStep: string };
@@ -119,6 +120,12 @@ const views = {
     pending: false,
     nextStep: 'Policy did not accept it; read the error, fix and land again.',
   },
+  'recompose-stopped': {
+    label: 'Source verification stopped',
+    tone: 'failed',
+    pending: false,
+    nextStep: 'Stop and inspect the retained recompose failure in Needs you.',
+  },
   superseded: {
     label: 'Superseded',
     tone: 'stale',
@@ -195,6 +202,7 @@ function stateOf(record: LandingRecord): LandingStateName {
           ? 'waiting-for-runner'
           : pendingState(observed.pendingReason, record.phase, Boolean(record.orderWait));
     case 'terminal-failed': {
+      if (code === 'SOURCE_RECOMPOSE_INVARIANT') return 'recompose-stopped';
       const cause = observed.cause;
       if (cause === 'conflict' || code === 'COMPOSITION_CONFLICT') return 'conflict';
       if (cause === 'check-failed' || code === 'CHECK_FAILED') return 'check-failed';

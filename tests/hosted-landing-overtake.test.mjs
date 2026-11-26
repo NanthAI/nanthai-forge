@@ -424,10 +424,11 @@ test('incident replay 70a9bd2f: global-risk A/C overtake meets the unchanged 1.5
   // 84 write bytes for the pair. Calls, timing and idle work stay unchanged.
   // Item a2457f95: the opted-in recipe adds 990 read and 693 write bytes on existing rows.
   // Item 686ecdde: cause and direct-Node routing stamps add 1,367 read and 470 write bytes on existing rows.
+  // Item 686ecdde: the exact direct-storage delta marker adds 560 read and 112 write bytes, with unchanged calls.
   const pair = await guardReplayCost(t, '70a9bd2f pair', pairInput, {
     calls: 103,
-    readBytes: 1_669_258,
-    writeBytes: 570_306,
+    readBytes: 1_669_818,
+    writeBytes: 570_418,
   });
   assert.equal(pair.idle, 0, 'the settled pair has no idle queue work');
   assert.equal(pair.runs[0], 1);
@@ -491,10 +492,11 @@ test('70a9bd2f: admission pipeline calls and metadata bytes stay bounded at 4000
   // Item 8947a779: the same day histogram on the summary row: +105 read and +140 write bytes at 4,000 files.
   // Item 3abaec5e: the same 180 read and 84 write bytes for the accepted path count at 4,000 files.
   // Item 686ecdde: the same 1,367 read and 470 write bytes for the compose and routing stamps.
+  // Item 686ecdde: the same 560 read and 112 write bytes for the direct-storage delta marker.
   const after = await guardReplayCost(t, '70a9bd2f 4,000-file pair', input, {
     calls: 103,
-    readBytes: 1_673_770,
-    writeBytes: 572_499,
+    readBytes: 1_674_330,
+    writeBytes: 572_611,
   });
   assert(after.landedAt[1] <= 1500, 'one check duration plus bounded source/queue progress');
   assert.deepEqual(after.runs, [1, 1]);

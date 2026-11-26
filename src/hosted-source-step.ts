@@ -47,6 +47,9 @@ import { prepareMergeStep, computeMergeStep } from './hosted-source-step-merge.j
 import { mapSourceOrdered } from './hosted-source-parallel.js';
 import { cachedReads } from './hosted-source-read-cache.js';
 export interface StepTransport extends SourceWorkerTransport {
+  composeDeltas?: import('./hosted-compose.js').ComposeDeltaPins;
+  /** Wait for preceding verified output bindings before writing a dependent State. */
+  flushWrites?: () => Promise<void>;
   /** One descriptor page; unavailable graph probes stay pending until the cut
    * or the exact merge proves whether their bytes are needed. */
   probeStates?(
@@ -103,6 +106,9 @@ export type SourceStepCursor = {
   docsPaths?: string[];
   /** Source-built listing retained across the batch's terminal publication quantum. */
   candidateFiles?: WorkerPin;
+  composeDeltas?: StepTransport['composeDeltas'];
+  /** Telemetry for the completed step only. */
+  fastDisjoint?: true;
   /** A finished sync's result as changes from the client's Lane head (never saved: set only in
    * the step that finishes; the submitting action passes it to its caller). */
   syncDelta?: import('./hosted-sync-delta.js').SyncStateDelta;
@@ -391,8 +397,10 @@ export async function runSourceStep(
 ) {
   const c = structuredClone(cursor),
     m = meter(),
-    original = io,
     from = c.phase;
+  if (io.composeDeltas) c.composeDeltas = io.composeDeltas;
+  if (c.composeDeltas) io = { ...io, composeDeltas: c.composeDeltas };
+  const original = io;
   if (c.plan) io.setSourceSizePhase?.(sourceSizePhase(c.plan as { kind: string }));
   io.rememberStateGenerations?.(c.generations ?? {});
   const mergeSource = retained ?? new MemoryMergeSource(c.parents, c.ancestryBoundary, c.ancestryCuts);

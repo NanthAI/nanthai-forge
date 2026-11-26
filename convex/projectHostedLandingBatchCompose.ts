@@ -10,7 +10,7 @@ import type { MutationCtx } from './_generated/server';
 import { beginHostedOperation } from './projectHostedOperations';
 import { composeRow, loadCompose, hostedComposeInput, type ComposeState } from './projectHostedComposeStore';
 import { hostedStartMain } from './projectHostedChannels';
-import { saveObject } from './projectHostedSaveStore';
+import { composeStateBinding } from './projectHostedSaveStore';
 import { hostedPayloadHash, canonicalPayload } from '../src/hosted-source-operation';
 import { buildComposePages } from '../src/hosted-compose';
 import { savePin } from '../src/hosted-save';
@@ -29,15 +29,18 @@ export async function prepareBatchCompose(ctx: MutationCtx, input: BatchIdentity
   const existing = await composeRow(ctx, auth);
   if (existing && batch.uploads)
     return { ...(await loadCompose(ctx, auth, true, existing)), auth, uploads: batch.uploads };
+  const bindings = await Promise.all(
+    batch.members.map(member =>
+      composeStateBinding(ctx, input.projectId, { sha256: member.candidate.head! }),
+    ),
+  );
   const inputs = buildComposePages([]),
     dependencies = buildComposePages(
-      await Promise.all(
-        batch.members.map(async member => ({
-          candidateId: member.candidate.id,
-          head: member.candidate.head!,
-          state: await saveObject(ctx, input.projectId, { sha256: member.candidate.head! }),
-        })),
-      ),
+      batch.members.map((member, index) => ({
+        candidateId: member.candidate.id,
+        head: member.candidate.head!,
+        state: bindings[index]!.ref,
+      })),
     );
   const memberDetails: BatchMemberDetail[] = [];
   const earlyResolutions: NonNullable<
@@ -61,6 +64,7 @@ export async function prepareBatchCompose(ctx: MutationCtx, input: BatchIdentity
       message: 'Compose concurrent hosted landings',
     };
     const project = await activeProject(ctx, input.projectId, auth.actor);
+    const composeDeltas: NonNullable<ComposeState['composeDeltas']> = {};
     let ownerInputs = true;
     const contracts = await mainSemanticMembers(ctx, auth, current.receipt.id);
     if (batch.predecessor) {
@@ -92,6 +96,8 @@ export async function prepareBatchCompose(ctx: MutationCtx, input: BatchIdentity
       );
       const candidate = hostedRecordSchema.options[3].parse(JSON.parse(row.value));
       if (!request.intentId) request.intentId = candidate.intentId;
+      if (candidate.result.status === 'clean' && row.candidateFiles && row.candidateFilesDirect)
+        composeDeltas[candidate.result.head] = { base: candidate.base.head, files: row.candidateFiles };
       ownerInputs = ownerInputs && candidateOwnerInputs(project, row, candidate, first.authorityEpoch);
       contracts.push(...(candidate.semanticPlan?.members ?? []));
       earlyResolutions.push(...(candidate.earlyResolutions ?? []));
@@ -123,8 +129,15 @@ export async function prepareBatchCompose(ctx: MutationCtx, input: BatchIdentity
         ids: { candidate: crypto.randomUUID(), job: crypto.randomUUID(), jobOperation: crypto.randomUUID() },
       },
     });
+    const main = await composeStateBinding(ctx, input.projectId, { sha256: base.head });
     const state: ComposeState = {
       cause: batch.recomposing ? 'batch-recompose' : 'batch-compose',
+      ...(main.recordedGraph &&
+      bindings.every(binding => binding.recordedGraph) &&
+      Object.keys(composeDeltas).length === batch.members.length &&
+      batch.members.length
+        ? { composeDeltas }
+        : {}),
       request,
       ownerInputs,
       ...(earlyResolutions.length ? { earlyResolutions } : {}),
@@ -138,7 +151,7 @@ export async function prepareBatchCompose(ctx: MutationCtx, input: BatchIdentity
             },
           }
         : {}),
-      main: await saveObject(ctx, input.projectId, { sha256: base.head }),
+      main: main.ref,
       inputs: { next: null, pages: inputs.manifest.pages, count: 0 },
       dependencies: { next: null, pages: dependencies.manifest.pages, count: batch.members.length },
       candidateId: operation.operation.firstAttempt.ids.candidate!,

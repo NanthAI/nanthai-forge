@@ -21,7 +21,7 @@ import { requireLaneSourceAuthority } from './projectLaneAuthority';
 import { readHostedRecord } from './projectHostedRecords';
 import { beginHostedOperation } from './projectHostedOperations';
 import { hostedStartMain } from './projectHostedChannels';
-import { saveLaneRecord, sameSaveLane, saveObject } from './projectHostedSaveStore';
+import { composeStateBinding, saveLaneRecord, sameSaveLane, saveObject } from './projectHostedSaveStore';
 import {
   composeRow,
   loadCompose,
@@ -281,7 +281,14 @@ export const stage = mutation({
           'SOURCE_UNAVAILABLE',
           'The selected State needs trusted source registration.',
         );
-        const stored = await saveObject(ctx, input.projectId, { sha256: entry.head }, 'compose');
+        const { ref: stored, recordedGraph } = await composeStateBinding(
+          ctx,
+          input.projectId,
+          { sha256: entry.head },
+          'compose',
+        );
+        if (recordedGraph && state.request.inputs.count + state.request.dependencies.count === 1)
+          state.singleSelectionHead = entry.head;
         invariant(
           canonicalPayload(stored) === canonicalPayload(entry.state) &&
             (!registered || registered.size === stored.object.size),

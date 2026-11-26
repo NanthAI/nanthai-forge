@@ -30,6 +30,7 @@ import { landingStateOf, type LandingStateName } from '../src/landing-state';
 import { report } from './errors';
 import { invariant } from '../src/errors';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
+import { recentRecomposeAlerts } from './projectHostedLandingRecomposeAlerts';
 
 const RAW_ID = /^\s*[0-9a-f]{8}(?:-[0-9a-f]{1,12})*(?:-?(?:…|\.{3}))?(?:\s*[:–—-]\s*|\s*$)/i;
 /** A Lane goal without a leading raw Item or Lane id ("875a4b60-3aad-…: site function" → "site function"). */
@@ -139,7 +140,12 @@ export const needsMeResult = v.object({
   notices: v.optional(
     v.array(
       v.object({
-        kind: v.union(v.literal('reverted'), v.literal('needs-fix'), v.literal('mirror')),
+        kind: v.union(
+          v.literal('reverted'),
+          v.literal('needs-fix'),
+          v.literal('mirror'),
+          v.literal('source-proof'),
+        ),
         /** The reverted Intent's id, `mirror`, or `deploy:<target>`. */
         id: v.string(),
         summary: v.string(),
@@ -156,6 +162,7 @@ export const needsMeResult = v.object({
             agent: v.union(v.string(), v.null()),
           }),
         ),
+        laneId: v.optional(v.string()),
         /** A revert somebody ran, offered to the Lane's owner (J08): the card says who took which Lane out and when. */
         taken: v.optional(v.object(takenOutShape)),
       }),
@@ -314,7 +321,7 @@ async function dependencyLane(ctx: QueryCtx, projectId: Id<'hostedProjects'>, su
 }
 
 type Notice = {
-  kind: 'reverted' | 'needs-fix' | 'mirror';
+  kind: 'reverted' | 'needs-fix' | 'mirror' | 'source-proof';
   id: string;
   summary: string;
   next: string | null;
@@ -323,6 +330,7 @@ type Notice = {
   tests?: string[];
   moreTests?: number;
   repair?: { laneId: string; title: string | null; actor: string; agent: string | null };
+  laneId?: string;
   taken?: TakenOut;
 };
 
@@ -388,7 +396,7 @@ export const read = query({
       const projectHasNoCheck = project.hasCheckDefinitions === false;
       // The owner's handle (one indexed read) is read only when a row below needs an approval link.
       const link = approvalLinks(ctx, project);
-      const [marks, approvals, asks, parks, { reviews }] = await Promise.all([
+      const [marks, approvals, asks, parks, { reviews }, recomposeAlerts] = await Promise.all([
         ctx.db
           .query('projectLiveLineLanes')
           .withIndex('by_project_and_held', q => q.eq('projectId', projectId).eq('held', true))
@@ -402,6 +410,9 @@ export const read = query({
           )
           .take(NEEDS_ME_PARKED_LIMIT + 1),
         openLandingReviews(ctx, projectId, link, projectHasNoCheck),
+        project.owner === user.subject
+          ? recentRecomposeAlerts(ctx, projectId, NEEDS_ME_NOTICE_LIMIT + 1)
+          : [],
       ]);
       const reviewIds = new Set(reviews.map(review => review.submissionId));
       const shown = marks.slice(0, NEEDS_ME_HELD_LIMIT);
@@ -508,9 +519,15 @@ export const read = query({
       // The sealed-secrets counter sits on the project row already read; a role check runs only when it is not zero.
       const secrets =
         project.secretsNeeds && (await hasWriteRole(ctx, project, user.subject)) ? project.secretsNeeds : 0;
-      const notices: Notice[] = [];
+      const notices: Notice[] = recomposeAlerts.slice(0, NEEDS_ME_NOTICE_LIMIT).map(alert => ({
+        kind: 'source-proof',
+        id: alert.groupId,
+        summary: alert.summary,
+        next: 'Inspect the retained landing failure.',
+        ...(alert.laneId ? { laneId: alert.laneId } : {}),
+      }));
       const tookOut: (TakenOut & { id: string })[] = [];
-      let noticesMore = false;
+      let noticesMore = recomposeAlerts.length > NEEDS_ME_NOTICE_LIMIT;
       let noticesMoreSince = Infinity;
       if (team) {
         for (const fix of fixes.slice(NEEDS_ME_NOTICE_LIMIT)) {

@@ -340,6 +340,7 @@ export function convexSourceTransport(
     },
   });
   const io: StepTransport = {
+    flushWrites: settle,
     ...(physical.selectPhysicalComposeMain
       ? { selectPhysicalComposeMain: physical.selectPhysicalComposeMain }
       : {}),

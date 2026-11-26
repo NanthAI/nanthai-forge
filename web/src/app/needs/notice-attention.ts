@@ -28,6 +28,13 @@ export function noticeAttention(read: NeedsRead, now: number) {
   for (const notice of read.notices ?? []) {
     // Legacy deploy notices have been replaced by the deploy status read.
     if (notice.kind === 'deploy') continue;
+    if (notice.kind === 'source-proof') {
+      const action: NoticeLink = notice.laneId
+        ? { label: 'Inspect the Lane', to: { place: 'lanes', rest: notice.laneId } }
+        : { label: 'Inspect landing history', to: { place: 'lanes', section: 'history' } };
+      notices.push({ ...notice, action, links: [] });
+      continue;
+    }
     if (notice.kind === 'needs-fix' || (notice.kind === 'reverted' && !notice.taken)) {
       const item = { place: 'plan' as const, rest: notice.id };
       const evidence = notice.receiptId ? { place: 'code' as const, rest: notice.receiptId } : item;

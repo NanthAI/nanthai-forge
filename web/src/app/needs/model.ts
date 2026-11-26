@@ -229,6 +229,7 @@ function parkedRow(row: ParkedLane): ParkedRow {
 const noticeTags = {
   reverted: 'Reverted from main',
   'needs-fix': 'Fix needed',
+  'source-proof': 'Source verification stopped',
   mirror: 'GitHub mirror',
   deploy: 'Deploy needs attention',
   secrets: 'Secrets',
@@ -236,6 +237,7 @@ const noticeTags = {
 const noticeFallback = {
   reverted: 'A change was taken out of main.',
   'needs-fix': 'A change needs a fix before it can land again.',
+  'source-proof': 'Forge stopped a recompose when its source proof failed.',
   mirror: 'The GitHub mirror stopped.',
   deploy: 'A deploy failed.',
   secrets: 'Sealed secrets wait on you.',

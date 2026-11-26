@@ -9,6 +9,7 @@ import { hostedLandingAttemptSchema, landingCheckSelectionSchema } from './hoste
 export const hostedFinishSchema = z
   .object({
     source: composeRequestSchema,
+    singleSelectionHead: hostedLandingAttemptSchema.shape.main.shape.head.optional(),
     recoveryRunId: z.uuid().optional(),
     restoreBases: composeInputSchema.shape.restoreBases,
     check: landingCheckSelectionSchema.nullable(),

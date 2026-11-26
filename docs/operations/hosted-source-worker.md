@@ -56,6 +56,28 @@ The State and its result manifest upload concurrently; publication waits for
 both checksum-verified writes. There is no per-project small-save lock or
 application queue.
 
+A Node recompose can reuse the complete file deltas pinned by the original
+Candidates. The graph walk proves each member's exact merge base against the
+current cohort prefix. The worker reads main once, verifies the signed delta
+bytes, and checks that every changed path still has its before value. It checks
+each generated State's parent order and exact file changes before publishing
+any prefix. A proved cohort publishes its sequential States, Candidate listing
+and result in one Node step. Candidates with overlapping changes, ambiguous
+ancestry, restores or unavailable placement metadata use general composition.
+
+Trusted Candidate rows record whether the delta lives at its standalone R2
+key, so the source step signs the exact object from the rows it already holds.
+Source publication keeps a retained binding if a writer later replaces the
+primary key. Pack commits bind pending objects. Storage read failures retain
+the source step's availability retry handling. The Node step verifies the
+serialized State hash, lineage and changed paths, and waits for each prefix's
+physical bindings before publishing its child.
+Terminal compose records drop the copied delta pins.
+A broken delta pin or State proof stops the landing with
+`SOURCE_RECOMPOSE_INVARIANT`. The owner sees one Needs you notice per failed
+submission or cohort, with the cause retained on the landing and the notice
+independent of the held Lane list.
+
 The small-save source job uses six invocations: dispatch mutation, step action,
 begin mutation, two batched descriptor mutations and commit mutation. This was
 seven with the Node dispatch wrapper. Publication adds its existing action and

@@ -115,7 +115,7 @@ export type Approval = {
 
 /** Shared-state evidence that stays until its condition clears. */
 export type Notice = {
-  kind: 'reverted' | 'needs-fix' | 'mirror' | 'deploy' | 'secrets';
+  kind: 'reverted' | 'needs-fix' | 'mirror' | 'deploy' | 'secrets' | 'source-proof';
   /** The reverted Intent's id, `mirror`, or `deploy:<target>`. */
   id: string;
   summary: string;
@@ -127,6 +127,7 @@ export type Notice = {
   moreTests?: number;
   who?: string;
   repair?: Pick<HeldLane, 'laneId' | 'title' | 'actor' | 'agent'>;
+  laneId?: string;
   /** A revert somebody ran, offered to the Lane's owner (J08): never a hold on work. */
   taken?: Taken;
 };

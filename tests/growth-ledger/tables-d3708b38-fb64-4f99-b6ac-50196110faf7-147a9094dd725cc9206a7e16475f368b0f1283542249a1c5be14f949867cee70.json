@@ -1,0 +1,6 @@
+{
+  "kind": "tables",
+  "delta": 1,
+  "reason": "686ecdde removes dependence on transient held Lane marks for proof failures. A small durable owner alert keeps each failed submission or cohort visible after its mark leaves Needs you.",
+  "date": "2026-11-26"
+}

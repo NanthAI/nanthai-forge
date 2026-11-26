@@ -109,6 +109,7 @@ test('the spend ledger splits calls by caller and source steps by cause, keeping
     ['recompose', 'node-full'],
     ['batch-compose', 'node-full'],
     ['batch-recompose', 'node-full'],
+    ['batch-recompose', 'node-fast-disjoint'],
   ]) {
     const event = spendEvent(log(cause, [step(cause, path)], 0), 'dev');
     assert.equal(event.attribution, `source-step/${cause}/${path}`);

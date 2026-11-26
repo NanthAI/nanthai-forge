@@ -276,7 +276,7 @@ reads canonical rows, `compact` a compact projection, and `context`, `inputs` an
 A source step's `forge-source-step` line carries its `cause` (`save`, `register`,
 a sync mode, or the compose operation's recorded cause). Compose causes are
 `compose`, `recompose`, `precompose`, `batch-compose` and `batch-recompose`.
-Compose steps also report `path` as `v8-small` or `node-full`. A call with one
+Compose steps also report `path` as `v8-small`, `node-full`, or `node-fast-disjoint`. A call with one
 cause and path and no read-shape label uses `source-step/<cause>/<path>` for its
 calls, compute and egress. Legacy lines and other source steps without a path
 use `source-step/<cause>`.

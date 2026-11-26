@@ -588,6 +588,32 @@ for (const why of [
   });
 }
 
+test('a stopped source proof asks the owner to inspect even without a held Lane', () => {
+  const input = {
+    ...read([], []),
+    notices: [
+      {
+        id: 'solo',
+        kind: 'source-proof',
+        summary: 'Source verification stopped.',
+        next: null,
+        laneId: 'lane',
+      },
+      { id: 'cohort', kind: 'source-proof', summary: 'Source verification stopped.', next: null },
+    ],
+  };
+  const view = needsView(input, 1);
+  assert.deepEqual(needsCount(input, 1), { n: 2, atLeast: false });
+  assert.equal(view.fyiNotices.length, 0);
+  assert.deepEqual(
+    view.notices.map(row => row.action.to),
+    [
+      { place: 'lanes', rest: 'lane' },
+      { place: 'lanes', section: 'history' },
+    ],
+  );
+});
+
 test('e5c142ef: an agent’s main fix stays FYI until the investigation window opens, then clears on recovery', () => {
   const since = Date.parse('2026-11-26T10:00:00Z');
   const deadline = since + 60 * 60_000;

@@ -94,6 +94,7 @@ export const projectPurgeTables = {
   projectHostedActionsExports: 'by_project_and_run',
   projectHostedLandingQueueStatus: 'by_project_and_page',
   projectHostedStallAlerts: 'by_project_and_submission',
+  projectHostedRecomposeAlerts: 'by_project',
   projectHostedLandingBatches: 'by_project_and_batch',
   projectHostedLandingDesired: 'by_project_and_submission',
   projectHostedLandingAliases: 'by_project_and_actor_and_operation',

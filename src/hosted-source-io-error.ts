@@ -114,7 +114,7 @@ export const composeCauses = [
   'batch-compose',
   'batch-recompose',
 ] as const;
-type SourceStepPath = 'v8-small' | 'node-full';
+type SourceStepPath = 'v8-small' | 'node-full' | 'node-fast-disjoint';
 
 /** The begin transaction already loaded the owning record. Older compose records only distinguish cohorts. */
 export function sourceStepCause(jobKind: string | undefined, state: unknown): string | null {

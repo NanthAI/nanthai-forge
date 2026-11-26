@@ -52,6 +52,7 @@ import { sourceResultInlineBytes } from './projectConvexSourceTransport';
 import { digest } from '../src/state/hash';
 import { publishSourceResult } from './projectSourcePublishInline';
 import { sourceStepCause } from '../src/hosted-source-io-error';
+import { presignGet, r2Config, r2Key } from './r2';
 const identity = { projectId: v.id('hostedProjects'), jobId: v.string() };
 /** The step's own result text, when publication may take it without the complete action's R2 read. */
 export function inlineSourceResult(
@@ -325,13 +326,37 @@ export const begin = sourceMutation({
     const batch = active.row.batchId ? await ctx.db.get(active.row.batchId) : null;
     if (batch && batch.status !== 'done') return null;
     const locations = [];
+    const source = active.source?.state;
+    const availableDeltas =
+      !active.row.cursor && active.row.nodeCompose && source && 'composeDeltas' in source
+        ? source.composeDeltas
+        : undefined;
+    const composeDeltas =
+      availableDeltas &&
+      source &&
+      'main' in source &&
+      source.main.object.size <= 8 * 1024 * 1024 &&
+      Object.values(availableDeltas).every(({ files }) => files.size <= 2 * 1024 * 1024) &&
+      Object.values(availableDeltas).reduce((size, { files }) => size + files.size, 0) <= 8 * 1024 * 1024
+        ? availableDeltas
+        : undefined;
+    // The trusted Candidate rows already pin standalone R2 placement. No object
+    // lookup or extra Convex call is needed to sign those exact immutable bodies.
+    if (composeDeltas)
+      locations.push(
+        ...(await Promise.all(
+          Object.values(composeDeltas).map(async ({ files }) => ({
+            descriptor: { object: files, recipe: null },
+            url: await presignGet(r2Config(), r2Key(args.projectId, files.sha256)),
+          })),
+        )),
+      );
     if (!active.row.cursor) {
       locations.push(await sourceObjectLocation(ctx, args.projectId, active.job.input));
       // A save's first step also gets its baseline and delta page, so it reads all three at once.
       if (active.job.jobKind === 'save' && !active.row.batchId)
         for (const pin of await saveStepReads(ctx, args.projectId, args.jobId))
           locations.push(await sourceObjectLocation(ctx, args.projectId, pin));
-      const source = active.source?.state;
       if (!active.row.batchId && source && ('inputs' in source || 'work' in source))
         locations.push(...(await mergeStepReads(ctx, args.projectId, source)));
     }
@@ -343,6 +368,7 @@ export const begin = sourceMutation({
       input: active.job.input,
       jobKind: active.job.jobKind,
       cause: sourceStepCause(active.job.jobKind, active.source?.state),
+      ...(composeDeltas ? { composeDeltas } : {}),
       ...(active.project.physicalSeed?.jobId === args.jobId
         ? { physicalSeed: active.project.physicalSeed }
         : {}),

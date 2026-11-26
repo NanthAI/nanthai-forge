@@ -15,7 +15,12 @@ import { activeProject } from './projectAuthority';
 import { hostedWriteProject } from './projectHostedRecords';
 import { hostedOperationRow } from './projectHostedOperations';
 import { hostedOperationSchema } from '../src/hosted-source-operation';
-import { composeRequestSchema, composeInputSchema, COMPOSE_ALGORITHM } from '../src/hosted-compose';
+import {
+  composeRequestSchema,
+  composeInputSchema,
+  composeDeltaPinsSchema,
+  COMPOSE_ALGORITHM,
+} from '../src/hosted-compose';
 import { saveObjectSchema, saveWorkerObjectSchema } from '../src/hosted-save';
 import { notifyFinishCompose } from './projectHostedFinishWake';
 import { invariant } from '../src/errors';
@@ -29,6 +34,9 @@ export const composeStateSchema = z
   .object({
     // Telemetry on the operation record only. It does not change the hashed worker input.
     cause: z.enum(composeCauses).optional(),
+    /** Server-pinned complete deltas for the exact selected heads. */
+    composeDeltas: composeDeltaPinsSchema.optional(),
+    singleSelectionHead: saveObjectSchema.shape.sha256.optional(),
     // Read-only compatibility for already pinned compose inputs; new plans omit this field.
     candidateFiles: z.literal(true).optional(),
     retryUntil: z.number().int().nonnegative().optional(),
@@ -97,11 +105,15 @@ export async function writeComposeState(
   id: Id<'projectHostedComposes'>,
   state: ComposeState,
 ) {
+  const terminal = state.status === 'completed' || state.status === 'failed';
+  const { composeDeltas: _pins, ...settled } = state;
+  void _pins;
+  const value = terminal ? settled : state;
   await ctx.db.patch(id, {
     candidateId: state.candidateId,
-    value: semanticPayload(composeStateSchema.parse(state), true),
+    value: semanticPayload(composeStateSchema.parse(value), true),
   });
-  if (state.status === 'completed' || state.status === 'failed') {
+  if (terminal) {
     const row = (await ctx.db.get(id))!;
     await notifyFinishCompose(ctx, row.projectId, row.operationId);
     await notifyDesiredCompose(ctx, row.projectId, row.operationId);

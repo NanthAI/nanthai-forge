@@ -13,7 +13,7 @@ import { hostedStartMain } from './projectHostedChannels';
 import { keepTheRunOn } from './projectHostedKeepSwitch';
 import { beginHostedOperation } from './projectHostedOperations';
 import { composeRow, loadCompose, type ComposeState } from './projectHostedComposeStore';
-import { saveObject } from './projectHostedSaveStore';
+import { composeStateBinding } from './projectHostedSaveStore';
 import {
   loadLanding,
   loadLandingAttempt,
@@ -298,8 +298,26 @@ export async function prepareFinishCompose(ctx: MutationCtx, input: LandingIdent
       (own?.base?.receiptId ? await semanticBaseSequence(ctx, input.projectId, own.base.receiptId) : 0);
   }
   const project = await hostedWriteProject(ctx, input.projectId, state.actor, request.authorityEpoch);
+  const main = await composeStateBinding(ctx, input.projectId, { sha256: pending.main.head });
   const stateValue: ComposeState = {
     cause: pending.precompose ? 'precompose' : 'recompose',
+    ...(!pending.precompose &&
+    main.recordedGraph &&
+    !value.restoreBases &&
+    request.inputs.count + request.dependencies.count === 1 &&
+    originalCandidate?.result.status === 'clean' &&
+    value.singleSelectionHead === originalCandidate.result.head &&
+    originalRow?.candidateFiles &&
+    originalRow.candidateFilesDirect
+      ? {
+          composeDeltas: {
+            [value.singleSelectionHead]: {
+              base: originalCandidate.base.head,
+              files: originalRow.candidateFiles,
+            },
+          },
+        }
+      : {}),
     retryUntil: Date.parse(pending.at) + HOSTED_FINISH_COMPOSE_WATCH_WINDOW_MS,
     ownerProvenance: 1,
     ...(value.restoreBases ? { restoreBases: value.restoreBases } : {}),
@@ -313,7 +331,7 @@ export async function prepareFinishCompose(ctx: MutationCtx, input: LandingIdent
     ),
     ...(semanticPlan.members.length ? { semanticPlan } : {}),
     request,
-    main: await saveObject(ctx, input.projectId, { sha256: pending.main.head }),
+    main: main.ref,
     inputs: { next: null, pages: request.inputs.pages, count: request.inputs.count },
     dependencies: { next: null, pages: request.dependencies.pages, count: request.dependencies.count },
     candidateId: prepared.operation.firstAttempt.ids.candidate!,
@@ -371,6 +389,10 @@ export async function installFinishCompose(
   }
   const terminal = source.operation.terminal;
   invariant(terminal, 'WORK_STALE', 'Wait for the original source job to settle.');
+  if (terminal.outcome.status === 'failed' && terminal.outcome.error.code === 'SOURCE_RECOMPOSE_INVARIANT') {
+    await failFinish(ctx, input, terminal.outcome.error.code, terminal.outcome.error.message);
+    return;
+  }
   // A running check retired by an acceptance owns a fresh exact composition.
   // Back-to-back main moves must not spend its replacement CI on an obsolete
   // source generation, or expose an obsolete conflict as the final outcome.

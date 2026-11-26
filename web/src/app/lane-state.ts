@@ -161,6 +161,8 @@ function heldBy(
       return { glyph: 'Stopped', why: 'main moved under it', note: 'main moved' };
     case 'rejected':
       return { glyph: 'Stopped', why: 'Forge refused the landing', note: 'refused' };
+    case 'recompose-stopped':
+      return { glyph: 'Stopped', why: 'source verification failed', note: 'inspect the recompose failure' };
     case 'held-review': {
       const paths = landing?.protectedPaths;
       return {

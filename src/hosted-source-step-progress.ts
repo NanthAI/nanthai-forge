@@ -34,8 +34,9 @@ export async function saveSourceProgress(
   store: (bytes: Uint8Array) => Promise<string>,
 ) {
   // The one-trip sync delta rides on the step's reply only; durable progress never carries it.
-  const { syncDelta: _reply, ...kept } = cursor;
+  const { syncDelta: _reply, fastDisjoint: _path, ...kept } = cursor;
   void _reply;
+  void _path;
   const value: SourceProgress = { kind: 'forge-source-progress-v1', cursor: kept, sections: {} };
   for (const field of fields) {
     const bytes = Buffer.from(JSON.stringify(cursor[field] ?? {}));

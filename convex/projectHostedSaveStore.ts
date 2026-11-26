@@ -96,6 +96,23 @@ export async function saveObject(
 ) {
   return (await saveObjects(ctx, projectId, [pin], [], phase))[0]!;
 }
+/** The compose already resolves these source bindings. Retain the recorded
+ * graph stamp alongside the worker reference without fetching another row. */
+export async function composeStateBinding(
+  ctx: QueryCtx | MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  pin: { sha256: string },
+  phase?: SourceSizePhase,
+) {
+  const row = await findStoredObject(ctx, projectId, pin.sha256);
+  invariant(
+    row && !row.removed && isStored(row),
+    'SOURCE_UNAVAILABLE',
+    'Commit the exact project source object before staging it.',
+  );
+  const [ref] = await saveObjects(ctx, projectId, [pin], [row], phase);
+  return { ref: ref!, recordedGraph: row.stateGeneration !== undefined && row.stateParents !== undefined };
+}
 /** The caller supplies one already-bounded source window. Each exact object is
  * checked and marked, but cleanup needs just one new fence for this transaction,
  * irrespective of how many source references the batch introduces. */

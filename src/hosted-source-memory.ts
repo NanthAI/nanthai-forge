@@ -85,6 +85,11 @@ export class MemoryMergeSource extends LazyMergeSource {
     this.states.add(id);
     return id;
   }
+  /** Compose has already verified the parent edges and decoded each file in
+   * canonical schema order. Keep those entries rather than cloning the tree. */
+  writeVerifiedComposeState(files: NativeFile[], parents: string[], message: string, at: string) {
+    return this.storeState({ schema: 1, kind: 'forge-source-state', parents, files, message, at });
+  }
   outputState(bytes: Buffer) {
     const id = this.generatedBytes.get(bytes),
       state = id ? this.parsed.get(id) : undefined;

@@ -19,6 +19,9 @@ import { digest } from '../src/state/hash';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import type { HostedRecord } from '../src/hosted-records';
 import { invariant } from '../src/errors';
+import { findStoredObject } from './projectObjectFind';
+import { isR2Object, isStored } from './projectObjectFields';
+import { r2Key } from './r2';
 /** Constant-size publication. Selection/edge checks were paged before dispatch;
  * ancestry and bytes are verified by the fixed worker, never client display facts. */
 export async function publishHostedCompose(
@@ -66,11 +69,23 @@ export async function publishHostedCompose(
     'The result selected different original compose inputs.',
   );
   const result = output.result;
-  await saveObjects(ctx, input.projectId, [
-    job.output,
-    result.status === 'clean' ? result.state : result.conflicts,
-    ...(result.status === 'clean' && result.candidateFiles ? [result.candidateFiles] : []),
-  ]);
+  const filesPin = result.status === 'clean' ? result.candidateFiles : undefined;
+  const filesRow = filesPin ? await findStoredObject(ctx, input.projectId, filesPin.sha256) : null;
+  invariant(
+    !filesPin || (filesRow && !filesRow.removed && isStored(filesRow) && filesRow.size === filesPin.size),
+    'SOURCE_UNAVAILABLE',
+    'Commit the exact project source object before staging it.',
+  );
+  await saveObjects(
+    ctx,
+    input.projectId,
+    [
+      job.output,
+      result.status === 'clean' ? result.state : result.conflicts,
+      ...(filesPin ? [filesPin] : []),
+    ],
+    filesRow ? [filesRow] : [],
+  );
   if (result.status === 'clean') {
     const prior = await ctx.db
       .query('projectHostedStates')
@@ -130,7 +145,17 @@ export async function publishHostedCompose(
     expectedVersion: null,
     ownerOnly: ownerInputs,
     ...(state.restoreBases ? { restoreBases: canonicalPayload(state.restoreBases) } : {}),
-    ...(result.status === 'clean' && result.candidateFiles ? { candidateFiles: result.candidateFiles } : {}),
+    ...(filesPin ? { candidateFiles: filesPin } : {}),
+    // saveObjects pins this standalone key as source. Upload packs only bind
+    // pending objects; source encoding changes retain old source keys before
+    // replacing the primary binding (projectSourceKeyProtection).
+    ...(filesRow &&
+    isR2Object(filesRow) &&
+    !filesRow.pack &&
+    !filesRow.recipe &&
+    filesRow.r2Key === r2Key(input.projectId, filesRow.digest)
+      ? { candidateFilesDirect: true as const }
+      : {}),
     record: candidate,
   });
   const terminal = {

@@ -114,7 +114,10 @@ export async function batchFinishStep(
   if (source.operation.terminal) {
     const outcome = source.operation.terminal.outcome;
     if (outcome.status === 'failed') {
-      if (outcome.error.code === 'SOURCE_RETRY_EXHAUSTED') {
+      if (
+        outcome.error.code === 'SOURCE_RETRY_EXHAUSTED' ||
+        outcome.error.code === 'SOURCE_RECOMPOSE_INVARIANT'
+      ) {
         for (const member of batch.members)
           await failFinish(
             ctx,

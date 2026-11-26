@@ -1,0 +1,6 @@
+{
+  "kind": "errorCodes",
+  "delta": 1,
+  "reason": "686ecdde removes full-State recomposition work for proven disjoint Candidates. A distinct terminal proof failure records why the queue cannot reuse those deltas and prevents batch splitting from concealing an invariant failure.",
+  "date": "2026-11-26"
+}

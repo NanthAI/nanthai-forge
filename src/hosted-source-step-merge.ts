@@ -37,6 +37,7 @@ import { sourceGenerationWalk } from './hosted-source-generation-cut.js';
 import { describeStackTips, stackedSync } from './hosted-source-stack-tips.js';
 import type { WorkerObject } from './hosted-source-worker-format.js';
 import { docsMerge } from './docs-resolution.js';
+import { composeDisjoint } from './hosted-compose-disjoint.js';
 
 export async function prepareMergeStep(
   c: SourceStepCursor,
@@ -150,6 +151,14 @@ export async function prepareMergeStep(
       return;
     }
     composeRoots = [compose.base.head, ...selections.slice(0, ancestryCount).map(entry => entry.head)];
+    if (io.composeDeltas) {
+      invariant(
+        !restoreBases && selections.length > 0 && selections.every(entry => io.composeDeltas?.[entry.head]),
+        'SOURCE_RECOMPOSE_INVARIANT',
+        'The pinned Candidate deltas do not cover the exact recompose selections.',
+      );
+      for (const id of composeRoots) io.expectState?.(id);
+    }
     if (selecting) c.states = [...composeRoots];
     else if (ancestryCount < selections.length && c.states.length) {
       // A cursor from the previous worker may have queued a trailing restore's
@@ -171,7 +180,13 @@ export async function prepareMergeStep(
     let tips = [...new Set([left, right])].filter(id => !c.parents[id]);
     // Both tips are read in one action so their manifests also sign changed paths.
     const size = tips.reduce((sum, id) => sum + c.inventory[id]!.object.size, 0);
-    if (left !== right && tips.length && size > sourceStepComputeBytes && io.stateParents && io.prepareRead) {
+    if (
+      left !== right &&
+      tips.length &&
+      (size > sourceStepComputeBytes || io.composeDeltas?.[right]) &&
+      io.stateParents &&
+      io.prepareRead
+    ) {
       // The ordinary tip read resolves these same descriptors. Recorded parents can rule
       // out a direct fast-forward before either large body occupies the merge heap.
       for (const id of tips) io.expectState?.(id);
@@ -203,6 +218,14 @@ export async function prepareMergeStep(
     );
     for (const [index, id] of tips.entries()) {
       const state = tipStates[index]!;
+      if (io.composeDeltas) {
+        const recordedParents = io.stateParents?.(id);
+        invariant(
+          recordedParents && canonicalPayload(recordedParents) === canonicalPayload(state.parents),
+          'SOURCE_RECOMPOSE_INVARIANT',
+          'The recompose tip State differs from its verified ancestry.',
+        );
+      }
       c.parents[id] = state.parents;
       const generation = io.stateGeneration?.(id);
       if (generation !== undefined) (c.generations ??= {})[id] = generation;
@@ -211,6 +234,12 @@ export async function prepareMergeStep(
       files.set(id, state.files);
     }
     if (left === right || c.parents[left]!.includes(right) || c.parents[right]!.includes(left)) {
+      if (io.composeDeltas)
+        invariant(
+          !c.generationFallback && c.generations?.[left] && c.generations?.[right],
+          'SOURCE_RECOMPOSE_INVARIANT',
+          'The recompose proof is missing a State generation.',
+        );
       c.head = left === right || c.parents[left]!.includes(right) ? left : right;
       if (c.head !== left && c.composeBases) {
         if (files.has(left) && files.has(right)) {
@@ -493,6 +522,7 @@ export async function computeMergeStep(
     return;
   }
   const plan = sourceValidation('SOURCE_JOB_INVALID', () => composeInputSchema.parse(c.plan));
+  if (await composeDisjoint(c, io, source, plan)) return;
   const mainId = plan.main.object.sha256,
     terminal = c.index >= c.selections.length;
   io.selectPhysicalComposeMain?.(mainId);

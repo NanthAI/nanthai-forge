@@ -6,6 +6,16 @@ import { v } from 'convex/values';
  * mutation that settles it as failed (convex/projectFailureLog.ts). A healthy path writes nothing; rows
  * expire after 30 days with the operational expiry pages. */
 export const failureLogTables = {
+  projectHostedRecomposeAlerts: defineTable({
+    projectId: v.id('hostedProjects'),
+    groupId: v.string(),
+    submissionId: v.string(),
+    laneId: v.optional(v.string()),
+    summary: v.string(),
+  })
+    .index('by_project_and_group', ['projectId', 'groupId'])
+    // index-order: caller: convex/projectHostedLandingRecomposeAlerts.ts#recentRecomposeAlerts; order: the bounded owner notice page reads newest _creationTime first.
+    .index('by_project', ['projectId']),
   projectFailures: defineTable({
     projectId: v.id('hostedProjects'),
     operationId: v.string(),

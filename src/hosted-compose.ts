@@ -67,6 +67,12 @@ export const candidateFileListSchema = z
     ),
   })
   .strict();
+/** Trusted Candidate deltas, keyed by selected head and outside the hashed compose input. */
+export const composeDeltaPinsSchema = z.record(
+  object.shape.sha256,
+  z.object({ base: object.shape.sha256, files: object }).strict(),
+);
+export type ComposeDeltaPins = typeof composeDeltaPinsSchema._output;
 /** One source-only listing, derived from the exact manifests already used by the merge. */
 export function candidateFileList(
   base: string,

@@ -149,6 +149,7 @@ export async function writeHostedRecord(
     /** Trusted compose metadata, outside the client-visible immutable record body. */
     restoreBases?: string;
     candidateFiles?: { sha256: string; size: number };
+    candidateFilesDirect?: true;
     /** Trusted input aggregate; false clears Lane provenance, true seeds a new resolution/Candidate. */
     ownerOnly?: boolean;
     saveHooks?: import('../src/hosted-lane').AgentHooks;
@@ -271,6 +272,9 @@ export async function writeHostedRecord(
       : {}),
     ...(record.kind === 'candidate' && input.restoreBases ? { restoreBases: input.restoreBases } : {}),
     ...(record.kind === 'candidate' && input.candidateFiles ? { candidateFiles: input.candidateFiles } : {}),
+    ...(record.kind === 'candidate' && input.candidateFilesDirect
+      ? { candidateFilesDirect: true as const }
+      : {}),
     digest: ref.digest,
     bytes: ref.bytes,
   });

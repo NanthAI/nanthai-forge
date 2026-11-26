@@ -62,7 +62,11 @@ export function sourceStepCause(log) {
         const { event, cause: done, stepCause, path } = JSON.parse(message);
         const cause = event === 'forge-source-step' ? done : stepCause;
         if (typeof cause !== 'string' || !/^[a-z-]{1,32}$/.test(cause)) return [];
-        return [[cause, ...(['v8-small', 'node-full'].includes(path) ? [path] : [])].join('/')];
+        return [
+          [cause, ...(['v8-small', 'node-full', 'node-fast-disjoint'].includes(path) ? [path] : [])].join(
+            '/',
+          ),
+        ];
       } catch {
         return [];
       }

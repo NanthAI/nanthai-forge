@@ -1,0 +1,1 @@
+| `projectHostedRecomposeAlerts` | Durable owner notice for failed recompose proof. One row per failed solo submission or cohort. Needs you reads one bounded page independent of held Lane marks. The record points at the existing terminal landing evidence. | Activity |

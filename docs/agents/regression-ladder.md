@@ -80,6 +80,7 @@ removed, skipped or moved out of `tests/*.test.mjs`, or when this page stops nam
 | Incident | Replayed failure |
 | --- | --- |
 | `ad80e037` | Convex 1.50 rejects self-cancellation of a running mutation whose system row still says pending; request ownership protects its successor |
+| `686ecdde` | A disjoint cohort keeps its exact sequential State bytes, Candidate and paths, including recipe States. |
 | `08169467` | Completed compose stranded before admission by cancellation of a running desired wake |
 | `9809f716` | A desired landing stayed preparing after its compose ended clean: the completion wake reached only an older cancelled goal on that compose, and a replay of the original request left the live goal on its backed-off watchdog |
 | `n3-r3-a1` | B1.5d n3-r3 attempt 1: a stalled land, help hunting after resolve from the wrong folder, and a 3x slower cell that raised no alert |
