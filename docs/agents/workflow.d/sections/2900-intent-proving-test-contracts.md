@@ -7,6 +7,9 @@ timing estimates from native timing history where available; unknown timings are
 exact Candidate. Hosted mode reads the same machine reports from verified, sealed
 check output. Proposal reads never run project code.
 
+Use [`tests {runId}`](3900-check-report-detail.md) to inspect an existing
+check's suite outcomes and browser shard using just its run ID.
+
 Confirm or edit with one CLI command (MCP: `forge_check`, action `confirm-tests`):
 
 ```sh

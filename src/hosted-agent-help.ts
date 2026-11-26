@@ -66,6 +66,7 @@ const actionTopic: Record<string, HelpTopicId> = {
   prioritize: 'queue',
   peers: 'overlap',
   check: 'check',
+  tests: 'check',
   start: 'lanes',
   lanes: 'lanes',
   'lane-history': 'lanes',
@@ -163,9 +164,11 @@ function helpExample(entry: (typeof hostedAgentHelpEntries)[number]) {
   const example =
     entry.action === 'start'
       ? { outcome: 'Improve the README', model: 'unknown' }
-      : entry.action === 'revert'
-        ? { target: { kind: 'receipt', receiptId: 'RECEIPT_ID' } }
-        : Object.fromEntries(required.map(field => [field, placeholder(field, properties[field])]));
+      : entry.action === 'tests'
+        ? { runId: 'RUN_ID' }
+        : entry.action === 'revert'
+          ? { target: { kind: 'receipt', receiptId: 'RECEIPT_ID' } }
+          : Object.fromEntries(required.map(field => [field, placeholder(field, properties[field])]));
   const command = entry.command.startsWith('x ')
     ? `nforge x ROOT ${entry.command.slice(2)}`
     : `nforge agent ROOT ${entry.command}`;

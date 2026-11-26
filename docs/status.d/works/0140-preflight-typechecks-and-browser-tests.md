@@ -6,6 +6,8 @@
   ([agent workflow](../../agents/workflow.d/sections/3150-preflight-typechecks-and-browser-tests.md)).
   Set `FORGE_BROWSER_TESTS=0` to skip browser files in local preflight, including
   the run started by `land --save`. The hosted check keeps its browser coverage.
+- `nforge agent ROOT tests '{"runId":"RUN_ID"}'` reads retained suite outcomes
+  and the pinned browser shard for a hosted check.
 - Local preflight shares one [heavy slot](../../parallel-work-defaults.md#localheavyslots) across
   static checks, build and tests, including runs that only execute static checks.
   Standalone preflight replans against working files edited during a slot wait.

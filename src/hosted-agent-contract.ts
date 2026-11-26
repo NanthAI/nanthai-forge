@@ -215,7 +215,26 @@ const check = z
 export const hostedAgentCommandSchemas = {
   pull: z.object({}).strict(),
   ...hostedRecordCommands,
-  tests: contractTestsInput.omit({ operationId: true, laneId: true }).extend({ candidateId: uuid }).strict(),
+  tests: contractTestsInput
+    .omit({ operationId: true, laneId: true })
+    .extend({
+      candidateId: uuid.optional().describe('Propose a proving-test contract for this Candidate.'),
+      runId: uuid.optional().describe('Read executed tests with runId alone, or time a Candidate proposal.'),
+      cursor: z.string().optional().describe('Continue the retained reports page for a runId-only read.'),
+    })
+    .strict()
+    .superRefine(({ candidateId, runId, cursor, timingBasis, tests, expectedHead, expectedVersion }, ctx) => {
+      if (
+        candidateId
+          ? cursor !== undefined
+          : !runId || [timingBasis, tests, expectedHead, expectedVersion].some(value => value !== undefined)
+      )
+        ctx.addIssue({
+          code: 'custom',
+          message:
+            'Pass runId (and optional cursor) for check coverage, or candidateId for a contract proposal.',
+        });
+    }),
   'confirm-tests': contractTestsInput
     .omit({ operationId: true, laneId: true })
     .extend({ candidateId: uuid })

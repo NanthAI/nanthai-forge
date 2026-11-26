@@ -1098,6 +1098,39 @@ export class HostedAgentTransport {
       );
       if (!observation && operationId !== undefined)
         invariant(z.uuid().safeParse(operationId).success, 'BAD_ARGUMENT', 'operationId must be a UUID.');
+      if (action === 'tests') {
+        const read = command.data as z.infer<typeof hostedAgentCommandSchemas.tests>;
+        if (!read.candidateId && read.runId) {
+          const runId = read.runId;
+          const [reports, plan] = await Promise.all([
+            this.action<Record<string, unknown>>('projectHostedCheckDetail:reports', {
+              runId,
+              ...(read.cursor === undefined ? {} : { cursor: read.cursor }),
+            }),
+            this.action<{
+              selection: { scope: string; browser?: boolean } | null;
+              groups?: string[][];
+            }>('projectHostedCheckSelection:detail', { runId }),
+          ]);
+          let browserShards: { shard: number; files: string[] }[] | null = null;
+          if (plan.selection?.browser !== undefined) {
+            browserShards = [];
+            if (plan.selection.browser) {
+              const { isBrowserTest } = await import('../scripts/test-browser-names.mjs');
+              browserShards = (plan.groups ?? []).flatMap((group, shard) => {
+                const files = group.filter(isBrowserTest);
+                return files.length ? [{ shard, files }] : [];
+              });
+            }
+          }
+          return this.response(action, null, {
+            runId,
+            scope: plan.selection?.scope ?? null,
+            browserShards,
+            ...reports,
+          });
+        }
+      }
       // A bare start has nothing to start. Refuse before any journal or call exists (Issue ec7bd1b5).
       if (action === 'start') {
         const asked = command.data as { planningItemId?: string; intentId?: string; outcome?: string };

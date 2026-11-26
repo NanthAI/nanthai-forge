@@ -1,7 +1,22 @@
 ### Check report detail
 
 Landing receipts, `wait`, `observe` and `status` show `checkRunId` when a
-check is bound to the selected landing. Use it with `log {runId}` for the
+check is bound to the selected landing. The landing ledger also lists those
+IDs in `checkRunIds`. Use one to inspect suites and the browser shard:
+
+```sh
+nforge agent ROOT tests '{"runId":"RUN_ID"}'
+```
+
+`contractReports` lists the file outcomes that Forge retained for that run.
+An empty `attempts` array marks a fully skipped file. Pass `nextCursor` back
+as `cursor` to see the next page. `browserShards` gives the zero-based
+shard indexes and fixture paths from the pinned browser selection. Match those
+paths to their file outcomes to verify execution. An empty array means the plan
+disabled browser coverage, and `null` means Forge has no browser selection to show.
+The read uses the existing report and selection actions, in parallel.
+
+Use the run ID with `log {runId}` for the
 check log. To read one file's CI time, use
 `status {runId,reports:{files:[FILE]}}` or the same selection with `observe`.
 The report's `durationMs` is the time recorded for that file by the runner.

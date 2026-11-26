@@ -25,6 +25,7 @@ import { hostedAgentActions, hostedAgentCommandSchemas } from '../dist/hosted-ag
 import { hostedAgentRoot } from '../dist/hosted-agent-journal.js';
 import { readHostedCliStatus } from '../dist/hosted-cli-status.js';
 import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
+import { registerAgentWorkflow } from '../dist/mcp-agent-workflow.js';
 import { slimReceipt } from '../dist/receipt-slim.js';
 import { pageCheckReports } from '../dist/check-report-detail.js';
 import { readLaneEntry, recordLane } from '../dist/lane-registry.js';
@@ -45,6 +46,63 @@ test('observe reads exact CI time for a selected file from the check report', as
     JSON.stringify(pageCheckReports(selected === runId ? contractReports : {}, { files }));
   const { result } = await s.transport().dispatch('observe', { runId, reports: { files: [file] } });
   assert.deepEqual(result.contractReports, { [file]: { failed: false, durationMs: 231 } });
+});
+
+test('ba1fc144: a check run alone reveals retained suite outcomes and the planned browser shard', async t => {
+  const s = agentFixture(t);
+  const runId = randomUUID();
+  const browser = 'tests/landing-browser.test.mjs';
+  const skipped = 'tests/docs-site.test.mjs';
+  const ordinary = 'tests/browser-runtime.test.mjs';
+  const contractReports = {
+    [browser]: { failed: false, durationMs: 231 },
+    [skipped]: { failed: false, attempts: [] },
+    [ordinary]: { failed: true, durationMs: 387 },
+  };
+  const plan = { selection: { scope: 'full', browser: true }, groups: [[ordinary], [browser, skipped]] };
+  s.exchange.client.action = (ref, args) => {
+    assert.equal(args.runId, runId);
+    switch (getFunctionName(ref)) {
+      case 'projectHostedCheckDetail:reports':
+        return JSON.stringify(pageCheckReports(contractReports, {}, args.cursor));
+      case 'projectHostedCheckSelection:detail':
+        return JSON.stringify(plan);
+      default:
+        assert.fail('Check coverage uses the selected run, without a Candidate proposal.');
+    }
+  };
+  const transport = s.transport();
+  const coverage = await transport.dispatch('tests', { runId });
+  assert.equal(coverage.operationId, null);
+  assert.deepEqual(coverage.result, {
+    runId,
+    scope: 'full',
+    browserShards: [{ shard: 1, files: [browser, skipped] }],
+    contractReports,
+    nextCursor: null,
+  });
+  const tools = new Map();
+  t.after(
+    registerAgentWorkflow(
+      { registerTool: (name, config, handler) => tools.set(name, { ...config, handler }) },
+      s.root,
+      transport,
+    ),
+  );
+  const checkTool = tools.get('forge_check');
+  const command = checkTool.inputSchema.command.parse({ action: 'tests', runId, replyDetail: true });
+  const mcp = await checkTool.handler({ command }, {});
+  assert.deepEqual(JSON.parse(mcp.content[0].text).result, coverage.result);
+  for (let index = 0; index < 130; index++)
+    contractReports[`tests/a-${index}.test.mjs`] = { failed: true, firstError: 'x'.repeat(2048) };
+  const first = (await transport.dispatch('tests', { runId })).result;
+  assert(first.nextCursor);
+  const second = (await transport.dispatch('tests', { runId, cursor: first.nextCursor })).result;
+  assert.deepEqual(second.contractReports[browser], contractReports[browser]);
+  assert.equal(second.nextCursor, null);
+  plan.selection.browser = false;
+  assert.deepEqual((await transport.dispatch('tests', { runId })).result.browserShards, []);
+  await assert.rejects(transport.dispatch('tests', { runId, expectedVersion: 1 }), errorCode('BAD_ARGUMENT'));
 });
 
 test('hosted Lane status reports local disk usage without a new hosted query', async t => {
