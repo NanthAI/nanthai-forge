@@ -211,6 +211,143 @@ test('overlapping requests skip projects whose purge started or finished under a
   assert.deepEqual(await f.call('read', { requestId: next.id }), done);
 });
 
+test('a fresh tiny purge reports the upload window and returns from one wait on completion', async t => {
+  const { waitForDeleteRequest } = await import('../dist/host-delete-projects.js');
+  const f = fixture(t, 1);
+  const request = await prepare(f, { ids: ['project-0'] });
+  const messages = [];
+  let listener,
+    fail,
+    closed = false;
+  const waiting = waitForDeleteRequest(
+    {
+      onUpdate(_reference, { requestId }, onUpdate, onError) {
+        assert.equal(requestId, request.id);
+        assert.equal(listener, undefined);
+        listener = onUpdate;
+        fail = onError;
+        return () => {
+          listener = undefined;
+        };
+      },
+      async close() {
+        closed = true;
+      },
+    },
+    request.id,
+    message => messages.push(message),
+  );
+  void waiting.catch(() => {});
+  t.after(() => fail?.(Error('fixture closed')));
+  const publish = async () => listener?.(JSON.stringify(await f.call('read', { requestId: request.id })));
+  await publish();
+  assert.match(messages[0], /waiting for owner approval/);
+  f.as('owner');
+  await approve(f, request);
+  f.as('owner', true);
+  await publish();
+  await publish();
+  assert.equal(messages.length, 2);
+  assert.match(messages[1], /0 of 1 purges finished.*20 minutes/);
+  assert.equal(closed, false);
+  t.mock.timers.tick(purgeSettleMs);
+  f.s.tables.cliCredentials.get('device').expiresAt = fixtureNow + purgeSettleMs + 600_000;
+  // The durable purge receipt can identify this approval even without the lifecycle marker.
+  const project = f.s.tables.hostedProjects.get('project-0');
+  delete project.lifecycle;
+  await finishPurge(f, project._id);
+  const finished = await f.call('read', { requestId: request.id });
+  assert.equal(finished.projects[0].outcome, 'deleted');
+  await publish();
+  assert.deepEqual(await waiting, finished);
+  assert.equal(listener, undefined);
+  assert.equal(closed, true);
+});
+
+test('a legacy bulk wait sees completed purge receipts when the request still says started', async t => {
+  const { waitForDeleteRequest } = await import('../dist/host-delete-projects.js');
+  const f = fixture(t, 3);
+  const request = await prepare(f, { ids: ['project-0', 'project-1', 'project-2'] });
+  f.as('owner');
+  await approve(f, request);
+  t.mock.timers.tick(purgeSettleMs);
+  await finishPurge(f, 'project-0');
+  await finishPurge(f, 'project-2');
+  const row = f.s.tables.projectDeleteRequests.get(request.id);
+  delete row.tracksPurgeReceipt;
+  row.results = row.results.map(entry => ({ ...entry, outcome: 'started' }));
+  const other = f.s.tables.hostedProjects.get('project-2');
+  other.purge.operationId = 'a different purge';
+  let listener,
+    fail,
+    reads = 0;
+  const checked = Promise.withResolvers();
+  const waiting = waitForDeleteRequest(
+    {
+      onUpdate(_reference, _args, onUpdate, onError) {
+        listener = onUpdate;
+        fail = onError;
+        return () => {
+          listener = undefined;
+        };
+      },
+      async close() {},
+    },
+    request.id,
+    () => {},
+    async () => {
+      reads++;
+      const view = await f.call('read', { requestId: request.id, reconcile: true });
+      checked.resolve(view);
+      return JSON.stringify(view);
+    },
+  );
+  void waiting.catch(() => {});
+  t.after(() => fail?.(Error('fixture closed')));
+  const publish = async () => listener?.(JSON.stringify(await f.call('read', { requestId: request.id })));
+  await publish();
+  const inspected = await checked.promise;
+  assert.deepEqual(
+    inspected.projects.map(p => p.outcome),
+    ['deleted', 'started', 'changed'],
+  );
+  await publish();
+  assert.equal(reads, 1);
+  assert.ok(
+    row.results.every(p => p.outcome === 'started'),
+    'observing a legacy request writes nothing',
+  );
+  await finishPurge(f, 'project-1');
+  await publish();
+  const settled = await waiting;
+  assert.deepEqual(
+    settled.projects.map(p => p.outcome),
+    ['deleted', 'deleted', 'changed'],
+  );
+  assert.equal(reads, 1);
+});
+
+test('the owner can retry a blocked legacy purge pinned by its receipt while the request still says started', async t => {
+  const f = fixture(t, 1);
+  const request = await prepare(f, { ids: ['project-0'] });
+  f.as('owner');
+  await approve(f, request);
+  delete f.s.tables.projectDeleteRequests.get(request.id).tracksPurgeReceipt;
+  const project = f.s.tables.hostedProjects.get('project-0');
+  delete project.lifecycle;
+  delete project.task;
+  project.purgeBlocked = 'R2_PURGE_RETRY_EXHAUSTED';
+  project.r2Purge = { generation: 1, cursor: null, failures: 8 };
+  const before = await f.call('read', { requestId: request.id, reconcile: true });
+  assert.equal(before.projects[0].outcome, 'failed');
+  const result = await f.call('retry', { requestId: request.id });
+  assert.equal(result.projects[0].outcome, 'started');
+  assert.equal(f.s.tables.hostedProjects.get('project-0').purgeBlocked, undefined);
+  t.mock.timers.tick(purgeSettleMs);
+  await finishPurge(f, 'project-0');
+  assert.equal((await f.call('read', { requestId: request.id })).projects[0].outcome, 'deleted');
+});
+
 test('a project that gained a landing, changed revision or changed owner after the list was shown is skipped and named', async t => {
   const f = fixture(t, 3);
   const request = await prepare(f, { glob: 'bench-zoo-*' });

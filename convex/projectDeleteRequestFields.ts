@@ -60,6 +60,8 @@ export const deleteRequestTables = {
       }),
     ),
     results: v.optional(v.array(v.object({ projectId: v.string(), outcome: deleteRequestOutcome }))),
+    /** Approvals whose terminal outcomes are tracked from the project's purge receipt. */
+    tracksPurgeReceipt: v.optional(v.literal(true)),
   })
     .index('by_owner_and_operation', ['owner', 'operationId'])
     // index-order: caller: convex/projectDeleteRequests.ts#open; order: newest open request first.

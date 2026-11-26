@@ -1009,11 +1009,18 @@ permanent purge as the single delete, and its row shows
 deleting, deleted or could not delete as that purge ends. **Retry** replays only the purges that stopped. Approving
 twice, or replaying the same decision, changes nothing.
 
+`--wait` reports approval and the count of finished purges on stderr as the
+request changes. A newly removed project allows up to 20 minutes for outstanding
+signed uploads to expire before purge work begins, including for a small project.
+The terminal reply reports each outcome and closes the subscription.
+
 Only the owner person approves or retries: device and agent sign-ins of the owner's account are refused with
 `PROJECT_UNAVAILABLE`. Another account reads the request as not found. Costs: prepare reads one bounded page of the
 account's projects (or one get per id) plus one landing read and one storage read per listed project. The page and
 `--wait` hold one subscription to the request row, which is written on prepare, on the decision and once per project
-as its purge ends. Nothing polls, and an open request with nobody watching costs nothing.
+as its purge ends. For an older approval with an outstanding outcome, the wait
+makes one additional read for matching project purge receipts, at most 100.
+Nothing polls, and an open request with nobody watching costs nothing.
 
 #### Delete one project from the CLI
 

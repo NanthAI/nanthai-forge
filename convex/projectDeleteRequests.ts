@@ -17,7 +17,12 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { latestLanding } from './projectLatestLanding';
-import { DELETE_REQUEST_OPERATION as OPERATION } from './projectDeleteRequestOutcome';
+import {
+  DELETE_REQUEST_OPERATION as OPERATION,
+  deletePurgeOperation,
+  reconcileDeleteOutcomes,
+} from './projectDeleteRequestOutcome';
+import { purgeSettleMs } from './projectRetention';
 
 /** A request holds at most this many projects (owner request, Item 7456856f). */
 export const DELETE_REQUEST_LIMIT = 100;
@@ -93,13 +98,20 @@ export function deleteRequestUrl(requestId: string) {
 function reply(row: Row) {
   const view = requestView(row);
   const url = deleteRequestUrl(view.id);
+  const running = view.projects.filter(project => project.outcome === 'started').length;
+  const settled = view.projects.filter(
+    project => project.outcome === 'deleted' || project.outcome === 'failed',
+  ).length;
   return canonicalPayload({
     ...view,
     url,
+    ...(!row.tracksPurgeReceipt && running ? { legacyPurgeReconcile: true } : {}),
     next:
       view.status === 'requested'
         ? `Only the owner person can approve this, once, signed in on the web${url ? `: ${url}` : ''}. Wait for the decision with nforge host ROOT --delete-projects --wait ${view.id}; withdraw with --withdraw ${view.id}.`
-        : `This request is ${view.status}.`,
+        : running
+          ? `${settled} of ${settled + running} purges finished. For a newly removed project, Forge allows up to ${purgeSettleMs / 60_000} minutes for existing uploads to expire before purging.`
+          : `This request is ${view.status}.`,
   });
 }
 
@@ -215,14 +227,15 @@ export const prepare = accountMutation('write')({
   },
 });
 
-/** The request as the page and `--wait` see it: one row, re-run only when it is written. Any sign-in of the account. */
+/** The page and `--wait` subscribe to this request row. Legacy reconciliation is a one-shot read. */
 export const read = query({
-  args: { requestId: v.string() },
+  args: { requestId: v.string(), reconcile: v.optional(v.literal(true)) },
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
       const user = await caller(ctx);
-      return reply(await ownRequest(ctx, input.requestId, user.subject));
+      const row = await ownRequest(ctx, input.requestId, user.subject);
+      return reply(input.reconcile ? await reconcileDeleteOutcomes(ctx, row) : row);
     } catch (error) {
       return report(error);
     }
@@ -328,6 +341,7 @@ export const decide = accountMutation('same')({
           kept,
         },
         results,
+        tracksPurgeReceipt: true,
       });
       return reply((await ctx.db.get(row._id))!);
     } catch (error) {
@@ -369,7 +383,7 @@ export const retry = accountMutation('same')({
   handler: async (ctx, input) => {
     try {
       const user = await requireOwnerPerson(ctx, 'permanently delete projects');
-      const row = await ownRequest(ctx, input.requestId, user.subject);
+      const row = await reconcileDeleteOutcomes(ctx, await ownRequest(ctx, input.requestId, user.subject));
       const results: NonNullable<Row['results']> = [];
       for (const entry of row.results ?? []) {
         if (entry.outcome !== 'failed') {
@@ -383,7 +397,7 @@ export const retry = accountMutation('same')({
           continue;
         }
         const operationId = `${OPERATION}${row._id}`;
-        if (project.lifecycle?.operationId !== operationId) {
+        if (deletePurgeOperation(project) !== operationId) {
           results.push({ projectId: entry.projectId, outcome: 'changed' });
           continue;
         }
@@ -393,7 +407,10 @@ export const retry = accountMutation('same')({
             {
               projectId: project._id,
               operationId,
-              expectedRevision: project.lifecycle.expectedRevision,
+              expectedRevision:
+                project.lifecycle?.operationId === operationId
+                  ? project.lifecycle.expectedRevision
+                  : project.revision,
             },
             'delete',
             { confirmed: true },
@@ -401,7 +418,7 @@ export const retry = accountMutation('same')({
         results.push({
           projectId: entry.projectId,
           outcome:
-            project.removal === 'deleted'
+            project.removal === 'deleted' && project.purge?.completedAt !== undefined
               ? 'deleted'
               : project.removal === 'deleting'
                 ? 'started'

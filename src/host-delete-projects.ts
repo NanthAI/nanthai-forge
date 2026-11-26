@@ -14,6 +14,7 @@ import { deadlineConvexSubscription } from './network-convex-client.js';
 import { networkTimeout } from './network-fetch.js';
 import { shellQuote } from './shell-quote.js';
 import { ForgeError, invariant } from './errors.js';
+import type { HostedRunSubscription } from './hosted-agent-observe.js';
 
 export type DeleteRequestProject = {
   projectId: string;
@@ -34,6 +35,7 @@ export type DeleteRequest = {
   url: string | null;
   next: string;
   reason?: string;
+  legacyPurgeReconcile?: true;
 };
 type Selection = { glob: string } | { ids: string[] } | { trash: true };
 type Parsed =
@@ -115,6 +117,7 @@ export function formatDeleteRequest(request: DeleteRequest, root: string, deploy
 const terminal = (request: DeleteRequest) =>
   request.status !== 'requested' &&
   (request.status !== 'approved' || request.projects.every(project => project.outcome !== 'started'));
+const readDeleteRequest = makeFunctionReference<'query'>('projectDeleteRequests:read');
 
 function forgeError(error: unknown): never {
   if (error instanceof ConvexError && error.data && typeof error.data === 'object') {
@@ -140,7 +143,25 @@ export async function deleteProjects(root: string, flags: string[], json: boolea
     return undefined;
   };
   try {
-    if (parsed.kind === 'wait') return done(await waitForRequest(deployment, parsed.id));
+    if (parsed.kind === 'wait') {
+      const credentials = coordinationCredentials(deployment, process.env.FORGE_AUTH_TOKEN);
+      const live = deadlineConvexSubscription(credentials.url, {
+        logger: false,
+        unsavedChangesWarning: false,
+      });
+      live.setAuth(async () => credentials.token);
+      return done(
+        await waitForDeleteRequest(
+          live,
+          parsed.id,
+          message => process.stderr.write(`${message}\n`),
+          () =>
+            coordinationClient(deployment, process.env.FORGE_AUTH_TOKEN, {
+              signal: networkTimeout(90_000),
+            }).query(readDeleteRequest, { requestId: parsed.id, reconcile: true }),
+        ),
+      );
+    }
     const client = coordinationClient(deployment, process.env.FORGE_AUTH_TOKEN, {
       signal: networkTimeout(90_000),
     });
@@ -160,34 +181,78 @@ export async function deleteProjects(root: string, flags: string[], json: boolea
 }
 
 /** One subscription until the request is decided and no purge is still running, or it expires. */
-async function waitForRequest(deployment: string, id: string) {
-  const credentials = coordinationCredentials(deployment, process.env.FORGE_AUTH_TOKEN);
-  const live = deadlineConvexSubscription(credentials.url, { logger: false, unsavedChangesWarning: false });
-  live.setAuth(async () => credentials.token);
+export async function waitForDeleteRequest(
+  live: HostedRunSubscription,
+  id: string,
+  progress: (message: string) => void,
+  reconcileLegacy?: () => Promise<unknown>,
+) {
   let unsubscribe: (() => void) | undefined;
   let expiry: NodeJS.Timeout | undefined;
+  let closed = false;
   try {
     return await new Promise<DeleteRequest>((resolve, reject) => {
-      let last: DeleteRequest | undefined;
+      let last: DeleteRequest;
+      let lastProgress: string | undefined;
+      let reconcileStarted = false;
+      const recovered = new Map<string, DeleteRequestProject['outcome']>();
+      const receive = (request: DeleteRequest) => {
+        last = request;
+        const current = recovered.size
+          ? {
+              ...request,
+              projects: request.projects.map(project => {
+                if (project.outcome === 'started' && recovered.has(project.projectId))
+                  return { ...project, outcome: recovered.get(project.projectId)! };
+                recovered.delete(project.projectId);
+                return project;
+              }),
+            }
+          : request;
+        if (terminal(current)) {
+          closed = true;
+          return resolve(
+            recovered.size
+              ? { ...current, next: 'This request is approved and all purges have ended.' }
+              : current,
+          );
+        }
+        const message =
+          current.status === 'requested'
+            ? `Delete request ${id} is waiting for owner approval.`
+            : current.next;
+        if (message !== lastProgress) {
+          progress(message);
+          lastProgress = message;
+        }
+        if (current.status === 'requested' && !expiry)
+          // An open request ends at its expiry without a write; one local timer says so (no polling).
+          expiry = setTimeout(
+            () => resolve({ ...last, status: 'expired', next: 'This request expired. Nothing was deleted.' }),
+            Math.max(0, Date.parse(current.expiresAt) - Date.now()),
+          );
+        else if (current.status !== 'requested' && expiry) clearTimeout(expiry);
+        if (!current.legacyPurgeReconcile || !reconcileLegacy || reconcileStarted) return;
+        reconcileStarted = true;
+        // One exceptional read for an old request. Purge page writes do not invalidate the live read.
+        void reconcileLegacy()
+          .then(value => {
+            if (closed) return;
+            const repaired = JSON.parse(value as string) as DeleteRequest;
+            for (const project of repaired.projects)
+              if (project.outcome && project.outcome !== 'started')
+                recovered.set(project.projectId, project.outcome);
+            receive(last);
+          })
+          .catch(reject);
+      };
       unsubscribe = live.onUpdate(
-        makeFunctionReference<'query'>('projectDeleteRequests:read'),
+        readDeleteRequest,
         { requestId: id },
         value => {
+          if (closed) return;
           try {
-            last = JSON.parse(value as string) as DeleteRequest;
-            if (terminal(last)) return resolve(last);
-            if (last.status === 'requested' && !expiry)
-              // An open request ends at its expiry without a write; one local timer says so (no polling).
-              expiry = setTimeout(
-                () =>
-                  resolve({
-                    ...last!,
-                    status: 'expired',
-                    next: 'This request expired. Nothing was deleted.',
-                  }),
-                Math.max(0, Date.parse(last.expiresAt) - Date.now()),
-              );
-            else if (last.status !== 'requested' && expiry) clearTimeout(expiry);
+            receive(JSON.parse(value as string) as DeleteRequest);
           } catch (error) {
             reject(error);
           }
@@ -196,8 +261,12 @@ async function waitForRequest(deployment: string, id: string) {
       );
     });
   } finally {
+    closed = true;
     if (expiry) clearTimeout(expiry);
-    unsubscribe?.();
-    await live.close();
+    try {
+      unsubscribe?.();
+    } finally {
+      await live.close();
+    }
   }
 }
