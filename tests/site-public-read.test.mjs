@@ -223,15 +223,54 @@ test('snapshot pages put crawlable facts and inert data in the document and reus
     ['/explore', /<h1>Explore public projects<\/h1><ul><li><a href="\/ada\/atlas">ada\/atlas<\/a>/],
     ['/ada', /<h1>@ada<\/h1><ul><li><a href="\/ada\/atlas">ada\/atlas<\/a>/],
   ]) {
-    const request = new Request('https://site.example' + url);
-    const html = await (await serve(request, env)).text();
+    const address = 'https://site.example' + url;
+    const cold = await serve(new Request(address + '?source=cold'), env);
+    assert.equal(cold.status, 200);
+    assert.equal(cold.headers.get('location'), null);
+    const html = await cold.text();
     assert.match(html, expected);
     assert.match(html, /<template id="forge-public-snapshot" data-path="[^\"]+\.json">/);
     assert.equal(html.match(/<script/g).length, 1, 'stored text cannot add a script to the document');
-    assert.equal(await (await serve(request, env)).text(), html);
+    if (url === '/ada/atlas') {
+      const description = 'Main is passing. 5 changes landed this week. 1 Lane open. 4 Items left. 2 stars.';
+      const title = 'ada/$&amp; &lt;/template&gt;&lt;script&gt;bad()&lt;/script&gt; · Forge';
+      for (const tag of [
+        `<title>${title}</title>`,
+        `<meta name="description" content="${description}"/>`,
+        `<link rel="canonical" href="${address}"/>`,
+        `<meta property="og:title" content="${title}"/>`,
+        `<meta property="og:description" content="${description}"/>`,
+        `<meta property="og:url" content="${address}"/>`,
+        '<meta property="og:image" content="https://site.example/forge-badge-256.png"/>',
+        '<meta name="twitter:card" content="summary"/>',
+        `<meta name="twitter:title" content="${title}"/>`,
+        `<meta name="twitter:description" content="${description}"/>`,
+        '<meta name="twitter:image" content="https://site.example/forge-badge-256.png"/>',
+      ])
+        assert(html.includes(tag), tag);
+    }
+    for (const suffix of ['', '?source=warm']) {
+      const hit = await serve(new Request(address + suffix), env);
+      assert.equal(hit.status, cold.status);
+      assert.deepEqual([...hit.headers], [...cold.headers]);
+      assert.equal(await hit.text(), html);
+    }
   }
-  assert.deepEqual(read, [...buckets.keys()]);
-  assert.equal(edge.puts.length, 3);
+  const dataUrl = 'https://site.example/-/public/v1/project/ada/atlas.json';
+  const cold = await serve(new Request(dataUrl + '?source=cold'), env);
+  assert.equal(cold.status, 200);
+  assert.equal(cold.headers.get('location'), null);
+  assert.match(cold.headers.get('content-type'), /application\/json/);
+  const body = await cold.text();
+  assert.deepEqual(JSON.parse(body).project, buckets.get(SNAPSHOT_KEY).project);
+  for (const suffix of ['', '?source=warm']) {
+    const hit = await serve(new Request(dataUrl + suffix), env);
+    assert.equal(hit.status, cold.status);
+    assert.deepEqual([...hit.headers], [...cold.headers]);
+    assert.equal(await hit.text(), body);
+  }
+  assert.deepEqual(read, [...buckets.keys(), SNAPSHOT_KEY]);
+  assert.equal(edge.puts.length, 4);
   assert.deepEqual(asked, []);
 });
 
@@ -451,7 +490,19 @@ test('a bound sitemap and its legacy API spelling cannot serve removed URLs afte
   const config = { zone: 'a'.repeat(32), token: 'synthetic-token', origin: 'https://site.example' };
   const paths = ['/sitemap.xml', '/-/public/v1/sitemap.xml'];
   const read = path => serve(new Request(config.origin + path));
-  for (const path of paths) assert.match(await (await read(path)).text(), /ada\/atlas/);
+  const cold = await read('/sitemap.xml?source=cold');
+  assert.equal(cold.status, 200);
+  assert.equal(cold.headers.get('location'), null);
+  assert.match(cold.headers.get('content-type'), /application\/xml/);
+  const publicSitemap = await cold.text();
+  assert(publicSitemap.includes('<loc>https://site.example/ada/atlas</loc>'));
+  assert(publicSitemap.includes('<loc>https://site.example/kit/docs</loc>'));
+  for (const path of [...paths, '/sitemap.xml?source=warm']) {
+    const hit = await read(path);
+    assert.equal(hit.status, cold.status);
+    assert.deepEqual([...hit.headers], [...cold.headers]);
+    assert.equal(await hit.text(), publicSitemap);
+  }
   value = snapshotObject({ generation: 2, projects: [['kit', 'docs']] });
   await purgePublicSnapshotCache(config, ['/sitemap.xml']);
   for (const path of paths) {
