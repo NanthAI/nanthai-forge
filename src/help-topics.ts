@@ -40,7 +40,7 @@ NOT_FOUND names what was looked up: run from the Lane root start printed, or pas
 - LANDED is acceptance; CHECK PASSED is not. Fix in the same Lane and land again; never abandon and re-create it.
 - revert {target} prepares a Lane. Run land --save there for a checked compensating landing.
 - Inline preflight failure or budget exhaustion gives recovery and the original land replay.
-- Local preflight tests stop at a 600 s ceiling (the rest goes to the landing check); preflight {budgetSeconds} above 600 raises it for one run.
+- Raise preflight's 600 s ceiling with {budgetSeconds}. Use FORGE_BROWSER_TESTS=0 to skip local browser suites in land --save and preflight.
 More: help wait, help conflict, help check, help overlap.`,
   },
   wait: {

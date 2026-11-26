@@ -21,7 +21,11 @@ const healthy = {
   reason: null,
   attempts: [],
 };
-test.beforeEach(t => t.mock.method(preflightRuntime, 'filesystemEventHealth', () => healthy));
+test.beforeEach(t => {
+  t.mock.method(preflightRuntime, 'filesystemEventHealth', () => healthy);
+  // These fixtures simulate an enabled, skipped, or missing browser without launching one.
+  withEnv(t, 'FORGE_BROWSER_TESTS', '1');
+});
 
 function lane(t, files) {
   const dir = mkdtempSync(join(tmpdir(), 'forge-preflight-skips-'));

@@ -77,7 +77,9 @@ import type { NativeFile } from './state/format.js';
 import { sourceTree } from './source-tree.js';
 import { incompletePreflight, preflightOutcome, preflightVerdict } from './agent-preflight-incomplete.js';
 import {
+  disabledBrowserTests,
   missingBrowserTests,
+  NEEDS_BROWSER_ENABLED,
   NEEDS_CHROMIUM,
   preflightBrowserEnv,
   skippedBrowserTests,
@@ -1651,7 +1653,11 @@ export function runPreflight(
     Object.assign(built.env, preflightBrowserEnv());
     return (clean = built).env;
   };
-  // Browser test files that did not run their browser (not installed here, or a skip): NOT COMPLETE.
+  const disabledBrowser = new Set(staticOnly ? [] : disabledBrowserTests(plan.tests));
+  const runnableTests = disabledBrowser.size
+    ? plan.tests.filter(test => !disabledBrowser.has(test))
+    : plan.tests;
+  // Browser test files whose browser was unavailable: NOT COMPLETE.
   const needsBrowser: string[] = [];
   let heavy: HeldHeavySlot | null | undefined =
     typeof options.heavySlot === 'object' ? options.heavySlot : undefined;
@@ -1726,7 +1732,7 @@ export function runPreflight(
       else if (!staticOnly && !options.workingTree && !typecheckUntouched.length)
         keepPassedStatic(root, laneId, head, keptScope, staticNames, staticResults);
     }
-    if (!staticOnly && plan.tests.length && exitCode === 0) {
+    if (!staticOnly && runnableTests.length && exitCode === 0) {
       // Keep the static batch's lease if one was needed so this preflight waits at most once.
       const buildAndTestEnv = heavyEnv('test');
       // Only Forge's own Node layout (no project runner) builds first; another project's script of
@@ -1789,14 +1795,14 @@ export function runPreflight(
         // machine gets small groups. No file starts once the budget is spent; near the end groups shrink
         // to one file, so the run ends within the budget plus about one file. Every file it did not
         // start is named in the receipt with a one-command rerun of exactly those.
-        const absentBrowser = new Set(missingBrowserTests(root, plan.tests, env));
+        const absentBrowser = new Set(missingBrowserTests(root, runnableTests, env));
         if (absentBrowser.size) {
           needsBrowser.push(...absentBrowser);
           process.stderr.write(
             `preflight: ${absentBrowser.size} browser test file(s) skipped: needs ${NEEDS_CHROMIUM.runtime}; ${NEEDS_CHROMIUM.next}\n`,
           );
         }
-        const queue = plan.tests.filter(test => !absentBrowser.has(test));
+        const queue = runnableTests.filter(test => !absentBrowser.has(test));
         // Declared guards are never stopped for time (docs/workflows.md#local-preflight-guards), except
         // in land's quick head run, whose budget is a hard cap.
         const guardTests = new Set(
@@ -2039,7 +2045,8 @@ export function runPreflight(
     .slice(0, 3)
     .map(([file, ms]) => ({ file, ms: Math.round(ms) }));
   const evidence = preparedEvidence.get(plan);
-  const skipped = notRun.length + stopped.length + environmentUnits.length + needsBrowser.length;
+  const skipped =
+    notRun.length + stopped.length + environmentUnits.length + needsBrowser.length + disabledBrowser.size;
   const skippedFiles = [...(plan.local?.trimmedTests ?? []), ...notRun].sort();
   const rerun = skippedFiles.length ? rerunCommand(root, skippedFiles) : undefined;
   const stoppedRerun = notRun.length && !options.workingTree ? stoppedCommand(root, laneId) : undefined;
@@ -2064,7 +2071,11 @@ export function runPreflight(
                 : plan.local?.tierTests,
             notRun,
             secondsPerFile,
-            ...(needsBrowser.length ? { needs: { ...NEEDS_CHROMIUM, files: [...needsBrowser].sort() } } : {}),
+            ...(disabledBrowser.size
+              ? { needs: { ...NEEDS_BROWSER_ENABLED, files: [...disabledBrowser].sort() } }
+              : needsBrowser.length
+                ? { needs: { ...NEEDS_CHROMIUM, files: [...needsBrowser].sort() } }
+                : {}),
           })
       : undefined;
   if (options.workingTree && incomplete) delete incomplete.finish;
@@ -2160,7 +2171,7 @@ export function runPreflight(
     writePreflightReceipt(root, receipt);
     dropKeptStatic(root, laneId);
   }
-  process.stderr.write(`${runSummary(receipt, plan, typecheckUntouched)}\n`);
+  process.stderr.write(`${runSummary(receipt, plan, typecheckUntouched, disabledBrowser.size)}\n`);
   recordPreflightTiming(root, receipt);
   return quickTimedOut ? { ...receipt, quickTimedOut: true } : receipt;
 }
@@ -2179,6 +2190,7 @@ function runSummary(
   receipt: PreflightReceipt,
   plan: PreflightPlan & { status: 'planned' },
   typecheckUntouched: string[] = [],
+  disabledBrowserCount = 0,
 ) {
   const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
   const timing = [
@@ -2207,11 +2219,13 @@ function runSummary(
           receipt.stopped && receipt.stopped.length <= SKIPPED_NAMED ? `: ${receipt.stopped.join(' ')}` : ''
         }); run just those: ${receipt.stoppedRerun}.`
       : '';
-  const browserNeeds = needs
-    ? ` ${needs.files.length} test file(s) skipped: needs ${needs.runtime}, so they are not a pass (${
-        needs.files.length <= SKIPPED_NAMED ? needs.files.join(' ') : 'receipt.incomplete.needs names them'
-      }). To run them here: ${needs.next}; the landing check runs them either way.`
-    : '';
+  const browserNeeds = disabledBrowserCount
+    ? ` ${disabledBrowserCount} browser test file(s) skipped locally (FORGE_BROWSER_TESTS=0). The landing check still runs them.`
+    : needs
+      ? ` ${needs.files.length} test file(s) skipped: needs ${needs.runtime}, so they are not a pass (${
+          needs.files.length <= SKIPPED_NAMED ? needs.files.join(' ') : 'receipt.incomplete.needs names them'
+        }). To run them here: ${needs.next}; the landing check runs them either way.`
+      : '';
   const stopped = mustRun + forTime + browserNeeds;
   const failedFirst = receipt.stoppedForFailure
     ? ` ${receipt.stoppedForFailure} planned test file(s) were not started because an earlier group failed; fix it and run preflight again (passed files are reused).`

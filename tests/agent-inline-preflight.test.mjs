@@ -173,6 +173,60 @@ test('incident e0cedfb5: one land --save lands a one-file docs change after inli
   );
 });
 
+test('friction d9d6ad43: browser-off on land skips the browser subtest and still submits the hosted check', async t => {
+  for (const [name, value] of [
+    ['FORGE_BROWSER_TESTS', '0'],
+    ['FORGE_UI_BROWSER', process.execPath],
+  ]) {
+    const previous = process.env[name];
+    process.env[name] = value;
+    t.after(() => {
+      if (previous === undefined) delete process.env[name];
+      else process.env[name] = previous;
+    });
+  }
+  // The availability probe would succeed, but the fixture never launches a real browser.
+  const browsers = Array.from({ length: 15 }, (_, index) => `tests/document-${index}-browser.test.mjs`);
+  const reader = `import test from 'node:test';
+import fs from 'node:fs';
+test('document reader sees local browser-off', () => {
+  fs.readFileSync(new URL('../README.md', import.meta.url));
+  if (process.env.FORGE_BROWSER_TESTS === '0') fs.writeFileSync('.forge/browser-off-forwarded', 'yes');
+});`;
+  const browser = `import test from 'node:test';
+import fs from 'node:fs';
+test('browser subtest would start', () => {
+  fs.readFileSync(new URL('../README.md', import.meta.url));
+  fs.writeFileSync('.forge/browser-subtest-started', 'ran');
+});`;
+  const s = await fixture(t, 'require', reader, Object.fromEntries(browsers.map(path => [path, browser])));
+  // With the browser files counted, this plan exceeds the full-preflight threshold.
+  s.caps.agentDefaults = effectiveAgentDefaults({ preflight: 'require', preflightMaxMinutes: 1 });
+  let output = '';
+  const write = process.stderr.write.bind(process.stderr);
+  t.mock.method(process.stderr, 'write', (chunk, ...args) => {
+    output += String(chunk);
+    return write(chunk, ...args);
+  });
+  const result = await submitHostedLand(
+    s.root,
+    { operationId: randomUUID(), message: 'Update document' },
+    s.address,
+    s.transport(),
+  );
+  assert.equal(existsSync(join(s.root, '.forge/browser-subtest-started')), false);
+  assert.equal(existsSync(join(s.root, '.forge/browser-off-forwarded')), true);
+  const receipt = readPreflightReceipt(s.root, s.lane.laneId);
+  assert.equal(receipt.outcome, 'incomplete');
+  assert.equal(receipt.quick, undefined, 'disabled files do not count against the full preflight threshold');
+  assert.equal(receipt.tests, 1, 'the other affected test still ran');
+  assert.deepEqual(receipt.incomplete.needs.files, browsers.sort());
+  assert.match(output, /browser test file\(s\) skipped[^\n]*FORGE_BROWSER_TESTS=0[^\n]*landing check/);
+  assert.match(result.result.defaults.preflight.reason, /skipped locally[^\n]*FORGE_BROWSER_TESTS=0/);
+  assert.equal(result.result.submission.phase, 'landed');
+  assert(s.calls.some(call => call.name === 'projectHostedLanding:enqueue'));
+});
+
 test('inline preflight failure stops before compose and names the exact next command', async t => {
   const s = await fixture(t);
   writeFileSync(

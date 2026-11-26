@@ -40,3 +40,8 @@ COMPLETE with `incomplete.needs` (`runtime: "Chromium"`, the files, and
 that skips a test anyway is the same: no pass, no reusable pass and no timing
 sample. NOT COMPLETE never refuses a landing; the landing check runs them, and a
 skipped browser test fails its shard there.
+
+Set `FORGE_BROWSER_TESTS=0` before `nforge agent . land --save` or
+`nforge agent . preflight` to skip selected browser test files locally. Preflight
+leaves those files unstarted and names the skip in its result. A clean run that
+skips them is NOT COMPLETE. The hosted check keeps its browser coverage.

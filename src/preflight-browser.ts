@@ -5,12 +5,20 @@ import { existsSync } from 'node:fs';
 import { isBrowserTest } from '../scripts/test-browser-names.mjs';
 import { testBrowserPath } from '../scripts/test-browser-path.mjs';
 
+const browserTestsOff = (env: NodeJS.ProcessEnv) => env.FORGE_BROWSER_TESTS === '0';
+
+/** Filter before launching a runner: framework-level skips can still load browser test files. */
+export function disabledBrowserTests(tests: string[], env: NodeJS.ProcessEnv = process.env): string[] {
+  return browserTestsOff(env) ? tests.filter(isBrowserTest) : [];
+}
+
 /** Browser tests in preflight (Item ad80e037 fix 5). The landing check's test jobs get the browser
  * cache and browser override passed through (src/hosted-actions-job-run.ts: PLAYWRIGHT_BROWSERS_PATH,
  * FORGE_UI_BROWSER). Preflight's clean environment gives HOME/XDG private empty folders, and Playwright
  * looks for its cache under them, so every browser test skipped and the skip counted as a pass. These
  * are resolved from the agent's own environment, before that isolation. */
 export function preflightBrowserEnv(env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  if (browserTestsOff(env)) return { FORGE_BROWSER_TESTS: '0' };
   const browser: Record<string, string> = {};
   const cache = testBrowserPath(env);
   // '0' is Playwright's "browsers inside node_modules": a setting, not a folder.
@@ -23,6 +31,11 @@ export function preflightBrowserEnv(env: NodeJS.ProcessEnv = process.env): Recor
 export const NEEDS_CHROMIUM = {
   runtime: 'Chromium',
   next: 'npx playwright install chromium (in the Lane), then run preflight again',
+} as const;
+
+export const NEEDS_BROWSER_ENABLED = {
+  runtime: NEEDS_CHROMIUM.runtime,
+  next: 'run preflight again without FORGE_BROWSER_TESTS=0',
 } as const;
 
 /** The planned browser tests (the landing check's own browser policy, scripts/browser-test-policy.mjs)

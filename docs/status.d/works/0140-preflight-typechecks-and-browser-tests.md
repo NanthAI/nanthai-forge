@@ -4,6 +4,8 @@
   (no typecheck for a docs-only change), and a selected browser test that skips
   or has no browser installed makes preflight NOT COMPLETE, never a pass
   ([agent workflow](../../agents/workflow.d/sections/3150-preflight-typechecks-and-browser-tests.md)).
+  Set `FORGE_BROWSER_TESTS=0` to skip browser files in local preflight, including
+  the run started by `land --save`. The hosted check keeps its browser coverage.
 - Local preflight shares one [heavy slot](../../parallel-work-defaults.md#localheavyslots) across
   static checks, build and tests, including runs that only execute static checks.
   Standalone preflight replans against working files edited during a slot wait.

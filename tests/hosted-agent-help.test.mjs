@@ -106,6 +106,13 @@ test('core maintenance help distinguishes submission cancellation, Lane withdraw
   assert.match(revert, /"target":\{"kind":"receipt","receiptId":"RECEIPT_ID"\}/);
 });
 
+test('standalone preflight and land --save help both name the local browser opt-out', async t => {
+  const s = agentFixture(t);
+  for (const form of [['preflight'], ['land', '--save']])
+    assert.match(await output(() => agentCli([s.root, ...form, '--help'])), /FORGE_BROWSER_TESTS=0/);
+  assert.equal(s.calls.length, 0);
+});
+
 test('hosted coordination entry points retain supported reads and their coverage limits', () => {
   for (const path of ['AGENTS.md', 'skills/forge-agent/SKILL.md', 'docs/agents/workflow.md']) {
     const text = readDocument(repo, path);

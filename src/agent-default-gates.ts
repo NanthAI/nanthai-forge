@@ -4,15 +4,18 @@ import { ForgeError } from './errors.js';
 import { shellQuote } from './shell-quote.js';
 import { localPreflightSummary, preflightOutcome } from './agent-preflight-incomplete.js';
 import {
+  estimatePreflightMinutes,
   planWithBudget,
   preflightPlan,
   readPreflightReceipt,
   runPreflight,
   PREFLIGHT_SECONDS_PER_FILE,
+  type PreflightPlan,
   type PreflightReceipt,
 } from './agent-preflight.js';
 import type { EffectiveAgentDefaults } from './agent-parallel-defaults.js';
 import type { readHostedOverlapAdvice } from './hosted-overlap-client.js';
+import { disabledBrowserTests } from './preflight-browser.js';
 
 type Advice = Awaited<ReturnType<typeof readHostedOverlapAdvice>>;
 /** Land's quick head run (13ea93bf, lead decision 2026-11-20): when the plan is over the gate's
@@ -39,6 +42,18 @@ const quickSummary = (
 });
 const command = (root: string, verb: string, body: Record<string, unknown>) =>
   `nforge agent ${shellQuote(root)} ${verb} ${shellQuote(JSON.stringify(body))}`;
+
+function gateEstimateMinutes(root: string, plan: PreflightPlan) {
+  if (plan.status !== 'planned') return Infinity;
+  const groups = [plan.tests, plan.deferredTests ?? [], plan.reusedTests ?? []];
+  const count = groups.reduce((total, files) => total + files.length, 0);
+  const disabled = groups.reduce((total, files) => total + disabledBrowserTests(files).length, 0);
+  const eligible = count - disabled;
+  const estimate = disabled
+    ? estimatePreflightMinutes(root, eligible)
+    : (plan.totalEstimateMinutes ?? plan.estimateMinutes);
+  return Math.max(estimate, Math.ceil((eligible * PREFLIGHT_SECONDS_PER_FILE) / 60));
+}
 
 /** Finish gates from the project's agent defaults, applied once per new finish after its save and
  * before compose. Refusals throw; advisories return. No extra server calls: the advice read is
@@ -122,7 +137,7 @@ export function finishGates(
         estimateMinutes: fullRun.incomplete.estimateMinutes,
         reason: fullRun.incomplete.mustRun
           ? `NOT COMPLETE: ${fullRun.incomplete.mustRun} must-run test file(s) did not run locally; only the landing check runs them unless you finish them first.`
-          : `NOT COMPLETE: ${fullRun.incomplete.needs?.files.length ?? 0} test file(s) skipped: needs ${fullRun.incomplete.needs?.runtime ?? 'a runtime'}; only the landing check runs them unless you install it (${fullRun.incomplete.needs?.next ?? 'see the receipt'}).`,
+          : `NOT COMPLETE: ${fullRun.incomplete.needs?.files.length ?? 0} browser test file(s) skipped locally. The landing check runs them. To run them locally: ${fullRun.incomplete.needs?.next ?? 'see the receipt'}.`,
         deferredTests: fullRun.deferredTests ?? 0,
         at: fullRun.at,
       };
@@ -145,17 +160,7 @@ export function finishGates(
       const changed = advice?.changedPaths?.complete ? advice.changedPaths.paths : null;
       // Tests may be advised by policy, estimate or inferred setup. Their status must not
       // skip independent static commands, nor can a static-only pass satisfy the test gate.
-      const gateMinutes =
-        plan.status === 'planned'
-          ? Math.max(
-              plan.totalEstimateMinutes ?? plan.estimateMinutes,
-              Math.ceil(
-                ((plan.tests.length + (plan.deferredTests?.length ?? 0) + (plan.reusedTests?.length ?? 0)) *
-                  PREFLIGHT_SECONDS_PER_FILE) /
-                  60,
-              ),
-            )
-          : Infinity;
+      const gateMinutes = gateEstimateMinutes(root, plan);
       // A replay may price the same head differently. Honor the quick receipt that already
       // exhausted its budget on this operation, even if the new estimate would require a full run
       // (operations an older CLI refused with PREFLIGHT_BUDGET_EXCEEDED at the quick cap).
