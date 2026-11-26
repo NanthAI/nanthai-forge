@@ -8,6 +8,8 @@ import { hostedCheckClock } from './projectHostedCheckClock';
 const base = v.object({ head: v.string(), receiptId: v.string() });
 const check = v.object({
   runId: v.string(),
+  gateMode: v.optional(v.union(v.literal('full'), v.literal('scoped'))),
+  fullReason: v.optional(v.string()),
   // Omit when the check uses the immutable attempt's own base.
   predictedBase: v.optional(base),
   dispatchedAt: v.optional(v.number()),
@@ -93,10 +95,13 @@ export function replayRead(
     attempt: attempt.number,
     composedBase: attempt.main,
     runId: check?.runId ?? unrecorded,
+    ...(check?.gateMode ? { gateMode: check.gateMode } : {}),
+    ...(check?.gateMode === 'full' && check.fullReason ? { fullReason: check.fullReason } : {}),
     ...(replay?.earlierChecks?.length
       ? {
-          earlierChecks: replay.earlierChecks.map(check => ({
+          earlierChecks: replay.earlierChecks.map(({ fullReason, ...check }) => ({
             ...check,
+            ...(check.gateMode === 'full' && fullReason ? { fullReason } : {}),
             predictedBase: check.predictedBase ?? attempt.main,
           })),
         }

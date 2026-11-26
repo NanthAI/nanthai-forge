@@ -765,16 +765,20 @@ test('the accepted landing ledger exports replay evidence with no check-run look
   const reads = f.meter.queries - before;
   assert.equal(legacy.attemptReplay[0].outcome, 'unrecorded');
   assert.equal(legacy.attemptReplay[0].waitedToStartMs, 'unrecorded');
+  assert.equal(legacy.attemptReplay[0].gateMode, undefined);
   assert.equal(legacy.holdEdges, 'unrecorded', 'a receipt from before the no-hold stamp invents no "none"');
   const attempt = f.tables.projectHostedLandingAttempts[0];
   attempt.replay = {
     check: {
       runId: 'adm-1',
+      gateMode: 'full',
+      fullReason: 'Root configuration changed',
       predictedBase: base,
       dispatchedAt: minute(50),
       startedAt: minute(51),
       endedAt: minute(59),
     },
+    earlierChecks: [{ runId: 'earlier-scoped', gateMode: 'scoped', fullReason: 'Stale reason' }],
     actualBase: base,
     holdEdges: 'none',
   };
@@ -785,6 +789,11 @@ test('the accepted landing ledger exports replay evidence with no check-run look
   assert.equal(f.meter.queries - before, reads * 2);
   assert.equal(current.attemptReplay[0].waitedToStartMs, 60_000);
   assert.equal(current.attemptReplay[0].outcome, 'landed');
+  assert.equal(current.attemptReplay[0].gateMode, 'full');
+  assert.equal(current.attemptReplay[0].fullReason, 'Root configuration changed');
+  assert.deepEqual(current.attemptReplay[0].earlierChecks, [
+    { runId: 'earlier-scoped', gateMode: 'scoped', predictedBase: base },
+  ]);
   assert.deepEqual(current.attemptReplay[0].predictedBase, base);
   assert.deepEqual(current.attemptReplay[0].actualBase, base);
   assert.equal(current.holdEdges, 'none');

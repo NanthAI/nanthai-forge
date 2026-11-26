@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedLandingReplay.ts": "59585e45714ce13b32a78b3581fd9312459ce8054745aeb2fb076af2b1338045"
+  },
+  "replay": {
+    "incident": "ced8e98f",
+    "test": "attempt replay records the mover and checked prefix, links a conflict recheck and censors a withdrawn follower",
+    "receipt": "1b524c6b-17e7-4c7e-ae6c-31890a10fc74"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "thread:delegated-task:command%3Amcp%3Ad68e0f0e-90c1-402c-8fc4-f4087fedd601%3Adelegate-task%3A84195cb1-27e1-46ca-9178-6cdf0ce9cbd0",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "thread:delegated-task:command%3Amcp%3Ae9b79936-4aef-4418-8727-04902f50c404%3Adelegate-task%3Ac0c0adc2-94ba-4250-a02a-5fd961af12f6",
+    "receipt": "1b524c6b-17e7-4c7e-ae6c-31890a10fc74"
+  },
+  "exercised": {
+    "convex/projectHostedLandingReplay.ts": {
+      "executed": [
+        "checkReplay",
+        "replayHoldEdges",
+        "replayRead"
+      ],
+      "digest": "ea466859e694c51905fbf81dcad790122c530da4f1589d88772fb90ef1013dff",
+      "units": [
+        [
+          "base",
+          "a74227fcc7e6d29cee481aa2652ded15a0927cb0ed957a6be66830034dda8b0a"
+        ],
+        [
+          "check",
+          "3b01709c30c48e157e4e41787f4479becda43f2d5c00401f220b823b8f5407a7"
+        ],
+        [
+          "checkReplay",
+          "64d2992dd5c7762650872e87928dc32e831e400f8da4f712fae5fff8c0499831"
+        ],
+        [
+          "hostedCheckClock",
+          "0804332a385d9dc4c5c42ef790369758079d66d2bd24679aa4b6af7e1c65be22"
+        ],
+        [
+          "inheritRecheckCause",
+          "4623213fe74562f27b880ada888ce207c36e749ee2931ea022b05e33e30c53aa"
+        ],
+        [
+          "landingReplay",
+          "66d1daecb167790ee34d401d41ed5c80b46dea60c7a665d512c415d5ae8eaf10"
+        ],
+        [
+          "replayCause",
+          "f0d078bd3d36de65a113a4aa98e49ed7035377cb2504762ce4d6055285714f0c"
+        ],
+        [
+          "replayHoldEdges",
+          "7a07fa75d7bca947ac045550b69c7fd9891211bcd3772d45db92281d3e602772"
+        ],
+        [
+          "replayRead",
+          "e335fc4b06a0008166f1a04c412d1e5314d4ddae2d266ab5d4d6ad4a6b7214a1"
+        ],
+        [
+          "v",
+          "c9b23930c9b094848cdb5f563a16f0a2f497fc28d7ea9a82afca6bc52741e95f"
+        ]
+      ],
+      "shell": "f22a63d469af7ddb809b550210e3fe3c29baa455a6e373f2167f2d440ff02c6e"
+    }
+  }
+}
