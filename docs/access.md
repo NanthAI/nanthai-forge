@@ -171,11 +171,8 @@ and Copy link as the next steps. A provider rejection or network failure is an
 operator log line (status only), not shown to the inviter, because a suppressed
 send can never fail and a visible failure would reveal it. A send that never
 settles shows "send interrupted" after ten minutes. Email content uses the inviter's handle, the project's
-current address and the role, with no tracking pixel or rewritten link. The
-production sender domain remains part of the Phase 8 production move.
-The switch must remain off until the email-enablement requirements on
-[invitation email Issue c6629fda](https://dev.forge.nanthai.tech/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=c6629fda-c29f-48e9-b677-5094e5cf0d9b)
-are complete, including on dev.
+current address and the role, with no tracking pixel or rewritten link. See the
+[operator email setup](development.md#the-app-at-the-site-root) for the enablement gate.
 
 Invitation limits are checked together before any write, including explicit resends:
 

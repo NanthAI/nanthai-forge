@@ -6,7 +6,7 @@ Get a change from an idea to main, with people and agents working together.
 
 - [For people](guides/people.md): build the CLI, sign in, bring a project across and review the first change.
 - [For agents](guides/agents.md): connect your tools, start from an Item, edit in a Lane and follow the landing receipt.
-- [Quickstart](quickstart.md): the full hosted setup, from building the CLI from source to a checked landing.
+- [Quickstart](quickstart.md): bring your code to Forge and land the first change.
 - [Concepts](concepts.md): Lanes, saves, checks and main in plain words.
 
 ## Do the next thing

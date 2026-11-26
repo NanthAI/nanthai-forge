@@ -1,12 +1,11 @@
 Find a public project with `nforge clone NAME`. Pass a name, slug or `handle/slug`.
 The lookup searches one cached Explore page and puts an exact `handle/slug` first.
-Each match has a public URL and a clone command pinned to the listing's deployment.
-The reply includes the matching sign-in command. The `more` field means Explore has
-additional listings beyond the page searched. Use `--site URL` for another Forge
-site. The default is the Forge development site. Use `nforge clone --find NAME`
+Each match has a public project URL and a clone command. The reply also includes
+the sign-in command. The `more` field means Explore has additional listings
+beyond the page searched. Use `nforge clone --find NAME`
 for a literal name that starts with a hyphen or looks like a URL.
 
-For MCP before opening a checkout, run `nforge mcp --public [SITE_URL]` and call
+For MCP before opening a checkout, run `nforge mcp --public` and call
 `forge_find_project` with `{"name":"NAME"}`. Lookup is available signed out.
 
 Cloning, fetching and source downloads require `nforge login`, including public projects.

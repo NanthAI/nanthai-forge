@@ -64,9 +64,9 @@ export function docsReference(root: string) {
   const cli =
     '# CLI reference\n\nGenerated from CLI help and enforced hosted command schemas at site build time. Optional parameters carry `?`. JSON schemas below include nested fields and constraints.\n\n```text\n' +
     usage.trim() +
-    '\n```\n\n## Sealed Development secrets\n\n```text\n' +
+    '\n```\n\n## Sealed secrets\n\n```text\n' +
     secretUsage +
-    '\n```\n\nValues are read from a hidden prompt or stdin, never an argument. `--file` treats the input bytes as a file-shaped secret. `--operation-id` reconciles an unknown write outcome. `repin` is a person-only confirmation of a view signed by this device. Sharing and Checks delivery remain later slices.\n\n' +
+    '\n```\n\nValues come from a hidden prompt or stdin. `--file` stores the exact bytes, and `--operation-id` lets you reconcile a write with an unknown outcome. Run `repin` in a person’s terminal to confirm a view signed by that device. For Development sharing, Checks machine keys and rotation, see [Set up sealed team secrets](../guides/secrets.md).\n\n' +
     hostedAgentHelpEntries
       .map(
         entry =>

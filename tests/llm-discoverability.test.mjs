@@ -177,6 +177,9 @@ test('llms-full is curated: listed in the package inventory and without internal
     'docs/r2-storage-plan.md',
     'docs/research/sp1-storage.md',
     'docs/decisions.md',
+    'docs/operations/github-actions-checks.md',
+    'docs/operations/runner-fallback.md',
+    'docs/operations/self-hosted-runner.md',
   ])
     assert.ok(!llmsFullPaths.includes(internal), `${internal} is not concatenated`);
   const first = llmDocuments(root);

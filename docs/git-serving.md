@@ -1,22 +1,17 @@
 # Git serving
 
-Hosted Forge answers plain `git clone`, `git fetch`, `git pull` and `git ls-remote`
-over smart HTTP. It is read-only: `git push` is refused with a message that pushes go
-through Lanes (`nforge agent ROOT start`, then `land`), which land through the normal
-check and queue. Main never changes over Git.
+To work on a hosted Forge project, use its handle and slug from the project page.
+Sign in, then clone the project:
 
 ```sh
-git clone https://<deployment>.convex.site/git/<handle>/<slug>.git
-git clone https://<deployment>.convex.site/git/<projectId>.git   # same project by id
+nforge login
+nforge clone OWNER/PROJECT DIR
 ```
 
-`<handle>/<slug>` is the project's web route; `.git` is optional. A deployment with the
-large-pack Worker also answers on the Worker's address, with the same paths and access, and
-one backend round trip fewer per command (see [Large packs](#large-packs)):
-
-```sh
-git clone https://<worker-origin>/git/<handle>/<slug>.git
-```
+Use the project's GitHub mirror when you need an ordinary Git remote. Forge also
+serves read-only Git refs over smart HTTP for operators and integrations. The
+[operator guide](operations.md#git-http-endpoints) describes that endpoint.
+Contribute changes through [Lanes and landings](guides/agents.md#land-it).
 
 ## Access
 
@@ -74,8 +69,8 @@ A save writes no Git objects. A ref moves only when it is fetched again after a 
 moved Lane is not listed until a fetch names it. Closed Lanes are not listed. Listings
 show the Lanes already built (newest 50) plus the ones named; a fetch names at most 8.
 
-Git asks for a login at the initial advertisement. Presenting it up front avoids that
-challenge, for example `git -c "http.extraHeader=Authorization: Bearer <token>" ls-remote <url>`.
+Git asks for a login at the initial advertisement. A Git credential helper can
+provide the credential without putting it on the command line.
 Signed-in readers of a public project get main; project members also get Lane refs.
 
 ## What is served
@@ -239,13 +234,7 @@ session there. Nothing changes for the user: no extra step, setting or credentia
 
 ### Operating the Worker
 
-The Worker is `src/git-byte-worker.ts`, built to `dist/git-byte-worker.js` with no imports.
-Deploy it with the `cf` CLI on the Cloudflare account that holds the deployment's R2 bucket:
-a Worker with binding `FORGE_R2` (the bucket, read only in practice) and the plain variable
-`FORGE_CONVEX_SITE` (the deployment's `https://NAME.convex.site`), served on its
-`workers.dev` route. Then set `FORGE_GIT_WORKER_URL` on the backend to the Worker's origin.
-`FORGE_GIT_WORKER_MIN_BYTES` (optional) routes clones at or over that size through the
-Worker instead of the 100 MiB default. Unset `FORGE_GIT_WORKER_URL` to turn the path off.
+See the [Git HTTP operator setup](operations.md#git-http-endpoints).
 
 Anonymous clone and fetch are refused before history, pack or object IO; there are no
 anonymous-clone switches or usage counters. Signed-in fetches retain the existing Worker

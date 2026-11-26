@@ -14,7 +14,7 @@ const skillPath = 'skills/forge-agent/SKILL.md';
 const productSummary =
   'Forge is a source host and workspace for people and AI agents changing the same code at the same time. Agents work in their existing tools, and checks run in your CI. Forge coordinates concurrent work with isolated Lanes, recorded checks and accepted Channels.';
 const developmentStatus =
-  'Forge is in open development. Build the CLI from source to try the development service. An npm release, a public production service and live Forge billing are still planned.';
+  'Forge is in open development. Build the CLI from source to try Forge. An npm release, a public production service and live Forge billing are still planned.';
 
 // Explicit inventory of what `llms-full.txt` carries: the README and the guides a user or agent
 // needs. Internal plans, status/backlog/roadmap, research, license disclosures and the long
@@ -37,10 +37,6 @@ export const llmsFullPaths = [
   'docs/guides/export.md',
   'docs/concepts.md',
   'docs/agents.md',
-  'docs/operations/self-hosted-runner.md',
-  'docs/operations/runner-fallback.md',
-  'docs/operations/github-actions-checks.md',
-  'docs/readable-urls.md',
 ];
 // Keep the long references one click away from the smaller, task-focused full text.
 const fullTextReferences = [
@@ -49,6 +45,10 @@ const fullTextReferences = [
   'docs/parallel-work-defaults.md',
   'docs/security.md',
   'docs/workflows.md',
+  'docs/operations/self-hosted-runner.md',
+  'docs/operations/runner-fallback.md',
+  'docs/operations/github-actions-checks.md',
+  'docs/readable-urls.md',
 ];
 // Soft size line, in bytes. Crossing it only warns: the file is a sum over every Lane's docs, so a
 // hard limit fails combined landings that each pass alone (2026-11-05). Trim when you see the warning.

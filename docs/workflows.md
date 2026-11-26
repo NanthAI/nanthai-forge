@@ -1,6 +1,6 @@
 # Workflows
 
-Hosted projects acquire source, compose and land through the hosted backend. Your CLI and editor operate on local checkouts. Follow the [hosted GitHub-import quickstart](quickstart.md) for the development installation and entry point. Commands use `nforge`. Mutating commands take a client UUID. If a reply is lost, replay the same command and UUID to get the original result.
+Hosted projects acquire source, compose and land through the hosted backend. Your CLI and editor operate on local checkouts. Follow the [quickstart](quickstart.md) to bring your code to Forge and land your first change. If a reply is lost, retry with the same operation ID to recover the original result.
 
 ## Hosted flow
 
@@ -8,7 +8,7 @@ Forge has one client mode: hosted. `nforge host ./project` makes a Git folder (o
 
 1. Start a Lane from an Issue or an outcome (`nforge agent ROOT start`). A Lane is a directory.
 2. Edit the Lane with your editor or agent and save it. No Git staging is involved.
-3. `land --save` composes the Lane with current main into a Candidate, runs the project's check on its runner and lands it under project policy. Independent file changes merge; overlapping edits open a conflict Lane to resolve.
+3. From the Lane, `nforge agent . land --save` composes the change with current main into a Candidate and follows the project's check and landing policy. Independent file changes merge; overlapping edits open a conflict Lane to resolve.
 
 Capture includes non-ignored regular files with executable modes. Symlinks and special files are reported, not captured. Agents use the shorter flow in [agents](agents.md).
 
@@ -25,8 +25,9 @@ exact passing check is selected when available. Unchecked acceptance follows **W
 **Settings → Landing & checks**. The default is Owner only; the owner may instead
 choose named people or existing teams, or all current write members. A selected
 person must still have write access at landing time; team selection grants no
-project access. Revocation takes effect immediately. Agent credentials always need
-a passing check. Protected-path and review rules continue to apply.
+project access. Revocation takes effect immediately. Agent landings need passing
+evidence when the project requires a check. Protected-path and review rules
+continue to apply.
 
 **Cancel landing** cancels the submission separately from its Lane or shared check.
 A hosted landing with no progress for 15 minutes gets a stall alarm naming the
@@ -247,8 +248,7 @@ fields take these defaults: `trustedAt` 25, `autonomousAt` 100, `halfLifeDays` 3
 The gate ships dark for existing projects. Deploy the server, runner, main audit
 and automatic recovery before enabling it. With a drained queue and the current
 main receipt fully checked, the owner enables it with
-`nforge x ROOT set-policy '{"operationId":"UUID","acceptance":{"gate":"contract"}}'` (or
-`nforge hosted-work DEPLOYMENT PROJECT_ID '{"action":"set-policy","operationId":"UUID","acceptance":{"gate":"contract"}}'`).
+`nforge x ROOT set-policy '{"operationId":"UUID","acceptance":{"gate":"contract"}}'`.
 Use the same command with a fresh UUID and `gate: full` to revert the policy.
 Gate changes invalidate older pinned attempts through `POLICY_CHANGED`. A
 `protectedPaths` edit affects only Candidates matching an added or removed
@@ -291,12 +291,12 @@ Accepted and superseded Candidates show their retained disposition instead of de
 
 ## Autonomy policy
 
-`nforge policy ROOT` (also `nforge agent ROOT policy`) reads the typed `AutonomyPolicy` exported from the package. Local Work status and agent status include `autonomyPolicy`. MCP exposes them through `forge_work_overview` and `forge_task`. Hosted clients use `projectAutonomy.read` and `projectAutonomy.set`. On a hosted ROOT, `nforge agent ROOT policy` is one query and `nforge x ROOT set-policy` is one mutation (no capability call; the server enforces owner authority). Without an `operationId`, `set-policy` generates one and returns it; replay it with the same fields to reconcile an unknown outcome. `nforge hosted-work DEPLOYMENT PROJECT_ID '{"action":"policy"}'` and `forge_hosted_work` expose the same read/write commands without needing a Work index.
+`nforge policy ROOT` (also `nforge agent ROOT policy`) reads the project policy. Agent status includes it as `autonomyPolicy`. MCP exposes it through `forge_work_overview` and `forge_task`. On a hosted checkout, the read takes one query and an owner edit takes one mutation. Without an `operationId`, `set-policy` generates one and returns it. Replay it with the same fields to recover an unknown result.
 
 ```sh
 nforge set-policy ROOT '{"operationId":"UUID","preset":"trusted"}'
 nforge x ROOT set-policy '{"operationId":"UUID","acceptance":{"protectedPaths":["convex/**","**/package-lock.json"]}}'
-nforge hosted-work DEPLOYMENT PROJECT_ID '{"action":"set-policy","operationId":"UUID","preset":"supervised"}'
+nforge set-policy ROOT '{"operationId":"UUID","preset":"supervised"}'
 ```
 
 A built-in preset replaces all settings; selecting custom retains the current fields. A field edit merges only the supplied fields and changes `preset` to `custom`. An optional `expectedPolicy` guards a settings edit against a concurrent change. Retrying the original operation returns its original policy receipt without reverting later settings.
@@ -433,7 +433,7 @@ saves a minute. The proposal is the `selection` to add and the one line above.
 A check without `selection` keeps today's behaviour: one full job. Local and self-hosted machine runners
 already supply the same file to every command and run it as one job.
 
-Choose the project's runner once with `nforge agent ROOT configure-runner` (owner only); see
+Choose the project's runner once with `nforge x ROOT configure-runner` (owner only); see
 [GitHub Actions checks](operations/github-actions-checks.md). Each terminal receipt records
 `backend.cost` with billed quantities, estimated USD and its basis; see
 [runner selection and cost basis](operations.md#runner-selection) for label rates and allowance
@@ -807,7 +807,7 @@ and Now show recorded mirror failure (prefixed with the failing job's State,
 which can be older than current main), lag and the next retry time. Status reads
 use selected rows through existing discovery/workspace requests, without polling.
 
-After resolving the cause, the project owner runs `nforge github resume PROJECT`
+After resolving the cause, the project owner runs `nforge github resume ROOT` from a hosted checkout
 (or Resume in the mirror panel on Now); the operator mutation
 `projectGithubMirrorStore:resume` with the job's `jobId` stays for deployment
 operators. Resume retains
@@ -994,9 +994,8 @@ not counted as a completed code change in Now. The project is hosted from birth:
 its source authority is the server and hosted `main` is selected, so agents start
 and land Lanes with no local native owner. An editable GitHub import is hosted the
 same way once it is ready. Imports published before this was the case stay
-native-owner until their owner runs `nforge make-editable DEPLOYMENT PROJECT_ID`,
-which selects hosted `main` from the already stored import (nothing is uploaded).
-It is refused if the source changed after the import; use the owner cutover then.
+native-owner until the owner selects hosted main from the stored import.
+See [hosted authority](operations.md#hosted-authority-and-local-presence).
 
 Canonical project URLs use the owner's Forge handle and replace the older ID URL
 in the browser. Display names are never turned into invented account handles.

@@ -109,14 +109,12 @@ Select a check from `check-settings`, or use `nforge x ROOT configure-check` wit
 Once hosted holds source authority (`server` mode, or a pending switch to it),
 local `accept` and `accept-channel` return `HOSTED_AUTHORITY`, whatever the owner
 role or local autonomy policy. The error names the hosted project and an
-explicitly addressed `nforge agent ROOT finish` command for the hosted landing
-queue. Review and accept on the hosted project page, or submit a hosted Lane with
-`{"url":"DEPLOYMENT_URL","projectId":"PROJECT_ID","laneId":"HOSTED_LANE_ID","accept":true}`.
+addressed `nforge agent ROOT finish` command for the hosted landing queue. Review
+and accept on the project page, or land from a hosted Lane checkout.
 There is no local override: if hosted is unavailable, landing pauses
 and editing continues.
 
-For hosted Lanes, the same `nforge mcp ROOT --agent` detects the hosted checkout or
-retained CLI address; `--url URL --project-id ID` selects a new hosted address.
+Start `nforge mcp ROOT --agent` with the path to the hosted clone or Lane.
 Task/check/overview commands reuse the hosted CLI schemas and retry journal.
 Source tools return saved Lane/State/blob pins and accept optional exact expected
 pins; local drafts are separate. `forge_check` observe is finite; only an explicit

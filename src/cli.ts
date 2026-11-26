@@ -35,7 +35,7 @@ Usage:
   nforge --version
   nforge agent ROOT queue '{}'   # hosted landing queue
   nforge queue list|cancel OPERATION|prioritize OPERATION   # local command recovery
-  nforge github connect|status|disconnect|resume PROJECT [--url DEPLOYMENT] [--repo OWNER/NAME] [--operation-id UUID] [--no-mirror] [--no-browser]
+  nforge github connect|status|disconnect|resume ROOT [--repo OWNER/NAME] [--operation-id UUID] [--no-mirror] [--no-browser]
   nforge github-sync ROOT [--repo OWNER/NAME] [--branch main] [--dry-run | --push] [--operation-id UUID] [--rebind] [--wait-audit] [--audit-timeout-ms MS]
   nforge host ROOT [--name NAME] [--visibility private|public] [--status | --new]
   nforge login [--name NAME] [--scope cli|coordination] [--no-browser]
@@ -44,8 +44,8 @@ Usage:
   nforge maintenance check-logs ROOT --dry-run|--apply --plan FILE [--hosted]
   nforge hosted-work <deployment-url> <project-id> JSON
   nforge make-editable <deployment-url> <project-id> [operation-uuid]
-  nforge coordination <deployment-url> <project-id> JSON
-  nforge mcp-coordination <deployment-url> <project-id>
+  nforge coordination ROOT JSON
+  nforge mcp-coordination ROOT
   nforge exchange ROOT pull [--target NEW_DIRECTORY]
   nforge exchange <root> pull|open|restore|receive-proposal|pull-proposal|migrate-archive --command-file FILE
   nforge agent <root> start|save|land|ask|hand-back [--mode] [json | --command-file FILE|-] [--message-file FILE|-] [--no-wait]   # nforge agent --help
@@ -58,11 +58,11 @@ Usage:
   nforge recover NEW_RUNNER --command-file REQUEST.json
   nforge policy <root>
   nforge set-policy <root> JSON
-  nforge mcp --public [SITE_URL]   # find public projects without a checkout
+  nforge mcp --public   # find public projects without a checkout
   nforge mcp <root> [--agent]   # source tools; --agent: a hosted checkout's agent tools
   nforge mcp-agent <forge-convex-deployment-url>
   nforge mcp-config <root> [--agent [--client APP]]
-  nforge connect <claude-code|codex|cursor|opencode|pi> [--undo BACKUP_ID]
+  nforge connect <claude-code|codex|cursor|opencode|pi|antigravity> [--undo BACKUP_ID]
   nforge plugin-config <root> <new-directory>
   nforge doctor <git-worktree-root | forge-clone-or-lane-root>
   nforge index <git-worktree-root>

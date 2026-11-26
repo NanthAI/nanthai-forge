@@ -766,7 +766,7 @@ design-system behaviour layer out of the first paint.
   same close over today as a provisional row at most hourly and only after a
   landing since the last; the real close replaces it. See
   [Stats](run-evidence.md#stats).
-- Invitations: Home and `/account/people` load the recipient inbox lazily. The link carries no grant; the signed-in recipient accepts or declines. `FORGE_INVITATION_EMAIL=1` enables the separate sender on dev; its default is off. See [access](access.md#invitations).
+- Invitations: Home and `/account/people` load the recipient inbox lazily. The link carries no grant; the signed-in recipient accepts or declines. `FORGE_INVITATION_EMAIL=1` enables the separate sender. Keep it off, including on dev, until the [enablement requirements in Item c6629fda](https://dev.forge.nanthai.tech/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=c6629fda-c29f-48e9-b677-5094e5cf0d9b) are met. See [access](access.md#invitations).
 - Sign-in: one handle field (passkey sign-in or sign-up, browser autofill) and
   GitHub. After a first GitHub sign-in with no passkey, `/signin/passkey`
   offers one (`authPasskeys`), skippable. The return address is kept in

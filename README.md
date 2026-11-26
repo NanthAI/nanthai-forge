@@ -7,11 +7,11 @@ Four ideas cover most of it:
 - **Intent** — an outcome you want ("fix tax rounding").
 - **Lane** — an isolated working directory where one person or agent makes that change.
 - **Check** — a recorded test run against an exact snapshot of the code.
-- **Channel** — accepted source, like a branch (`main`). Agents accept after a passing check; people can accept a clean Candidate under review. Accepting never drops someone else's accepted work.
+- **Channel** — accepted source, like a branch (`main`). Forge applies the project's landing policy and keeps its recorded check evidence. Accepting preserves earlier accepted work.
 
 More in [concepts](docs/concepts.md).
 
-For hosted GitHub import and first acceptance: `nforge docs quickstart`
+For bringing a project to Forge and landing your first change, run `nforge docs quickstart`
 ([quickstart](docs/quickstart.md)). Browse installed documentation with `nforge docs`.
 
 ## Try it
@@ -27,9 +27,9 @@ Forge runs hosted projects only. To host a folder and browse it in the web app, 
 
 A plain directory gets a Forge-native source bootstrap without Git. Hosting selects verified source and server authority together; use `nforge clone OWNER/PROJECT DIR` to check it out and start Lanes. Existing hosted projects retain their authority.
 
-For agents: `nforge agent ./demo start '{"outcome":"…","model":"unknown"}'`, edit the returned Lane, then `nforge agent ./demo land --save '{"laneId":"…","message":"…"}'`. Supply your model ID in `model` or `FORGE_AGENT_MODEL` when known. See the [agent workflow](docs/agents/workflow.md). [Parallel-work defaults](docs/parallel-work-defaults.md) lists what Forge changes in agents' default behaviour so many can work at once, and how to change it.
+For agents, run `nforge agent ROOT start '{"outcome":"Update the README"}'` with your clone path as `ROOT`. Change into the returned Lane folder, edit the file, and run `nforge agent . land --save '{"message":"Update the README"}'` there. Supply your model ID in `model` or `FORGE_AGENT_MODEL` when known. See the [agent workflow](docs/agents/workflow.md) and [parallel-work defaults](docs/parallel-work-defaults.md).
 
-Git repositories work too ([workflows](docs/workflows.md)), and projects can be hosted so several machines and people share them ([architecture](docs/architecture.md)). The server decides what lands and checks run on [GitHub Actions](docs/operations/github-actions-checks.md) or your own runners; your machine does not accept.
+Git repositories work too ([workflows](docs/workflows.md)). Forge applies the project policy at landing. If you configure checks, they can run on [GitHub Actions](docs/operations/github-actions-checks.md) or your own runners.
 
 Checks use your CI provider’s full logs. Forge retains results, failure summaries, compact test evidence and provider links. Local log upload is opt-in with finite retention ([operations](docs/operations.md#check-logs-and-retention)).
 
@@ -39,14 +39,9 @@ Forge is in active development and builds itself. [Status](docs/status.md) lists
 
 ## Hosted links
 
-Hosted URLs use `/<handle>/<project-slug>`; previous names and ID-based links redirect
-through retained aliases after the same project-access checks. See [readable URLs](docs/readable-urls.md)
-for the operator backfill command (`npx convex run urlsBackfill:run '{"cursor":null}'`,
-then repeat with the returned cursor until `isDone`) and settings behavior.
-
-URL call sites use `src/project-routes.ts`: the hosted route gate and frame, project
-list navigation, existing copy/share links through the shell codec, CLI/MCP agent
-links (`src/agent-links.ts`), and CLI hosting output (`convex/projectHosting.ts`).
+Open [Forge](https://forge.nanthai.tech) to find your projects. Hosted links use
+`/<handle>/<project-slug>`. Links using a previous name or a project ID redirect
+after the usual project access checks. See [readable URLs](docs/readable-urls.md).
 
 Hosted source operations currently support up to 56,800 files and 9,200,000
 logical manifest bytes per State across all phases; save and compose have larger

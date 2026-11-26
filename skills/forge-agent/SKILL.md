@@ -8,7 +8,7 @@ Use ordinary file tools for source questions. For delivery, use the installed `n
 <!-- agent-scope:start -->
 Forge is a source host and workspace for people and AI agents changing the same code at the same time. Agents work in their existing tools, and checks run in your CI. Forge coordinates concurrent work with isolated Lanes, recorded checks and accepted Channels.
 
-Forge is in open development. Build the CLI from source to try the development service. An npm release, a public production service and live Forge billing are still planned.
+Forge is in open development. Build the CLI from source to try Forge. An npm release, a public production service and live Forge billing are still planned.
 <!-- agent-scope:end -->
 
 `nforge agent ROOT VERB [--MODE] --help` gives parameters; `help TOPIC` gives one how-to. `nforge docs agents/hosted` is generated from the enforced contract. Use `--command-file FILE` for nested JSON. Refusals name `{code,message,next,learn}`: follow `next`, reading `learn` once. First-write hooks are advisory; `help hosted` explains opting out.

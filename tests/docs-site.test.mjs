@@ -38,6 +38,29 @@ test('docs are static, contract-generated and usable without account or backend 
   // Every docs page links the draft Terms and Privacy pages (a9f4654f).
   assert.match(home, /<a href="\/terms">Terms<\/a><a href="\/privacy">Privacy policy<\/a>/);
   const cli = read(out, 'docs/reference/cli.md');
+  // User docs use the hosted site and checkout commands, without exposing backend origins.
+  for (const path of [
+    'docs/README.md',
+    'docs/access.md',
+    'docs/access-contract.md',
+    'docs/agents.md',
+    'docs/agents/workflow.md',
+    'docs/git-serving.md',
+    'docs/quickstart.md',
+    'docs/security.md',
+    'docs/status.md',
+    'docs/workflows.md',
+    'docs/reference/cli.md',
+    'docs/reference/mcp.md',
+    'docs/reference/errors.md',
+    'llms.txt',
+    'llms-full.txt',
+  ])
+    assert.doesNotMatch(
+      read(out, path),
+      /https?:\/\/[^/\s`]*(?:dev\.forge\.nanthai\.tech|\.convex\.(?:cloud|site))\b/i,
+      path,
+    );
   // 6b7d5a79: a missing model is recorded as unknown, never refused; the generated references say so.
   const modelRequirement = 'Your model ID, or set FORGE_AGENT_MODEL. Missing: the start records';
   assert(cli.includes(modelRequirement));

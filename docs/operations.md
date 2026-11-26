@@ -1333,6 +1333,11 @@ starts an acceptance listener. The former `ownerAcceptance`, `ownerLifecycle`,
 instructions. The old `host --listen`, `--sync-agent` and auto-sync switches return
 the same error. The request/machine tables are gone from the schema.
 
+For an import with legacy native-owner authority, the owner can run
+`nforge make-editable DEPLOYMENT PROJECT_ID`. This selects hosted main from
+the stored import without uploading files. If the source changed since import,
+use the [owner cutover](operations/source-exchange.md#source-authority-transition-and-writer-fencing).
+
 Local activity updates presence only; it starts no hosted metadata sender, retry
 timer or owner subscription. Hosted CLI/MCP source and lifecycle operations use
 their authoritative server APIs. Explicit coordination activity remains available.
@@ -1846,6 +1851,22 @@ A missing variable fails the write with `R2_NOT_CONFIGURED`; Forge never falls b
 - A checkout missing 500 or more objects downloads the project's latest source pack (one gzip in R2, at most 300 MiB and 100,000 files, `projectSourcePacks`) in one signed GET instead of per-object pages. A pack is a cache, not a limit: below 500 objects, or for anything the pack lacks, objects still come one by one, each verified by digest.
 - Otherwise clones and Lane opens read signed pages of up to 500 objects (`describe`/`lanePage` with `runs`). Requested objects that sit back to back in one stored upload pack (a GitHub import window, or a save's upload pack) form a run: the server signs one byte range covering exactly those objects, never a gap, and the client reads it with one ranged GET, eight at a time, checking each object's digest as it completes. Other objects keep their own signed range or URL. A run whose signature expired, or one only partly needed, falls back to per-object reads; an older server without `runs` keeps 100-object pages. Both functions read a page's object rows concurrently (`findObjects`), resolving catalog entries in digest order so each catalog row is read at most once per call.
 - Convex file storage is retired: no row, reader or backfill names a Convex file any more, and a read has one shape, R2 ([retirement runbook](operations/legacy-storage-cleanup.md)).
+
+## Git HTTP endpoints
+
+Operators can expose the read-only Git service for clone, fetch, pull and ref
+listing. The paths are `/git/<handle>/<slug>.git` and `/git/<projectId>.git`
+on the deployment's HTTPS Convex site. The `.git` suffix is optional. The
+[Git access rules](git-serving.md#access) apply on both endpoints.
+
+The optional large-pack Worker accepts the same paths on its own origin and
+avoids a backend round trip. Deploy `dist/git-byte-worker.js` (built from
+`src/git-byte-worker.ts`) with the `cf` CLI in the Cloudflare account that holds
+the deployment's R2 bucket. Bind the bucket as `FORGE_R2` and set
+`FORGE_CONVEX_SITE` to the deployment's HTTPS Convex site. Set
+`FORGE_GIT_WORKER_URL` on the backend to the Worker's origin.
+`FORGE_GIT_WORKER_MIN_BYTES` sets the threshold for routing large clones to the
+Worker (default 100 MiB). Unset `FORGE_GIT_WORKER_URL` to turn that route off.
 
 ## Self-host
 

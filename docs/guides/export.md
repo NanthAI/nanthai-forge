@@ -4,13 +4,13 @@ You can keep copies of accepted source, planning history, saved Lane work and ac
 
 ## Accepted source and history
 
-A connected mirror keeps accepted main in your repository. Read its state before relying on the latest commit:
+A connected mirror keeps accepted main in your repository. Check it from your Forge clone before relying on the latest commit:
 
 ```sh
-nforge github status PROJECT
+nforge github status .
 ```
 
-A mirror can lag the accepted State. The status reports that gap. [Git serving](../git-serving.md) explains plain clone and fetch, including saved Lane refs for project members. Git serving is a read/export path; contributions go through Lanes and landings.
+A mirror can lag the accepted State. The status reports that gap. [Git serving](../git-serving.md) describes accepted main and saved Lane refs. [Public project access](access.md#browse-or-share-a-public-project) explains what visitors can see and how to clone a Forge project.
 
 ## Planning and project metadata
 

@@ -6,4 +6,4 @@ Open **Account → Billing** (`/account/billing`) to see the sample allowance an
 
 A landing is a change accepted onto main. Saves, checks, seats and open tabs are different units. CI runs in the configured provider account. Read [cost to serve](../operations/cost-to-serve.md) for measured service costs, their dates and their gaps; those measurements are not a customer price.
 
-For current project usage, use the [metrics command](../reference/cli.md). It reports retained evidence; missing billed usage stays unknown. No billing action is required to read these docs, build the CLI from source or inspect the current development flow.
+From a project clone, run `nforge metrics .` for retained project evidence. If billed usage is missing from that evidence, the report leaves it unknown.
