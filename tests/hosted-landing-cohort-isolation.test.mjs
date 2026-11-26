@@ -46,6 +46,9 @@ const rowOf = (f, id) =>
 for (const history of [0, 575, 1150])
   test(`mixed cohort replay with ${history} retained entries: survivors check before settlement and reuse their exact generation`, async t => {
     const f = await batchesFixture(t, {
+      // This budget covers the cohort within one account-order hour. Clock
+      // rollover has its own replay in hosted-landing-admission-default.
+      startAt: Date.UTC(2026, 10, 10, 12),
       count: 10,
       batching: 'default',
       batchMaxSize: 3,
@@ -122,6 +125,11 @@ for (const history of [0, 575, 1150])
         assert(files.some(accepted => accepted.path === file.path && accepted.blob === file.blob));
     }
     const calls = f.counts.slice(before);
+    assert.deepEqual(
+      calls.filter(c => ['accountOrderTouch', 'statsClose'].includes(c.name)).map(c => c.name),
+      ['accountOrderTouch'],
+      'the fixed-hour replay includes one account-order update and no hour close',
+    );
     const budget = {
       history,
       calls: calls.length,
