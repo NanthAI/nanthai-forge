@@ -12,6 +12,8 @@ import { hostedStartMain } from './projectHostedChannels';
 import { agentActor } from '../src/agent-slug';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
+import type { HostedAcceptance } from '../src/hosted-acceptance';
+import { latestLandingProgress } from '../src/landing-stall';
 import { report } from './errors';
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -165,8 +167,8 @@ export const main = query({
 
 /**
  * Wait until a landing (by receiptId, sequence, or current main) is contained in a successful deploy
- * (`wait {"deploy": ...}`, Item 8b6efb50). ONE live Convex subscription on `projectDeploys`; re-runs
- * only when a deploy row changes. Zero polling, zero idle cost.
+ * (`wait {"deploy": ...}`, Item 8b6efb50). One live Convex subscription follows the current
+ * declaration and deploy evidence. Zero polling, zero idle cost.
  */
 export const deploy = query({
   args: {
@@ -176,14 +178,16 @@ export const deploy = query({
     target: v.optional(v.string()),
   },
   returns: v.string(),
-  handler: async (rawCtx, input) => {
+  handler: async (ctx, input) => {
     try {
-      const ctx = finishReadReader(rawCtx);
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to wait for a deploy.');
+      // The finish-read project projection omits deploy policy. Authorize from the same
+      // authoritative row whose declaration schedules deploys and validates CI reports.
       const project = await activeProject(ctx, input.projectId, user.subject);
       let sequence = input.sequence;
       let receiptId: string | undefined;
+      let acceptedAt: string | undefined;
       if (input.receiptId !== undefined) {
         const wanted = input.receiptId.trim().toLowerCase();
         invariant(
@@ -191,7 +195,7 @@ export const deploy = query({
           'BAD_ARGUMENT',
           'Pass a receipt id or at least 8 characters of one.',
         );
-        const exact = await rawCtx.db
+        const exact = await ctx.db
           .query('projectHostedAcceptances')
           .withIndex('by_project_and_receipt', q =>
             q.eq('projectId', input.projectId).eq('receiptId', wanted),
@@ -199,7 +203,7 @@ export const deploy = query({
           .unique();
         const found = exact
           ? [exact]
-          : await rawCtx.db
+          : await ctx.db
               .query('projectHostedAcceptances')
               .withIndex('by_project_and_receipt', q =>
                 q
@@ -216,8 +220,9 @@ export const deploy = query({
         );
         sequence = found[0]!.sequence;
         receiptId = found[0]!.receiptId;
+        acceptedAt = (JSON.parse(found[0]!.value) as HostedAcceptance).at;
       } else if (sequence === undefined) {
-        const current = await hostedStartMain(rawCtx, input.projectId);
+        const current = await hostedStartMain(ctx, input.projectId);
         sequence = current.sourceRevision;
       }
       invariant(
@@ -226,14 +231,15 @@ export const deploy = query({
         'Select a positive landing sequence or receipt id.',
       );
       const target = input.target ?? 'all';
-      const status = await deployWaitStatus(rawCtx, project, sequence, target);
+      const status = await deployWaitStatus(ctx, project, sequence, target);
+      const lastProgressAt = latestLandingProgress([acceptedAt, status.lastProgressAt]);
       return canonicalPayload({
         deploy: {
           sequence,
           ...(receiptId ? { receiptId } : {}),
           target,
           state: status.state,
-          ...(status.lastProgressAt ? { lastProgressAt: status.lastProgressAt } : {}),
+          ...(lastProgressAt ? { lastProgressAt } : {}),
           deploys: status.deploys,
         },
       });

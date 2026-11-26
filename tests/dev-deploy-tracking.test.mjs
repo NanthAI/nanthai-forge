@@ -198,6 +198,8 @@ test('Item 8b6efb50: deploy record refuses undeclared targets, wrong repo/workfl
 
 test('Item 8b6efb50: ancestry picks the first successful deploy >= sequence in lane-history, receipts and wait', async () => {
   const { s, projectId, accept } = makeProject();
+  // Model an existing hosted project with the finish-read projection installed.
+  s.patch('hostedProjects', projectId, {});
   const r10 = accept(10, hex('a'));
   const r11 = accept(11, hex('b'));
   const r12 = accept(12, hex('c'));
@@ -359,6 +361,8 @@ test('Item 8b6efb50: ancestry picks the first successful deploy >= sequence in l
   assert.equal(w12.deploy.state, 'deployed');
   const w13All = JSON.parse(await s.call('wait', boardWait.deploy, { projectId, receiptId: r13 }, 'owner'));
   assert.equal(w13All.deploy.state, 'pending');
+  assert.equal(w13All.deploy.lastProgressAt, w13All.deploy.deploys.convex.at);
+  assert.equal(w13All.deploy.deploys.web, null);
   const w13Convex = JSON.parse(
     await s.call('wait', boardWait.deploy, { projectId, receiptId: r13, target: 'convex' }, 'owner'),
   );
@@ -443,6 +447,45 @@ test('Item 8b6efb50: ancestry picks the first successful deploy >= sequence in l
   assert.equal(w15All.deploy.deploys.web.unchanged, true);
   assert.equal(w15All.deploy.deploys.web.liveSequence, 14);
   assert.equal(w15All.deploy.deploys.web.liveHead, hex('e'));
+});
+
+test('friction 7f7f0afa: an all-target receipt wait reports progress before CI reports a deploy', async () => {
+  const { s, projectId } = makeProject();
+  s.patch('hostedProjects', projectId, {});
+  const receipt = acceptMirrorReceipt(s, hex('a'), hex('0'), 10);
+  const selection = { projectId, receiptId: receipt.id };
+  const wait = async () => JSON.parse(await s.call('wait', boardWait.deploy, selection, 'owner')).deploy;
+  await assert.rejects(
+    s.call('wait', boardWait.deploy, selection, 'outsider'),
+    error => error.data?.code === 'PROJECT_UNAVAILABLE',
+  );
+  await assert.rejects(
+    s.call('wait', boardWait.deploy, { ...selection, target: 'undeclared' }, 'owner'),
+    error => error.data?.code === 'EVIDENCE_CHANGED',
+  );
+
+  assert.deepEqual(await wait(), {
+    sequence: 10,
+    receiptId: receipt.id,
+    target: 'all',
+    state: 'pending',
+    lastProgressAt: receipt.at,
+    deploys: { convex: null, web: null },
+  });
+
+  const queuedAt = '2026-01-02T00:00:10.000Z';
+  s.insert('projectDeploys', {
+    projectId,
+    target: 'web',
+    sequence: 10,
+    head: hex('a'),
+    status: 'queued',
+    runId: 'queued',
+    at: queuedAt,
+  });
+  assert.equal((await wait()).lastProgressAt, queuedAt);
+  await s.call('claim', deployStore.claimQueued, { projectId, target: 'web' });
+  assert.equal((await wait()).lastProgressAt, receipt.at);
 });
 
 test('Item 8b6efb50: a landing arriving during an in-flight web deploy gets a trailing flush and claimQueued defers inside the 5-min window', async () => {

@@ -179,6 +179,11 @@ sets an upload interval for that target. Forge's own [dev target configuration](
 uses the same shape. The rollout owner can supply that file as the value of `deploys`
 in a project `set-policy` command.
 
+`nforge agent . wait '{"deploy":{"receiptId":"RECEIPT_ID","target":"convex"}}'`
+follows the named target's rollout. Omit `target` to follow all declared targets.
+When waiting by receipt, the last progress time starts at acceptance and advances
+as Forge observes newer queue or deploy evidence.
+
 A CI system can call the Convex mutation `projectDeployStore:reportByoci` with the
 Forge project ID, target name, exact accepted main `state` and `sequence`, a stable
 `runId` for the attempt and `status` (`succeeded`, `failed` or `smoke-failed`).
