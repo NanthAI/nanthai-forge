@@ -14,10 +14,7 @@ const item = '00000000-0000-4000-8000-000000000001',
 const denied = error => (error.data?.code ?? error.code) === 'PROJECT_UNAVAILABLE';
 function fixture(subject = 'owner', identity = {}) {
   const s = state([]);
-  s.tables.hostedProjects.set(
-    'project',
-    projectRow({ _id: 'project', name: 'synthetic', revision: 1, workStore: 'records' }),
-  );
+  s.tables.hostedProjects.set('project', projectRow({ _id: 'project', name: 'synthetic', revision: 1 }));
   s.tables.projectHostedRecordHeads.set('head-comment', {
     _id: 'head-comment',
     _creationTime: 1,

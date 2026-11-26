@@ -6,7 +6,12 @@ import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { acceptanceFixture, control } from './hosted-acceptance-fixture.mjs';
 import { batchesFixture, batchPublish, states, synthetic } from './hosted-landing-batches-fixture.mjs';
-import { setup as planningSetup, actions as workActions, pinIntent } from './hosted-planning-fixture.mjs';
+import {
+  setup as planningSetup,
+  actions as workActions,
+  pinIntent,
+  beginRetainedWork,
+} from './hosted-planning-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { policyPreset } from '../dist/autonomy-policy.js';
 import { mergeItems } from '../dist/planning-batch.js';
@@ -305,33 +310,14 @@ test('a later resolution on the same Lane does not change which origin Item the 
   );
 });
 
-/** A records-store project (Flip 5 S4): its planning reads load the Item through `storeItem`. */
-async function recordsStore(s) {
-  const { dispatchHostedWork } = await import('../dist/hosted-work-client.js');
-  const store = await import(moduleUrl('../convex/projectWorkStore.ts'));
-  const handlers = {
-    'projectWorkStore:copy': store.copy,
-    'projectWorkStore:compare': store.compare,
-    'projectWorkStore:setMode': store.setMode,
-  };
-  const client = {
-    query: (ref, args) => handlers[getFunctionName(ref)]._handler(s.ctx, args),
-    mutation: (ref, args) => handlers[getFunctionName(ref)]._handler(s.ctx, args),
-    action: () => assert.fail('no action'),
-  };
-  for (const input of [{ action: 'copy-work-store' }, { action: 'set-work-store', mode: 'records' }])
-    await dispatchHostedWork(client, s.projectId, input);
-  assert.equal(s.tables.hostedProjects.get(s.projectId).workStore, 'records');
-}
-
 /** Review 66f9ed38: merging duplicates moves their Lane links to the survivor (each duplicate's Intent joins
  * its intentIds), so the survivor's comment read shows the duplicates' landing notes too. Both Work store
  * readers load the Item: the journal record, and on a records-store project `storeItem` (review 5b7fdb31). */
-for (const workStore of ['journal', 'records'])
-  test(`a merged Item shows the landing notes of its merged duplicates (${workStore} Work store)`, async t => {
+for (const retained of [false, true])
+  test(`a merged Item shows the landing notes of its merged duplicates (${retained ? 'retained' : 'historical'} events)`, async t => {
     const s = await planningSetup(t);
     s.tables.hostedProjects.get(s.projectId).sourceAuthority = { mode: 'server', epoch: 1 };
-    if (workStore === 'records') await recordsStore(s);
+    if (retained) beginRetainedWork(s);
     const survivor = s.item({ title: 'Survivor' }),
       duplicate = s.item({ title: 'Duplicate' });
     await s.send(survivor);
@@ -562,7 +548,7 @@ test('the planning export carries every landing note, across export pages', asyn
 test('merged Item discussion and owner export retain hot, legacy and verified capsule notes', async t => {
   const s = await planningSetup(t);
   s.tables.hostedProjects.get(s.projectId).sourceAuthority = { mode: 'server', epoch: 1 };
-  await recordsStore(s);
+  beginRetainedWork(s);
   const id = n => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
   const duplicate = s.item({ itemId: id(1), title: 'Duplicate' });
   const survivor = s.item({ itemId: id(2), title: 'Survivor', intentIds: [duplicate.itemId] });

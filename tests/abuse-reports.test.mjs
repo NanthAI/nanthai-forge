@@ -49,7 +49,6 @@ function fixture() {
   const comment = (author, text = 'Spam spam spam') => {
     const itemId = randomUUID(),
       commentId = randomUUID();
-    f.tables.hostedProjects.get('project').workStore = 'records';
     f.tables.projectHostedRecordHeads.set(`issue-${itemId}`, {
       _id: `issue-${itemId}`,
       projectId: 'project',

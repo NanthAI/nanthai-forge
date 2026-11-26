@@ -102,8 +102,6 @@ test('a browser-created project starts in the record store and keeps its first I
   const s = setup(),
     projectId = await s.create(input()),
     project = s.tables.hostedProjects.get(projectId);
-  assert.equal(project.workStore, 'records');
-  assert.deepEqual(project.workStoreWriters, ['note', 'intent', 'intent-status', 'planning']);
   assert.equal(project.workStoreCutoverRevision, 0);
   assert.deepEqual(project.workStoreEventWindows, [{ revision: 0, storeFirst: true }]);
   const receipt = JSON.parse([...s.tables.projectSourceCutovers.values()][0].receipt);
@@ -358,20 +356,14 @@ test('R2 bootstrap retries an incomplete reservation without any Convex byte sto
 
 // Item c0af6cfa F2 review 92eafa87 P1: in the record store an Intent's creation is a retained version, not a
 // `projectWorkEvents` row. A contributor's proposal on the first Intent of a browser-born project must still
-// register against the Intent's exact server-pinned base, in both Work modes, and keep its denials.
+// register against the Intent's exact server-pinned base, with historical and retained events, and keep its denials.
 test('a contributor proposal on a browser-born Intent registers its exact base pins with no journal event', async () => {
   for (const records of [true, false]) {
     const s = setup(),
       projectId = await s.create(input()),
       project = s.tables.hostedProjects.get(projectId);
     if (!records)
-      for (const field of [
-        'workStore',
-        'workStoreWriters',
-        'workStoreCutoverRevision',
-        'workStoreEventWindows',
-      ])
-        delete project[field];
+      for (const field of ['workStoreCutoverRevision', 'workStoreEventWindows']) delete project[field];
     establishedAccount(s.tables, 'contributor', ['planning', 'start']);
     s.tables.projectContributors.set('grant', {
       _id: 'grant',

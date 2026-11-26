@@ -6,7 +6,6 @@ import { rebuildWorkIndex } from './work-index-client.js';
 import { hostedActionError } from './hosted-action-error.js';
 import { SourceAuthorityStaleError } from './hosted-source-authority.js';
 import { assembleIndexValue } from './work-index-value.js';
-import { workStoreSources } from './work-store-records.js';
 import { policyWriteSchema } from './autonomy-policy.js';
 import { ConvexError } from 'convex/values';
 import { getFunctionName, makeFunctionReference, type FunctionReference } from 'convex/server';
@@ -18,27 +17,6 @@ export const hostedWorkRequestSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('workspace') }).strict(),
   z.object({ action: z.literal('rebuild-index') }).strict(),
   z.object({ action: z.literal('migrate-record-details'), operationId: z.uuid() }).strict(),
-  z
-    .object({
-      action: z.literal('copy-work-store'),
-      digestsOnly: z.boolean().optional(),
-      newest: z.number().int().min(1).max(1000).optional(),
-    })
-    .strict(),
-  z
-    .object({
-      action: z.literal('compare-work-store'),
-      /** Check only the newest rows of each collection (a bounded sample) instead of the whole history. */
-      newest: z.number().int().min(1).max(1000).optional(),
-    })
-    .strict(),
-  z
-    .object({
-      action: z.literal('set-work-store'),
-      mode: z.enum(['journal', 'dual', 'records']),
-      writers: z.array(z.enum(['note', 'intent', 'intent-status', 'planning'])).optional(),
-    })
-    .strict(),
   z.object({ action: z.literal('command'), operationId: z.uuid(), command: metadataCommandSchema }).strict(),
   z
     .object({
@@ -80,9 +58,7 @@ async function queryWorkHistory(
   const hydrated = await hydrateLandingHistory(name, args, value, (name, request) =>
     client.action(makeFunctionReference<'action'>(name), { projectId: args.projectId, ...request }),
   );
-  return name !== 'projectWorkStore:compare' && typeof hydrated === 'string'
-    ? JSON.parse(hydrated)
-    : hydrated;
+  return typeof hydrated === 'string' ? JSON.parse(hydrated) : hydrated;
 }
 type Workspace = {
   generationId: string;
@@ -177,90 +153,6 @@ export async function readIndexedWorkDetail(
     return { ...latest, value, intentPin: latest.intentPin ? JSON.parse(latest.intentPin) : null };
   }
 }
-type StoreBucket = { count: number; keys: string[] };
-type StorePage = {
-  copied?: number;
-  same?: number;
-  checked?: number;
-  matched?: number;
-  missing?: StoreBucket;
-  different: StoreBucket;
-  invalid: StoreBucket;
-  cursor: string | null;
-};
-/** Flip 5 S1/S2: the owner copies the journal's Issues, comments, notes, Intents and lifecycle into the Work store, or compares
- * the two, one page per call (copy: one mutation, compare: one query) until every collection is done.
- * A copy is idempotent by digest, so an interrupted run is simply run again. */
-async function workStorePass(
-  client: HostedWorkTransport,
-  projectId: string,
-  action: 'copy-work-store' | 'compare-work-store',
-  progress?: (line: string) => void,
-  newest?: number,
-  digestsOnly = false,
-) {
-  const copy = action === 'copy-work-store';
-  invariant(
-    !copy || client.mutation,
-    'UNSUPPORTED',
-    'This transport needs hosted mutations for copy-work-store.',
-  );
-  const collections = copy
-    ? [...workStoreSources, ...(digestsOnly ? ['planningItems', 'issueHeads'] : [])]
-    : [
-        ...workStoreSources,
-        'planningItems',
-        'issueHeads',
-        'readItems',
-        'readVersions',
-        'readComments',
-        'readNotes',
-        'readLifecycle',
-      ];
-  const totals: Record<string, Record<string, number | string | string[]>> = {};
-  for (const collection of collections) {
-    const total: Record<string, number | string | string[]> = {};
-    let cursor: string | null = null,
-      pages = 0;
-    do {
-      // A sample asks only for the rows it still needs, newest first.
-      const left = newest === undefined ? undefined : newest - ((total.checked as number | undefined) ?? 0);
-      const args = {
-        projectId,
-        collection,
-        cursor,
-        ...(left === undefined ? {} : { newest: left }),
-        ...(copy && digestsOnly ? { digestsOnly: true, sampleSize: newest } : {}),
-      };
-      const page = JSON.parse(
-        (copy
-          ? await client.mutation!(makeFunctionReference<'mutation'>('projectWorkStore:copy'), args)
-          : await queryWorkHistory(
-              client,
-              makeFunctionReference<'query'>('projectWorkStore:compare'),
-              args,
-            )) as string,
-      ) as StorePage;
-      for (const [name, value] of Object.entries(page)) {
-        if (name === 'cursor') continue;
-        if (typeof value === 'string') total[name] = value;
-        else if (typeof value === 'number') total[name] = ((total[name] as number | undefined) ?? 0) + value;
-        else if (value && typeof value === 'object') {
-          total[name] = ((total[name] as number | undefined) ?? 0) + value.count;
-          const keys = [...((total[`${name}Keys`] as string[] | undefined) ?? []), ...value.keys];
-          total[`${name}Keys`] = name === 'purged' ? keys : keys.slice(0, 20);
-        }
-      }
-      cursor = page.cursor;
-      pages++;
-      progress?.(
-        `Work store ${copy ? 'copy' : 'compare'} ${collection}: page ${pages}${cursor ? '' : ', done'}.`,
-      );
-    } while (cursor !== null && (newest === undefined || ((total.checked as number) ?? 0) < newest));
-    totals[collection] = { ...total, pages };
-  }
-  return { action, ...(newest === undefined ? {} : { newest }), collections: totals };
-}
 export async function dispatchHostedWork(
   client: HostedWorkTransport,
   projectId: string,
@@ -271,7 +163,7 @@ export async function dispatchHostedWork(
   invariant(
     parsed.success,
     'BAD_ARGUMENT',
-    'Use workspace, records, detail, policy, set-policy, rebuild-index, migrate-record-details, copy-work-store, compare-work-store, set-work-store or command.',
+    'Use workspace, records, detail, policy, set-policy, rebuild-index, migrate-record-details or command.',
   );
   try {
     const request = parsed.data;
@@ -314,25 +206,6 @@ export async function dispatchHostedWork(
         command: JSON.stringify(request.command),
       });
     }
-    if (request.action === 'set-work-store') {
-      invariant(client.mutation, 'UNSUPPORTED', 'This transport needs hosted mutations for set-work-store.');
-      return JSON.parse(
-        (await client.mutation(makeFunctionReference('projectWorkStore:setMode'), {
-          projectId,
-          mode: request.mode,
-          ...(request.writers !== undefined ? { writers: request.writers } : {}),
-        })) as string,
-      );
-    }
-    if (request.action === 'copy-work-store' || request.action === 'compare-work-store')
-      return await workStorePass(
-        client,
-        projectId,
-        request.action,
-        progress,
-        request.newest,
-        request.action === 'copy-work-store' && request.digestsOnly === true,
-      );
     if (request.action === 'policy')
       return await client.query(makeFunctionReference('projectAutonomy:read'), { projectId });
     if (request.action === 'set-policy') {

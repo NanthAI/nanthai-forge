@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { getDocumentSize } from 'convex/values';
 import { spendEvent } from '../scripts/convex-spend-model.mjs';
 import { moduleUrl } from './convex-module.mjs';
-import { setup } from './hosted-planning-fixture.mjs';
+import { setup, beginRetainedWork, seedHistoricalIssueVersion } from './hosted-planning-fixture.mjs';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';
 import { setWorkRecord } from './hosted-fixture.mjs';
 import { meterReads } from './hosted-read-set.mjs';
@@ -14,7 +14,7 @@ import { indexedRecord } from '../dist/work-hosted-index.js';
 import { hostedRecordValue } from '../dist/hosted-records.js';
 import { workStoreRecord } from '../dist/work-store-records.js';
 
-const { copy, storeVersion } = await import(moduleUrl('../convex/projectWorkStore.ts'));
+const { storeVersion } = await import(moduleUrl('../convex/projectWorkStore.ts'));
 const { writeHostedRecord } = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 const { withPlanningTimes, planningHistoryBudget } = await import(
   moduleUrl('../convex/projectPlanningHistory.ts')
@@ -30,17 +30,12 @@ process.env.R2_SECRET_ACCESS_KEY = 'synthetic-planning-proof-key';
 async function fixture(t) {
   const s = await setup(t);
   const project = s.tables.hostedProjects.get(s.projectId);
-  await s.ctx.db.patch(s.projectId, { workStore: 'records' });
   const { generationId } = project.work;
-  // Stage historical fixtures through the legacy/dual copy path; reads exercise published records.
-  const put = (item, workStore = 'dual') =>
-    storeVersion(
-      s.ctx,
-      { _id: s.projectId, workStore },
-      hostedRecordValue(workStoreRecord('planningVersions', item)),
-      undefined,
-      false,
-    );
+  const put = async (item, mode = 'historical') => {
+    const encoded = hostedRecordValue(workStoreRecord('planningVersions', item));
+    if (mode === 'records') return storeVersion(s.ctx, { _id: s.projectId }, encoded);
+    return seedHistoricalIssueVersion(s, item);
+  };
   const head = id => [...s.tables.projectHostedRecordHeads.values()].find(row => row.key === id);
   const detail = async (id, planningHistory = true) =>
     JSON.parse(
@@ -105,80 +100,32 @@ const endpoints = (s, id, includeHistory = true) => {
   ]);
 };
 
-test('record-store copy publishes only with proved times and preserves the pin on an exact refresh', async t => {
+test('a canonical Issue write requires proved history and preserves the pin on an exact refresh', async t => {
   const s = await fixture(t);
   const id = randomUUID();
   const first = snapshot(id, 1, 'closed');
   const second = snapshot(id, 2, 'closed');
-  await s.ctx.db.patch(s.projectId, { sourceAuthority: { mode: 'server', epoch: 1 } });
-  const generation = s.tables.projectWorkGenerations.get(
-    s.tables.hostedProjects.get(s.projectId).work.generationId,
-  );
-  const retain = item => {
-    for (const entry of indexedRecord('planningVersions', item.operationId, id, item.version, item))
-      setWorkRecord(s.tables, `copy-${entry.key}`, {
-        ...entry,
-        _id: `copy-${entry.key}`,
-        _creationTime: 1,
-        projectId: s.projectId,
-        generationId: recordPartition(generation),
-      });
-  };
-  const runCopy = () =>
-    copy._handler(s.ctx, { projectId: s.projectId, collection: 'planningVersions', cursor: null });
-  retain(second);
-  await assert.rejects(runCopy(), workStale);
+  await assert.rejects(s.put(second, 'records'), workStale);
   assert.equal(s.head(id), undefined);
   assert.equal([...s.tables.projectHostedRecords.values()].filter(row => row.key === id).length, 0);
-  retain(first);
-  assert.equal(JSON.parse(await runCopy()).copied, 2);
-  const before = s.head(id).planningTimes;
-  assert.deepEqual(before, {
+  await s.put(first, 'records');
+  await s.put(second, 'records');
+  const pin = s.head(id).planningTimes;
+  assert.deepEqual(pin, {
     version: 2,
     lastStatusChangeAt: first.at,
     closedAt: first.at,
     closeKept: first.at,
   });
   await s.ctx.db.patch(s.head(id)._id, { value: undefined });
-  assert.equal(JSON.parse(await runCopy()).refreshed, 1);
-  assert.deepEqual(s.head(id).planningTimes, before);
+  assert.equal(await s.put(second, 'records'), 'refreshed');
+  assert.deepEqual(s.head(id).planningTimes, pin);
 
   const staged = randomUUID();
-  await s.put(snapshot(staged, 2, 'open'), 'dual');
+  await s.put(snapshot(staged, 2, 'open'));
   await assert.rejects(s.put(snapshot(staged, 1, 'open'), 'records'), workStale);
   assert.equal(s.head(staged).version, 2);
   assert.equal(s.head(staged).planningTimes, undefined);
-  // The same out-of-order copy still works while staging in dual mode.
-  assert.equal(await s.put(snapshot(staged, 1, 'open'), 'dual'), 'copied');
-});
-
-test('a record-store copy page rolls back earlier versions when a later head is unproved', async t => {
-  const s = await fixture(t);
-  await s.ctx.db.patch(s.projectId, { sourceAuthority: { mode: 'server', epoch: 1 } });
-  const generation = s.tables.projectWorkGenerations.get(
-    s.tables.hostedProjects.get(s.projectId).work.generationId,
-  );
-  const accepted = snapshot(randomUUID(), 1, 'open');
-  const refused = snapshot(randomUUID(), 2, 'closed');
-  for (const item of [accepted, refused]) {
-    for (const entry of indexedRecord('planningVersions', item.operationId, item.id, item.version, item))
-      setWorkRecord(s.tables, `copy-${entry.key}`, {
-        ...entry,
-        _id: `copy-${entry.key}`,
-        _creationTime: 1,
-        projectId: s.projectId,
-        generationId: recordPartition(generation),
-      });
-  }
-  const store = transactions(s);
-  const args = { projectId: s.projectId, collection: 'planningVersions', cursor: null };
-  const before = structuredClone(store.tables);
-  await assert.rejects(store.call('copy page', copy, args), workStale);
-  assert.deepEqual(store.tables, before, 'neither the preceding version nor its head or digests survive');
-  // Once the blocked row is removed from this source page, the same copy starts fresh.
-  for (const rows of Object.values(store.tables)) rows.delete(`copy-${refused.operationId}`);
-  const copied = JSON.parse(await store.call('copy page retry', copy, args));
-  assert.equal(copied.copied, 1);
 });
 
 test('the generic canonical writer cannot bypass Item pinning', async t => {
@@ -384,8 +331,8 @@ for (const first of ['backfill', 'status']) {
     const s = await fixture(t);
     await s.ctx.db.patch(s.projectId, {
       sourceAuthority: { mode: 'server', epoch: 1 },
-      ...(first === 'backfill' ? { workStoreWriters: ['planning'] } : {}),
     });
+    if (first === 'backfill') beginRetainedWork(s);
     const open = s.item();
     const projectId = s.projectId;
     const args = input => ({ projectId, operationId: input.operationId, command: JSON.stringify(input) });

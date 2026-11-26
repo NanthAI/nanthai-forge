@@ -5,13 +5,11 @@
 // (both read `projectWorkIndex:records` and `:detail`). One head per item and no project-wide row, so a
 // write re-runs only the page that holds it. Rows keep the journal's shape: the whole item or comment
 // (never a payload header), in the journal's append order (the order the heads were created).
-import { invariant } from '../src/errors';
 import { journalRecordPage } from './projectJournalRecordPage';
 import type { QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import type { PaginationOptions } from 'convex/server';
-import { hostedRecordBody, recordHead, recordVersion } from './projectHostedRecords';
-import { noteRecordId } from '../src/work-store-records';
+import { hostedRecordBody, recordHead } from './projectHostedRecords';
 import { pinnedPlanningTimes, type PlanningTimesRead } from './projectPlanningTimes';
 
 type Row = { id: string; position: number; value: unknown; planningTimes?: PlanningTimesRead };
@@ -142,63 +140,4 @@ export async function storeItemRow(
     deferred,
     ...planningHeadTimes(head),
   };
-}
-
-/** Order-free JSON, so a reader compare does not depend on key order. */
-function canonical(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonical);
-  if (!value || typeof value !== 'object') return value;
-  return Object.fromEntries(
-    Object.keys(value)
-      .sort()
-      .map(key => [key, canonical((value as Record<string, unknown>)[key])]),
-  );
-}
-export const sameValue = (a: unknown, b: unknown) =>
-  JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
-
-/** What the store reader returns for one journal row, for the S4 compare: the full journal value has to
- * come back field for field (a field the record schema dropped would show up here). The compare also opens
- * the body: a body that fails its digest throws, and an inline value that is not what the body reads back
- * as comes back as both, so it shows as different. */
-export async function storeReadOf(
-  ctx: QueryCtx,
-  projectId: Id<'hostedProjects'>,
-  collection: 'planningItems' | 'planningVersions' | 'planningComments' | 'notes' | 'lifecycle',
-  value: { id?: string; version?: number; intentId?: string; index?: number },
-) {
-  if (collection === 'planningVersions') {
-    const row = await recordVersion(ctx, projectId, 'issue', value.id!, value.version!);
-    if (row?.purged !== undefined) return { purgedRecord: { ...row, purged: row.purged } };
-    return { value: journalValue(collection, await body(ctx, row)) };
-  }
-  const kind =
-    collection === 'planningItems' ? 'issue' : collection === 'lifecycle' ? 'lifecycle' : 'comment';
-  const id =
-    collection === 'planningItems' || collection === 'planningComments'
-      ? value.id!
-      : collection === 'notes'
-        ? (value.id ?? noteRecordId(value.intentId!, value.index!))
-        : noteRecordId(value.intentId!, value.index!, 'lifecycle');
-  const head = await recordHead(ctx, projectId, kind, id);
-  if (!head) return { value: null };
-  const row = await ctx.db.get(head.recordId);
-  if (row?.purged !== undefined) {
-    invariant(
-      row.projectId === projectId &&
-        row.kind === kind &&
-        row.key === id &&
-        row.parent === head.parent &&
-        row.version === head.version,
-      'INVALID_WORK_JOURNAL',
-      'The marked Work record does not match its head.',
-    );
-    return {
-      purgedRecord: { ...row, purged: row.purged },
-      ...(head.value === undefined ? {} : { value: await headValue(ctx, collection, head) }),
-    };
-  }
-  const read = await headValue(ctx, collection, head);
-  const stored = journalValue(collection, await body(ctx, row));
-  return { value: sameValue(read, stored) ? read : { read, stored } };
 }

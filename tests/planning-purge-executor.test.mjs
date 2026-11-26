@@ -9,13 +9,12 @@ import { randomUUID } from 'node:crypto';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
 import { metadataRequest } from '../dist/work-metadata.js';
-import { purgedIndexValue } from '../dist/work-planning-purge.js';
 import { digest } from '../dist/hash.js';
 import { encodeArchiveBytes } from '../dist/landing-capsule-bytes.js';
 import { journalFragmentTexts } from '../dist/journal-fragments.js';
 import { journalSegmentText, journalTablePins } from '../dist/journal-segment.js';
 import { getFunctionName } from 'convex/server';
-import { setup, actions } from './hosted-planning-fixture.mjs';
+import { setup, actions, beginRetainedWork } from './hosted-planning-fixture.mjs';
 import { workRecordRows } from './hosted-fixture.mjs';
 import { meterWorkIO } from './hosted-read-set.mjs';
 import { moduleUrl } from './convex-module.mjs';
@@ -56,7 +55,6 @@ const hostedRecords = await import(moduleUrl('../convex/projectHostedRecords.ts'
 const artifactStorage = await import(moduleUrl('../convex/artifactStorage.ts'));
 const { resolve: resolveAttachment } = await import(moduleUrl('../convex/discussionAttachmentRead.ts'));
 const { successorIntentId } = await import('../dist/hosted-intent-chain.js');
-const { dispatchHostedWork } = await import('../dist/hosted-work-client.js');
 const { indexedRecord } = await import('../dist/work-hosted-index.js');
 
 /** Route the executor's internal calls to their handlers; `crash` throws before the given redaction call. */
@@ -97,24 +95,9 @@ const secretRows = s =>
       ),
   );
 
-/** Simulate historical journal provenance or begin a retained-event window for the purge fixtures. */
-async function storeMode(s, mode) {
-  const handlers = {
-    'projectWorkStore:copy': workStore.copy,
-    'projectWorkStore:compare': workStore.compare,
-    'projectWorkStore:setMode': workStore.setMode,
-  };
-  const client = {
-    query: (ref, args) => handlers[getFunctionName(ref)]._handler(s.ctx, args),
-    mutation: (ref, args) => handlers[getFunctionName(ref)]._handler(s.ctx, args),
-    action: () => assert.fail('no action'),
-  };
-  if (mode === 'dual') {
-    s.tables.hostedProjects.get(s.projectId).sourceAuthority = { mode: 'server', epoch: 1 };
-    return;
-  }
-  await dispatchHostedWork(client, s.projectId, { action: 'set-work-store', mode });
-  await s.ctx.db.patch(s.projectId, { workStoreWriters: [] });
+function historicalPurgeWork(s, recordWindow) {
+  s.tables.hostedProjects.get(s.projectId).sourceAuthority = { mode: 'server', epoch: 1 };
+  if (recordWindow) beginRetainedWork(s, false);
 }
 
 /** An alias of the Intent in the selected index, as a folded Issue leaves one (src/work-intent-converter.ts). */
@@ -135,7 +118,7 @@ async function deletedItem(
   { records = false, intentBorn = true, large = false, useAlias = true, converted = true } = {},
 ) {
   const s = await setup(t);
-  if (records) await storeMode(s, 'dual');
+  if (records) historicalPurgeWork(s, false);
   const initial = await s.read(),
     itemId = randomUUID();
   if (intentBorn)
@@ -212,7 +195,7 @@ async function deletedItem(
     await s.send(keep);
   } else {
     if (useAlias) alias = addAlias(s, itemId);
-    await storeMode(s, 'records');
+    historicalPurgeWork(s, true);
     await s.send(keep);
     // The alias lives in the index only (a real one comes from the base checkpoint, which a full read replays from),
     // so the last two writes pass their revision instead of reading the whole journal.
@@ -262,29 +245,29 @@ test('a purge redacts every store, checks completeness before purgedAt, and no t
   assert.deepEqual(await executor(s).run(itemId, operationId), done);
 });
 
-async function compareWork(s, collection, itemId) {
-  return JSON.parse(
-    await workStore.compare._handler(s.ctx, {
-      projectId: s.projectId,
-      collection,
-      ...(itemId === undefined ? {} : { itemId }),
-      cursor: null,
-      digestOnly: false,
-    }),
-  );
-}
-
-test('Item version comparisons require the recorded purge request and a redacted index row', async t => {
+test('retained Issue versions refuse purged text only with a valid recorded purge', async t => {
   const { s, itemId } = await deletedItem(t, { records: true, intentBorn: false, useAlias: false });
   const done = await executor(s).run(itemId, randomUUID());
-  const collections = ['readVersions', 'planningVersions'];
-  const valid = await compareWork(s, collections[0], itemId);
-  assert.equal(valid.matched, 1, 'the Item tombstone compares as an ordinary retained version');
-  assert.ok(valid.purged.count > 1);
-  assert.equal(valid.checked, valid.matched + valid.purged.count);
-  assert.equal(valid.invalid.count + valid.different.count + valid.missing.count, 0);
-  assert.equal(new Set(valid.purged.keys).size, valid.purged.count);
-  assert.deepEqual(await compareWork(s, collections[1], itemId), { ...valid, hosted: 0 });
+  const versions = [...s.tables.projectHostedRecords.values()].filter(
+    row => row.kind === 'issue' && row.key === itemId && row.purged === done.operationId,
+  );
+  assert.ok(versions.length > 1);
+  const read = version =>
+    hostedRecords.readHostedRecord(s.ctx, {
+      projectId: s.projectId,
+      actor: 'owner',
+      kind: 'issue',
+      key: itemId,
+      version,
+    });
+  for (const row of versions)
+    await assert.rejects(
+      read(row.version),
+      error =>
+        code('PLANNING_ITEM_PURGED')(error) &&
+        error.recovery.itemId === itemId &&
+        error.recovery.purgeOperationId === done.operationId,
+    );
   const recorded = [
     ...s.tables.projectWorkEvents.values(),
     ...s.tables.projectHostedRecordBodies.values(),
@@ -292,62 +275,13 @@ test('Item version comparisons require the recorded purge request and a redacted
   assert.ok(recorded, 'the purge has a canonical command');
   const request = recorded.request;
   recorded.request = '0'.repeat(64);
-  for (const collection of collections) {
-    const invalid = await compareWork(s, collection, itemId);
-    assert.deepEqual(invalid.purged, { count: 0, keys: [] });
-    assert.equal(invalid.invalid.count, valid.purged.count);
-  }
+  for (const row of versions) await assert.rejects(read(row.version), code('SOURCE_UNAVAILABLE'));
   recorded.request = request;
-  const row = [...s.tables.projectPlanningRecords.values(), ...s.tables.projectWorkDataRecords.values()].find(
-    row => row.collection === 'planningVersions' && valid.purged.keys.includes(row.key),
-  );
-  assert.ok(row, 'the historical version is still in the comparison index');
-  row.value = JSON.stringify({ ...JSON.parse(row.value), body: 'Unredacted synthetic text' });
-  for (const collection of collections) {
-    const invalid = await compareWork(s, collection, itemId);
-    assert.deepEqual(invalid.invalid, { count: 1, keys: [row.key] });
-    assert.equal(invalid.purged.count, valid.purged.count - 1);
-  }
-});
-
-test('a different Item purge does not vouch for redacted versions or inline comments', async t => {
-  const { s, itemId, keep } = await deletedItem(t, { records: true, intentBorn: false, useAlias: false });
-  const commentId = randomUUID();
-  await s.send({
-    action: 'comment-planning-item',
-    operationId: commentId,
-    itemId: keep.itemId,
-    authorLabel: 'agent',
-    text: 'Kept comment',
-  });
-  const done = await executor(s).run(itemId, randomUUID());
-  const valid = await compareWork(s, 'readComments');
-  assert.ok(valid.purged.count > 0, 'real purged comments count');
-  assert.equal(valid.invalid.count, 0);
-  for (const [kind, key, source, read] of [
-    ['issue', keep.itemId, 'planningVersions', 'readVersions'],
-    ['comment', commentId, 'planningComments', 'readComments'],
-  ]) {
-    const head = await hostedRecords.recordHead(s.ctx, s.projectId, kind, key);
-    assert.ok(head);
-    const record = s.tables.projectHostedRecords.get(head.recordId);
-    record.purged = done.operationId;
-    const row = [
-      ...s.tables.projectPlanningRecords.values(),
-      ...s.tables.projectWorkDataRecords.values(),
-    ].find(row => row.collection === source && row.parent === keep.itemId);
-    assert.ok(row);
-    row.value = JSON.stringify(purgedIndexValue(source, JSON.parse(row.value), done.operationId));
-    if (kind === 'comment') {
-      assert.ok(head.value, 'the comment head has an inline value');
-      head.value = row.value;
-    }
-    for (const collection of [source, read]) {
-      const proof = await compareWork(s, collection, kind === 'issue' ? keep.itemId : undefined);
-      assert.deepEqual(proof.invalid, { count: 1, keys: [row.key] });
-      assert.ok(!proof.purged.keys.includes(row.key), 'the spoofed purge is invalid');
-    }
-  }
+  const command = JSON.parse(recorded.command);
+  command.operationId = randomUUID();
+  recorded.command = JSON.stringify(command);
+  recorded.request = metadataRequest(command);
+  for (const row of versions) await assert.rejects(read(row.version), code('SOURCE_UNAVAILABLE'));
 });
 
 test('a purge stopped mid-way never reports done and resumes, also after an index rebuild', async t => {
@@ -700,7 +634,7 @@ test('a pre-upgrade terminal check checkpoint cannot finish over a live discussi
 
 test('records mode (work store primary): a purge of an Item with an alias-written comment leaves the words in no store', async t => {
   const { s, itemId, keep, alias } = await deletedItem(t, { records: true, intentBorn: false });
-  assert.equal(s.tables.hostedProjects.get(s.projectId).workStore, 'records');
+  assert.ok(s.tables.hostedProjects.get(s.projectId).workStoreEventWindows.length > 0);
   const stored = [...s.tables.projectHostedRecords.values()].filter(row => row.kind === 'comment');
   assert.ok(stored.length >= 3, 'the store holds the comments and the note');
   // Every Issue is also an Intent, and the store keeps that Intent's versions (the Item's Intent copy).
@@ -1321,7 +1255,7 @@ async function backfillArchive(s, ctx, beforePage = () => {}) {
 async function purgeArchiveFixture(t, { history, indexed }) {
   const { s, itemId } = await deletedItem(t, { records: true, useAlias: false });
   const r2 = storage(t);
-  await s.ctx.db.patch(s.projectId, { workStoreWriters: ['planning', 'note'] });
+  beginRetainedWork(s);
   const revision = journalRevision(s);
   for (let offset = 0; offset < 3; offset++)
     await s.send(
@@ -2046,7 +1980,7 @@ test('a lost fragment PUT and codec change leave no hidden bytes from a later-pu
 });
 
 async function archiveOneNote(s, r2, itemId) {
-  await s.ctx.db.patch(s.projectId, { workStoreWriters: ['planning', 'note'] });
+  beginRetainedWork(s);
   await s.send(
     { action: 'note', kind: 'comment', intentId: itemId, text: `Archived ${SECRET}` },
     journalRevision(s),
@@ -2079,7 +2013,7 @@ test('a pending legacy publication adds its index entry and invalidates an index
   const pages = await backfillArchive(s, executor(s).ctx);
   assert.ok(pages.length >= 3, 'archive coverage crosses a bounded event page and its next phase');
   assert.ok(pages.every(page => page.segments <= 16));
-  await s.ctx.db.patch(s.projectId, { workStoreWriters: ['planning', 'note'] });
+  beginRetainedWork(s);
   await s.send(
     { action: 'note', kind: 'comment', intentId: itemId, text: `Archived ${SECRET}` },
     journalRevision(s),
@@ -2226,7 +2160,7 @@ test('the tombstone retries an appended archive tail and lists a relocated comma
   const [first] = await fillArchivePage(s, r2, keep, 1);
   const operationId = randomUUID();
   let appended;
-  await s.ctx.db.patch(s.projectId, { workStoreWriters: ['planning', 'note'] });
+  beginRetainedWork(s);
   await s.send(
     { action: 'note', kind: 'comment', intentId: itemId, text: `Archived ${SECRET}` },
     journalRevision(s),

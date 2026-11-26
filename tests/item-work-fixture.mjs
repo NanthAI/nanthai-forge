@@ -307,8 +307,6 @@ export async function itemWorkFixture({
         s.ctx,
         { _id: auth.projectId },
         hostedRecordValue(workStoreRecord('planningVersions', snapshot)),
-        undefined,
-        false,
       );
       snapshots.push(snapshot);
       await s.ctx.db.insert('projectPlanningRecords', {
@@ -337,8 +335,6 @@ export async function itemWorkFixture({
         s.ctx,
         { _id: auth.projectId },
         hostedRecordValue(workStoreRecord('planningComments', comment)),
-        undefined,
-        false,
       );
     }
   };

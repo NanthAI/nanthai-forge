@@ -81,12 +81,6 @@ import { executeHostedPolicy } from './hosted-agent-policy.js';
 import { executeHostedPlanning, markPlanningStarted, resolvePlanningId } from './hosted-agent-planning.js';
 import { isPlanningPrefix } from './planning-id.js';
 import { planningIssueArguments } from './planning-issue-arguments.js';
-import {
-  agentMetricsRead,
-  executeHostedMetrics,
-  METRICS_DEADLINE_MS,
-  metricsDeadline,
-} from './hosted-agent-metrics.js';
 import { laneLiveness, readLaneEntry, recordLane, withLaneCommand } from './lane-registry.js';
 import { convexLaneStates, markerIdentity, type LaneHousekeeping } from './lane-prune.js';
 import { shareDependencies, installScriptsNotice } from './shared-dependencies.js';
@@ -1011,12 +1005,14 @@ export class HostedAgentTransport {
     signal?: AbortSignal,
   ): Promise<HostedAgentResponse> {
     // Issue e32cb0e7: capability discovery shares the metrics budget.
-    if (requestedAction === 'metrics')
+    if (requestedAction === 'metrics') {
+      const { metricsDeadline } = await import('./hosted-agent-metrics.js');
       return metricsDeadline(
         input,
         () => this.dispatchRequest(requestedAction, input, signal),
         this.metricsDeadlineMs,
       );
+    }
     if (
       [
         'capabilities',
@@ -1147,7 +1143,10 @@ export class HostedAgentTransport {
         );
       }
       // A wide metrics read is refused before capability discovery, so it costs no server call (Issue 686ecdde).
-      if (action === 'metrics') agentMetricsRead(command.data as Parameters<typeof agentMetricsRead>[0]);
+      if (action === 'metrics') {
+        const { agentMetricsRead } = await import('./hosted-agent-metrics.js');
+        agentMetricsRead(command.data as Parameters<typeof agentMetricsRead>[0]);
+      }
       // Policy needs no capability discovery: the server authorizes it, so each command is one call.
       if ((hostedAgentPolicyActions as readonly string[]).includes(action)) {
         const {
@@ -1375,7 +1374,8 @@ export class HostedAgentTransport {
         );
         return this.response(action, planning.operationId, planning.result);
       }
-      if (action === 'metrics')
+      if (action === 'metrics') {
+        const { executeHostedMetrics } = await import('./hosted-agent-metrics.js');
         return this.response(
           action,
           null,
@@ -1391,6 +1391,7 @@ export class HostedAgentTransport {
             this.metricsDeadlineMs,
           ),
         );
+      }
       if (action === 'capabilities') {
         this.defaults = capabilities.agentDefaults;
         return this.response(action, null, {
@@ -2235,8 +2236,8 @@ export class HostedAgentTransport {
   }
   /** Seconds-bound for checkout and dependency sharing after the durable start. */
   startBoundMs = START_COMPLETION_SECONDS * 1000;
-  /** Whole metrics action, capability discovery included (e32cb0e7). */
-  metricsDeadlineMs = METRICS_DEADLINE_MS;
+  /** Optional override for the whole metrics action, including capability discovery (e32cb0e7). */
+  metricsDeadlineMs?: number;
   /** Set when a bounded step was abandoned: the CLI must not wait for it to exit. */
   abandonedStart = false;
   /** Checkout and dependency sharing after the durable start, within the bound. A stall or failure

@@ -19,7 +19,6 @@ import { CUTOVER_CLI_VERSION } from '../src/cutover-version';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { report } from './errors';
-import { bornRecordStore } from './projectWorkStoreFingerprintWrites';
 
 type Birth = {
   operationId: string;
@@ -28,6 +27,12 @@ type Birth = {
   generationId: Id<'projectWorkGenerations'>;
   origin: 'new-project' | 'github-import' | 'make-editable';
 };
+/** Start the retained event window at the verified Work revision. F3 still replays old windows. */
+export const bornRecordStore = (revision: number) => ({
+  workStoreCutoverRevision: revision,
+  workStoreEventWindows: [{ revision, storeFirst: true }],
+});
+
 /** The one seam for a project born under server authority (guarded by
  * tests/born-record-store-guard.test.mjs). A nonempty seed imports its Work before calling this seam. */
 export function serverBirth(previous: SourceAuthority, workRevision: number) {

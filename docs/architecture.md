@@ -833,14 +833,10 @@ records and 500 KiB through the original seed operation. Replaying a committed
 page advances no record. A verified empty Work seed does not run an import page.
 Archived Work uses the same canonical write helpers when it is first initialized.
 
-The P8 bridge can still copy and fully compare the legacy index before recording
-the cutover with all four primary writers. A copy leaves an existing record with
-the same digest alone and reports a different digest without overwriting it.
-Ordinary writes update the retained record and the transactional planning
-projections in one mutation. They no longer maintain migration fingerprints.
-Where a deployment still has live journal-only or dual-mode Work, prepare its
-canonical records and verify them on the preceding release before deploying
-record-store readers.
+Hosted Work has one record format. Ordinary writes update the retained record and
+the transactional planning projections in one mutation. Deployments with legacy
+mode fields or comparison rows use the pinned releases in the
+[P8 runbook](operations/legacy-work-store-mode.md) before applying the current schema.
 
 Primary commands retain their operation, request, actor, time and Work revision
 on their immutable version. Older event rows and the event-window frontier remain

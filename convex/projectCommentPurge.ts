@@ -30,7 +30,6 @@ import { decisionOperationId } from '../src/work-planning-put';
 import { purgedDecisionRequest } from '../src/work-planning-state';
 import { metadataRequest } from '../src/work-metadata';
 import { digest } from '../src/state/hash';
-import { workReadDigest } from './projectWorkStoreDigests';
 import {
   decisionLines,
   decisionVersionValue,
@@ -48,15 +47,7 @@ import { projectPrefix } from './r2Operations';
 import { baseRevision } from './projectPlanningPurgeSelect';
 import { readArchiveCoverage } from './projectPlanningArchiveCoverage';
 import { noStagedMigration } from './projectWorkDetailMigration';
-import {
-  dropFingerprint,
-  fingerprint,
-  indexRecord,
-  indexValue,
-  journalRow,
-  partitionsOf,
-  storeRecord,
-} from './projectPlanningPurgeRedact';
+import { indexRecord, indexValue, journalRow, partitionsOf, storeRecord } from './projectPlanningPurgeRedact';
 
 /** Versions one comment has in the work store (it is written once; a copy or migration may add one). */
 const COMMENT_VERSION_LIMIT = 16;
@@ -528,9 +519,6 @@ async function decisionVersion(ctx: MutationCtx, input: Input, lines: Lines, req
       ...(row.inline === undefined ? {} : { inline: value }),
       digest: digest(value),
       bytes: new TextEncoder().encode(value).length,
-      ...(row.workReadDigest === undefined
-        ? {}
-        : { workReadDigest: workReadDigest(storedRow(JSON.parse(value))) }),
     });
   }
 }
@@ -564,7 +552,6 @@ async function redactComment(ctx: MutationCtx, input: Input, facts?: string) {
   for (const partition of await partitionsOf(ctx, projectId)) {
     await indexRecord(ctx, db, partition, 'events', commentId, operationId, new Map());
     await indexRecord(ctx, db, partition, 'planningComments', commentId, operationId, new Map());
-    await dropFingerprint(ctx, db, partition, fingerprint('planningComments'), commentId);
   }
   // A head stored before heads kept their value reads its version's body, which the purge empties: it gets the
   // tombstone inline instead, from that body, before the body goes.

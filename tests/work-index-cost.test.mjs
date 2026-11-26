@@ -169,7 +169,6 @@ function measure(ctx) {
 
 test('a 50-Item planning timestamp page reads the same bounded bytes with 40 extra versions per Item', async t => {
   const s = await setup(t);
-  await s.ctx.db.patch(s.projectId, { workStore: 'records' });
   const at = '2026-11-23T09:00:00.000Z';
   const items = Array.from({ length: 50 }, (_, i) => ({
     id: `issue-${i}`,
@@ -290,7 +289,7 @@ test('doubled dogfood history retains its index through main moves and increment
     for (let i = 0; i < count; i++) put(collection, String(i), i, { id: String(i), retainedBytes: 4096 });
   }
   const project = s.tables.hostedProjects.get(s.projectId);
-  const { bornRecordStore } = await import(moduleUrl('../convex/projectWorkStoreFingerprintWrites.ts'));
+  const { bornRecordStore } = await import(moduleUrl('../convex/projectHostedBirth.ts'));
   Object.assign(project, bornRecordStore((await s.read()).data.revision));
   const metadata = JSON.parse(generation.metadata);
   Object.assign(metadata.counts, shape);

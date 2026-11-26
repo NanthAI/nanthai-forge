@@ -63,7 +63,7 @@ test('an Intent written in the projection that creates its Item is born bound to
     'a planned Item’s own Intent is bound when the Item is created',
   );
   const stored = (id, bound) =>
-    store.storeIntent(s.ctx, s.projectId, 'owner', intent(id, base), true, undefined, { bound });
+    store.storeIntent(s.ctx, s.projectId, 'owner', intent(id, base), undefined, { bound });
   await stored(item.itemId, true);
   const stranger = randomUUID();
   await stored(stranger, false);
@@ -72,7 +72,7 @@ test('an Intent written in the projection that creates its Item is born bound to
   assert.equal(await marker(stranger), undefined, 'no Item of that id: nothing to bind');
 });
 
-test('legacy copy and status mutations preserve imported attributes before data projections can retire', async t => {
+test('archive seed and status mutations preserve imported attributes before data projections can retire', async t => {
   const id = randomUUID();
   let original;
   const s = await setup(t, true, root => {
@@ -97,11 +97,6 @@ test('legacy copy and status mutations preserve imported attributes before data 
     }),
   );
   s.tables.hostedProjects.get(s.projectId).sourceAuthority = { mode: 'server', epoch: 1 };
-  const copy = () =>
-    store.copy._handler(s.ctx, { projectId: s.projectId, collection: 'intents', cursor: null });
-  const copied = JSON.parse(await copy());
-  assert.equal(copied.copied, 0);
-  assert.equal(copied.same, 2, 'the imported records already match their original Work bytes');
   assert.equal((await recordHead(s.ctx, s.projectId, 'intent', id)).planningItemId, undefined);
   const body = async () => {
     const head = [...s.tables.projectHostedRecordHeads.values()].find(
@@ -132,7 +127,7 @@ test('legacy copy and status mutations preserve imported attributes before data 
   );
   assert.equal(s.tables.projectWorkEvents.size, events);
   for (const row of missing) s.tables.projectWorkDataRecords.set(row._id, row);
-  assert.equal(JSON.parse(await copy()).same, 2, 'copy retry preserves exact immutable versions');
+  await check();
   await s.send({ action: 'intent-status', intentId: id, status: 'completed' });
   assert.equal((await check()).status, 'completed');
   const rows = [...s.tables.projectWorkDataRecords.values()];

@@ -174,7 +174,6 @@ const NOT_CORE = {
   'convex/projectHostedOverlapLanded.ts': 'overlap view of landed Lanes',
   'convex/projectHostedOverlapStore.ts': 'Lane overlap rows written at save',
   'convex/projectHostedProvenance.ts': 'source ownership evidence of composed inputs',
-  'convex/projectHostedRecords.ts': 'immutable record integrity primitives shared by all hosted storage',
   'convex/projectHostedResolutionOrigin.ts': 'conflict resolution Lane lineage',
   'convex/projectHostedRevertNotice.ts': 'notice of a compensating landing',
   'convex/projectHostedSaveStore.ts': 'save rows; a save is not a queue step',

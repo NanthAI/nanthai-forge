@@ -1,0 +1,192 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedRecords.ts": "857e1239aa5d0dddda844e5e15f677b30d52f47c1efa5c3ff169848779820434"
+  },
+  "replay": {
+    "incident": "c0af6cfa",
+    "test": "the first Lane completion tick retires the exact landed work when closing the Lane",
+    "receipt": "fdac4225-b62e-4b9a-b9bf-3b4737635674"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "6527ac84-23f8-4c91-b707-dedd2efb47c1",
+  "review": {
+    "model": "Gemini 4 Neon",
+    "session": "thread:delegated-task:command%3Amcp%3Ad0cf0a1e-2d2e-4a8a-aadd-711703fd17af%3Adelegate-task%3A22feb1f3-d1a1-466b-8402-cfae33815a9a",
+    "receipt": "f73394e0-500a-4e40-92b6-d29f30d2dd6c"
+  },
+  "exercised": {
+    "convex/projectHostedRecords.ts": {
+      "executed": [
+        "hostedRecordBody",
+        "hostedWriteProject",
+        "readHostedRecord",
+        "recordHead",
+        "recordVersion",
+        "requireWriteEpoch",
+        "writeHostedRecord"
+      ],
+      "digest": "709a178b373e52e61aff9b72a235c84103c7366fc2e3fad921e021c206646702",
+      "units": [
+        [
+          "accessibleProject",
+          "50a4d4f1047573513f361192189b40078a2daa64c945e440ac80ed1a45c7d270"
+        ],
+        [
+          "activeProject",
+          "d18cc6b641cd45a0e474d0afe7700101c46cef8057b70e172637d1e1d30d2be9"
+        ],
+        [
+          "commentPurged",
+          "199f1b1a25bd838cc69931d61d4cc9d45c345bf49b0ed51b378c798e5d57fa52"
+        ],
+        [
+          "digest",
+          "5f605f8606bb3242a28c6a44a95e70e8b39f3555b7f0838c11f4e606795a3e50"
+        ],
+        [
+          "effectiveLifecycleRecord",
+          "5d2aa4d0f56eda5e19c998567e8d04894d03682f3cfc17ed98ea97825229c456"
+        ],
+        [
+          "hostedRecordBody",
+          "24aa3c43b61da3b4626cecbd3bb1c0cbe84b0d11ab7e09f77707ff673107cb25"
+        ],
+        [
+          "hostedRecordIndex",
+          "e2c8aa15820c0e96d32f536771daea732d8aa99f4c9311867957e3bae5715816"
+        ],
+        [
+          "hostedRecordPage",
+          "a0b000e0bcf3c93fd202e58173af587d9dc9a3f2c252f21526e3159dae9d2fa5"
+        ],
+        [
+          "hostedRecordValue",
+          "9016248df4a8244dbc4b3bcacef2203f9c3039ad09608ce9ed75b135826b294f"
+        ],
+        [
+          "hostedWriteProject",
+          "bd14ce67076ae7af4b92a6d861adc85ba6345f5bdca6b1ff1aae024435c8fb15"
+        ],
+        [
+          "independentIntentItem",
+          "ea39bba4b8eac7f80db77e985eb0fd3a80b5728aa906b476c4c9a4dc69407804"
+        ],
+        [
+          "indexedSaveStatus",
+          "f0ad20d595568954768cf193761345342b21c38a0ab5176d0edeeef9ee14ac54"
+        ],
+        [
+          "invariant",
+          "a25036d770aae805d10bdb41ade261044ed7f7ba6fbbf3ccd57a32c56a3d4c20"
+        ],
+        [
+          "isAgentSlug",
+          "10a2e0a8f1e541775fd45b2d311b3460b055098ac2de0dd4e143e060fb67a26f"
+        ],
+        [
+          "journalBody",
+          "df05e22ede6698a58df0a2ef6703bc966cf654b127052777c6640b2936213e8a"
+        ],
+        [
+          "journalDependency",
+          "8169b7c6c616adfea02cc084ddd82a997ad5f8dac65a3811d4700b7ae519ffdc"
+        ],
+        [
+          "journalGraceMs",
+          "758990876e92c6649feac00852a94edf3fc9ee7352aebe776fa117dfef0abdb2"
+        ],
+        [
+          "journalRecord",
+          "03aa3e2f32acc8dd0a2f73dabf4b8a2246dca5c7394b7c8de151f900f4453903"
+        ],
+        [
+          "lifecycleGuard",
+          "8b6a4ecbfa4f4c21e6ab68c55749cb051f8784a52cd8e57a05383f220da639c6"
+        ],
+        [
+          "loadedJournalRows",
+          "152261c729a4ee43286873c34343b740189a5d99fcf52b6e4013fd0b02f93f25"
+        ],
+        [
+          "materializeLifecycleLane",
+          "f0d1467442365b7a093a7419e0e0aec9ab02077759d024c84199f8040bdc6d36"
+        ],
+        [
+          "planLaneItem",
+          "2b0da82c78a0a75f06b1aaaa1227c0b70faecd200d0c001f231325a86aec78f4"
+        ],
+        [
+          "planningPurged",
+          "1b4be65f13866614c9611208d9ecd4769a0cb3b691465d3a1da4910c5cc2ce35"
+        ],
+        [
+          "purgeOwnsIntent",
+          "bd1cc06137006b731cb509af640cce2195026cd7bfd246d5e6bbca00a2b4e2f7"
+        ],
+        [
+          "readHostedIntentLabel",
+          "5e8224a00ecdfa28ee7f26ab63e6b8d502242d21666de94e49055bbaee0fd133"
+        ],
+        [
+          "readHostedRecord",
+          "229ba42e438b2ec4fbfb72f221cd88901e04f40a8be4398d09f228181cb6b486"
+        ],
+        [
+          "readyJournalRecord",
+          "e04fa0b7de3aaac8efcc62be0ce17f7b90fcbe96d433edd9b960e266fb62fc75"
+        ],
+        [
+          "recordHead",
+          "fb80d12b7fe83100ff27bf6da4828b1bc9a75d790063f9171dd27690638ba029"
+        ],
+        [
+          "recordVersion",
+          "62ac03c00e9e6aaf708ec3807eb67edf72f1aec0a96bead499cbcea200f452b3"
+        ],
+        [
+          "requireWriteEpoch",
+          "abf09b15427fb4cbd077850322af923c3e63e0f9be41e966e44639e3bf088244"
+        ],
+        [
+          "resumeSaveHeadBackfill",
+          "332fac6c04f1a85c9a35b6eab0f52237606d89754d45f38c4975cbf686f18200"
+        ],
+        [
+          "saveHeadFact",
+          "d1a624353d37552742f523a06cb3c02b75aceb26e531de2e06daf0ba30c2f09a"
+        ],
+        [
+          "sourceAuthority",
+          "eb32e73637d57e614cf4e6336ef9cc7e7e91e97205dc92858eedf675be78c60e"
+        ],
+        [
+          "touchLifecycleIntent",
+          "cc2ed837ba96114cd5a5abbe7c93beb79295ad473ce56e0086546838e0d1888b"
+        ],
+        [
+          "trackHostedOverlapLane",
+          "8988ace02932c75108e3f25d7b7a12fd74059e6ab2fedb4e7a97a6f07171a09b"
+        ],
+        [
+          "verifiedPurgedRecord",
+          "58a8c74fb31f6a5a160811916ee319b1bfa1c2c640ed3e3a0480761c345f8429"
+        ],
+        [
+          "visibleLifecycleRecord",
+          "8169317650f53951d0fe0abbfbcfabd18958f14ad6500fdb8b004490340b1519"
+        ],
+        [
+          "wakeJournal",
+          "149f92a33b4cbd70d79f2c31f9dd52de2837cccd64a83d7663ef0d5c1d4f673f"
+        ],
+        [
+          "writeHostedRecord",
+          "5f95ab7d6e199d25f66f3790dfe3084674fce1ad307d4ad3ed950b30444f0dad"
+        ]
+      ],
+      "shell": "ad3ca2314685b2e0a5f023c5e8289638e975affa7a229955f4653cafa6669e11"
+    }
+  }
+}

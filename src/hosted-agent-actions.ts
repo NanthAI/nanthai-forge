@@ -11,7 +11,6 @@ import { executeHostedFinish } from './hosted-agent-finish.js';
 import { stoppedLanding, stoppedLandingResubmit } from './hosted-agent-finish-result.js';
 import { executeHostedWithdraw } from './hosted-agent-withdraw.js';
 import { settleTurnWork } from './agent-turn-work.js';
-import { executeHostedMetrics } from './hosted-agent-metrics.js';
 import { isStandardForgeCheck } from './standard-check.js';
 import { isMachineRunner, machineRunnerDescription } from './hosted-machine-runner.js';
 import { checkLogsField, publicLogsNotice } from './runner-visibility.js';
@@ -534,7 +533,10 @@ export async function executeHostedAgent(
     return recovered;
   }
 
-  if (action === 'metrics') return executeHostedMetrics(session, input);
+  if (action === 'metrics') {
+    const { executeHostedMetrics } = await import('./hosted-agent-metrics.js');
+    return executeHostedMetrics(session, input);
+  }
   const operationId = session.journal.operationId,
     epoch = session.capabilities.authority.epoch;
   if (action === 'tests' || action === 'confirm-tests') {

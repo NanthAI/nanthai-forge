@@ -110,8 +110,7 @@ async function writeRows(
     invariant(workStoreSources.includes(row.collection), 'INVALID_WORK_BACKUP', 'Unknown Work collection.');
     const value: unknown = JSON.parse(row.value);
     if (row.collection === 'intents') {
-      const result = await storeIntent(ctx, projectId, owner, value, true, undefined, {
-        migrationDigests: false,
+      const result = await storeIntent(ctx, projectId, owner, value, undefined, {
         bound: row.bound === true,
       });
       invariant(
@@ -121,13 +120,7 @@ async function writeRows(
       );
     } else {
       const encoded = hostedRecordValue(workStoreRecord(row.collection, value));
-      const result = await storeVersion(
-        ctx,
-        { _id: projectId, workStore: 'records' },
-        encoded,
-        undefined,
-        false,
-      );
+      const result = await storeVersion(ctx, { _id: projectId }, encoded);
       invariant(
         result !== 'different',
         'WORK_OPERATION_CHANGED',

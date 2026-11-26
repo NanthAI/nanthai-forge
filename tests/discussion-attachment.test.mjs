@@ -34,7 +34,6 @@ async function fixture(t, { bytes = Buffer.from('<script>window.active = true</s
     name: 'synthetic',
     revision: 1,
     visibility: 'public',
-    workStore: 'records',
     work: { generationId: 'current', backupId: 'backup', operationId: 'op', initialRevision: 1, revision: 1 },
   });
   s.tables.hostedProjects.set(project._id, project);
@@ -317,17 +316,12 @@ test('revocation while bytes are in flight prevents delivery and future storage 
 });
 
 test('a permanent Item tombstone blocks downloads while comment and attachment rows are retained', async t => {
-  for (const workStore of ['records', 'journal']) {
-    await t.test(workStore, async t => {
-      const f = await fixture(t);
-      if (workStore === 'journal') delete f.project.workStore;
-      f.setItem({ status: 'deleted' });
-      assert.equal((await f.download()).status, 200, 'A reversible deletion keeps member access');
-      f.setItem({ status: 'deleted', purged: { operationId: 'purge' } });
-      await expectError(await f.download(), 404, 'NOT_FOUND');
-      assert.equal(f.fake.requests.length, 1);
-    });
-  }
+  const f = await fixture(t);
+  f.setItem({ status: 'deleted' });
+  assert.equal((await f.download()).status, 200, 'A reversible deletion keeps member access');
+  f.setItem({ status: 'deleted', purged: { operationId: 'purge' } });
+  await expectError(await f.download(), 404, 'NOT_FOUND');
+  assert.equal(f.fake.requests.length, 1);
 });
 
 test('HEAD does not resolve metadata or fetch an attachment', async t => {
@@ -372,7 +366,6 @@ test('R2 failures, short and long reads, and wrong bytes yield only structured e
 
 test('discussion uses the canonical comment independently of its historical generation', async t => {
   const f = await fixture(t);
-  delete f.project.workStore;
   assert.equal((await f.download({ viewer: 'visitor' })).status, 200);
   f.s.tables.projectWorkDataRecords.delete('legacy-comment');
   assert.equal((await f.download({ viewer: 'visitor' })).status, 200);

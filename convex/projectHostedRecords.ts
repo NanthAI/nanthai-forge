@@ -2,7 +2,6 @@
 // Copyright 2026 Ferdinando Valsecchi
 import { readyJournalRecord, wakeJournal, journalGraceMs } from './projectJournalWake';
 import { journalDependency, journalRecord, loadedJournalRows, journalBody } from './projectJournalStore';
-import { fingerprintHostedIntent } from './projectWorkStoreFingerprintWrites';
 import { trackHostedOverlapLane } from './projectHostedOverlapStore';
 import { planLaneItem } from './projectPlanLaneMarks';
 import { purgeOwnsIntent } from './projectItemPurgeFence';
@@ -302,8 +301,6 @@ export async function writeHostedRecord(
     await readyJournalRecord(ctx, input.projectId, head.recordId, head.kind);
     await ctx.db.replace(head._id, pointer);
   } else await ctx.db.insert('projectHostedRecordHeads', pointer);
-  if (record.kind === 'intent')
-    await fingerprintHostedIntent(ctx, project, ref, head?._creationTime ?? Date.now(), indexed.status);
   if (record.kind === 'lane') {
     if (['completed', 'abandoned'].includes(record.state))
       await wakeJournal(

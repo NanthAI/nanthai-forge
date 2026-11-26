@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { setup, actions, work } from './hosted-planning-fixture.mjs';
+import { setup, actions, work, beginRetainedWork } from './hosted-planning-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { trackReadSets } from './hosted-read-set.mjs';
 import { speedBudgets } from '../dist/speed-budgets.js';
@@ -126,7 +126,6 @@ test('hosted note contention and reactive read-set measurement', async t => {
 test('flip 5 re-run meter: Work queries one tab re-runs per planning write', async t => {
   const s = await setup(t);
   // Stage the canonical records with the journal writes before switching the reader.
-  await s.ctx.db.patch(s.projectId, { workStore: 'dual' });
   const initial = await s.read(),
     intentId = randomUUID();
   await actions.command._handler(s.ctx, {
@@ -201,9 +200,8 @@ test('flip 5 re-run meter: Work queries one tab re-runs per planning write', asy
   assert.deepEqual(measured, expected);
   // S4: with the store reader on, the Issue list and detail read record heads; the dual write adds no
   // re-run (an Issue head, a comment head and an Intent version sit in separate kinds).
-  s.tables.hostedProjects.get(s.projectId).workStore = 'records';
   assert.deepEqual(await meter({ expectedVersion: 2, status: 'open' }), expected);
-  s.tables.hostedProjects.get(s.projectId).workStoreWriters = ['note', 'intent', 'intent-status', 'planning'];
+  beginRetainedWork(s);
   s.tables.hostedProjects.get(s.projectId).workStoreCutoverRevision = (await s.read()).data.revision;
   assert.deepEqual(
     await meter({ expectedVersion: 3, status: 'closed' }),
@@ -317,101 +315,3 @@ test('planning puts in the revision-free mutation: unrelated writes never refuse
 // Part 9: completing cutover removes disposable source/target fingerprints from ordinary writes.
 // An unrelated older event writer remains in each bridge scenario. Canonical Work
 // commands never maintain comparison rows after the reader cutover.
-test('primary Work writes retire migration I/O without changing item versions or tab reads', async t => {
-  const { workRecordWriter } = await import(moduleUrl('../convex/projectWorkRecordWriter.ts'));
-  const { meterWorkIO } = await import('./hosted-read-set.mjs');
-  const store = await import(moduleUrl('../convex/projectWorkStore.ts'));
-  const { writeHostedRecord } = await import(moduleUrl('../convex/projectHostedRecords.ts'));
-  const writers = ['note', 'intent', 'intent-status', 'planning'];
-  const measure = async primary => {
-    const s = await setup(t);
-    const project = s.tables.hostedProjects.get(s.projectId);
-    project.sourceAuthority = { mode: 'server', epoch: 1 };
-    await store.setMode._handler(s.ctx, { projectId: s.projectId, mode: 'records', writers });
-    const base = (await s.read()).sourceHead;
-    const intentId = randomUUID(),
-      issue = s.item();
-    const send = (command, operationId = command.operationId ?? randomUUID()) =>
-      mutations.command._handler(s.ctx, {
-        projectId: s.projectId,
-        operationId,
-        command: JSON.stringify(command),
-      });
-    await send({ action: 'intent', outcome: 'I/O fixture', constraints: '', base }, intentId);
-    await send(issue);
-    const io = meterWorkIO(s.ctx, s.tables);
-    const costs = {};
-    for (const [name, command] of [
-      ['note', { action: 'note', intentId, text: 'A retained note', kind: 'comment' }],
-      ['intent', { action: 'intent', outcome: 'Next fixture', constraints: '', base }],
-      ['status', { action: 'intent-status', intentId, status: 'completed' }],
-      ['put', { ...issue, operationId: randomUUID(), expectedVersion: 1, status: 'closed' }],
-      [
-        'comment',
-        {
-          action: 'comment-planning-item',
-          operationId: randomUUID(),
-          itemId: issue.itemId,
-          text: 'A retained comment',
-          authorLabel: '',
-        },
-      ],
-    ]) {
-      // Every measured command is primary, including in the migration-maintenance baseline.
-      project.workStoreWriters = primary
-        ? writers
-        : writers.filter(writer => writer !== (name === 'intent' ? 'note' : 'intent'));
-      costs[name] = await io.cost(() => send(command));
-    }
-    project.workStoreWriters = primary ? writers : writers.filter(writer => writer !== 'note');
-    costs.hostedIntent = await io.cost(() =>
-      writeHostedRecord(workRecordWriter(s.ctx), {
-        projectId: s.projectId,
-        actor: 'owner',
-        authorityEpoch: 1,
-        expectedVersion: null,
-        record: {
-          kind: 'intent',
-          id: randomUUID(),
-          version: 0,
-          at: '2026-01-01T00:00:00.000Z',
-          creatorAccountId: 'owner',
-          outcome: 'Pinned fixture',
-          constraints: '',
-          status: 'active',
-          assigneeAccountIds: [],
-          base: { head: base, receiptId: 'fixture-receipt' },
-        },
-      }),
-    );
-    io.restore();
-    return costs;
-  };
-  const before = await measure(false),
-    after = await measure(true);
-  for (const name of Object.keys(after)) {
-    assert.equal(after[name].migrationWrites, 0, `${name}: primary writes no migration metadata`);
-    if (name !== 'hostedIntent') {
-      assert.equal(before[name].migrationWrites, 0, `${name}: bridge writes no migration metadata`);
-      continue;
-    }
-    assert.ok(before[name].migrationWrites > 0, `${name}: the retained queue bridge maintains old metadata`);
-    for (const dimension of ['readDocuments', 'readBytes', 'writeDocuments', 'writeBytes'])
-      assert.ok(
-        after[name][dimension] < before[name][dimension],
-        JSON.stringify({ name, dimension, before: before[name], after: after[name] }),
-      );
-  }
-  const measured = {
-    planningPrimaryReadBytes: Math.max(...Object.values(after).map(cost => cost.readBytes)),
-    planningPrimaryWriteBytes: Math.max(...Object.values(after).map(cost => cost.writeBytes)),
-    planningMigrationWrites: Math.max(...Object.values(after).map(cost => cost.migrationWrites)),
-  };
-  console.log(JSON.stringify({ primaryWorkIO: { before, after } }));
-  assert.deepEqual(
-    judgeCosts(speedBudgets.costs, speedBudgets.costGuard, 'planning-fixture', measured)
-      .filter(v => v.metric in measured && v.status !== 'pass')
-      .map(v => v.message),
-    [],
-  );
-});

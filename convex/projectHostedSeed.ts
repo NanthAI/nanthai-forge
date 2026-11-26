@@ -21,14 +21,13 @@ import {
 } from '../src/hosted-seed-protocol';
 import { invariant } from '../src/errors';
 import { report } from './errors';
-import { serverBirth } from './projectHostedBirth';
+import { bornRecordStore, serverBirth } from './projectHostedBirth';
 import { findObject, findObjects, findStoredObject, findStoredObjects } from './projectObjectFind';
 import { indexEntry } from './projectWorkIndexFields';
 import { HOSTED_WORK_INDEX_FORMAT } from '../src/work-hosted-summary';
 import { seedRow as rowFor } from './projectHostedSeedObjects';
 import { commitCatalogSeedPage, replaySeedPage } from './projectHostedSeedPages';
 import { abortSeedWork } from './projectHostedSeedWorkStore';
-import { bornRecordStore } from './projectWorkStoreFingerprintWrites';
 
 const identity = { projectId: v.id('hostedProjects'), operationId: v.string() };
 async function caller(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>) {

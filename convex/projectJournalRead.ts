@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-import { journalWorkStoreCompare } from './projectWorkStore';
 import { journalCoordinationFeed, journalCoordinationRecent } from './projectCoordination';
 import { journalCoordinationRelated, journalCoordinationInbox } from './projectCoordinationReads';
 import { journalWorkRecordsRead } from './projectWorkIndex';
@@ -84,7 +83,6 @@ async function journalResult(
     return canonicalPayload(await journalCoordinationInbox(selected, original));
   if (input.query === 'projectCoordinationReads:related')
     return canonicalPayload(await journalCoordinationRelated(selected, original));
-  if (input.query === 'projectWorkStore:compare') return journalWorkStoreCompare(selected, original);
   if (input.query === 'projectWorkIndex:records')
     return canonicalPayload(await journalWorkRecordsRead(selected, original));
   if (input.query === 'projectHostedLaneHistory:read') return journalLaneHistoryRead(selected, original);

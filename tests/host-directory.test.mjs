@@ -364,8 +364,8 @@ test('legacy native-owner and existing server projects retain their original aut
     });
     // The Work store is selected even when the source remains native-owner.
     assert.deepEqual(
-      [project.workStore, project.workStoreWriters, project.workStoreCutoverRevision],
-      ['records', ['note', 'intent', 'intent-status', 'planning'], 0],
+      [project.workStoreCutoverRevision, project.workStoreEventWindows],
+      [0, [{ revision: 0, storeFirst: true }]],
     );
     if (server) assert.equal((await exchange.current()).head, JSON.parse(selection).head);
     else

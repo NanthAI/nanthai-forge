@@ -271,7 +271,6 @@ async function evictedPurge(f, itemId) {
     {},
   );
   f.patch('hostedProjects', f.projectId, {
-    workStore: 'records',
     itemPurges: Array.from({ length: 20 }, (_, i) => ({
       operationId: randomUUID(),
       itemId: randomUUID(),

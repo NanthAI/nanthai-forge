@@ -260,7 +260,7 @@ test('record rebuild replays purged rows as their redacted commands and keeps th
   const source = f.s.tables.hostedProjects.get('project');
   // This replay fixture covers the original event table. The retained-event
   // purge executor exercises the canonical ledger separately.
-  source.workStoreWriters = [];
+  source.workStoreEventWindows = [];
   source.workStoreEventWindows = [];
   delete source.workStoreCutoverRevision;
   const secret = 'walrus-purge-fixture';

@@ -36,8 +36,8 @@ async function fixture(t) {
   const s = await setup(t);
   Object.assign(s.tables.hostedProjects.get(s.projectId), {
     sourceAuthority: { mode: 'server', epoch: 1 },
-    workStore: 'records',
-    workStoreWriters: ['note', 'intent', 'intent-status', 'planning'],
+    workStoreCutoverRevision: 0,
+    workStoreEventWindows: [{ revision: 0, storeFirst: true }],
   });
   const calls = [];
   const invoke = async (name, input) => {
@@ -224,14 +224,11 @@ test('large imported bodies still deduplicate through primary records and chunke
   const source = [row('large/body', { body: 'historical text '.repeat(8000) })];
   const first = await s.run(source, true, randomUUID());
   assert.equal(first.result.created.length, 1);
-  for (const mode of ['records', 'journal']) {
-    s.tables.hostedProjects.get(s.projectId).workStore = mode;
-    const preview = await s.run(source, false, randomUUID());
-    assert.equal(preview.result.rows[0].action, 'skip');
-    const again = await s.run(source, true, randomUUID());
-    assert.deepEqual(again.result.created, []);
-    assert.deepEqual(again.result.skipped, first.result.created);
-  }
+  const preview = await s.run(source, false, randomUUID());
+  assert.equal(preview.result.rows[0].action, 'skip');
+  const again = await s.run(source, true, randomUUID());
+  assert.deepEqual(again.result.created, []);
+  assert.deepEqual(again.result.skipped, first.result.created);
 });
 
 test('a lost apply reply reconciles the committed page under its original operation without repeating effects', async t => {

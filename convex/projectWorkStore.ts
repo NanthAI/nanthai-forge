@@ -1,34 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import { readyJournalRecord } from './projectJournalWake';
-import { JournalNeeded, journalPageProtocol, journalReadReply } from './projectJournalStore';
-import { splitRecordTable } from './projectWorkRecordTables';
 import {
   eventDocument,
   findWorkEvent,
   type WorkProvenance,
   type StoredWorkEvent,
 } from './projectWorkEventStore';
-// Flip 5 S1 and S2 (Issue 0695ab24): copy the journal index's Issues, comments and notes into the hosted
-// record store in pages, compare them read-only and choose primary writers per command.
-// Reader and writer flags are independent; retained versions own provenance when a writer freezes its journal.
-// Intents are mutable records: the journal owns a copied Intent until a hosted Lane pins its execution
-// (a base with a receipt); from then on hosted paths own it and the copy, compare and dual write leave it.
-import {
-  fingerprintSource,
-  fingerprintHead,
-  fingerprintCoverage,
-  workReadDigest,
-} from './projectWorkStoreDigests';
-import { workProject } from './projectWorkHead';
-import { primaryWriters } from './projectWorkStoreFingerprintWrites';
-import { v } from 'convex/values';
-import { mutation, query, type MutationCtx, type QueryCtx } from './cliServer';
+import type { MutationCtx } from './cliServer';
 import type { Doc, Id } from './_generated/dataModel';
-import { invariant, ForgeError } from '../src/errors';
-import { report } from './errors';
-import { accessibleProject } from './projectAuthority';
-import { selectedGeneration, recordPartition, record as indexRecord } from './projectWorkIndexStore';
+import { invariant } from '../src/errors';
 import { independentIntentItem, recordHead, recordVersion, hostedRecordBody } from './projectHostedRecords';
 import { hostedRecordIndex, hostedRecordValue } from '../src/hosted-records';
 import { assembleIndexValue } from '../src/work-index-value';
@@ -38,131 +19,25 @@ import {
   workStoreSources,
   type WorkStoreSource,
 } from '../src/work-store-records';
-import { sameValue, storeReadOf } from './projectWorkStoreReads';
 import { advancePlanningTimes, pinnedPlanningTimes } from './projectPlanningTimes';
 import { retainAuditVersion } from './projectPlanningAuditWindow';
-import { isPlanningUuid } from '../src/planning-id';
-import { purgedIndexValue } from '../src/work-planning-purge';
-import { verifiedPurgedRecord } from './projectWorkPurgedRows';
 
-type WorkStoreProject = Pick<Doc<'hostedProjects'>, '_id' | 'workStore' | 'workStoreCutoverRevision'>;
+type WorkStoreProject = Pick<Doc<'hostedProjects'>, '_id'>;
 const pinRequired =
   'This Item has unproved planning times. Complete the planning-times backfill before advancing its record-store head.';
 
-/** Rows per page: a copy page writes at most 3 documents per row (body, version, head). */
-export const WORK_STORE_PAGE = 100;
-const SAMPLE = 20;
-const copySource = v.union(...workStoreSources.map(name => v.literal(name)));
-const digestSource = v.union(copySource, v.literal('planningItems'), v.literal('issueHeads'));
-/** S4 reader compares: each journal row against what the store reader returns for it. */
-const readCompares = {
-  readItems: 'planningItems',
-  readVersions: 'planningVersions',
-  readComments: 'planningComments',
-  readNotes: 'notes',
-  readLifecycle: 'lifecycle',
-} as const;
-const compareSource = v.union(
-  copySource,
-  v.literal('planningItems'),
-  v.literal('issueHeads'),
-  ...Object.keys(readCompares).map(name => v.literal(name as keyof typeof readCompares)),
-);
-type CompareSource = WorkStoreSource | 'planningItems' | 'issueHeads' | keyof typeof readCompares;
-
-async function ownerStore(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>) {
-  const user = await ctx.auth.getUserIdentity();
-  invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to use your Forge project.');
-  const project = await accessibleProject(ctx, projectId, user.subject);
-  invariant(
-    project.owner === user.subject,
-    'PROJECT_UNAVAILABLE',
-    'The Work store copy and compare are available to the project owner.',
-  );
-  const generation = await selectedGeneration(ctx, project);
-  invariant(generation, 'PROJECT_WORK_INDEX_MISSING', 'Prepare the hosted Work index first.');
-  return { project, partition: recordPartition(generation) };
-}
-
-/** One page of a journal index collection with large values joined from their stored parts. */
-async function indexPage(
-  ctx: QueryCtx | MutationCtx,
-  partition: Id<'projectWorkGenerations'>,
-  collection: string,
-  cursor: string | null,
-  newest?: number,
-  itemId?: string,
-) {
-  const rowsByCollection = ctx.db.query(splitRecordTable(collection));
-  const rowsInOrder = itemId
-    ? rowsByCollection.withIndex('by_generation_and_collection_and_parent_and_position', q =>
-        q.eq('generationId', partition).eq('collection', collection).eq('parent', itemId),
-      )
-    : rowsByCollection.withIndex('by_generation_and_collection_and_position', q =>
-        q.eq('generationId', partition).eq('collection', collection),
-      );
-  const page = await rowsInOrder.order(newest ? 'desc' : 'asc').paginate({
-    cursor,
-    numItems: Math.min(newest ?? WORK_STORE_PAGE, WORK_STORE_PAGE),
-    maximumBytesRead: 4 * 1024 * 1024,
-  });
-  const rows: { key: string; position: number; value: unknown }[] = [];
-  for (const row of page.page) {
-    const header = JSON.parse(row.value);
-    if (!header.payloadKey) {
-      rows.push({ key: row.key, position: row.position, value: header });
-      continue;
-    }
-    const parts: { position: number; value: string }[] = [];
-    for (;;) {
-      const last = parts.at(-1)?.position;
-      const batch = await ctx.db
-        .query(splitRecordTable(`${collection}:payload`))
-        .withIndex('by_generation_and_collection_and_parent_and_position', q => {
-          const parent = q
-            .eq('generationId', partition)
-            .eq('collection', `${collection}:payload`)
-            .eq('parent', header.payloadKey);
-          return last === undefined ? parent : parent.gt('position', last);
-        })
-        .take(100);
-      parts.push(...batch);
-      if (batch.length < 100) break;
-    }
-    rows.push({
-      key: row.key,
-      position: row.position,
-      value: assembleIndexValue(collection, header, parts, {
-        incomplete: () => {
-          throw new ForgeError('INVALID_WORK_JOURNAL', 'Indexed record payload coverage is incomplete.');
-        },
-      }),
-    });
-  }
-  return { rows, cursor: page.isDone ? null : page.continueCursor };
-}
-
-const tally = () => ({ count: 0, keys: [] as string[] });
-const note = (bucket: { count: number; keys: string[] }, key: string) => {
-  bucket.count++;
-  if (bucket.keys.length < SAMPLE) bucket.keys.push(key);
-};
-
 /** Store one record version unless it is already there. A version stored with other bytes is left
- * as it is and reported. Legacy/dual history can arrive out of order before record-store publication. */
+ * as it is and reported to the caller. */
 export async function storeVersion(
   ctx: MutationCtx,
   project: WorkStoreProject,
   encoded: ReturnType<typeof hostedRecordValue>,
   provenance?: WorkProvenance,
-  migrationDigests = true,
   liveProjection = false,
 ): Promise<'copied' | 'same' | 'refreshed' | 'different'> {
   const projectId = project._id;
   const { record, ref } = encoded;
-  const requirePin =
-    (project.workStore === 'records' || project.workStoreCutoverRevision !== undefined) &&
-    record.kind === 'issue';
+  const requirePin = record.kind === 'issue';
   const head = await recordHead(ctx, projectId, record.kind, record.id);
   // A live write beyond the selected head has no immutable version to open.
   // Copies and same-version writes still compare the exact version.
@@ -174,17 +49,7 @@ export async function storeVersion(
   if (old?.purged !== undefined) return 'same';
   if (old && (old.digest !== ref.digest || old.bytes !== ref.bytes)) return 'different';
   if (!old) {
-    await insertVersion(
-      ctx,
-      projectId,
-      encoded,
-      head,
-      provenance,
-      migrationDigests,
-      undefined,
-      requirePin,
-      liveProjection,
-    );
+    await insertVersion(ctx, projectId, encoded, head, provenance, undefined, liveProjection);
     return 'copied';
   }
   // A head stored before heads kept their value (and notes their own status) is brought up to date.
@@ -192,7 +57,7 @@ export async function storeVersion(
     value = inlineValue(encoded);
   if (head?.recordId !== old._id || (head.value === value && head.status === indexed.status)) return 'same';
   // The immutable body digest matched. Rehydrating the same status can keep its proof.
-  // Do not expose an unpinned or status-mismatched refresh in record-store mode.
+  // A refresh must carry the same status and its proved planning times.
   invariant(
     !requirePin || (head.status === indexed.status && pinnedPlanningTimes(head)),
     'WORK_STALE',
@@ -201,7 +66,6 @@ export async function storeVersion(
   await ctx.db.patch(head._id, {
     value,
     status: indexed.status,
-    ...(record.kind === 'issue' && !requirePin && head.planningTimes ? { planningTimes: undefined } : {}),
   });
   if (old.status !== indexed.status) await ctx.db.patch(old._id, { status: indexed.status });
   return 'refreshed';
@@ -227,16 +91,14 @@ async function insertVersion(
   encoded: ReturnType<typeof hostedRecordValue>,
   head: Awaited<ReturnType<typeof recordHead>>,
   provenance?: WorkProvenance,
-  migrationDigests = true,
   planningItemId = head?.planningItemId,
-  requirePin = false,
   liveProjection = false,
 ) {
   const { record, ref, value } = encoded;
   invariant(record.kind !== 'candidate', 'BAD_ARGUMENT', 'Work metadata copies cannot publish a Candidate.');
   const planningTimes =
     record.kind === 'issue' ? advancePlanningTimes(record.item, head ?? undefined) : undefined;
-  if (requirePin) {
+  if (record.kind === 'issue') {
     invariant(
       !head || record.version > head.version,
       'WORK_STALE',
@@ -245,7 +107,7 @@ async function insertVersion(
     invariant(planningTimes, 'WORK_STALE', pinRequired);
     // Historical backlog import uses the ordinary projection too. Its creation
     // must not backfill summaries or add per-Item writes to an import page.
-    if (liveProjection && record.kind === 'issue' && !(record.version === 1 && record.item.imported))
+    if (liveProjection && !(record.version === 1 && record.item.imported))
       await retainAuditVersion(ctx, projectId, head, record.item, provenance?.actor);
   }
   const indexed = { ...hostedRecordIndex(record), version: record.version },
@@ -261,14 +123,7 @@ async function insertVersion(
     ...(provenance ? { inline: value } : {}),
     digest: ref.digest,
     bytes: ref.bytes,
-    ...(!migrationDigests || journalRow(record as unknown as { kind: string }) === undefined
-      ? {}
-      : { workReadDigest: workReadDigest(journalRow(record as unknown as { kind: string })) }),
   });
-  // A missing older version can change a previously incomplete walk without moving this head.
-  // Re-copying that version is then a no-op; only a newly inserted predecessor invalidates it.
-  if (record.kind === 'issue' && head?.planningTimes && record.version < head.version)
-    await ctx.db.patch(head._id, { planningTimes: undefined });
   const inline = inlineValue(encoded),
     pointer = {
       ...identity,
@@ -285,18 +140,16 @@ async function insertVersion(
   }
 }
 
-/** The journal Intent `value` against its stored head. `hosted`: a Lane pinned it, so hosted paths own it.
- * `same`: the head already holds these bytes. With `write`, a missing Intent is stored at version 0 and a
- * changed one as the next version; without it a change is only reported (`different`). */
+/** Retain the Intent projection. A Lane-pinned Intent keeps its hosted bytes.
+ * One live Work operation can append an immutable provenance version of those same bytes. */
 export async function storeIntent(
-  ctx: QueryCtx | MutationCtx,
+  ctx: MutationCtx,
   projectId: Id<'hostedProjects'>,
   owner: string,
   value: unknown,
-  write: boolean,
   provenance?: WorkProvenance,
-  { migrationDigests = true, createdIndependently = false, bound = false } = {},
-): Promise<'copied' | 'same' | 'different' | 'hosted' | 'missing'> {
+  { createdIndependently = false, bound = false } = {},
+): Promise<'copied' | 'same' | 'hosted'> {
   const id = (value as { id: string }).id;
   const head = await recordHead(ctx, projectId, 'intent', id);
   if (head) {
@@ -305,23 +158,21 @@ export async function storeIntent(
     if (!stored || (stored.base?.receiptId && !provenance)) return 'hosted';
     if (stored.base?.receiptId && provenance) {
       const encoded = hostedRecordValue({ ...stored, version: head.version + 1, at: provenance.at });
-      await insertVersion(ctx as MutationCtx, projectId, encoded, head, provenance, migrationDigests);
+      await insertVersion(ctx, projectId, encoded, head, provenance);
       return 'copied';
     }
     const same = hostedRecordValue(workStoreRecord('intents', value, { owner, version: head.version }));
     if (same.ref.digest === row!.digest && same.ref.bytes === row!.bytes && !provenance) return 'same';
-    if (!write) return 'different';
-  } else if (!write) return 'missing';
+  }
   const encoded = hostedRecordValue(
     workStoreRecord('intents', value, { owner, version: head ? head.version + 1 : 0 }),
   );
   await insertVersion(
-    ctx as MutationCtx,
+    ctx,
     projectId,
     encoded,
     head,
     provenance,
-    migrationDigests,
     head ? undefined : createdIndependently ? independentIntentItem : bound ? id : undefined,
   );
   return 'copied';
@@ -368,21 +219,13 @@ export async function storeProjection(
       : header;
     const audit = collection === primary ? provenance : undefined;
     if (collection === 'intents')
-      await storeIntent(ctx, projectId, owner, value, true, audit, {
-        migrationDigests: false,
+      await storeIntent(ctx, projectId, owner, value, audit, {
         createdIndependently: entry.key === createdIntentId,
         // A same-id Intent is bound when its Item is written in this projection.
         bound: items.has(entry.key),
       });
     else {
-      await storeVersion(
-        ctx,
-        project,
-        hostedRecordValue(workStoreRecord(collection, value)),
-        audit,
-        false,
-        true,
-      );
+      await storeVersion(ctx, project, hostedRecordValue(workStoreRecord(collection, value)), audit, true);
     }
   }
   if (!provenance) return null;
@@ -396,407 +239,4 @@ export async function storeProjection(
   if (body.journalSegment)
     return findWorkEvent(ctx, projectId, provenance.operationId, { command: provenance.command });
   return eventDocument(body);
-}
-
-/** P8 bridge. After copying, pinning and comparing Work, mark its retained-event frontier. */
-export const setMode = mutation({
-  args: {
-    projectId: v.id('hostedProjects'),
-    mode: v.union(v.literal('journal'), v.literal('dual'), v.literal('records')),
-    writers: v.optional(
-      v.array(
-        v.union(v.literal('note'), v.literal('intent'), v.literal('intent-status'), v.literal('planning')),
-      ),
-    ),
-  },
-  returns: v.string(),
-  handler: async (ctx, input) => {
-    try {
-      invariant(
-        input.mode === 'records' &&
-          (input.writers === undefined ||
-            (input.writers.length === primaryWriters.length &&
-              primaryWriters.every(writer => input.writers!.includes(writer)))),
-        'BAD_ARGUMENT',
-        'The Work store cutover retains all four record writers.',
-      );
-      const { project } = await ownerStore(ctx, input.projectId);
-      const ready =
-        project.workStore === 'records' &&
-        primaryWriters.every(writer => project.workStoreWriters?.includes(writer));
-      if (!ready) {
-        const current = await workProject(ctx, project);
-        await ctx.db.patch(project._id, {
-          ...(project.workStoreEventWindows?.at(-1)?.storeFirst
-            ? {}
-            : {
-                workStoreEventWindows: [
-                  ...(project.workStoreEventWindows ?? []),
-                  { revision: current.work!.revision, storeFirst: true },
-                ],
-              }),
-          workStore: 'records',
-          workStoreWriters: [...primaryWriters],
-          ...(project.workStoreCutoverRevision === undefined
-            ? { workStoreCutoverRevision: current.work!.revision }
-            : {}),
-        });
-      }
-      return JSON.stringify({
-        mode: input.mode,
-        changed: !ready,
-        writers: primaryWriters,
-      });
-    } catch (error) {
-      return report(error);
-    }
-  },
-});
-
-/** S1: copy one page. A version already stored with the same digest is left alone, so a retry or a
- * second full run copies nothing; one stored with different bytes is reported, never overwritten. A
- * journal-owned Intent is mutable: a changed one is stored as its next version. */
-export const copy = mutation({
-  args: {
-    projectId: v.id('hostedProjects'),
-    collection: digestSource,
-    cursor: v.union(v.string(), v.null()),
-    digestsOnly: v.optional(v.boolean()),
-    newest: v.optional(v.number()),
-    sampleSize: v.optional(v.number()),
-  },
-  returns: v.string(),
-  handler: async (ctx, input) => {
-    try {
-      const { project, partition } = await ownerStore(ctx, input.projectId);
-      if (input.digestsOnly) {
-        let rows: { key: string; position: number; value: unknown }[], cursor: string | null;
-        if (input.collection === 'issueHeads') {
-          const page = await ctx.db
-            .query('projectHostedRecordHeads')
-            .withIndex('by_project_and_kind', q => q.eq('projectId', input.projectId).eq('kind', 'issue'))
-            .order('desc')
-            .paginate({
-              cursor: input.cursor,
-              numItems: Math.min(input.newest ?? 100, 100),
-              maximumBytesRead: 4 * 1024 * 1024,
-            });
-          for (const head of page.page) await fingerprintHead(ctx, input.projectId, partition, head);
-          rows = page.page.map(head => ({ key: head.key, position: head._creationTime, value: null }));
-          cursor = page.isDone ? null : page.continueCursor;
-        } else {
-          const page = await indexPage(ctx, partition, input.collection, input.cursor, input.newest);
-          rows = page.rows;
-          cursor = page.cursor;
-          for (const row of rows) {
-            const encoded = await fingerprintSource(
-              ctx,
-              input.projectId,
-              partition,
-              project.owner,
-              input.collection,
-              row.key,
-              row.position,
-              row.value,
-            );
-            const head = encoded ? await recordHead(ctx, input.projectId, encoded.kind, encoded.id) : null;
-            if (head) await fingerprintHead(ctx, input.projectId, partition, head);
-          }
-        }
-        if (cursor === null || rows.length >= (input.newest ?? Infinity))
-          await fingerprintCoverage(
-            ctx,
-            input.projectId,
-            partition,
-            input.collection,
-            rows.length ? Math.min(...rows.map(row => row.position)) : 0,
-            cursor === null,
-            input.sampleSize ?? input.newest ?? rows.length,
-          );
-        return JSON.stringify({ checked: rows.length, copied: 0, fingerprinted: rows.length, cursor });
-      }
-      invariant(
-        input.collection !== 'planningItems' && input.collection !== 'issueHeads',
-        'BAD_ARGUMENT',
-        'These collections only seed digest metadata.',
-      );
-      const page = await indexPage(ctx, partition, input.collection, input.cursor);
-      let copied = 0,
-        same = 0,
-        refreshed = 0,
-        hosted = 0;
-      const different = tally(),
-        invalid = tally();
-      for (const row of page.rows) {
-        if (input.collection === 'intents') {
-          let stored;
-          try {
-            // A journal-owned Intent the journal has changed since is stored as its next version.
-            stored = await storeIntent(ctx, input.projectId, project.owner, row.value, true);
-          } catch {
-            note(invalid, row.key);
-            continue;
-          }
-          if (stored === 'copied') copied++;
-          else if (stored === 'same') same++;
-          else hosted++;
-          continue;
-        }
-        let encoded;
-        try {
-          encoded = hostedRecordValue(workStoreRecord(input.collection, row.value));
-        } catch {
-          note(invalid, row.key);
-          continue;
-        }
-        const stored = await storeVersion(ctx, project, encoded);
-        if (stored === 'copied') copied++;
-        else if (stored === 'same') same++;
-        else if (stored === 'refreshed') refreshed++;
-        else note(different, `${encoded.record.kind}:${encoded.record.id}:${encoded.record.version}`);
-      }
-      return JSON.stringify({ copied, same, refreshed, hosted, different, invalid, cursor: page.cursor });
-    } catch (error) {
-      return report(error);
-    }
-  },
-});
-
-// A historical Issue marker is not the live tombstone. Requiring the redaction fixed point
-// prevents a forged index marker from bypassing the content check.
-function compareRedacted(collection: string, value: unknown, operationId: string) {
-  const version = value as { purged?: unknown } | null;
-  return (
-    !(
-      (collection === 'planningVersions' || collection === 'planningItems') &&
-      version?.purged !== undefined
-    ) && sameValue(value, purgedIndexValue(collection, value, operationId))
-  );
-}
-
-/** S2: compare one page read-only. Journal pages check each row has its record version with the same
- * digest (an Intent: its head holds the journal's current Intent, or a Lane pinned it: `hosted`); `planningItems` checks each Issue head is at the journal's latest version; `issueHeads`
- * pages the store and checks each head has its journal Issue (nothing extra). `readItems`, `readVersions`,
- * `readComments`, `readNotes` and `readLifecycle` (S4) check that the store reader returns each journal row field for field.
- * `newest` samples: pages run newest first with at most that many rows, so a bounded check reads the
- * recent rows only (the client stops after its sample). */
-export const compare = query({
-  args: {
-    projectId: v.id('hostedProjects'),
-    collection: compareSource,
-    cursor: v.union(v.string(), v.null()),
-    newest: v.optional(v.number()),
-    digestOnly: v.optional(v.boolean()),
-    ...journalPageProtocol,
-    itemId: v.optional(v.string()),
-  },
-  returns: v.string(),
-  handler: journalWorkStoreCompare,
-});
-export async function journalWorkStoreCompare(
-  ctx: QueryCtx,
-  input: {
-    projectId: Id<'hostedProjects'>;
-    collection: CompareSource;
-    cursor: string | null;
-    newest?: number;
-    digestOnly?: boolean;
-    journalProtocol?: 1;
-    itemId?: string;
-  },
-) {
-  const requestedCursor = input.cursor;
-  try {
-    const { project, partition } = await ownerStore(ctx, input.projectId);
-    invariant(
-      input.itemId === undefined ||
-        (['planningVersions', 'readVersions'].includes(input.collection) && isPlanningUuid(input.itemId)),
-      'BAD_ARGUMENT',
-      'Select one Item by full UUID for a version comparison.',
-    );
-    const fullPrefix = 'work-full:';
-    invariant(
-      !input.cursor?.startsWith('work-digest:'),
-      'WORK_STALE',
-      'Restart the comparison against the full retained Work records.',
-    );
-    if (input.cursor?.startsWith(fullPrefix))
-      input = { ...input, cursor: input.cursor.slice(fullPrefix.length) };
-    const full = (value: { cursor: string | null } & Record<string, unknown>) =>
-      JSON.stringify({
-        ...value,
-        method: 'full',
-        cursor: value.cursor ? fullPrefix + value.cursor : null,
-        done: value.cursor === null,
-      });
-    const collection = input.collection as CompareSource;
-    let checked = 0,
-      matched = 0,
-      hosted = 0;
-    const missing = tally(),
-      different = tally(),
-      invalid = tally(),
-      purged = tally();
-    const listPurge = (key: string) => {
-      purged.count++;
-      purged.keys.push(key);
-    };
-    const comparePurged = async (
-      stored: Doc<'projectHostedRecords'> & { purged: string },
-      source: string,
-      value: unknown,
-      key: string,
-      inline?: unknown,
-    ) => {
-      if (
-        (await verifiedPurgedRecord(ctx, stored)) &&
-        value != null &&
-        compareRedacted(source, value, stored.purged) &&
-        (inline === undefined || sameValue(inline, value))
-      )
-        listPurge(key);
-      else note(invalid, key);
-    };
-    const compareHead = async (
-      head: Doc<'projectHostedRecordHeads'>,
-      value: unknown,
-      key: string,
-      version: number | undefined,
-    ) => {
-      if (version !== head.version) {
-        note(different, `${head.key}:${head.version}:${version}`);
-        return;
-      }
-      const stored = await ctx.db.get(head.recordId);
-      if (
-        !stored ||
-        stored.projectId !== input.projectId ||
-        stored.kind !== 'issue' ||
-        stored.key !== head.key ||
-        stored.version !== head.version
-      ) {
-        note(invalid, key);
-      } else if (stored.purged !== undefined) {
-        await comparePurged(
-          { ...stored, purged: stored.purged },
-          'planningItems',
-          value,
-          key,
-          head.value === undefined ? undefined : JSON.parse(head.value),
-        );
-      } else matched++;
-    };
-    if (collection === 'issueHeads') {
-      const page = await ctx.db
-        .query('projectHostedRecordHeads')
-        .withIndex('by_project_and_kind', q => q.eq('projectId', input.projectId).eq('kind', 'issue'))
-        .order(input.newest ? 'desc' : 'asc')
-        .paginate({
-          cursor: input.cursor,
-          numItems: Math.min(input.newest ?? WORK_STORE_PAGE, WORK_STORE_PAGE),
-        });
-      for (const head of page.page) {
-        checked++;
-        const row = await indexRecord(ctx, partition, 'planningItems', head.key);
-        if (!row) note(missing, head.key);
-        else {
-          const value = JSON.parse(row.value) as { version?: number; payloadKey?: string };
-          // A redacted Issue head is inline. A payload pointer cannot establish its redacted form here.
-          await compareHead(head, value.payloadKey ? null : value, head.key, value.version);
-        }
-      }
-      return full({
-        checked,
-        matched,
-        purged,
-        missing,
-        different,
-        invalid,
-        cursor: page.isDone ? null : page.continueCursor,
-      });
-    }
-    if (
-      collection === 'readItems' ||
-      collection === 'readVersions' ||
-      collection === 'readComments' ||
-      collection === 'readNotes' ||
-      collection === 'readLifecycle'
-    ) {
-      const source = readCompares[collection];
-      const page = await indexPage(ctx, partition, source, input.cursor, input.newest, input.itemId);
-      for (const row of page.rows) {
-        checked++;
-        try {
-          const read = await storeReadOf(ctx, input.projectId, source, row.value as { id?: string });
-          if ('purgedRecord' in read && read.purgedRecord)
-            await comparePurged(read.purgedRecord, source, row.value, row.key, read.value);
-          else if (read.value == null) note(missing, row.key);
-          else if (!sameValue(read.value, row.value)) note(different, row.key);
-          else matched++;
-        } catch (error) {
-          if (error instanceof JournalNeeded) throw error;
-          note(invalid, row.key);
-        }
-      }
-      return full({ checked, matched, purged, missing, different, invalid, cursor: page.cursor });
-    }
-    const page = await indexPage(ctx, partition, collection, input.cursor, input.newest, input.itemId);
-    for (const row of page.rows) {
-      checked++;
-      if (collection === 'intents') {
-        let stored;
-        try {
-          stored = await storeIntent(ctx, input.projectId, project.owner, row.value, false);
-        } catch (error) {
-          if (error instanceof JournalNeeded) throw error;
-          // hostedRecordBody checks the recorded purge before raising this refusal.
-          const operation = error instanceof ForgeError ? error.recovery?.purgeOperationId : undefined;
-          if (
-            error instanceof ForgeError &&
-            error.code === 'PLANNING_ITEM_PURGED' &&
-            typeof operation === 'string' &&
-            compareRedacted(collection, row.value, operation)
-          )
-            listPurge(row.key);
-          else note(invalid, row.key);
-          continue;
-        }
-        if (stored === 'same') matched++;
-        else if (stored === 'hosted') hosted++;
-        else note(stored === 'missing' ? missing : different, row.key);
-        continue;
-      }
-      let encoded;
-      try {
-        encoded = hostedRecordValue(
-          workStoreRecord(collection === 'planningItems' ? 'planningVersions' : collection, row.value),
-        );
-      } catch {
-        note(invalid, row.key);
-        continue;
-      }
-      const { record, ref } = encoded;
-      if (collection === 'planningItems') {
-        const head = await recordHead(ctx, input.projectId, 'issue', record.id);
-        if (!head) note(missing, record.id);
-        else await compareHead(head, row.value, row.key, record.version);
-        continue;
-      }
-      const stored = await recordVersion(ctx, input.projectId, record.kind, record.id, record.version);
-      if (!stored) note(missing, `${record.kind}:${record.id}:${record.version}`);
-      else if (stored.purged !== undefined)
-        await comparePurged({ ...stored, purged: stored.purged }, collection, row.value, row.key);
-      else if (stored.digest !== ref.digest || stored.bytes !== ref.bytes)
-        note(different, `${record.kind}:${record.id}:${record.version}`);
-      else matched++;
-    }
-    return full({ checked, matched, hosted, purged, missing, different, invalid, cursor: page.cursor });
-  } catch (error) {
-    if (error instanceof JournalNeeded)
-      return journalReadReply(ctx, error, input.projectId, {
-        protocol: input.journalProtocol,
-        continuation: { cursor: requestedCursor, done: false },
-      });
-    return report(error);
-  }
 }

@@ -48,7 +48,7 @@ import { chargeAccountChannel } from './accountLimits';
 import { emitChange, workChange } from './coordinationWrite';
 import { movePlanLaneMark } from './projectPlanLaneMarks';
 import { storeProjection } from './projectWorkStore';
-import { bornRecordStore } from './projectWorkStoreFingerprintWrites';
+import { bornRecordStore } from './projectHostedBirth';
 import { projectForViewer } from './projectViewerFields';
 
 /** The project record every open tab subscribes to (name, owner, selected source). A non-owner gets only the
@@ -216,8 +216,13 @@ export const initialize = internalMutation({
               )
               .unique();
       const generationId = initialGeneration?.status === 'ready' ? initialGeneration._id : undefined;
+      const emptyResume =
+        !importRequired &&
+        revision === 0 &&
+        project.workStoreCutoverRevision === undefined &&
+        project.workStoreEventWindows === undefined;
       await ctx.db.patch(projectId, {
-        ...(completedImport ? bornRecordStore(revision) : {}),
+        ...(completedImport || emptyResume ? bornRecordStore(revision) : {}),
         work: {
           backupId,
           operationId,
@@ -303,18 +308,8 @@ export async function appendWork(
       );
     const action = parsed.success ? parsed.data.action : purge?.success ? purge.data.action : undefined;
     const frozen =
-      // The bridge still serves pre-cutover event windows while P8 copies existing projects.
-      // Cleared project fields leave the retained-event frontier in place for F3.
-      (project.workStoreWriters
-        ? project.workStoreWriters.some(
-            writer =>
-              writer === action ||
-              (writer === 'planning' &&
-                (action === 'put-planning-item' ||
-                  action === 'comment-planning-item' ||
-                  action === 'purge-planning-item')),
-          )
-        : project.workStoreEventWindows?.at(-1)?.storeFirst === true) &&
+      // F3 still reads old event windows and keeps anchored notes and comment purges in the journal.
+      project.workStoreEventWindows?.at(-1)?.storeFirst === true &&
       (action === 'note' ||
         action === 'intent' ||
         action === 'intent-status' ||

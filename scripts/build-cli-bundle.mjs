@@ -68,7 +68,20 @@ await build({
     minify: false,
     rollupOptions: {
       external: id => external.some(name => id === name || id.startsWith(`${name}/`)),
-      output: { entryFileNames: 'cli-entry.js', chunkFileNames: 'cli-bundle-[name]-[hash].js' },
+      output: {
+        entryFileNames: 'cli-entry.js',
+        chunkFileNames: 'cli-bundle-[name]-[hash].js',
+        codeSplitting: {
+          groups: [
+            {
+              // The Intent command validators import and use the planning validators.
+              name: 'work-command-schemas',
+              test: id => /^src[\\/]work-(?:intent|planning)-types\.ts$/.test(relative(root, id)),
+              includeDependenciesRecursively: false,
+            },
+          ],
+        },
+      },
     },
   },
   ssr: { noExternal: true },

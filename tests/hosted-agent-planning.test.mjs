@@ -3215,7 +3215,6 @@ test('indexed planning preserves all filter combinations, record-store bodies, p
   const s = await setup(t),
     p = port(s, new Map(), workerFeatures);
   // Stage both copies before exposing the record-store read path in this compatibility fixture.
-  await s.ctx.db.patch(s.projectId, { workStore: 'dual' });
   const initiativeId = (await put(p, { kind: 'initiative', title: 'Group' })).result.itemId;
   const first = (
     await put(p, {
@@ -3273,7 +3272,6 @@ test('indexed planning preserves all filter combinations, record-store bodies, p
   );
   assert.equal((await list(p, { counts: true, initiativeId })).coverage, 'partial-needs-preparation');
   generation.planningSearchVersion = 2;
-  s.tables.hostedProjects.get(s.projectId).workStore = 'records';
   // Ordinary puts in dual/records mode retain exact row bodies, including long Done-when text.
   const long = 'x'.repeat(40000) + '\nDone when:\n- [ ] Evidence pending';
   await put(p, { itemId: first, expectedVersion: 1, body: long });
@@ -3597,8 +3595,8 @@ test('planning detail, list and search distinguish the latest close from later e
   t.mock.timers.enable({ apis: ['Date'], now: first });
   const s = await setup(t);
   await s.ctx.db.patch(s.projectId, {
-    workStore: 'records',
-    workStoreWriters: ['planning'],
+    workStoreCutoverRevision: 0,
+    workStoreEventWindows: [{ revision: 0, storeFirst: true }],
   });
   const p = port(s, new Map(), [
     ...hostedContractFeatures,

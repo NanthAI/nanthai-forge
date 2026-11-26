@@ -23,7 +23,6 @@ import { indexedRecord } from '../src/work-hosted-index';
 import { splitRecordTable } from './projectWorkRecordTables';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { hostedRecordBody, recordHead, recordVersion } from './projectHostedRecords';
-import { fingerprintHostedIntent } from './projectWorkStoreFingerprintWrites';
 import { purgeLifecyclePlans } from './projectPlanningPurgeLifecycle';
 import { removeArtifact } from './artifactStorage';
 import { projectPrefix } from './r2Operations';
@@ -100,7 +99,6 @@ async function purgeLandingNotes(
 }
 
 export type PurgeStep = (typeof purgeSteps)[number];
-export const fingerprint = (collection: string) => `_workStoreDigests:${collection}`;
 
 /** The purge's command: its row list in journal order. */
 export async function purgeRows(ctx: Ctx, projectId: Id<'hostedProjects'>, operationId: string) {
@@ -213,7 +211,6 @@ async function pageOf(
         purge.operationId,
         decisions,
       );
-      changes += await dropFingerprint(ctx, write, partition, fingerprint('intents'), purge.intentId);
     }
     return { changes, after: null };
   }
@@ -284,7 +281,6 @@ async function pageOf(
         decisions,
         row,
       );
-      changes += await dropFingerprint(ctx, write, partition, fingerprint(collection), row.key);
     }
     return { changes, after: page.length === PURGE_PAGE ? String(page.at(-1)!.position) : null };
   }
@@ -486,19 +482,6 @@ async function stalePayloads(
   return { changes, after: next };
 }
 
-export async function dropFingerprint(
-  ctx: Ctx,
-  write: MutationCtx['db'] | undefined,
-  partition: Id<'projectWorkGenerations'>,
-  collection: string,
-  key: string,
-) {
-  const row = await record(ctx, partition, collection, key);
-  if (!row) return 0;
-  if (write) await write.delete(row._id);
-  return 1;
-}
-
 /** A work-store version of the Item: marked purged (header and digest stay), its body emptied. The tombstone
  * version and the Item's other kinds are left alone. A comment's purge passes no version. */
 export async function storeRecord(
@@ -693,10 +676,6 @@ async function deletedIntentVersion(
     recordId,
     ...(head.planningItemId !== undefined ? { planningItemId: head.planningItemId } : {}),
   });
-  // The same store fingerprint a hosted Intent write keeps (convex/projectHostedRecords.ts writeHostedRecord).
-  const project = await ctx.db.get(projectId);
-  if (project)
-    await fingerprintHostedIntent(ctx as MutationCtx, project, ref, head._creationTime, indexed.status);
   return 1;
 }
 

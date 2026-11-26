@@ -21,7 +21,6 @@ export const history = action({
       v.literal('projectHostedProvenanceRead:read'),
       v.literal('projectRecoveryHosted:page'),
       v.literal('projectWorkIndex:records'),
-      v.literal('projectWorkStore:compare'),
       v.literal('projectHostedLaneHistory:read'),
       v.literal('projectHostedLanes:detail'),
     ),

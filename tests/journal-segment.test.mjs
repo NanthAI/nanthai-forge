@@ -666,9 +666,9 @@ test('unsupported clients get a structured upgrade before archived history can l
   assert.equal(h.gets.length, 0);
 });
 
-test('archived Work-store comparison resumes a saved full cursor and returns the final counts', async t => {
+test('archived Issue versions resume a live records cursor with journal protocol 1', async t => {
   const h = await fixture(t, { issue: true });
-  const { compare } = await import(moduleUrl('../convex/projectWorkStore.ts'));
+  const { records } = await import(moduleUrl('../convex/projectWorkIndex.ts'));
   const { projectId } = h.auth;
   const backupId = 'synthetic-backup';
   const generationId = await h.ctx.db.insert('projectWorkGenerations', {
@@ -684,41 +684,38 @@ test('archived Work-store comparison resumes a saved full cursor and returns the
   await h.ctx.db.patch(projectId, {
     work: { generationId, backupId, operationId: randomUUID(), initialRevision: 0, revision: 0 },
   });
-  for (const { item, version } of [h.old, h.current])
-    await h.ctx.db.insert('projectWorkRecords', {
-      projectId,
-      generationId,
-      collection: 'planningVersions',
-      key: `${item.id}:${version}`,
-      parent: item.id,
-      position: version,
-      value: JSON.stringify(item),
-    });
-  const args = { projectId, collection: 'readVersions', cursor: null, newest: 1 };
-  const first = JSON.parse(await compare._handler(h.ctx, args));
-  assert.equal(first.matched, 1);
-  assert.match(first.cursor, /^work-full:/);
-  const continuation = { ...args, cursor: first.cursor };
-  const expected = JSON.parse(await compare._handler(h.ctx, continuation));
-  assert.equal(expected.matched, 1);
+  const args = {
+    projectId,
+    generationId,
+    collection: 'planningVersions',
+    parentId: h.old.id,
+    newestFirst: true,
+    paginationOpts: { cursor: null, numItems: 1 },
+  };
+  const first = await records._handler(h.ctx, args);
+  assert.equal(first.page.length, 1);
+  assert.equal(JSON.parse(first.page[0].value).version, h.current.version);
+  assert.equal(first.isDone, false);
+  assert.ok(first.continueCursor);
+  const continuation = { ...args, paginationOpts: { ...args.paginationOpts, cursor: first.continueCursor } };
+  const expected = await records._handler(h.ctx, continuation);
+  assert.equal(expected.page.length, 1);
+  assert.equal(JSON.parse(expected.page[0].value).version, h.old.version);
   await h.relocate();
 
-  await assert.rejects(compare._handler(h.ctx, continuation), code('CLI_UPGRADE_REQUIRED'));
-  const name = 'projectWorkStore:compare';
-  const raw = await compare._handler(h.ctx, { ...continuation, journalProtocol: 1 });
-  const marker = JSON.parse(raw);
-  assert.equal(marker.cursor, first.cursor);
-  assert.equal(marker.done, false);
+  await assert.rejects(records._handler(h.ctx, continuation), code('CLI_UPGRADE_REQUIRED'));
+  const name = 'projectWorkIndex:records';
+  const marker = await records._handler(h.ctx, { ...continuation, journalProtocol: 1 });
+  assert.equal(marker.continueCursor, first.continueCursor);
+  assert.equal(marker.isDone, false);
   assert.equal(marker.journalHistory, true);
   assert(!('index' in marker));
   assert.equal(h.gets.length, 0);
-  const result = await hydrateLandingHistory(name, continuation, raw, (action, request) => {
+  const result = await hydrateLandingHistory(name, continuation, marker, (action, request) => {
     assert.equal(action, 'projectJournalActions:history');
     return actions.history._handler(h.actionCtx, { projectId, ...request });
   });
   assert.deepEqual(JSON.parse(result), expected);
-  assert.equal(expected.cursor, null);
-  assert.equal(expected.done, true);
   assert.equal(h.gets.length, 1);
 });
 

@@ -156,81 +156,81 @@ test('starting a planned Lane marks Plan and skips Next, and concurrent siblings
   assert.equal(nextItem(await rows(f)).next?.id, id);
 });
 
-for (const { label, keepOpen, sibling } of [
-  { label: 'when closing the Lane', keepOpen: false, sibling: false },
-  { label: 'when keeping the Lane open', keepOpen: true, sibling: false },
-  { label: 'with an open sibling on the same Item', keepOpen: false, sibling: true },
-])
-  test(`the first Lane completion tick retires the exact landed work ${label}`, async () => {
-    const f = await acceptanceFixture();
-    const [id, free] = [randomUUID(), randomUUID()];
-    await addPlan(f, [id, free]);
-    const started = await begin(f, planned(id));
-    const lane = await f.changeLane(started.lane.laneId, { head: f.state.sha256, sourceVersion: 1 });
-    if (sibling) await begin(f, planned(id));
-    const originalMark = markRow(f, id);
-    assert.equal(JSON.parse(originalMark.value).open, sibling ? 2 : 1);
-    const item = await f.makeCandidate([
-      {
-        laneId: lane.id,
-        head: lane.head,
-        version: lane.version,
-        sourceVersion: lane.sourceVersion,
-        lifecycleVersion: lane.lifecycleVersion,
-        state: { object: { sha256: lane.head, size: f.state.size }, recipe: null },
-      },
-    ]);
-    const { state } = await f.ready(item, { keepOpen });
-    const accepted = await f.accept(state);
-    assert.equal(f.currentMain().receipt.id, accepted.receipt.id);
-    const beforeTick = await rows(f);
-    assert.equal(beforeTick[0].inLane, true);
-    assert.equal(nextItem(beforeTick).next?.id, free);
-    await f.materialize(accepted.receipt.id);
-    assert.equal((await f.readLane(lane.id)).state, keepOpen ? 'active' : 'completed');
-    const afterTick = await rows(f);
-    assert.equal(afterTick[0].inLane, sibling ? true : undefined);
-    assert.equal(nextItem(afterTick).next?.id, sibling ? free : id);
-    const afterTickMark = markRow(f, id);
-    if (sibling) {
-      assert.equal(afterTickMark._id, originalMark._id);
-      assert.equal(JSON.parse(afterTickMark.value).open, 1);
-    } else assert.equal(afterTickMark, undefined);
+test('the first Lane completion tick retires the exact landed work when closing the Lane', () =>
+  firstCompletion({ keepOpen: false, sibling: false }));
+test('the first Lane completion tick retires the exact landed work when keeping the Lane open', () =>
+  firstCompletion({ keepOpen: true, sibling: false }));
+test('the first Lane completion tick retires the exact landed work with an open sibling on the same Item', () =>
+  firstCompletion({ keepOpen: false, sibling: true }));
 
-    if (keepOpen) {
-      const next = f.put(
-        JSON.stringify({ ...JSON.parse(f.objectBytes.get(lane.head)), parents: [lane.head] }),
-      );
-      await f.store.transaction(
-        'saveAfterKeepOpen',
-        { _handler: writeHostedRecord },
-        {
-          ...f.auth,
-          expectedVersion: lane.version,
-          record: {
-            ...lane,
-            version: lane.version + 1,
-            head: next.sha256,
-            sourceVersion: lane.sourceVersion + 1,
-          },
+async function firstCompletion({ keepOpen, sibling }) {
+  const f = await acceptanceFixture();
+  const [id, free] = [randomUUID(), randomUUID()];
+  await addPlan(f, [id, free]);
+  const started = await begin(f, planned(id));
+  const lane = await f.changeLane(started.lane.laneId, { head: f.state.sha256, sourceVersion: 1 });
+  if (sibling) await begin(f, planned(id));
+  const originalMark = markRow(f, id);
+  assert.equal(JSON.parse(originalMark.value).open, sibling ? 2 : 1);
+  const item = await f.makeCandidate([
+    {
+      laneId: lane.id,
+      head: lane.head,
+      version: lane.version,
+      sourceVersion: lane.sourceVersion,
+      lifecycleVersion: lane.lifecycleVersion,
+      state: { object: { sha256: lane.head, size: f.state.size }, recipe: null },
+    },
+  ]);
+  const { state } = await f.ready(item, { keepOpen });
+  const accepted = await f.accept(state);
+  assert.equal(f.currentMain().receipt.id, accepted.receipt.id);
+  const beforeTick = await rows(f);
+  assert.equal(beforeTick[0].inLane, true);
+  assert.equal(nextItem(beforeTick).next?.id, free);
+  await f.materialize(accepted.receipt.id);
+  assert.equal((await f.readLane(lane.id)).state, keepOpen ? 'active' : 'completed');
+  const afterTick = await rows(f);
+  assert.equal(afterTick[0].inLane, sibling ? true : undefined);
+  assert.equal(nextItem(afterTick).next?.id, sibling ? free : id);
+  const afterTickMark = markRow(f, id);
+  if (sibling) {
+    assert.equal(afterTickMark._id, originalMark._id);
+    assert.equal(JSON.parse(afterTickMark.value).open, 1);
+  } else assert.equal(afterTickMark, undefined);
+
+  if (keepOpen) {
+    const next = f.put(JSON.stringify({ ...JSON.parse(f.objectBytes.get(lane.head)), parents: [lane.head] }));
+    await f.store.transaction(
+      'saveAfterKeepOpen',
+      { _handler: writeHostedRecord },
+      {
+        ...f.auth,
+        expectedVersion: lane.version,
+        record: {
+          ...lane,
+          version: lane.version + 1,
+          head: next.sha256,
+          sourceVersion: lane.sourceVersion + 1,
         },
-      );
-      assert.equal((await rows(f))[0].inLane, true, 'new work on the keep-open Lane marks the Item again');
-    }
-    const beforeReplay = markRow(f, id);
-    await f.materialize(accepted.receipt.id);
-    assert.deepEqual(markRow(f, id), beforeReplay, 'replay preserves sibling and later contributions');
-    const measured = f.counts.find(row => row.name === 'acceptanceComplete');
-    assert.equal(measured.readRangesByTable.projectWorkGenerations, undefined);
-    assert.equal(measured.readRangesByTable.projectWorkDataRecords, undefined);
-    assert.ok(measured.readRangesByTable.projectHostedRecordHeads > 0, 'read the canonical Item head');
-    assert.equal(measured.readRangesByTable.projectPlanningRecords, undefined, 'no planning search read');
-    assert.deepEqual(
-      measured.written.filter(table => table.startsWith('projectWork') || table === 'projectPlanningRecords'),
-      [],
-      'the note fence writes no Work records',
+      },
     );
-  });
+    assert.equal((await rows(f))[0].inLane, true, 'new work on the keep-open Lane marks the Item again');
+  }
+  const beforeReplay = markRow(f, id);
+  await f.materialize(accepted.receipt.id);
+  assert.deepEqual(markRow(f, id), beforeReplay, 'replay preserves sibling and later contributions');
+  const measured = f.counts.find(row => row.name === 'acceptanceComplete');
+  assert.equal(measured.readRangesByTable.projectWorkGenerations, undefined);
+  assert.equal(measured.readRangesByTable.projectWorkDataRecords, undefined);
+  assert.ok(measured.readRangesByTable.projectHostedRecordHeads > 0, 'read the canonical Item head');
+  assert.equal(measured.readRangesByTable.projectPlanningRecords, undefined, 'no planning search read');
+  assert.deepEqual(
+    measured.written.filter(table => table.startsWith('projectWork') || table === 'projectPlanningRecords'),
+    [],
+    'the note fence writes no Work records',
+  );
+}
 
 const itemWrite = (f, command, endpoint = work.command) => {
   const operationId = randomUUID();

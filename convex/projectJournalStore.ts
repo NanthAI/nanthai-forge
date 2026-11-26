@@ -186,7 +186,7 @@ export async function journalRecord(
     status: pin[5],
     digest: pin[6],
     bytes: pin[7],
-    ...(pin[8] === null ? {} : { workReadDigest: pin[8] }),
+    // Archived tuple slot 8 was the retired comparison digest. Slot 9 still carries Lane provenance.
   } as Doc<'projectHostedRecords'>;
   if (kind === 'lane' && pin[9])
     laneSourcePins.set(row, {

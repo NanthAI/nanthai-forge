@@ -8,7 +8,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
-import { setup, actions } from './hosted-planning-fixture.mjs';
+import { setup, actions, beginRetainedWork } from './hosted-planning-fixture.mjs';
 import { meterWorkIO } from './hosted-read-set.mjs';
 import { digest } from '../dist/hash.js';
 import { dispatchHostedWork } from '../dist/hosted-work-client.js';
@@ -22,7 +22,6 @@ const SECRET = 'wombat-comment-purge-fixture';
 const code = expected => error => (error.data?.code ?? error.code) === expected;
 const commentPurge = await import(moduleUrl('../convex/projectCommentPurge.ts'));
 const reports = await import(moduleUrl('../convex/abuseReports.ts'));
-const workStore = await import(moduleUrl('../convex/projectWorkStore.ts'));
 const workIndex = await import(moduleUrl('../convex/projectWorkIndex.ts'));
 const hostedRecords = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 const artifactStorage = await import(moduleUrl('../convex/artifactStorage.ts'));
@@ -46,30 +45,13 @@ const secretRows = s =>
       .map(row => `${table}:${row.collection ?? row.kind ?? ''}:${row.key ?? row.operationId ?? ''}`),
   );
 
-/** Copy the Work into the store and make it the primary reader (records mode), as projects run today. */
-async function recordsMode(s) {
-  const handlers = {
-    'projectWorkStore:copy': workStore.copy,
-    'projectWorkStore:compare': workStore.compare,
-    'projectWorkStore:setMode': workStore.setMode,
-  };
-  const client = {
-    query: (ref, args) => handlers[getFunctionName(ref)]._handler(s.ctx, args),
-    mutation: (ref, args) => handlers[getFunctionName(ref)]._handler(s.ctx, args),
-    action: () => assert.fail('no action'),
-  };
-  s.tables.hostedProjects.get(s.projectId).sourceAuthority = { mode: 'server', epoch: 1 };
-  await dispatchHostedWork(client, s.projectId, { action: 'copy-work-store' });
-  await dispatchHostedWork(client, s.projectId, { action: 'set-work-store', mode: 'records' });
-  await s.ctx.db.patch(s.projectId, { workStoreWriters: [] });
-}
-
 /** An Item with a kept comment, the reported comment (with an attachment), a reply to it and a later put. */
 async function commented(t, { records = false, primary = false, decision = false, laterPut = true } = {}) {
   const s = await setup(t);
-  if (records || primary) await recordsMode(s);
+  if (records || primary)
+    s.tables.hostedProjects.get(s.projectId).sourceAuthority = { mode: 'server', epoch: 1 };
   // Planning as a primary store writer: its commands' rows live in the store's record bodies, not the event table.
-  if (primary) await s.ctx.db.patch(s.projectId, { workStoreWriters: ['planning', 'note'] });
+  if (primary) beginRetainedWork(s);
   const item = s.item({ title: 'Kept title', body: 'Kept body' });
   await s.send(item);
   const comment = (text, extra = {}) => ({

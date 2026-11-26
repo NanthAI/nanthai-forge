@@ -101,6 +101,19 @@ test('scoped read transport uses the ready generation and returns the selected c
   );
 });
 
+test('the hosted Work client rejects retired migration actions with BAD_ARGUMENT', async () => {
+  for (const request of [
+    { action: 'copy-work-store' },
+    { action: 'compare-work-store' },
+    { action: 'set-work-store', mode: 'records', writers: ['planning'] },
+  ]) {
+    await assert.rejects(
+      dispatchHostedWork(null, 'project', request),
+      error => error.code === 'BAD_ARGUMENT',
+    );
+  }
+});
+
 test('actual CLI and MCP share authenticated scoped Work reads and never expose credentials or backend logs', async t => {
   const s = await setup(t),
     item = s.item({ body: 'Retained detail '.repeat(8000) });

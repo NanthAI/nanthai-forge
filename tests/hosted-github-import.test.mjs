@@ -283,8 +283,8 @@ test('retry-safe personal mirrors publish complete source and Work atomically wi
   assert.equal(backup.preview.channels[0].name, 'main');
   // Item c0af6cfa F2: an imported project is born in the record store, never journal-only.
   assert.deepEqual(
-    [project.workStore, project.workStoreWriters, project.workStoreCutoverRevision],
-    ['records', ['note', 'intent', 'intent-status', 'planning'], 0],
+    [project.workStoreCutoverRevision, project.workStoreEventWindows],
+    [0, [{ revision: 0, storeFirst: true }]],
   );
   // Git history follows publication in its own scheduled run (Issue e103bacf).
   const history = [...s.tables.projectHistory.values()].find(row => row.projectId === job.projectId);

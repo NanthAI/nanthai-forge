@@ -18,7 +18,6 @@ export const journalPageQueries = new Set([
   'projectHostedRecordReads:read',
   'projectRecoveryHosted:page',
   'projectWorkIndex:records',
-  'projectWorkStore:compare',
 ]);
 
 export function journalPageProtocolRejected(error: unknown) {

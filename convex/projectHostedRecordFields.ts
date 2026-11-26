@@ -52,8 +52,6 @@ export const hostedRecordFields = {
   candidateFilesDirect: v.optional(v.literal(true)),
   digest: v.string(),
   bytes: v.number(),
-  /** Canonical journal-row hash for digest-only Work migration comparisons. */
-  workReadDigest: v.optional(v.string()),
   journalReady: v.optional(v.boolean()),
   journalReadyAt: v.optional(v.number()),
   journalSegment: v.optional(v.string()),
@@ -138,7 +136,7 @@ export const hostedRecordTables = {
     ),
   })
     // Creation order within a kind: the Work store's planning list pages in the journal's append order.
-    // index-order: caller: convex/projectWorkStore.ts#journalWorkStoreCompare; order: planning comparison exposes newest-first creation-time pages of Issues.
+    // index-order: caller: convex/projectWorkStoreReads.ts#storePage; order: creation-time pages of Issue heads.
     .index('by_project_and_kind', ['projectId', 'kind'])
     .index('by_project_and_kind_and_key', ['projectId', 'kind', 'key'])
     .index('by_project_and_kind_and_item', ['projectId', 'kind', 'planningItemId'])

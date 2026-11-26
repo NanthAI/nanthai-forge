@@ -20,7 +20,7 @@ import {
 /** The whole metrics read, not only each page: it ends under an agent shell's
  * two-minute limit. Page reads grow with the window (about 70 s for 7 days at
  * 2026-11 dogfood size), so a larger window ends here with a typed next step. */
-export const METRICS_DEADLINE_MS = 100_000;
+const METRICS_DEADLINE_MS = 100_000;
 
 /**
  * The agent surface reads a narrow window (Issue 686ecdde). A read costs about 0.2 MB of database reads per

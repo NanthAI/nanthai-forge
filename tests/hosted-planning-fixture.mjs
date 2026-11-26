@@ -7,6 +7,8 @@ import { getFunctionName } from 'convex/server';
 import { WorkService } from '../dist/work.js';
 import { initNative } from '../dist/native-work.js';
 import { digest } from '../dist/hash.js';
+import { hostedRecordIndex, hostedRecordValue } from '../dist/hosted-records.js';
+import { workStoreRecord } from '../dist/work-store-records.js';
 import { fixture, git } from './helpers.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { state } from './hosted-fixture.mjs';
@@ -19,6 +21,52 @@ const backups = await import(moduleUrl('../convex/projectBackups.ts'));
 const projectHostedSeedWorkStore = await import(moduleUrl('../convex/projectHostedSeedWorkStore.ts'));
 const { previewWorkArchive } = await import(moduleUrl('../web/src/work-archive.ts'));
 const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
+const { advancePlanningTimes } = await import(moduleUrl('../convex/projectPlanningTimes.ts'));
+
+/** Seed retained history from before Issue heads required planning-time proofs. */
+export async function seedHistoricalIssueVersion(s, item, pin) {
+  const encoded = hostedRecordValue(workStoreRecord('planningVersions', item));
+  const identity = { projectId: s.projectId, kind: 'issue', key: item.id };
+  const indexed = { ...hostedRecordIndex(encoded.record), version: item.version };
+  const previous = await records.recordHead(s.ctx, s.projectId, 'issue', item.id);
+  const bodyId = await s.ctx.db.insert('projectHostedRecordBodies', {
+    projectId: s.projectId,
+    value: encoded.value,
+  });
+  const recordId = await s.ctx.db.insert('projectHostedRecords', {
+    ...identity,
+    ...indexed,
+    bodyId,
+    digest: encoded.ref.digest,
+    bytes: encoded.ref.bytes,
+  });
+  if (previous && previous.version > item.version) {
+    if (previous.planningTimes) await s.ctx.db.patch(previous._id, { planningTimes: undefined });
+    return 'copied';
+  }
+  const planningTimes = pin ?? advancePlanningTimes(item, previous ?? undefined);
+  const row = {
+    ...identity,
+    ...indexed,
+    recordId,
+    value: JSON.stringify(item),
+    ...(planningTimes ? { planningTimes } : {}),
+  };
+  if (previous) await s.ctx.db.replace(previous._id, row);
+  else await s.ctx.db.insert('projectHostedRecordHeads', row);
+  return 'copied';
+}
+
+/** Start the fixture's retained-event epoch at its current Work revision. */
+export function beginRetainedWork(s, storeFirst = true) {
+  const project = s.tables.hostedProjects.get(s.projectId);
+  const head = [...s.tables.projectWorkHeads.values()].find(
+    row => row.projectId === s.projectId && row.backupId === project.work?.backupId,
+  );
+  const revision = head?.revision ?? project.work?.revision ?? 0;
+  project.workStoreCutoverRevision ??= revision;
+  project.workStoreEventWindows = [...(project.workStoreEventWindows ?? []), { revision, storeFirst }];
+}
 
 /** Add a Lane-owned pin to live Work, as a hosted start does after the Item or Intent exists. */
 export async function pinIntent(ctx, input) {
@@ -103,6 +151,13 @@ export async function setup(t, native = true, prepare, prepareIndex = true) {
     if (!put.ok && put.status !== 412) throw new Error(`base archive upload failed: ${put.status}`);
   }
   await actions.initialize._handler(s.ctx, { projectId, backupId, operationId: randomUUID() });
+  // Empty fixtures represent projects initialized before the F2 cutover. Keep their original
+  // document shape and journal layout until a test opens a retained event window.
+  if (preview.revision === 0)
+    await s.ctx.db.patch(projectId, {
+      workStoreCutoverRevision: undefined,
+      workStoreEventWindows: undefined,
+    });
   if (prepareIndex) {
     const { ensure } = await import(moduleUrl('../convex/projectWorkIndexActions.ts'));
     await ensure._handler(s.ctx, { projectId, rebuild: true });

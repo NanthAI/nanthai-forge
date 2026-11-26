@@ -24,7 +24,7 @@ import { planningSearchEntry } from '../dist/planning-search.js';
 import { indexedRecord, intentHeader } from '../dist/work-hosted-index.js';
 import { workStoreRecord } from '../dist/work-store-records.js';
 import { hostedRecordValue } from '../dist/hosted-records.js';
-import { setup } from './hosted-planning-fixture.mjs';
+import { setup, beginRetainedWork, seedHistoricalIssueVersion } from './hosted-planning-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { meterReads, meterWorkIO } from './hosted-read-set.mjs';
 import { planFixture } from './plan-read-fixture.mjs';
@@ -39,7 +39,6 @@ const { emptyPlanCounts, planCountsBirth, planRootFacts, PLAN_COUNTS, tallyGroup
 );
 const { planView, PLAN_LIVE_LIMIT } = await import(moduleUrl('../convex/projectPlanView.ts'));
 const { record, recordPartition } = await import(moduleUrl('../convex/projectWorkIndexStore.ts'));
-const { storeVersion } = await import(moduleUrl('../convex/projectWorkStore.ts'));
 const { finishReadWriter } = await import(moduleUrl('../convex/projectFinishReadWriter.ts'));
 const { runBatch } = await import(moduleUrl('../web/src/app/plan/batch.ts'));
 const id = () => randomUUID();
@@ -496,26 +495,11 @@ test('100 long-lived Items can replace 20 Related pairs each and evict expired a
     assert(root);
     const item = { ...JSON.parse(root.value), version: currentVersion, previousVersion: currentVersion - 1 };
     await s.ctx.db.patch(root._id, { value: JSON.stringify(item) });
-    assert.equal(
-      await storeVersion(
-        s.ctx,
-        { _id: project._id },
-        hostedRecordValue(workStoreRecord('planningVersions', item)),
-        undefined,
-        false,
-      ),
-      'copied',
-    );
-    const head = [...s.tables.projectHostedRecordHeads.values()].find(
-      row => row.kind === 'issue' && row.key === item.id,
-    );
-    await s.ctx.db.patch(head._id, {
-      planningTimes: {
-        version: currentVersion,
-        lastStatusChangeAt: item.at,
-        closedAt: null,
-        closeKept: null,
-      },
+    await seedHistoricalIssueVersion(s, item, {
+      version: currentVersion,
+      lastStatusChangeAt: item.at,
+      closedAt: null,
+      closeKept: null,
     });
     await s.ctx.db.insert('projectPlanningAudit', {
       projectId: s.projectId,
@@ -524,7 +508,7 @@ test('100 long-lived Items can replace 20 Related pairs each and evict expired a
       value: '{}',
     });
   }
-  await s.ctx.db.patch(s.projectId, { workStore: 'records', workStoreWriters: ['planning'] });
+  beginRetainedWork(s);
   const writes = sources.map(itemId => ({
     action: 'put-planning-item',
     itemId,

@@ -279,17 +279,8 @@ const projectFields = {
   ),
   planningArchiveEventRevision: v.optional(v.number()),
   journalRecordReceipts: v.optional(v.literal(true)),
-  /** Flip 5 Work store mode (Issue 0695ab24): absent = journal only; dual = planning writes also store
-   * their Issue version, comment or note record in the same mutation; records = dual, and the planning
-   * reads (Issues, versions, comments) and an Intent's notes and moves come from the store. */
-  workStoreWriters: v.optional(
-    v.array(
-      v.union(v.literal('note'), v.literal('intent'), v.literal('intent-status'), v.literal('planning')),
-    ),
-  ),
   workStoreCutoverRevision: v.optional(v.number()),
   workStoreEventWindows: v.optional(v.array(v.object({ revision: v.number(), storeFirst: v.boolean() }))),
-  workStore: v.optional(v.union(v.literal('dual'), v.literal('records'))),
   /** Durable one-time Item Intent and Lane membership repair frontier; true is complete. */
   /** Roll-up's independent coverage proof for existing open-Lane tally rows. */
   planLaneMarkCoverage: v.optional(

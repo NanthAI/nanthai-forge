@@ -71,6 +71,23 @@ function hosted(bytes, preview) {
   return { ...s, projectId, backupId };
 }
 
+test('initializing a resumed empty hosted archive starts its record-store event window', async t => {
+  const root = fixture(t, { 'a.ts': 'export const a = 1;' });
+  git(root, ['add', '.']);
+  git(root, ['commit', '-qm', 'Original native source']);
+  const local = new WorkService(root);
+  const exported = (await local.dispatch({ action: 'export-work', archive: true }, 0)).result;
+  const bytes = readFileSync(exported.archive.path);
+  const preview = await previewWorkArchive(new File([bytes], 'source.tar.gz'));
+  assert.equal(preview.revision, 0);
+  const { ctx, projectId, backupId } = hosted(bytes, preview);
+  const start = { projectId, backupId, operationId: randomUUID() };
+  const ready = await actions.initialize._handler(ctx, start);
+  assert.equal(ready.workStoreCutoverRevision, 0);
+  assert.deepEqual(ready.workStoreEventWindows, [{ revision: 0, storeFirst: true }]);
+  assert.deepEqual(await actions.initialize._handler(ctx, start), ready);
+});
+
 test('hosted Intent authority reconciles original operations, retains concurrent work, paginates and restores full pinned source/evidence without mutating its local owner', async t => {
   for (const format of ['sha1', 'sha256']) {
     const root = fixture(t, { 'a.ts': 'export const a = 1;' });

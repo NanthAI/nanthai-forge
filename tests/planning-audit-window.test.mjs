@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { getDocumentSize } from 'convex/values';
-import { setup } from './hosted-planning-fixture.mjs';
+import { setup, beginRetainedWork } from './hosted-planning-fixture.mjs';
 import { meterReads } from './hosted-read-set.mjs';
 import { moduleUrl } from './convex-module.mjs';
 
@@ -16,7 +16,7 @@ const { workRecordWriter, finishWorkRecordWrites } = await import(
 
 async function fixture(t) {
   const s = await setup(t);
-  await s.ctx.db.patch(s.projectId, { workStore: 'records', workStoreWriters: ['planning'] });
+  beginRetainedWork(s);
   const itemId = randomUUID();
   let at = Date.parse('2026-11-18T10:00:00Z');
   t.mock.timers.enable({ apis: ['Date'], now: at });

@@ -2,7 +2,7 @@
 // Copyright 2026 Ferdinando Valsecchi
 // Item c0af6cfa F2 (inventory c0b4cdec, sign-off b203cb98, review 92eafa87): new projects were born
 // journal-only because nothing set the Work store mode at creation. A server-authority birth now goes
-// through one seam, `serverBirth`, which starts the record store (`bornRecordStore`). The guard counts
+// through one seam, `serverBirth`, which starts its retained event window. The guard counts
 // call sites, not files: a new creation call, a second birth or a direct authority switch inside an
 // already listed file fails here until it is classified.
 import assert from 'node:assert/strict';
@@ -42,8 +42,7 @@ const expected = {
   // Every server birth: selectBornMain and the verified hosted seed.
   serverBirth: { 'projectHostedBirth.ts': 1, 'projectHostedSeed.ts': 1 },
   bornRecordStore: { 'projectHostedBirth.ts': 1, 'projectHostedSeed.ts': 1, 'projectWork.ts': 1 },
-  // The seam itself, plus existing projects switching authority. Those keep their journal history until
-  // slice 6 copies and compares it; they are not births.
+  // The seam itself, plus existing projects switching authority with verified Work.
   nextSourceAuthority: {
     'projectHostedBirth.ts': 1,
     'projectSourceAuthority.ts': 1,
@@ -73,4 +72,17 @@ test('the guard fails a new caller or second birth inside an already listed file
     ['createProject', { ...sources, 'projectNewPath.ts': 'await createProject(ctx, input);' }],
   ];
   for (const [name, files] of cases) assert.notDeepEqual(sitesOf(files, name), expected[name], name);
+});
+
+test('hosted Work has one canonical record format and no legacy comparison switch', () => {
+  const retired =
+    /\b(?:workStore|workStoreWriters|workReadDigest)\b|_workStore(?:Digest|Heads:)|projectWorkStore:(?:copy|compare|setMode)|(?:copy|compare|set)-work-store/;
+  for (const root of ['convex', 'src', 'web/src']) {
+    const directory = new URL(`../${root}/`, import.meta.url);
+    for (const name of readdirSync(directory, { recursive: true })) {
+      if (!/\.tsx?$/.test(name) || name.endsWith('.d.ts')) continue;
+      const text = readFileSync(new URL(name, directory), 'utf8');
+      assert.doesNotMatch(text, retired, `${root}/${name}`);
+    }
+  }
 });
