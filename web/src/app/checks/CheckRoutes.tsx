@@ -28,7 +28,7 @@ function Route({ kind }: { kind: 'forge' | 'machine' }) {
         </div>
         <div className="meta">
           {forge
-            ? 'One command that must pass; Forge runs only the tests a change can affect. You pay GitHub for the minutes.'
+            ? 'Runs the project’s configured check on the selected GitHub Actions runner. The result records what ran.'
             : 'nforge worker runs one command that must pass, on your own hardware. A pass has that machine’s user rights; it is not a sandbox.'}
         </div>
       </div>

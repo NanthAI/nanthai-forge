@@ -435,6 +435,7 @@ test("ci-status: an outside contributor's Candidate never reaches a job that hol
   assert.equal(settled.status, 'runner-unavailable');
   assert.equal(settled.ci, undefined);
   assert.match(settled.failureReason, /outside contributor/);
+  assert.match(settled.failureReason, /eligible runner configured for the project/);
 });
 
 for (const [name, a] of Object.entries(adapters)) {

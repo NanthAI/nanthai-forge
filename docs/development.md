@@ -645,6 +645,13 @@ When you add, move or delete a doc under `docs/`, add, move or delete its manife
 
 ## Hosted development configuration
 
+A web build can set `VITE_FORGE_OPERATOR_EMAIL` for Project Trash and
+`VITE_FORGE_ABUSE_EMAIL` for Terms. These are public contact addresses.
+For generated documentation, set `FORGE_DOCS_SOURCE_BASE` to an HTTPS source
+tree URL that includes the build's revision, for example
+`https://code.example/org/project/blob/REVISION`. Without a source base,
+generated documentation links to packaged guides and shows source filenames.
+
 Convex is a separate Forge project, not Edge's.
 
 ```sh

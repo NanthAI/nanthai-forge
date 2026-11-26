@@ -17,8 +17,7 @@ export const sourceStateLimits = {
   'conflict-sync': { fileCount: 56800, manifestBytes: 9200000 },
 } as const;
 export type SourceSizePhase = keyof typeof sourceStateLimits;
-export const sourceSizeDocs =
-  'https://github.com/NanthAI/nanthai-forge/blob/main/docs/operations/source-exchange.md#supported-repository-envelope';
+export const sourceSizeDocs = 'See Supported repository envelope in nforge docs operations/source-exchange.';
 
 /** Missing metadata is the approved legacy path, with no extra read or refusal. */
 export function assertSourceStateSize(phase: SourceSizePhase, size: StateSize | undefined) {

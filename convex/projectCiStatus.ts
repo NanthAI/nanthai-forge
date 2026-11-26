@@ -100,7 +100,7 @@ export const prepare = internalMutation({
         ctx,
         selected,
         'runner-unavailable',
-        `${ci.ci.workflow} runs with ${ci.ci.repository}'s secrets, so Forge publishes only Candidates from the owner and contributors. An outside contributor's Candidate needs a check on Forge's own runner.`,
+        `${ci.ci.workflow} runs with ${ci.ci.repository}'s secrets, so Forge publishes only Candidates from the owner and contributors. An outside contributor's Candidate needs a check on an eligible runner configured for the project.`,
       );
       return null;
     }

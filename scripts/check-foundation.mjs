@@ -23,6 +23,7 @@ import { statusListFindings } from './check-status-lists.mjs';
 import { currentCounts, growthFindings, readBaseline as readGrowthBaseline } from './check-growth.mjs';
 import { errorTeachingFindings } from './check-error-teaching.mjs';
 import { dsClassClashFindings } from './check-ds-class-clash.mjs';
+import { instanceLiteralFindings } from './check-instance-literals.mjs';
 import { docsCommandsFindings } from './check-docs-commands.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -72,6 +73,15 @@ let scanned = 0;
 for (const file of files) {
   if (scoped && !scoped.has(relative(root, file).split(sep).join('/'))) continue;
   scanned++;
+  if (
+    ['.ts', '.tsx', '.js', '.jsx', '.mts', '.cts', '.mjs', '.cjs', '.json', '.yaml', '.yml', '.sh'].includes(
+      extname(file),
+    )
+  ) {
+    errors.push(
+      ...instanceLiteralFindings(relative(root, file).split(sep).join('/'), readFileSync(file, 'utf8')),
+    );
+  }
   errors.push(...localPathFindings(relative(root, file), readFileSync(file)));
   if (isWorkflowPath(relative(root, file))) {
     errors.push(...actionPinFindings(relative(root, file), readFileSync(file, 'utf8')));

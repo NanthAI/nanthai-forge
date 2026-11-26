@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 // The terms page (Item b6588425, lines 1 and 7): the acceptable-use section renders, names in-app reporting and the
-// support@nanthai.tech abuse-report contact without keeping the placeholder, stays a draft, and passes axe with no
+// configured abuse-report contact without keeping the placeholder, stays a draft, and passes axe with no
 // sideways scroll at phone and desk width in both themes.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -34,6 +34,12 @@ test('terms: the acceptable-use section renders, the page stays a draft, and it 
     '<!doctype html><html lang="en" data-ds><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Terms · Forge</title><style>body{margin:0}</style></head><body><div id="root"></div><script type="module" src="./fixture.tsx"></script></body></html>',
   );
   writeFileSync(join(temp, 'fixture.tsx'), fixture);
+  const previous = process.env.VITE_FORGE_ABUSE_EMAIL;
+  process.env.VITE_FORGE_ABUSE_EMAIL = 'abuse@operator.example';
+  t.after(() => {
+    if (previous === undefined) delete process.env.VITE_FORGE_ABUSE_EMAIL;
+    else process.env.VITE_FORGE_ABUSE_EMAIL = previous;
+  });
   const { build } = await import('vite');
   await build({
     configFile: join(root, 'web/vite.config.ts'),
@@ -90,7 +96,7 @@ test('terms: the acceptable-use section renders, the page stays a draft, and it 
       assert.match(article, /rate-limit, suspend or\s+remove your account/, label);
       assert.match(
         article,
-        /Report abuse in the app where Report is available, or email support@nanthai\.tech\./,
+        /Report abuse in the app where Report is available or email abuse@operator\.example\./,
         label,
       );
       assert.doesNotMatch(article, /A way to report abuse is coming/, label);
@@ -100,7 +106,7 @@ test('terms: the acceptable-use section renders, the page stays a draft, and it 
         .evaluateAll(links => links.map(a => a.getAttribute('href')));
       assert.deepEqual(
         hrefs,
-        ['mailto:support@nanthai.tech', '/signin', '/privacy'],
+        ['mailto:abuse@operator.example', '/signin', '/privacy'],
         `${label}: links the abuse-report contact, sign-in and privacy`,
       );
       assert.equal(

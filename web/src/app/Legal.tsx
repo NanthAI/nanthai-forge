@@ -3,8 +3,9 @@
 import { PublicFrame } from './frames';
 import { LEGAL_VERSION } from '../../../src/legal-version';
 
-const forgeSupportAddress = 'support@nanthai.tech';
+import { instanceContact } from '../instance-contact';
 export default function Legal({ page }: { page: 'terms' | 'privacy' }) {
+  const abuse = instanceContact(import.meta.env?.VITE_FORGE_ABUSE_EMAIL);
   return (
     <PublicFrame>
       <div className="intro">
@@ -47,10 +48,16 @@ export default function Legal({ page }: { page: 'terms' | 'privacy' }) {
               immediately when delay would cause harm. Removed content may not be recoverable.
             </p>
             <p>
-              Report abuse in the app where Report is available, or email{' '}
-              <a className="lk" href={`mailto:${forgeSupportAddress}`}>
-                {forgeSupportAddress}
-              </a>
+              Report abuse in the app where Report is available
+              {abuse ? (
+                <>
+                  {' '}
+                  or email{' '}
+                  <a className="lk" href={abuse.href}>
+                    {abuse.address}
+                  </a>
+                </>
+              ) : null}
               .
             </p>
             <h2>Before launch</h2>

@@ -98,7 +98,7 @@ A standalone workflow that supplies its own verdict needs no Forge job API plan.
 
 The workflow runs with the mirror repository's secrets. Forge publishes only Candidates whose
 author and requester are the owner or a contributor. An outside contributor's Candidate settles
-`runner-unavailable` with that reason and needs a check on Forge's own runner.
+`runner-unavailable` with that reason and needs a check on an eligible runner configured for the project.
 
 ## Limits today
 

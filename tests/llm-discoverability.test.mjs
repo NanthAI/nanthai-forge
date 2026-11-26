@@ -24,7 +24,7 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 
 const { reservedHandles } = await import(moduleUrl('../src/readable-urls.ts'));
 const read = path => readFileSync(join(root, path), 'utf8');
-const githubBlob = 'https://github.com/NanthAI/nanthai-forge/blob/main/';
+const sourceBase = 'https://code.example/team/forge/tree/01234567/';
 
 // Robots uses the longest matching rule, counted over the whole pattern ("*" and "$" included, as RFC 9309 crawlers
 // count it); an equally specific Allow wins. Match the full
@@ -49,12 +49,26 @@ function crawlable(robots, url) {
   return !matched.length || matched[0].kind === 'Allow';
 }
 
+test('generated docs cite packaged material when no source tree was configured', t => {
+  const previous = process.env.FORGE_DOCS_SOURCE_BASE;
+  delete process.env.FORGE_DOCS_SOURCE_BASE;
+  t.after(() => {
+    if (previous !== undefined) process.env.FORGE_DOCS_SOURCE_BASE = previous;
+  });
+  const docs = llmDocuments(root);
+  assert.match(docs.find(doc => doc.fileName === 'llms-full.txt').source, /^Source: README\.md$/m);
+});
+
 test('the hosted Vite build emits linked LLM files, every packaged doc and crawler rules', async t => {
   const output = mkdtempSync(join(tmpdir(), 'forge-llm-build-'));
   const previousBackend = process.env.VITE_CONVEX_URL;
+  const previousSourceBase = process.env.FORGE_DOCS_SOURCE_BASE;
+  process.env.FORGE_DOCS_SOURCE_BASE = sourceBase;
   const deployment = 'https://example.convex.cloud';
   process.env.VITE_CONVEX_URL = deployment;
   t.after(() => {
+    if (previousSourceBase === undefined) delete process.env.FORGE_DOCS_SOURCE_BASE;
+    else process.env.FORGE_DOCS_SOURCE_BASE = previousSourceBase;
     if (previousBackend === undefined) delete process.env.VITE_CONVEX_URL;
     else process.env.VITE_CONVEX_URL = previousBackend;
   });
@@ -72,6 +86,8 @@ test('the hosted Vite build emits linked LLM files, every packaged doc and crawl
   const robots = readFileSync(join(output, 'robots.txt'), 'utf8');
   assert.deepEqual(JSON.parse(readFileSync(join(output, '_forge/cli.json'), 'utf8')), { deployment });
   assert.match(llms, /^# NanthAi:Forge\n\n> Forge/);
+  assert.ok(readFileSync(join(output, 'docs/reference/mcp.md'), 'utf8').includes(sourceBase + 'src/'));
+
   assert.match(llms, /Keep this turn active on unfinished work/);
   assert.match(llms, /operationIds:\[ORIGINAL_UUID\],until:"acceptance"\}`; it blocks up to its budget/);
   assert.match(llms, /repeat on IN PROGRESS/);
@@ -93,8 +109,8 @@ test('the hosted Vite build emits linked LLM files, every packaged doc and crawl
   assert.equal(links.length, packageDocuments.length + 6);
   for (const [, target, note] of links) {
     assert.ok(note.length > 0);
-    if (target.startsWith(githubBlob)) {
-      assert.ok(read(target.slice(githubBlob.length)).length > 0, target);
+    if (target.startsWith(sourceBase)) {
+      assert.ok(read(target.slice(sourceBase.length)).length > 0, target);
       continue;
     }
     assert.ok(target.startsWith('/'), `${target} is a site route or a repository link`);
@@ -123,7 +139,7 @@ test('the hosted Vite build emits linked LLM files, every packaged doc and crawl
   }
   let previous = -1;
   for (const path of llmsFullPaths) {
-    const marker = `Source: ${path === 'README.md' ? `${githubBlob}README.md` : `/${path}`}\n\n`;
+    const marker = `Source: ${path === 'README.md' ? `${sourceBase}README.md` : `/${path}`}\n\n`;
     const position = full.indexOf(marker);
     assert.ok(position > previous, `${path} follows list order`);
     assert.ok(

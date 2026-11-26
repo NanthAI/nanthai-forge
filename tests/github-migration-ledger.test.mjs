@@ -130,6 +130,7 @@ test('CLI migration language names omissions without inventing counts or changin
   assert.deepEqual(report.migration, status.migration);
   assert.equal(report.migrationSummary, migrationSummary(status.migration));
   assert.match(report.migrationSummary, /pull requests not reported/);
+  assert.match(report.migrationSummary, /nforge docs planning/);
   assert.equal(report.operationId, journal.operationId);
   assert.equal(report.ref, journal.ref);
   assert.equal(report.commit, status.commit);

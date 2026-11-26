@@ -10,6 +10,7 @@ import remarkGfm from 'remark-gfm';
 import type { Plugin } from 'vite';
 import { packageDocuments, readDocument } from './package-documents.mjs';
 import { generatedReferencePaths } from './docs-output-paths.mjs';
+import { docsSourceLink } from './docs-source-link.mjs';
 import { docsReference } from './docs-reference.ts';
 import { DocsFrame, type DocsGroup } from '../web/src/ds/DocsFrame.tsx';
 import { DocsAgentPrompt } from '../web/src/ds/DocsAgentPrompt.tsx';
@@ -105,11 +106,12 @@ export function docsSite(root: string): Plugin {
       const resolved = target!.startsWith('/')
         ? target!.slice(1)
         : posix.normalize(posix.join(posix.dirname(path), target!));
-      return docs.has(resolved)
-        ? `${href(resolved)}${fragment === undefined ? '' : `#${fragment}`}`
+      const destination = docs.has(resolved)
+        ? href(resolved)
         : url.startsWith('/')
-          ? url
-          : `https://github.com/NanthAI/nanthai-forge/blob/main/${resolved}${fragment === undefined ? '' : `#${fragment}`}`;
+          ? target
+          : docsSourceLink(resolved);
+      return destination ? destination + (fragment === undefined ? '' : `#${fragment}`) : undefined;
     };
     const ids = new Map<string, number>();
     const heading =
@@ -127,7 +129,10 @@ export function docsSite(root: string): Plugin {
         <Markdown
           remarkPlugins={[remarkGfm]}
           components={{
-            a: ({ href: url, children }) => <a href={link(url ?? '')}>{children}</a>,
+            a: ({ href: url, children }) => {
+              const destination = link(url ?? '');
+              return destination ? <a href={destination}>{children}</a> : <span>{children}</span>;
+            },
             h1: heading('h1'),
             h2: heading('h2'),
             h3: heading('h3'),

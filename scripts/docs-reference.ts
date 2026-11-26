@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { hostedAgentHelpEntries, allHelpTopics } from '../src/hosted-agent-help.js';
 import { registerHostedAgentWorkflow } from '../src/mcp-hosted-agent.js';
 import { teachingEntry } from '../src/error-teaching.js';
+import { docsSourceLink } from './docs-source-link.mjs';
 import { errorCodes } from './check-growth.mjs';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
@@ -105,8 +106,10 @@ export function docsReference(root: string) {
         const [name, contract] = node.arguments;
         if (!name || !ts.isStringLiteral(name) || !contract)
           throw new Error(`Unsupported MCP registration in ${path}; update documentation extraction.`);
+        const url = docsSourceLink(path);
+        const source = url ? `[${path}](${url})` : `\`${path}\``;
         entries.push(
-          `### ${name.text}\n\nRegistered input and description, generated from [${path}](https://github.com/NanthAI/nanthai-forge/blob/main/${path}). Named schema helpers are defined in that source. Availability follows the mode and current access; generating this reference does not start the service.\n\n\`\`\`ts\n${contract.getText(file)}\n\`\`\`\n`,
+          `### ${name.text}\n\nRegistered input and description, generated from ${source}. Named schema helpers are defined in that source. Availability follows the mode and current access; generating this reference does not start the service.\n\n\`\`\`ts\n${contract.getText(file)}\n\`\`\`\n`,
         );
       }
       ts.forEachChild(node, visit);

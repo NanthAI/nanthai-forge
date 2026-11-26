@@ -7,9 +7,9 @@ import { packageDocuments, packageDocumentData, readDocument } from './package-d
 import { AGENT_DEFAULTS, BOARD_LINE, agentDefaultLines } from './agent-default-lines.mjs';
 import { agentGuidePaths, checkAgentGuides } from './docs-agent-prompts.mjs';
 
+import { docsSourceLink } from './docs-source-link.mjs';
 import { coreVerbs, landSaveForm } from './agent-verb-forms.mjs';
 
-const repository = 'https://github.com/NanthAI/nanthai-forge/blob/main';
 const skillPath = 'skills/forge-agent/SKILL.md';
 const productSummary =
   'Forge is a source host and workspace for people and AI agents changing the same code at the same time. Agents work in their existing tools, and checks run in your CI. Forge coordinates concurrent work with isolated Lanes, recorded checks and accepted Channels.';
@@ -186,6 +186,10 @@ export function llmDocuments(root) {
   const measured = measuredEvidence(byPath.get('docs/why-forge.md').source);
   const skill = syncSkill(root, measured);
 
+  const sourceText = (path, label) => {
+    const url = docsSourceLink(path);
+    return url ? `[${label}](${url})` : `\`${path}\``;
+  };
   const links = selected => selected.map(doc => `- [${doc.title}](/${doc.path}): ${doc.note}`).join('\n');
   const introduction = `# NanthAi:Forge\n\n> ${productSummary}\n\n`;
   const reference = documents.filter(doc => referenceDocs.has(doc.path));
@@ -194,11 +198,11 @@ export function llmDocuments(root) {
   );
   const llms =
     `${introduction}## If someone sent you here\n\n${sentHere}\n\n## Documentation site\n\n- [Documentation](/docs/): Static, readable guides for people and agents.\n- [Generated CLI reference](/docs/reference/cli.md): Every hosted command and its enforced JSON schema.\n- [Generated MCP reference](/docs/reference/mcp.md): Hosted tool names and enforced input schemas.\n\n## Start here\n\n${links(documents.filter(doc => startHere.has(doc.path)))}\n` +
-    `- [README](${repository}/README.md): ${describe('README.md', full[0].source).note}\n\n` +
+    `- ${sourceText('README.md', 'README')}: ${describe('README.md', full[0].source).note}\n\n` +
     `## For agents\n\n${agentRules.map(rule => `- ${rule}`).join('\n')}\n\n` +
     `${links(documents.filter(doc => agentDocs.has(doc.path)))}\n` +
-    `- [forge-agent skill](${repository}/${skillPath}): ${describe(skillPath, skill).note}\n\n` +
-    `## Licence\n\nForge is licensed AGPL-3.0-only, copyright 2026 Ferdinando Valsecchi: [LICENSE.md](${repository}/LICENSE.md). Outside contributions need a contributor agreement and are closed for now.\n\n` +
+    `- ${sourceText(skillPath, 'forge-agent skill')}: ${describe(skillPath, skill).note}\n\n` +
+    `## Licence\n\nForge is licensed AGPL-3.0-only, copyright 2026 Ferdinando Valsecchi: ${sourceText('LICENSE.md', 'LICENSE.md')}. Outside contributions need a contributor agreement and are closed for now.\n\n` +
     `## Measured results\n\n${measured}\n\nMethod, sources and caveats: [Why Forge](/docs/why-forge.md).\n\n` +
     `## Reference\n\n${links(reference)}\n\n` +
     `## Optional\n\n${links(rest)}\n\n` +
@@ -209,7 +213,7 @@ export function llmDocuments(root) {
     full
       .map(
         doc =>
-          `---\n\nSource: ${doc.path === 'README.md' ? `${repository}/README.md` : `/${doc.path}`}\n\n${doc.source}`,
+          `---\n\nSource: ${doc.path === 'README.md' ? (docsSourceLink(doc.path) ?? doc.path) : `/${doc.path}`}\n\n${doc.source}`,
       )
       .join('\n\n');
   return [

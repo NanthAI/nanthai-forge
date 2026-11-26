@@ -24,7 +24,7 @@ for (const [phase, limits] of Object.entries(sourceStateLimits)) {
             new RegExp(`${phase}: ${dimension} ${size[dimension] + 1} exceeds ${limits[dimension]}`),
           );
           assert.match(error.message, /Split the repository\./);
-          assert.match(error.message, /source-exchange\.md#supported-repository-envelope/);
+          assert.match(error.message, /nforge docs operations\/source-exchange/);
           assert(error.message.length <= 240, 'terminal job retains the complete message');
           return true;
         },

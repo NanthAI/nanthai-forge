@@ -2,6 +2,7 @@
 // Copyright 2026 Ferdinando Valsecchi
 // One project in the Trash (SPEC-01-trash, "Screens" 3): name and address, time left, size, and the keys its phase
 // allows. Layout is the screen's own grid (`row.tr`); everything else is the design system's.
+import { instanceContact } from '../../instance-contact';
 import { Key, Row, State, type StateWord } from '../../ds';
 import { address, movedWords, sizeText, trashForm, type TrashProject } from './trash-model';
 
@@ -27,6 +28,7 @@ export function TrashRow({
   act: (action: RowAction, project: TrashProject) => void;
 }) {
   const form = trashForm(project, now);
+  const operator = instanceContact(import.meta.env?.VITE_FORGE_OPERATOR_EMAIL);
   const size = sizeText(project);
   const unknown = size === 'not reported';
   const moved = movedWords(project);
@@ -86,8 +88,8 @@ export function TrashRow({
           </Key>
         ) : null}
         {form.keys.includes('ask') ? (
-          <a className="lk" href="https://forge.nanthai.tech/docs/operations#project-retention-and-restore">
-            Ask the operator
+          <a className="lk" href={operator?.href ?? '/docs/operations/#project-retention-and-restore'}>
+            {operator ? 'Ask the operator' : 'Project retention and restore'}
           </a>
         ) : null}
       </span>
