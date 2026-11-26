@@ -14,13 +14,15 @@ import { parseNativeState, type NativeFile } from './state/format.js';
 import { digest } from './state/hash.js';
 import { reviewPaths } from './source-review-format.js';
 import { safeRelative } from './safe-relative.js';
-import { invariant } from './errors.js';
+import { convexErrorData, ForgeError, invariant } from './errors.js';
 import { selectHostedSource, selectHostedMain, hostedSourceShowSchema } from './mcp-hosted-source.js';
 import { hostedWaitSchema } from './hosted-wait-schema.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
 import { memberDataNotice } from './member-data-notice.js';
 import { exactConflictEnvelope, exactConflictsSchema } from './hosted-conflict-notice.js';
+import { callerPeerLane } from './hosted-lane-location.js';
+import type { ViewSignals } from './now-overlap-view.js';
 import { QUEUE_VIEW_LIMIT } from './hosted-queue-view.js';
 import { hostedLandingsSchema } from './hosted-agent-landings.js';
 import { hostedLaneHistorySchema } from './hosted-agent-lane-history.js';
@@ -28,16 +30,77 @@ import { hostedAgentRoot } from './hosted-agent-journal.js';
 import { liveLanesInput } from './hosted-live-lanes.js';
 import { hostedBoardSchemas } from './hosted-board.js';
 import { hostedConversationSchemas } from './coordination-types.js';
-import { SELECT_LANE } from './hosted-lane-location.js';
 import { shellQuote } from './shell-quote.js';
 const hash = z.string().regex(/^[0-9a-f]{64}$/);
 export const hostedPeersSchema = z
   .object({
-    laneId: z.uuid().optional(),
+    laneId: z.uuid().nullable().optional().describe('Select a Lane, or pass null for project-wide evidence.'),
     path: z.string().refine(safeRelative).optional(),
     detail: z.boolean().default(false),
   })
   .strict();
+export async function peersHostedSource(transport: HostedAgentTransport, input: unknown) {
+  const parsed = hostedPeersSchema.safeParse(input);
+  invariant(parsed.success, 'BAD_ARGUMENT', 'Invalid hosted peers parameters. Use peers --help.');
+  const { laneId: requested, path, detail } = parsed.data;
+  const laneId = requested === undefined ? callerPeerLane(transport) : requested;
+  const items = detail ? 50 : 5;
+  if (!laneId) return { ...(await projectPeers(transport, path, items)), conflictNotice: undefined };
+
+  // No capability or selection probe. This read authorizes and pins the entire observation.
+  const result = await transport
+    .query<Record<string, unknown>>('projectHostedOverlaps:read', {
+      laneId,
+      ...(path ? { path } : {}),
+      detail: true,
+      items,
+    })
+    .catch(error => {
+      const code = error instanceof ForgeError ? error.code : convexErrorData(error)?.code;
+      if (code !== 'NOT_FOUND') throw error;
+      const project = JSON.stringify({ laneId: null, path, ...(detail ? { detail } : {}) });
+      const command = `nforge agent ${shellQuote(transport.root)} peers ${shellQuote(project)}`;
+      throw new ForgeError(
+        'NOT_FOUND',
+        `Lane ${laneId} was not found on this project. Read project peers with ${command}`,
+        undefined,
+        { command },
+      );
+    });
+  // The exact trial verdict already rides this query. Range evidence alone is not a conflict.
+  const conflicts = exactConflictsSchema.parse(result.conflicts ?? []);
+  return {
+    ...result,
+    laneId,
+    ...(result.peerEvidence ? { notice: memberDataNotice } : {}),
+    ...exactConflictEnvelope(laneId, conflicts),
+  };
+}
+
+async function projectPeers(transport: HostedAgentTransport, path: string | undefined, items: number) {
+  // Reuse the same authorized, bounded saved-path projection as the Now page. Each Lane's shared
+  // paths and head travel together, keeping the reply proportional to that one project window.
+  const { signals } = await transport.query<{ signals: ViewSignals }>('projectNowOverlaps:now', {});
+  const { readViewSignals } = await import('./now-overlap-view.js');
+  const { edits, complete } = readViewSignals(signals);
+  const matching = new Set(edits.flatMap(edit => edit.paths.filter(file => !path || file === path)));
+  const listed = new Set([...matching].slice(0, items));
+  return {
+    notice: memberDataNotice,
+    peerEvidence: {
+      scope: 'project-saved-paths',
+      unsavedEdits: 'unavailable',
+      ...(path ? { path } : {}),
+      coverage: complete ? 'complete' : 'partial',
+      count: matching.size,
+      listed: listed.size,
+      edits: edits.flatMap(edit => {
+        const paths = edit.paths.filter(file => listed.has(file));
+        return paths.length ? [{ ...edit, paths }] : [];
+      }),
+    },
+  };
+}
 /** The smallest diff page: a byteBudget below it reads as it. */
 export const DIFF_MIN_BYTE_BUDGET = 1024;
 export const hostedDiffSchema = z
@@ -76,27 +139,6 @@ export const hostedDiffSchema = z
       .optional(),
   })
   .strict();
-export async function peersHostedSource(transport: HostedAgentTransport, input: unknown) {
-  const parsed = hostedPeersSchema.safeParse(input);
-  invariant(parsed.success, 'BAD_ARGUMENT', 'Invalid hosted peers parameters. Use peers --help.');
-  const command = parsed.data;
-  const laneId = command.laneId ?? readHostedLaneCheckout(transport.root)?.selection.laneId;
-  invariant(laneId, 'BAD_ARGUMENT', SELECT_LANE);
-  // Deliberately no capability or select probe: the server authorizes and pins the entire observation.
-  const result = await transport.query<Record<string, unknown>>('projectHostedOverlaps:read', {
-    ...command,
-    laneId,
-    detail: true,
-    items: command.detail ? 50 : 5,
-  });
-  // The exact trial verdict already rides this query. Range evidence alone is not a conflict.
-  const conflicts = exactConflictsSchema.parse(result.conflicts ?? []);
-  return {
-    ...result,
-    ...(result.peerEvidence ? { notice: memberDataNotice } : {}),
-    ...exactConflictEnvelope(laneId, conflicts),
-  };
-}
 /** `flow {}` (Item 85f456c1): the Flow view as text, from the top bar's one line feed read. No parameters. */
 export const hostedFlowSchema = z.object({}).strict();
 export async function flowHostedSource(transport: HostedAgentTransport, input: unknown) {

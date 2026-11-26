@@ -3,9 +3,34 @@
 import { z } from 'zod';
 import { ForgeError } from './errors.js';
 import { retainedHostedOperation } from './hosted-agent-journal.js';
-import { laneResolutions, readLaneEntry } from './lane-registry.js';
+import { laneResolutions, listLanes, readLaneEntry } from './lane-registry.js';
+import { markerIdentity } from './hosted-lane-directory.js';
 import { markerAt } from './hosted-apply-recovery-records.js';
 import { inPlaceResolution } from './hosted-conflict-precheck.js';
+
+/** Use a verified checkout or a single open local Lane belonging to the calling session. */
+export function callerPeerLane(caller: {
+  root: string;
+  address: { url: string; projectId: string };
+  agentSlug(): string | undefined;
+}) {
+  const { url, projectId } = caller.address;
+  const here = markerIdentity(caller.root);
+  if (here?.url === url && here.projectId === projectId) return here.laneId;
+  const session = caller.agentSlug();
+  if (!session) return undefined;
+
+  let found: string | undefined;
+  for (const entry of listLanes()) {
+    if (entry.state || entry.agent !== session || entry.url !== url || entry.projectId !== projectId)
+      continue;
+    const marker = markerIdentity(entry.root);
+    if (marker?.laneId !== entry.laneId || marker.url !== url || marker.projectId !== projectId) continue;
+    if (found) return undefined;
+    found = entry.laneId;
+  }
+  return found;
+}
 
 /** Where this machine already has the Lane open, when that is not `session.root`. Only a
  * registered root whose checkout marker names the same Lane, URL and project counts. */

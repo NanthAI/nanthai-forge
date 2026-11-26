@@ -51,10 +51,14 @@ MCP `forge_review` exposes hosted `show`, `diff`, `peers` and `queue`.
   read uses the existing history action, which authorizes the selection before and
   after one verified capsule read. None of these reads write data.
 
-- `peers {laneId,path?,detail?}` reads saved peer evidence in one query,
-  including paths before their first save, as `peerEvidence`. Detail shows 50 items
-  instead of five. Count/coverage disclose omissions; unsaved edits remain
-  unavailable and missing notices never prove independence.
+- `peers {laneId?,path?,detail?}` reads saved peer evidence in one query.
+  Omit `laneId` to use the checkout's Lane or the calling session's single open
+  local Lane on this project. From the project folder, if the session has no
+  unique Lane, `peerEvidence.scope` is `project-saved-paths` and `edits` lists
+  paths shared by open Lanes with their saved heads. Pass `{"laneId":null}` to
+  select the project explicitly. `path` filters the result. Detail shows up to
+  50 items or shared paths, with five by default. Count and coverage disclose
+  omissions. Unsaved edits remain unavailable.
 - `diff {laneId,paths?,byteBudget?,format?,cursor?}` pins base/saved-head R2 States.
   Defaults: 48,000 hunk payload bytes plus path metadata, 50 paths/page. `format:"unified"`
   returns a standard unified diff in `result.diff` (`--- a/path`, `+++ b/path`, `@@` hunks,
