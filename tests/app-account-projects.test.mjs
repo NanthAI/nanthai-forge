@@ -101,10 +101,13 @@ test('ages are whole hours, then whole days, like the server order', () => {
   assert.equal(updatedWords(5 * h, 0), 'updated this hour');
 });
 
-test('empty Projects onboarding prompt follows real CLI order with deployment URL and existing quickstart links', () => {
+test('empty Projects starts at Quickstart’s first landing and gives the agent the real CLI order', () => {
   const deployment = 'https://example-123.convex.cloud';
   const prompt = onboardingPrompt('https://forge.example', deployment);
-  assert.match(prompt, /^Read https:\/\/forge\.example\/docs\/quickstart\.md\./);
+  assert.equal(
+    prompt.split('\n')[0],
+    'Read First landing in https://forge.example/docs/quickstart.md#first-landing',
+  );
   assert.ok(prompt.includes(`nforge login ${deployment}`), 'includes deployment URL for clean-machine login');
   assert.ok(prompt.includes('nforge import <github-url>'));
   assert.ok(prompt.includes(`nforge host <folder> --deployment ${deployment}`));
@@ -120,9 +123,12 @@ test('empty Projects onboarding prompt follows real CLI order with deployment UR
     /npm (install|i) -g|npx nforge|tool server|local Git clone with history|project settings/,
     'no unbuilt or overpromised capabilities',
   );
-  assert.match(onboardingPrompt('', deployment), /^Read \/docs\/quickstart\.md\./);
+  assert.equal(
+    onboardingPrompt('', deployment).split('\n')[0],
+    'Read First landing in /docs/quickstart.md#first-landing',
+  );
   assert.equal(agentSetupHref, '/docs/quickstart.md');
-  assert.equal(manualSetupHref, '/docs/quickstart/#install-the-development-cli');
+  assert.equal(manualSetupHref, '/docs/quickstart/#first-landing');
   const [page, anchor] = manualSetupHref.split('#');
   const doc = readDocument(root, `${page.replace(/^\//, '').replace(/\/$/, '')}.md`);
   const slug = text =>

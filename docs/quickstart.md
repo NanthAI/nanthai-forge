@@ -10,11 +10,11 @@ guides while you wait for access.
 
 ## First landing
 
-1. [Build and link the CLI](#install-the-development-cli) and [approve your terminal sign-in](#sign-in).
+1. [Build and link the CLI](#install-the-development-cli) if you do not have it yet, then [sign in from your terminal](#sign-in).
 2. [Import committed GitHub source](#import-from-github-in-the-app), or [host a local folder](#host-a-local-folder). For a new project, start with a folder and a short README.
 3. [Clone the hosted project](#clone-the-project). Use the project URL from the web or the host or import receipt.
 4. [Choose a check and runner](#configure-the-first-hosted-check) if the project has none.
-5. [Start a Lane](#work-on-a-hosted-project), edit its README, then run `land --save` from the Lane. Follow the receipt through any [approval](#approve-the-first-landing). Open the accepted State in the project when the receipt says `LANDED`.
+5. [Start a Lane](#work-on-a-hosted-project) and edit its README. Run `nforge agent LANE_PATH land --save '{"message":"Improve the README"}'` with the returned Lane path. Follow the receipt through any [approval](#approve-the-first-landing). Open the accepted State in the project when the receipt says `LANDED`.
 
 | What you want to set up | Start here |
 | --- | --- |
@@ -200,7 +200,7 @@ cached objects and Lane directories.
 
 ## Configure the first hosted check
 
-On the project's **Needs me** page, **Getting started** links to **Settings → Landing and checks** to choose the required check. Bring your own CI; GitHub is not required. **Connect GitHub (optional)** links to the mirror settings if you want to mirror `main` or use a CI file from GitHub Actions, and does not count toward checklist progress.
+On the project's **Needs me** page, **Getting started → Quickstart** opens [First landing](#first-landing). Use **Choose** to open **Settings → Landing and checks** for the required check. Bring your own CI; GitHub is not required. **Connect GitHub (optional)** links to the mirror settings if you want to mirror `main` or use a CI file from GitHub Actions, and does not count toward checklist progress.
 
 Use **Skip** on any other step and **Undo** on the same row to restore it. To put the whole checklist away, select **Hide getting started**; restore it from **Needs me → Help → Show getting started**. Forge keeps your choices for that project across devices without changing anyone else's setup or the landing rules. With the checklist hidden, the owner can still choose who approves landings in **Settings → Landing and checks**.
 

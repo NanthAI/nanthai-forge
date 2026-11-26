@@ -13,7 +13,7 @@ import { Key, Region, Row, State, Who } from '../../ds';
 import { useSafeQuery } from '../../safe-query';
 import { A } from '../frames';
 import { hrefFor, type AppRoute } from '../paths';
-import { agentAppsSummary, deploymentUrl, joinPrompt } from './agent-apps';
+import { agentAppsSummary, deploymentUrl, joinPrompt, manualSetupHref } from './agent-apps';
 import { approvalWords, useApprovalWrite, type ApprovalMode } from './approvals';
 import { ConnectSteps, CopyKey } from './parts';
 import {
@@ -275,6 +275,7 @@ export default function GettingStarted({
         ) : null}
         <p className="pf gs-later">
           <span className="t3">When ready:</span>
+          <a href={manualSetupHref}>Quickstart</a>
           <A href={hrefFor({ ...route, place: 'settings', section: 'checks', rest: '' })}>
             Who approves landings
           </A>

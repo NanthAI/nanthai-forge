@@ -180,7 +180,10 @@ test('account projects: the held project leads, rows link to projects, and every
     );
     const promptRegion = main.getByRole('region', { name: 'Paste this into your agent' });
     const promptText = await promptRegion.locator('pre').textContent();
-    assert.match(promptText, /^Read https:\/\/forge\.test\/docs\/quickstart\.md\./);
+    assert.equal(
+      promptText.split('\n')[0],
+      'Read First landing in https://forge.test/docs/quickstart.md#first-landing',
+    );
     assert.match(promptText, /nforge login https:\/\//);
     assert.match(promptText, /nforge import <github-url>/);
     assert.match(promptText, /nforge host <folder> --deployment https:\/\//);
@@ -216,7 +219,7 @@ test('account projects: the held project leads, rows link to projects, and every
     const guideLink = page.getByRole('link', { name: 'Open /docs/quickstart.md' });
     const manualLink = page.getByRole('link', { name: 'Manual setup guide' });
     assert.equal(await guideLink.getAttribute('href'), '/docs/quickstart.md');
-    assert.equal(await manualLink.getAttribute('href'), '/docs/quickstart/#install-the-development-cli');
+    assert.equal(await manualLink.getAttribute('href'), '/docs/quickstart/#first-landing');
     assert.ok((await guideLink.boundingBox()).height >= 40, 'phone touch target >= 40 px for agent link');
     assert.ok((await manualLink.boundingBox()).height >= 40, 'phone touch target >= 40 px for manual link');
     assert.equal(await page.getByRole('link', { name: 'Start a project' }).count(), 0);

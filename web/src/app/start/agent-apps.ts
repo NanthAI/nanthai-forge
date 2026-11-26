@@ -58,19 +58,20 @@ export function joinPrompt(origin: string, projectUrl: string) {
   ].join('\n');
 }
 
-/** The Markdown setup guide the empty Projects prompt points agents at, keeping /llms.txt's explain-first rule for visitors. */
+const firstLandingSection = '#first-landing';
+
+/** The Markdown Quickstart for the empty Projects prompt. */
 export const agentSetupHref = '/docs/quickstart.md';
 
-/** The rendered manual setup guide for installing the CLI, signing in and importing or hosting a project. */
-export const manualSetupHref = '/docs/quickstart/#install-the-development-cli';
+/** The rendered Quickstart for people setting up and landing their first change. */
+export const manualSetupHref = `/docs/quickstart/${firstLandingSection}`;
 
 /** The prompt the empty Projects page copies (Items a0cf8c22, 45737a3b): the person has signed in and hands setup to
  * their own agent in the real CLI order (install, sign in with the deployment URL, import from GitHub or host a plain
  * local folder, clone, optionally connect the agent app inside the clone). */
 export function onboardingPrompt(origin: string, deployment: string) {
-  const guide = origin ? `${origin}${agentSetupHref}` : agentSetupHref;
   return [
-    `Read ${guide}.`,
+    `Read First landing in ${origin}${agentSetupHref}${firstLandingSection}`,
     '',
     `I already signed in to Forge in my browser. Help me set Forge up in this order: 1) install the nforge CLI from the guide if it is not installed, 2) run \`nforge login ${deployment}\` so I can approve this device once in my browser, 3) ask me whether to import a GitHub repository (\`nforge import <github-url>\`) or host a plain local folder without .git (\`nforge host <folder> --deployment ${deployment}\`), 4) clone the hosted project (\`nforge clone <project-url> <dir>\`), and 5) optionally connect this agent app from inside the clone (\`nforge connect <app>\` or \`nforge mcp-config . --agent\`). Tell me before changing anything on my machine.`,
   ].join('\n');

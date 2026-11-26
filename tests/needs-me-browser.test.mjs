@@ -170,6 +170,10 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
               .locator('.gs-row')
               .filter({ hasText: 'Choose the check that decides a landing' });
             await card.getByText('1 of 4 done').waitFor();
+            assert.equal(
+              await card.getByRole('link', { name: 'Quickstart' }).getAttribute('href'),
+              '/docs/quickstart/#first-landing',
+            );
             assert.equal((await page.evaluate(() => window.setupStats())).reads, 1, label);
             assert.equal(
               await card.getByText('Connect GitHub (optional)', { exact: true }).count(),
