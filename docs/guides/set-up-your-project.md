@@ -119,8 +119,8 @@ nforge agent . check-settings '{}'
   what is missing.
 
 - **Leave it for later.** Forge can accept a change without a check. The
-  landing record calls it **unchecked**. The project can still require a
-  person to approve. If Forge says to select a configured check, use the
+  landing record calls it **unchecked**. The project can still ask the owner
+  to approve. If Forge says to select a configured check, use the
   check settings command above to see what's missing.
 
 ## 4. Choose who approves landings
@@ -133,14 +133,16 @@ yourself, or **Land on its own when the check passes** to let ordinary changes
 through automatically. The second choice still pauses changes that touch a
 path [you have set aside for review](#5-choose-paths-that-need-a-person).
 
-If you leave this alone, Forge uses the choice shown on the page. If it asks
-for a person, even the first change without a check waits for approval.
+New solo projects start Trusted. When another member joins, Forge offers
+earned trust to the owner. A project set to ask the owner can still hold its
+first change without a check.
 
 To review a held change, open the agent's link or find it in **Needs me**.
-Read the changes and check result,
-then choose **Approve and land** or **Decline**. If no check ran, confirm
-**Approve without a check** when Forge asks. If Forge has not
-printed the link, use the original landing operation ID in the command below.
+Read the changes and any check result, then choose **Approve and land** or
+**Decline**. When the project has no check set up, **Approve and land** is a
+single action. Follow any confirmation Forge displays for a configured check.
+If Forge has not printed the link, use the original landing operation ID in
+the command below.
 
 ```sh
 nforge agent . approve-link '{"operationId":"LANDING_OPERATION_ID"}'
@@ -150,8 +152,8 @@ nforge agent . approve-link '{"operationId":"LANDING_OPERATION_ID"}'
 
 **Who can do this?** The project owner. An agent can propose the change.
 
-A protected path is a file or group of files whose changes should wait for a
-person. For example, you might want to review files that control how your app
+A protected path is a file or group of files whose changes ask the owner to
+approve. For example, you might want to review files that control how your app
 goes live. Open **Settings → Landing and checks → Paths that need owner
 approval**. Enter one pattern per line under **Repository path patterns**.
 Choose **Save paths**.

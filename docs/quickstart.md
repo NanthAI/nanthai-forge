@@ -11,7 +11,7 @@ the CLI and read its packaged guides while you wait for access.
 1. [Build and link the CLI](#install-the-cli) if you do not have it yet. [Check your terminal sign-in](#sign-in) and sign in if needed.
 2. [Import committed GitHub source](#import-from-github-in-the-app), or [host a local folder](#host-a-local-folder). For a new project, start with a folder and a short README.
 3. [Clone the hosted project](#clone-the-project). Use the project name shown in the app or the command from the host or import receipt.
-4. [Start a Lane](#work-on-a-hosted-project) and edit its README. Run the landing command and follow what it prints. `LANDED` means your change reached main.
+4. [Start a Lane](#work-on-a-hosted-project) and edit its README. Run `nforge agent LANE_PATH land --save '{"message":"Improve the README"}'` from the returned Lane path. Follow the wait command until Forge reports `LANDED`.
 
 For project settings, checks, secrets, teammates and GitHub, see
 [Set up your project](guides/set-up-your-project.md). For an agent app that
@@ -193,11 +193,6 @@ Cloning materializes hosted `main` for your tools. Keep the clone and its
 `.forge-client` sibling together. The sibling holds bindings, retry journals,
 cached objects and Lane directories.
 
-## Configure the first hosted check
-
-See [Choose how changes are checked](guides/set-up-your-project.md#3-choose-how-changes-are-checked)
-for all three options and their setup commands.
-
 ## Work on a hosted project
 
 Start in your clone. For a planned change, use [Start a Lane](guides/agents.md#land-it)
@@ -207,25 +202,40 @@ with the Item ID. To try an unplanned change:
 nforge agent /absolute/path/to/project start '{"outcome":"Improve the README","model":"unknown"}'
 ```
 
-Replace `LANE_PATH` with the path returned by `start` and edit inside it.
-Concurrent agents start separate Lanes. Land from your Lane. This saves your
-edits and runs any configured local checks before submitting them.
+Edit the README inside the returned `LANE_PATH`. Run the landing from that
+Lane to save the edit and run any configured local preflight.
 
 ```sh
 nforge agent LANE_PATH land --save '{"message":"Improve the README"}'
 ```
 
-Use `nforge agent LANE_PATH save '{"message":"Improve the README"}'` if you want
-to keep a checkpoint before you're ready to land.
+Keep the operation ID and run the wait command Forge prints. Run it again if
+it times out. `LANDED` means the change reached main. Follow any recovery command
+on the receipt if the landing is interrupted. The `save` command keeps a
+checkpoint while you are still editing.
 
-Keep the operation ID. Run the wait command Forge prints. Run it again
-if it times out. If Forge says the landing is held, see
-[Approve the first landing](#approve-the-first-landing).
+## Make it safer
 
-## Approve the first landing
+A new solo project starts Trusted. With no check set up, an ordinary change
+lands unchecked. The receipt shows that no check ran. Changes to protected
+paths always ask the owner.
 
-Follow the [held landing steps](guides/set-up-your-project.md#4-choose-who-approves-landings)
-if Forge asks a person to review your change.
+### Configure the first hosted check
+
+[Choose how changes are checked](guides/set-up-your-project.md#3-choose-how-changes-are-checked)
+when you want a check to pass on the exact Candidate before Forge accepts it.
+The setup guide covers GitHub Actions, other CI systems, and running your own
+verification command. Use `nforge agent ROOT check-settings '{}'` to see the
+current check and runner.
+
+### Set team approvals
+
+Use **Settings → Landing and checks** to choose Supervised if you want to approve
+each landing. When another member joins, Forge offers earned trust to the owner.
+To decide a held landing, open **Needs me**, inspect the changes and choose
+**Approve and land**. Agents can get the link with
+`nforge agent ROOT approve-link '{"operationId":"LANDING_OPERATION_ID"}'`.
+See the [agent workflow](agents/workflow.md) for retries and acceptance receipts.
 
 ## No background process
 

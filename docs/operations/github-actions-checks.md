@@ -499,7 +499,7 @@ letting the edit judge itself:
   trial job. This catches a definition change that loses the trial; it is not a guard against a
   hostile Lane, which could keep the line and make its trial run nothing. That is harmless: the
   trial only adds work, main's full check still judges the Lane, and `scripts/forge-check.mjs` is a
-  protected path that needs a person's approval to land.
+  protected path that needs the owner's approval to land.
 - **Cost.** A Lane that changes no definition path pins nothing new and runs no trial: the same
   recipe, Convex calls and runner minutes as before. A definition Lane pays main's full check (most
   already ran full) plus a few seconds of trial selection, more only when the trial finds tests to

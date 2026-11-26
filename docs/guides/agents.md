@@ -41,13 +41,13 @@ nforge mcp ROOT --agent
 
    Prove the changed behavior and failure paths, with UI/runtime evidence when relevant. Run affected checks, format, lint and types; the project runner owns the full check. Review the saved diff, following every `nextCursor` for that pinned pair. Record [findings and outcomes](review.md#structured-review-findings) on the Item. Use an independent reviewer when the user or project requires one; this recipe adds no review gate. Later review rounds cover changed code and unresolved findings, keeping pre-existing issues distinct. Escalate unresolved judgment with the evidence rather than cycling indefinitely.
 
-3. For a newly hosted project, read [how the project checks changes](set-up-your-project.md#3-choose-how-changes-are-checked). Submit once:
+3. Submit the Lane. The [project setup guide](set-up-your-project.md#3-choose-how-changes-are-checked) covers check options.
 
    ```sh
    nforge agent LANE_PATH land '{"message":"Problem and result; what was removed or why nothing can go"}'
    ```
 
-   Bare `land` is `land --save`. Retain requested authorship trailers in the message (`--message-file FILE` avoids shell quoting). Landing saves, runs affected preflight, updates from main, composes, checks and accepts under current project policy. Follow the recovery it prints; an unknown reply is retried with the printed command.
+   Bare `land` is `land --save`. Retain requested authorship trailers in the message (`--message-file FILE` avoids shell quoting). Landing saves, runs affected preflight, updates from main and composes. Forge runs the configured check when the project has one and applies the current acceptance policy. Follow the recovery it prints; an unknown reply is retried with the printed command.
 
 4. Keep the turn active until terminal. After submission, do not edit, save or sync the Lane. Run the receipt's exact `waitCommand` in the foreground; repeat on `IN_PROGRESS`, without polling or sleeping. When it returns `wake.command`, run that command once in the background and block on it with the harness wait tool. [Waiting](../agents/workflow.md#waiting-for-outcomes) describes both paths and interrupted-shell recovery.
 
