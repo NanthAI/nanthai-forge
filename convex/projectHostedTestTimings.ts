@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import { v } from 'convex/values';
+import { gzipSync, gunzipSync } from 'fflate';
 import { makeFunctionReference } from 'convex/server';
 import { writableHostedCheck, writeHostedCheck } from './projectHostedCheckStore';
 import { invariant } from '../src/errors';
@@ -14,13 +15,53 @@ import {
   objectReportTransport,
 } from './projectHostedCheckReports';
 import type { MutationCtx } from './_generated/server';
-import type { Id } from './_generated/dataModel';
+import type { Doc, Id } from './_generated/dataModel';
 import type { HostedCheckRun } from '../src/hosted-check';
 import { hostedCheckRunSchema } from '../src/hosted-check';
 import { parseTimingHistory, updateHostedTimingHistory } from '../src/hosted-test-timings';
+import { emptyHistory, timingHistoryLimits } from '../scripts/test-shards.mjs';
 import { checkTimeEvidence } from '../src/check-time-added';
 import { isScopedRecheck } from '../src/scoped-recheck-policy';
 import { isStandardForgeCheck } from '../src/standard-check';
+
+export function encodeTimingHistoryRow(text: string) {
+  const body = gzipSync(new TextEncoder().encode(text), { level: 6, mtime: 0 });
+  invariant(
+    body.byteLength <= timingHistoryLimits.bytes - 2048,
+    'BAD_ARGUMENT',
+    'The compressed timing history must fit its existing document.',
+  );
+  return { history: '', compressed: body.slice().buffer };
+}
+
+// fflate's bounded synchronous decoder does not check the gzip CRC.
+const crcTable = Uint32Array.from({ length: 256 }, (_, byte) => {
+  let crc = byte;
+  for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+  return crc;
+});
+
+export function decodeTimingHistoryRow(
+  row: Pick<Doc<'projectHostedTestTimings'>, 'history' | 'compressed'> | null,
+) {
+  if (!row?.compressed) return parseTimingHistory(row?.history ?? '');
+  const body = new Uint8Array(row.compressed);
+  // This writer emits a fixed header. Reject optional fields before fflate scans them.
+  if (body.length < 18 || body.length > timingHistoryLimits.bytes || body[3] !== 0) return emptyHistory();
+  const trailer = new DataView(row.compressed, body.length - 8, 8);
+  const rawSize = trailer.getUint32(4, true);
+  if (rawSize > timingHistoryLimits.bytes) return emptyHistory();
+  try {
+    const plain = gunzipSync(body, { out: new Uint8Array(rawSize) });
+    if (plain.length !== rawSize) return emptyHistory();
+    let crc = 0xffffffff;
+    for (const byte of plain) crc = (crc >>> 8) ^ crcTable[(crc ^ byte) & 255]!;
+    if (~crc >>> 0 !== trailer.getUint32(0, true)) return emptyHistory();
+    return parseTimingHistory(new TextDecoder('utf-8', { fatal: true }).decode(plain));
+  } catch {
+    return emptyHistory();
+  }
+}
 
 /** Same advisory JSON/EWMA as the native owner's .forge/work/test-timings.json.
  * One indexed document, read/written inside existing authorized transactions.
@@ -34,7 +75,7 @@ export async function hostedTimingHistory(
     .query('projectHostedTestTimings')
     .withIndex('by_project', q => q.eq('projectId', projectId))
     .unique();
-  let history = parseTimingHistory(row?.history ?? '');
+  let history = decodeTimingHistoryRow(row);
   if (!row) {
     // Bootstrap from already retained fixed-runner reports. At most one latest
     // run per terminal status, never a run-history scan or an extra function call.
@@ -139,7 +180,9 @@ export async function recordHostedTestTimings(
   if (evidence) run.checkTime = evidence;
   const value = {
     projectId,
-    history: updateHostedTimingHistory(JSON.stringify(history), run, durations, stamp?.sequence, final),
+    ...encodeTimingHistoryRow(
+      updateHostedTimingHistory(JSON.stringify(history), run, durations, stamp?.sequence, final),
+    ),
   };
   if (transport && part) {
     transport.timingParts = [...(transport.timingParts ?? []), part];

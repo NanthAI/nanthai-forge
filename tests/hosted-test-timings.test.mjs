@@ -3,13 +3,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { readdirSync } from 'node:fs';
+import { gunzipSync } from 'node:zlib';
+import { getDocumentSize } from 'convex/values';
 import { updateHostedTimingHistory, parseTimingHistory } from '../dist/hosted-test-timings.js';
-import { timingHistoryLimits } from '../scripts/test-shards.mjs';
+import { emptyHistory, timingHistoryLimits } from '../scripts/test-shards.mjs';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
-const { recordHostedTestTimings, hostedTimingHistory } = await import(
-  moduleUrl('../convex/projectHostedTestTimings.ts')
-);
+const { recordHostedTestTimings, hostedTimingHistory, decodeTimingHistoryRow, encodeTimingHistoryRow } =
+  await import(moduleUrl('../convex/projectHostedTestTimings.ts'));
 
 test('hosted history uses the native EWMA, ignores malformed observations and bounds files, runs and document bytes', () => {
   const file = 'tests/example.test.mjs';
@@ -53,6 +55,40 @@ test('hosted history uses the native EWMA, ignores malformed observations and bo
   }
 });
 
+test('timing rows preserve canonical v1 bytes and ignore corrupt or oversized gzip', () => {
+  const text = JSON.stringify({
+    version: 1,
+    generation: 'exact',
+    sample: 128,
+    files: {
+      'tests/é.test.mjs': { durationMs: 1.23456789012345, updatedAt: '2026-11-26', sourceRun: 128, n: 3 },
+    },
+    runs: ['first', 'second'],
+  });
+  const row = encodeTimingHistoryRow(text);
+  assert.equal(row.history, '');
+  assert.deepEqual(row, encodeTimingHistoryRow(text));
+  assert.equal(gunzipSync(row.compressed).toString('utf8'), text);
+  assert.equal(JSON.stringify(decodeTimingHistoryRow(row)), text);
+  assert.equal(JSON.stringify(decodeTimingHistoryRow({ history: text })), text);
+
+  const corrupt = (offset, mutate) => {
+    const bytes = new Uint8Array(row.compressed.slice(0));
+    mutate(new DataView(bytes.buffer), bytes.length + offset);
+    return bytes.buffer;
+  };
+  for (const bytes of [
+    row.compressed.slice(0, 17),
+    new ArrayBuffer(timingHistoryLimits.bytes + 1),
+    corrupt(-4, (view, at) => view.setUint32(at, timingHistoryLimits.bytes + 1, true)),
+    corrupt(-4, (view, at) => view.setUint32(at, 1, true)),
+    corrupt(-8, (view, at) => view.setUint8(at, view.getUint8(at) ^ 1)),
+    corrupt(-row.compressed.byteLength + 3, (view, at) => view.setUint8(at, 8)),
+  ]) {
+    assert.deepEqual(decodeTimingHistoryRow({ history: text, compressed: bytes }), emptyHistory());
+  }
+});
+
 test('600-file completed hosted results train one indexed document inside the result transaction, with no extra calls', async t => {
   const s = lanesFixture(),
     projectId = s.insert('hostedProjects', {
@@ -75,9 +111,9 @@ test('600-file completed hosted results train one indexed document inside the re
   for (const status of ['running', 'cancelled', 'interrupted']) await record({ ...run, status });
   assert.equal(s.tables.projectHostedTestTimings.size, 0);
   await record(run);
-  const first = [...s.tables.projectHostedTestTimings.values()][0].history;
+  const first = [...s.tables.projectHostedTestTimings.values()][0];
   await record(run);
-  assert.equal([...s.tables.projectHostedTestTimings.values()][0].history, first);
+  assert.deepEqual([...s.tables.projectHostedTestTimings.values()][0], first);
   const second = {
     ...run,
     id: randomUUID(),
@@ -92,6 +128,7 @@ test('600-file completed hosted results train one indexed document inside the re
   assert.equal(Object.keys(history.files).length, 600);
   assert.equal(history.files['tests/synthetic-0.test.mjs'].durationMs, 4);
   assert.deepEqual(history.runs, [run.id, second.id]);
+  assert.equal(s.scheduled.length, 0);
   const meters = s.counts.filter(row => row.name === 'record');
   assert(meters.every(row => row.documents <= 3 && row.writes <= 1));
   t.diagnostic(
@@ -100,9 +137,14 @@ test('600-file completed hosted results train one indexed document inside the re
       documentsPerWarmCompletion: 1,
       documentsPerColdCompletion: 3,
       writesPerCompletion: 1,
-      historyBytes: Buffer.byteLength(first),
+      timingRowBytes: getDocumentSize(first),
+      plainTimingRowBytes: getDocumentSize({
+        ...first,
+        compressed: undefined,
+        history: JSON.stringify(decodeTimingHistoryRow(first)),
+      }),
       addedFunctionCalls: 0,
-      idleCalls: 0,
+      idleCalls: s.scheduled.length,
     }),
   );
 });
@@ -141,7 +183,15 @@ test('final timing pages prune only dormant weights and shrink the capped histor
   original.files[file(1480)].updatedAt = '2026-01-31T23:59:59.999Z';
   original.files[file(0)].updatedAt = past;
   const before = JSON.stringify(original);
-  f.insert('projectHostedTestTimings', { projectId, history: before });
+  const timingId = f.insert('projectHostedTestTimings', { projectId, history: before });
+  const { history: legacy } = await f.transaction(
+    'read-before-upgrade',
+    { _handler: ctx => hostedTimingHistory(ctx, projectId) },
+    {},
+  );
+  assert(JSON.stringify(legacy) === JSON.stringify(parseTimingHistory(before)));
+  assert.equal(f.counts.at(-1).writes, 0);
+  assert.equal(f.tables.projectHostedTestTimings.get(timingId).compressed, undefined);
   const run = { id: randomUUID(), status: 'passed', endedAt };
   const record = (durations, final) =>
     f.transaction(
@@ -151,12 +201,15 @@ test('final timing pages prune only dormant weights and shrink the capped histor
       },
       {},
     );
-  const read = () => [...f.tables.projectHostedTestTimings.values()][0].history;
+  const read = () => f.tables.projectHostedTestTimings.get(timingId);
+  const legacyRow = read();
   await record({ [file(0)]: 200 }, false);
-  assert.equal(Object.keys(parseTimingHistory(read()).files).length, 4096);
+  assert.equal(read().history, '');
+  assert(read().compressed instanceof ArrayBuffer);
+  assert.equal(Object.keys(decodeTimingHistoryRow(read()).files).length, 4096);
   await record({ [file(4095)]: 200 }, true);
   const after = read();
-  const { files, generation, sample, runs } = parseTimingHistory(after);
+  const { files, generation, sample, runs } = decodeTimingHistoryRow(after);
   assert.equal(Object.keys(files).length, 1481);
   assert.equal(files[file(0)].durationMs, 130);
   assert.equal(files[file(4095)].durationMs, 130, 'a late page can still refresh a dormant weight');
@@ -165,13 +218,25 @@ test('final timing pages prune only dormant weights and shrink the capped histor
   assert.equal(files[file(1480)], undefined, 'one millisecond outside the window is pruned');
   assert.deepEqual([generation, sample, runs], [original.generation, original.sample, ['previous', run.id]]);
   await record({}, true);
-  assert.equal(read(), after, 'replay of a completed run keeps identical history');
+  assert.deepEqual(read(), after, 'replay of a completed run keeps identical history');
   assert(
     f.counts.filter(row => row.name === 'timing-expiry').every(row => row.documents === 1 && row.writes <= 1),
   );
-  const storedBytes = history => Buffer.byteLength(JSON.stringify({ projectId, history }));
-  t.diagnostic(JSON.stringify({ before: storedBytes(before), after: storedBytes(after) }));
-  assert(storedBytes(after) < storedBytes(before) * 0.4);
+  const plainAfter = {
+    ...after,
+    compressed: undefined,
+    history: JSON.stringify(decodeTimingHistoryRow(after)),
+  };
+  t.diagnostic(
+    JSON.stringify({
+      beforePruning: getDocumentSize(legacyRow),
+      afterPruningPlain: getDocumentSize(plainAfter),
+      afterPruningGzip: getDocumentSize(after),
+    }),
+  );
+  assert(getDocumentSize(plainAfter) < getDocumentSize(legacyRow) * 0.4);
+  assert.equal(f.tables.projectHostedTestTimings.size, 1);
+  assert.equal(f.scheduled.length, 0);
 });
 
 test('R2 timing stamps distinguish same-millisecond runs without repeating a long identity on every file', async () => {
@@ -206,10 +271,100 @@ test('R2 timing stamps distinguish same-millisecond runs without repeating a lon
     );
     stamps.push(objectReportTransport(run).timingStamp);
   }
-  const history = parseTimingHistory([...f.tables.projectHostedTestTimings.values()][0].history);
+  const history = decodeTimingHistoryRow([...f.tables.projectHostedTestTimings.values()][0]);
   assert.equal(stamps[0].generation, stamps[1].generation);
   assert.notEqual(stamps[0].sequence, stamps[1].sequence);
   assert.equal(history.files['tests/first.test.mjs'].sourceRun, stamps[0].sequence);
   assert.equal(history.files['tests/second.test.mjs'].sourceRun, stamps[1].sequence);
   assert.equal(typeof history.files['tests/second.test.mjs'].sourceRun, 'number');
+});
+
+test('dogfood and capped histories fit their document budgets without changing per-call timing row I/O counts', async t => {
+  const names = readdirSync(new URL('./', import.meta.url)).filter(name => name.endsWith('.test.mjs'));
+  const updatedAt = '2026-11-26T12:00:00.000Z';
+  for (const [count, ceiling] of [
+    [1480, 40_000],
+    [timingHistoryLimits.files, 60_000],
+  ]) {
+    const f = lanesFixture();
+    const projectId = f.insert('hostedProjects', {
+      owner: 'synthetic',
+      key: 'scale',
+      name: 'Synthetic timing scale',
+      currentBackup: null,
+      revision: 0,
+    });
+    const files = Object.fromEntries(
+      Array.from({ length: count }, (_, i) => [
+        `tests/${names[i] ?? `synthetic-project-check-file-${i}.test.mjs`}`,
+        { durationMs: (i + 1) * 13.191, updatedAt, sourceRun: 128, n: 3 },
+      ]),
+    );
+    const history = JSON.stringify({
+      version: 1,
+      generation: 'synthetic',
+      sample: 128,
+      files,
+      runs: Array.from({ length: 128 }, (_, i) => `run-${i}`),
+    });
+    const run = {
+      id: 'warm-completion',
+      status: 'passed',
+      endedAt: updatedAt,
+      contractReports: { [Object.keys(files)[0]]: { durationMs: 32 } },
+    };
+    const read = () =>
+      f.transaction('session-timing-read', { _handler: ctx => hostedTimingHistory(ctx, projectId) }, {});
+    const complete = () =>
+      f.transaction(
+        'timing-completion',
+        { _handler: ctx => recordHostedTestTimings(ctx, projectId, structuredClone(run)) },
+        {},
+      );
+    const id = f.insert('projectHostedTestTimings', { projectId, history });
+    const legacy = f.tables.projectHostedTestTimings.get(id);
+    assert.equal(JSON.stringify((await read()).history), history);
+    await complete();
+    const transitioned = f.tables.projectHostedTestTimings.get(id);
+    const updated = updateHostedTimingHistory(history, run);
+    assert.equal(JSON.stringify(decodeTimingHistoryRow(transitioned)), updated);
+
+    const plainOutput = { ...legacy, history: updated };
+    const compressedInput = { ...legacy, ...encodeTimingHistoryRow(history) };
+    f.tables.projectHostedTestTimings.set(id, compressedInput);
+    assert.equal(JSON.stringify((await read()).history), history);
+    await complete();
+    const compressedOutput = f.tables.projectHostedTestTimings.get(id);
+    assert.deepEqual(compressedOutput, transitioned);
+    assert(getDocumentSize(compressedInput) < ceiling);
+    assert(getDocumentSize(compressedOutput) < ceiling);
+
+    const [plainRead, upgrade, compressedRead, compressedWrite] = f.counts;
+    for (const meter of [plainRead, upgrade, compressedRead, compressedWrite]) {
+      assert.equal(meter.readDocumentsByTable.projectHostedTestTimings, 1);
+      assert.equal(meter.ranges, 1);
+      assert.equal(meter.writes, meter.name === 'timing-completion' ? 1 : 0);
+    }
+    assert(compressedRead.readBytesByTable.projectHostedTestTimings >= compressedInput.compressed.byteLength);
+    assert(
+      compressedWrite.writeBytesByTable.projectHostedTestTimings >= compressedOutput.compressed.byteLength,
+    );
+    assert.equal(f.counts.length, 4);
+    assert.equal(f.scheduled.length, 0);
+    t.diagnostic(
+      JSON.stringify({
+        files: count,
+        rowBytesPerRead: { before: getDocumentSize(legacy), after: getDocumentSize(compressedInput) },
+        rowBytesPerWrite: { before: getDocumentSize(plainOutput), after: getDocumentSize(compressedOutput) },
+        rowBytesPerWarmCompletion: {
+          before: getDocumentSize(legacy) + getDocumentSize(plainOutput),
+          upgrade: getDocumentSize(legacy) + getDocumentSize(compressedOutput),
+          after: getDocumentSize(compressedInput) + getDocumentSize(compressedOutput),
+        },
+        perRead: { calls: 1, reads: 1, writes: 0 },
+        perCompletion: { calls: 1, reads: 1, writes: 1 },
+        idleCalls: 0,
+      }),
+    );
+  }
 });

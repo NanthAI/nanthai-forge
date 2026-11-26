@@ -446,10 +446,10 @@ test('Issue 0c457ae4: 5,000 test files complete through the hosted result path a
   assert(checkFailureDetail(run).includes(failed));
   assert.deepEqual(culpritFailures(run), [{ file: failed, excerpt: 'synthetic failure' }]);
   assert.equal(probeVerdict(run, [failed]), 'fail');
-  // Timings were recorded from the finished run as one JSON text field.
   const timings = [...l.s.tables.projectHostedTestTimings.values()];
   assert.equal(timings.length, 1);
-  assert.equal(typeof timings[0].history, 'string');
+  assert.deepEqual(timingStore.decodeTimingHistoryRow(timings[0]).runs, [run.id]);
+  assert(timings[0].compressed instanceof ArrayBuffer);
   for (const table of Object.keys(l.s.tables))
     for (const row of l.s.tables[table].values()) checkConvexValue(row, table);
   const runRow = [...l.s.tables.projectHostedCheckRuns.values()].find(row => row.runId === l.id.runId);
@@ -686,10 +686,10 @@ test('batched reports: 20,000 all-pass and all-fail files use one pinned object,
     );
     assert(timedRow.reportTimingParts.length >= 1, 'duration arguments are retained with replay identity');
     assert.equal(timedRow.reportTimingComplete, true);
-    const historyBefore = [...l.s.tables.projectHostedTestTimings.values()][0].history;
+    const historyBefore = [...l.s.tables.projectHostedTestTimings.values()][0];
     await l.conclude(failed ? 'failure' : 'success');
-    assert.equal(
-      [...l.s.tables.projectHostedTestTimings.values()][0].history,
+    assert.deepEqual(
+      [...l.s.tables.projectHostedTestTimings.values()][0],
       historyBefore,
       'timing argument pages replay without a second EWMA sample',
     );
@@ -1351,9 +1351,21 @@ test('S3 duration arguments above 768 KiB page through idempotent settlement wit
   assert.equal(row.reportTimingComplete, true);
   assert(l.s.counts.some(count => count.name === 'projectHostedTestTimings:argumentsPage'));
   assert(l.s.counts.every(count => !count.touched.includes('projectHostedActionsResults')));
-  const before = [...l.s.tables.projectHostedTestTimings.values()][0].history;
+  const before = [...l.s.tables.projectHostedTestTimings.values()][0];
+  const history = timingStore.decodeTimingHistoryRow(before);
+  assert.deepEqual(history.runs, [l.id.runId]);
+  assert.equal(history.generation, row.reportTimingStamp.generation);
+  assert.equal(history.sample, row.reportTimingStamp.sequence);
+  assert(Object.keys(history.files).length > 0);
+  assert(
+    Object.values(history.files).every(
+      sample => sample.durationMs === 13 && sample.sourceRun === history.sample && sample.n === 1,
+    ),
+  );
+  const start = l.s.counts.length;
   await l.conclude();
-  assert.equal([...l.s.tables.projectHostedTestTimings.values()][0].history, before);
+  assert.deepEqual([...l.s.tables.projectHostedTestTimings.values()][0], before);
+  assert(l.s.counts.slice(start).every(count => !count.writeBytesByTable.projectHostedTestTimings));
 });
 
 test('incident 238b3573 delayed pass retains the exact R2 report pointer and file outcomes', async t => {

@@ -23,13 +23,24 @@ const {
 } = await import(moduleUrl('../convex/projectFinishReadProjection.ts'));
 const schema = (await import(moduleUrl('../convex/schema.ts'))).default;
 const githubBindings = await import(moduleUrl('../convex/githubBindingStore.ts'));
-const encoded = value =>
+const encoded = (value, binary = item => ({ $bytes: Buffer.from(item).toString('base64') })) =>
   JSON.stringify(value, (key, item) =>
     typeof item === 'bigint'
       ? String(key === 'commitTs' && item === fixturePendingCommit ? fixtureCommitStart : item)
-      : item,
+      : item instanceof ArrayBuffer
+        ? binary(item)
+        : item,
   );
-const bytes = value => Buffer.byteLength(encoded(value));
+// Keep the existing JSON-envelope meter for other values, while measuring raw
+// binary payloads at their Convex size rather than their base64 transport size.
+const bytes = value => {
+  let binaryBytes = 0;
+  const json = encoded(value, item => {
+    binaryBytes += item.byteLength;
+    return {}; // two bytes, matching the Convex bytes value overhead
+  });
+  return Buffer.byteLength(json) + binaryBytes;
+};
 const fieldValue = (row, path) =>
   path.includes('.') ? path.split('.').reduce((value, part) => value?.[part], row) : row[path];
 

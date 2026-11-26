@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedCheckFields.ts": "a34a6a11b397090fd67915b746bf5e782333eb5ef70088a069c40c986ed8f2aa",
+    "convex/projectHostedGate.ts": "8d801fa33884a87c314af892cb1d96c0f6c6fed29bdcef464b2d189ba1f3d851"
+  },
+  "replay": {
+    "incident": "5e3c3a3c",
+    "test": "incident 5e3c3a3c: passed followers land within the pass-to-land ceiling while the holder re-checks",
+    "receipt": "625bd5ea-9292-4828-a849-5255a245d55b"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "thread:delegated-task:command%3Amcp%3A001501ea-c8d4-4a77-8907-008562c1a991%3Adelegate-task%3A3ff6c845-26aa-4072-83bc-90c486b62d8b",
+  "exercised": {
+    "convex/projectHostedCheckFields.ts": {
+      "executed": [
+        "hostedCheckTables"
+      ],
+      "digest": "eac499e0834762c711c3b65176338ce602609f48dc6ee2b755af1187e17e6e2f",
+      "units": [
+        [
+          "checkCause",
+          "951898d2c83b24b33455ecfb98acea9ce436ed50e52d985a280b89061f7ab66d"
+        ],
+        [
+          "checkGate",
+          "ffd015ffb9e883b99c8ce3a2a2e2b5310c7882382b94343b28baf37b1e6ef43a"
+        ],
+        [
+          "defineTable",
+          "b47c67ba5772cdb88aa4a6b681e8b5447b2dc09879b915898b6f088274e1b34b"
+        ],
+        [
+          "hostedCheckTables",
+          "a666d6661b260f511b9cac814c30d2ce37b89e5cba35fccced793174763ba220"
+        ],
+        [
+          "retainedCheckGate",
+          "522fc075ac39c5fdbf41e5c5447f315221c91361c20705d7fbab5a8dabd14e32"
+        ],
+        [
+          "setting",
+          "e4b5989ffb335184ea7cde43b0da61ff7b76bec56bf789d75a19ae3b8626620e"
+        ],
+        [
+          "v",
+          "c9b23930c9b094848cdb5f563a16f0a2f497fc28d7ea9a82afca6bc52741e95f"
+        ]
+      ],
+      "shell": "187707ea01849a4302b15cd7fbeae8042254ebbe610649249aca41f5a3def73d"
+    }
+  },
+  "review": {
+    "model": "claude-opus-5-5",
+    "session": "fdfdd0a6-a1f6-4bf7-851b-21b4cf5a768b",
+    "receipt": "72f108ed-e0a5-4d1d-a11e-91f97377adb4"
+  }
+}

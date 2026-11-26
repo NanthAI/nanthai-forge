@@ -18,6 +18,7 @@ export const hostedCheckTables = {
   projectHostedTestTimings: defineTable({
     projectId: v.id('hostedProjects'),
     history: v.string(),
+    compressed: v.optional(v.bytes()),
   }).index('by_project', ['projectId']),
   projectHostedActionsResults: defineTable({
     projectId: v.id('hostedProjects'),

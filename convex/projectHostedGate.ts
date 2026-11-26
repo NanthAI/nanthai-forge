@@ -7,7 +7,7 @@ import { internalMutation, internalQuery } from './server';
 import { intentTestContext } from './projectIntentTestStore';
 import { hostedWriteProject, writeHostedRecord } from './projectHostedRecords';
 import { loadHostedCheck } from './projectHostedCheckStore';
-import { parseTimingHistory } from '../src/hosted-test-timings';
+import { decodeTimingHistoryRow } from './projectHostedTestTimings';
 import { intentTestContractSchema, latestTestContract } from '../src/intent-test-contract';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
@@ -166,7 +166,7 @@ async function historyBasis(
     .query('projectHostedTestTimings')
     .withIndex('by_project', q => q.eq('projectId', projectId))
     .unique();
-  const history = parseTimingHistory(row?.history ?? '');
+  const history = decodeTimingHistoryRow(row);
   if (!audit?.lastGreen || !history.runs.includes(audit.lastGreen.runId)) return null;
   const { run, row: runRow } = await loadHostedCheck(ctx, { projectId, runId: audit.lastGreen.runId });
   if (run.status !== 'passed' || run.request.expectedHead !== audit.lastGreen.head) return null;

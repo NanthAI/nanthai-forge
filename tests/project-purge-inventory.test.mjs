@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID, createHash } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
-import { jsonToConvex } from 'convex/values';
+import { convexToJson, getDocumentSize, jsonToConvex } from 'convex/values';
 import { moduleUrl } from './convex-module.mjs';
 import { state } from './hosted-fixture.mjs';
 
@@ -20,6 +20,12 @@ const storageInventory = await import(moduleUrl('../convex/projectStorageInvento
 const storageOwnership = await import(moduleUrl('../convex/projectStorageOwnership.ts'));
 const { projectPurgeTables, projectPurgeSpecial, idPaths } = inventory;
 const day = 24 * 60 * 60 * 1000;
+const rowPin = row => ({
+  id: row._id,
+  sha256: createHash('sha256')
+    .update(JSON.stringify(convexToJson(row)))
+    .digest('hex'),
+});
 
 test('orphan inventory covers every indexed root owner without treating nested generation references as ownership', () => {
   const owners = storageOwnership.storageOwners();
@@ -115,7 +121,7 @@ test('orphan purge rechecks absent ownership and exact pins, preserves live rows
     ownerId: 'missing',
     operationId: randomUUID(),
     part: 'one',
-    pins: [{ id: row._id, sha256: createHash('sha256').update(JSON.stringify(row)).digest('hex') }],
+    pins: [rowPin(row)],
   };
   const apply = args => s.transaction(() => storageInventory.purgeOrphans._handler(s.ctx, args));
   s.tables.hostedProjects.set('missing', { _id: 'missing', _creationTime: 1 });
@@ -133,6 +139,38 @@ test('orphan purge rechecks absent ownership and exact pins, preserves live rows
   assert.equal(s.tables.projectWorkRecords.has('orphan'), false);
   assert.equal(s.tables.projectWorkRecords.has('foreign'), true);
   assert.equal(s.scheduled.length, 0, 'finished cleanup has zero idle work');
+});
+
+test('orphan pin and size include the stored timing bytes, even when changed bytes have the same length', async () => {
+  const s = state([]);
+  const table = 'projectHostedTestTimings';
+  const row = {
+    _id: 'orphan',
+    _creationTime: 1,
+    projectId: 'missing',
+    history: '',
+    compressed: new ArrayBuffer(40),
+  };
+  s.tables[table].set(row._id, row);
+  const selection = { table, field: 'projectId' };
+  const { page } = await storageInventory.ownerPage(s.ctx, { ...selection, after: null });
+  assert.equal(page[0].sampleBytes, getDocumentSize(row));
+  const input = {
+    ...selection,
+    ownerId: row.projectId,
+    operationId: randomUUID(),
+    part: 'timings',
+    pins: [rowPin(row)],
+  };
+  const apply = args => s.transaction(() => storageInventory.purgeOrphans._handler(s.ctx, args));
+  const changed = { ...row, compressed: row.compressed.slice(0) };
+  new Uint8Array(changed.compressed)[0] = 1;
+  s.tables[table].set(row._id, changed);
+  await assert.rejects(apply(input), /pinned row/);
+  assert.deepEqual(await apply({ ...input, pins: [rowPin(changed)] }), {
+    deleted: 1,
+    bytes: getDocumentSize(changed),
+  });
 });
 
 /** Every typed hosted-project reference anywhere in a document, and any `projectId` field. */
@@ -617,7 +655,7 @@ test('orphan ticket purge removes both unindexed bodies, preserves foreign bodie
     ownerId: 'missing',
     operationId: randomUUID(),
     part: 'one',
-    pins: [{ id, sha256: createHash('sha256').update(JSON.stringify(row)).digest('hex') }],
+    pins: [rowPin(row)],
   };
   const apply = () => s.transaction(() => storageInventory.purgeOrphans._handler(s.ctx, input));
   const result = await apply();
@@ -666,7 +704,7 @@ test('411727ba row 5: orphan purge of a capsule pointer removes its pins body an
     ownerId: 'missing',
     operationId: randomUUID(),
     part: 'one',
-    pins: [{ id, sha256: createHash('sha256').update(JSON.stringify(row)).digest('hex') }],
+    pins: [rowPin(row)],
   };
   const result = await s.transaction(() => storageInventory.purgeOrphans._handler(s.ctx, input));
   assert.equal(result.deleted, 1);

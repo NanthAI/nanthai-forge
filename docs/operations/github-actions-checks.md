@@ -722,9 +722,14 @@ runner; unknown files use the historical p75, or the existing sorted round-robin
 split when history is missing or invalid. Complete per-file reports already carried
 by shard results train that history once when a check passes or fails. Hosted Mac
 completions use the same store and algorithm. Cancelled and interrupted checks do
-not train it. The indexed `projectHostedTestTimings` document uses the same JSON
-format and EWMA as the local `.forge/work/test-timings.json`, with `timingHistoryLimits`
-(4,096 files, 128 runs, 1 MiB) and space reserved for the containing Convex document.
+not train it. The indexed `projectHostedTestTimings` document stores gzip-compressed
+v1 JSON in a Convex bytes field. Readers also accept legacy plain JSON rows, which
+upgrade on their next timing write. Keep the optional `compressed` schema field
+during a code rollback while compressed rows exist. Retire legacy reads only
+after a bounded inventory confirms that no plain timing rows remain.
+Planning sessions and retained snapshots use the
+same JSON format, EWMA and `timingHistoryLimits` (4,096 files, 128 runs, 1 MiB) as
+the local `.forge/work/test-timings.json`.
 Local history is not uploaded. On a missing hosted
 history document, the session bootstraps from at most the latest passed and latest
 failed hosted run's retained reports through their status indexes. With no usable

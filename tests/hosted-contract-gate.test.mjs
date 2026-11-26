@@ -15,6 +15,7 @@ import { hostedAcceptanceSchema } from '../dist/hosted-acceptance.js';
 import { stateSchema } from '../dist/state/format.js';
 import { moduleUrl } from './convex-module.mjs';
 const gate = await import(moduleUrl('../convex/projectHostedGate.ts'));
+const { encodeTimingHistoryRow } = await import(moduleUrl('../convex/projectHostedTestTimings.ts'));
 const at = '2026-01-01T00:00:00.000Z',
   hash = 'a'.repeat(64),
   leaf = 'tests/leaf.test.mjs';
@@ -255,16 +256,18 @@ test('strict gate exports validate args/documents and history adoption retains m
   f.patch('projectHostedMainAudits', audit._id, {
     lastGreen: { sequence: 0, head: run.request.expectedHead, runId: run.id },
   });
-  f.insert('projectHostedTestTimings', {
-    projectId: f.projectId,
-    history: JSON.stringify({
-      version: 1,
-      files: { [leaf]: { durationMs: 11, updatedAt: at } },
-      runs: [run.id],
-    }),
+  const history = JSON.stringify({
+    version: 1,
+    files: { [leaf]: { durationMs: 11, updatedAt: at } },
+    runs: [run.id],
   });
+  const timingId = f.insert('projectHostedTestTimings', { projectId: f.projectId, history });
   const input = { projectId: f.projectId, candidateId: f.candidate.id };
-  const basis = JSON.parse(await f.call('gateHistory', gate.history, input));
+  const legacy = await f.call('gateHistory', gate.history, input);
+  f.patch('projectHostedTestTimings', timingId, encodeTimingHistoryRow(history));
+  const compressed = await f.call('gateHistory', gate.history, input);
+  assert.equal(compressed, legacy);
+  const basis = JSON.parse(compressed);
   assert.equal(basis.runId, run.id);
   assert.equal(basis.timings[leaf], 11);
   const intent = JSON.parse(

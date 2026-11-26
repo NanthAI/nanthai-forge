@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import { cancelPendingTask } from './schedulerCancel';
-import { v, getDocumentSize, type Value } from 'convex/values';
+import { convexToJson, v, getDocumentSize, type Value } from 'convex/values';
 import { internalQuery, internalMutation, type QueryCtx } from './server';
 import { deleteLandingRequestBodies } from './projectLandingRequestBody';
 import { deleteCapsulePins } from './projectLandingCapsulePins';
@@ -111,7 +111,7 @@ export const purgeOrphans = internalMutation({
       invariant(
         row &&
           row[input.field] === input.ownerId &&
-          digest(JSON.stringify(row)) === pin.sha256 &&
+          digest(JSON.stringify(convexToJson(row))) === pin.sha256 &&
           (input.field !== 'projectId' || projectOwnedScope(input.table, row)),
         'BAD_ARGUMENT',
         'A pinned row or its ownership changed; retain the page.',

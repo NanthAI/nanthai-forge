@@ -24,6 +24,9 @@ const { githubAppJwt, installationToken, actionsPermissions } = await import(
   moduleUrl('../convex/githubAppToken.ts')
 );
 const direct = await import(moduleUrl('../convex/projectHostedActionsDirect.ts'));
+const { decodeTimingHistoryRow, encodeTimingHistoryRow } = await import(
+  moduleUrl('../convex/projectHostedTestTimings.ts')
+);
 const packs = await import(moduleUrl('../convex/projectSourcePacks.ts'));
 const sessions = await import(moduleUrl('../convex/projectHostedActionsSession.ts'));
 const preflight = await import(moduleUrl('../convex/projectHostedActionsPreflight.ts'));
@@ -510,14 +513,14 @@ test('duplicate results are immutable and complete shard evidence is needed to p
   assert.deepEqual(terminal.testFiles.counts, { total: 1, failed: 0, flaky: 0 });
   const histories = [...s.tables.projectHostedTestTimings.values()];
   assert.equal(histories.length, 1);
-  const history = JSON.parse(histories[0].history);
+  const history = decodeTimingHistoryRow(histories[0]);
   assert.equal(history.files['tests/synthetic-0.test.mjs'].durationMs, 5);
   assert.deepEqual(history.runs, [s.run.id]);
   const session = await s.call(sessions, 'session', { ...s.input(), timings: true });
   assert.equal(session.run.id, s.run.id);
-  assert.deepEqual(JSON.parse(session.timingHistory), history);
+  assert.equal(session.timingHistory, JSON.stringify(history));
   assert.equal((await send(first)).status, 'passed');
-  assert.equal([...s.tables.projectHostedTestTimings.values()][0].history, histories[0].history);
+  assert.deepEqual([...s.tables.projectHostedTestTimings.values()][0], histories[0]);
   // The watchdog and the one confirm read are both cancelled.
   assert.equal(s.cancelled.length, 3);
   const scheduled = s.scheduled.length;
@@ -624,7 +627,10 @@ test('Actions timing history is advisory, project-scoped and records completed f
   assert.deepEqual(Object.keys(history.files), [file]);
   assert.equal(history.files[file].durationMs, 250);
   await send(first);
-  assert.equal([...s.tables.projectHostedTestTimings.values()][0].history, session.timingHistory);
+  assert.equal(
+    JSON.stringify(decodeTimingHistoryRow([...s.tables.projectHostedTestTimings.values()][0])),
+    session.timingHistory,
+  );
   await assert.rejects(
     s.call(sessions, 'session', { ...s.input({ fence: 99 }), timings: true }),
     code('WORK_STALE'),
@@ -715,7 +721,7 @@ test('first planning session bootstraps weights from bounded, already retained t
   });
   await s.call(results, 'result', { ...s.input(), result: JSON.stringify({ index: 1, exitCode: 0 }) });
   await s.conclude();
-  const stored = JSON.parse([...s.tables.projectHostedTestTimings.values()][0].history);
+  const stored = decodeTimingHistoryRow([...s.tables.projectHostedTestTimings.values()][0]);
   assert.equal(stored.files[file].durationMs, 240);
   assert.deepEqual(stored.runs, [previousId, s.run.id]);
 });
@@ -2272,7 +2278,10 @@ async function assertTimingReplay(t, pinRecipe) {
   const files = ['a', 'b', 'c', 'd', 'e'].map(name => `tests/${name}.test.mjs`);
   const history = durationMs =>
     JSON.stringify({ version: 1, files: { [files[0]]: { durationMs, updatedAt: '2026-01-01' } }, runs: [] });
-  s.insert('projectHostedTestTimings', { projectId: s.projectId, history: history(40_000) });
+  s.insert('projectHostedTestTimings', {
+    projectId: s.projectId,
+    ...encodeTimingHistoryRow(history(40_000)),
+  });
   const command = { kind: 'session', timings: true };
   const first = await (await send(command)).json();
   assert.deepEqual(mutations, ['projectHostedActionsSession']);
@@ -2284,7 +2293,9 @@ async function assertTimingReplay(t, pinRecipe) {
   });
   const key = [...r2.objects.keys()][0];
   assert(key.endsWith(`/checks/${s.run.id}/selection/timing-history.json`));
-  [...s.tables.projectHostedTestTimings.values()][0].history = history(90_000);
+  s.patch('projectHostedTestTimings', [...s.tables.projectHostedTestTimings.keys()][0], {
+    ...encodeTimingHistoryRow(history(90_000)),
+  });
   const retry = await (await send(command)).json();
   assert.equal(retry.timingHistory, first.timingHistory);
   assert.deepEqual(retry.timingHistoryPin, first.timingHistoryPin);

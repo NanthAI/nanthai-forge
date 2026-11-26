@@ -35,8 +35,9 @@ normal project lifecycle purge and its progress receipt. For a genuinely absent
 project or Work-generation owner, `projectStorageInventory:purgeOrphans` removes
 one exact page. Supply the selected ownership field, absent `ownerId`, an original
 `operationId`, unique `part` and at most eight `{id, sha256}` pins. Hash the exact
-JSON representation returned by a bounded readonly query; preserve its property
-order. The mutation rechecks absent ownership and every row's owner and digest
+Convex JSON representation returned by a bounded readonly query, including
+`$bytes` for binary fields. On typed rows, serialize with `convexToJson` before
+hashing. The mutation rechecks absent ownership and every row's owner and digest
 before deleting anything. A changed pin refuses the transaction. Personal
 guidance operations with an incidental project id remain personal data.
 
