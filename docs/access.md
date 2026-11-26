@@ -4,6 +4,8 @@ Who can do what in a Forge project, and where the server enforces it. The rules 
 
 Status: the roles, verbs and resolver below describe what runs today. The parts marked *proposed* wait for the owner's approval on the Items named beside them.
 
+For the web steps, see [Browse or share a public project](guides/access.md#browse-or-share-a-public-project).
+
 ## Roles
 
 | Forge | GitHub | Who |

@@ -20,6 +20,8 @@ git clone https://<worker-origin>/git/<handle>/<slug>.git
 
 ## Access
 
+See [Browse or share a public project](guides/access.md#browse-or-share-a-public-project) for the web visibility and Plan settings.
+
 - **Every project:** sign in to clone, fetch or list refs, including public projects.
 - Use a Forge login token (from `nforge login`, scope `cli`) as
   the HTTP password with any username, for example through a Git credential helper,

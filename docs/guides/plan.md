@@ -8,13 +8,21 @@ Open Plan for the project's backlog. Read the Item and its comments before start
 
 ```sh
 nforge agent ROOT planning '{"status":"active","limit":50}'
-nforge agent ROOT planning '{"id":"ITEM_ID"}'
+nforge agent ROOT planning '{"planningItemId":"ITEM_ID"}'
 nforge agent ROOT lanes '{"planningItemId":"ITEM_ID"}'
 ```
 
 An active Plan read includes proposals and work in progress. Continue a returned cursor when reading more pages. When choosing an Item yourself, use Plan's order and check that it is Planned, unowned, has no open Lane and has no unfinished dependency. Read the Item's current details before starting. [How Plan orders work](../planning.md#next) explains eligibility and skipped Items. Search for an existing match before adding duplicate work. The [generated reference](../reference/cli.md) gives the current fields for `put-planning-item` and `comment-planning-item`.
 
 An empty Plan read shows how to propose an Item. A fresh Forge-native host prepares Plan when its initial Work projection fits one transaction. Retained Work and larger projections can use the paged rebuild. If Forge returns `PROJECT_WORK_INDEX_MISSING`, follow the owner's recovery command in `next`. From the clone, run `nforge hosted-work ROOT '{"action":"rebuild-index"}'` and retry the read or write. The rebuild resumes from the project's index state.
+
+## Open an Item
+
+Select an Item in Plan to read its description, **Done when**, and discussion. Under **Work**, open its Lanes to see saves and check evidence, or open a landing to see the accepted source. The Item URL opens the same detail for anyone who can read it.
+
+Use **Parent → Set parent…** to put the Item under a top-level Item. From a parent, use **New child** or **Add existing…** to put work under it. In **Relations**, add **Depends on**, **Duplicate of** or **Related**. A dependency appears as **Blocks** on the other Item and can keep the dependent Item out of **Next**.
+
+Parents and Initiatives can follow work as their Items start and finish. The owner controls **Roll up planning status** in **Settings → Project → Plan**. A status set by hand stays pinned. Choose **Follow work** on that Item to clear its pin and let Forge evaluate its status again. See [hierarchy and relations](../planning.md#hierarchy-and-relations-in-the-web-plan) and [status roll-up](../planning.md#status-roll-up) for the exact rules.
 
 ## Capture several Items
 

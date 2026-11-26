@@ -1,4 +1,4 @@
-# Import GitHub source into a hosted project
+# From a project to your first landing
 
 Bring a [GitHub repository](#import-from-github-in-the-app) or a [local folder](#host-a-local-folder) to Forge, then make a small change and see it land on hosted `main`.
 
@@ -7,6 +7,22 @@ For a development trial, get the app URL, account access and the CLI deployment
 URL from the person who invited you. Open the app URL in your browser and pass
 the deployment URL to `nforge login`. You can build the CLI and read its packaged
 guides while you wait for access.
+
+## First landing
+
+1. [Build and link the CLI](#install-the-development-cli) and [approve your terminal sign-in](#sign-in).
+2. [Import committed GitHub source](#import-from-github-in-the-app), or [host a local folder](#host-a-local-folder). For a new project, start with a folder and a short README.
+3. [Clone the hosted project](#clone-the-project). Use the project URL from the web or the host or import receipt.
+4. [Choose a check and runner](#configure-the-first-hosted-check) if the project has none.
+5. [Start a Lane](#work-on-a-hosted-project), edit its README, then run `land --save` from the Lane. Follow the receipt through any [approval](#approve-the-first-landing). Open the accepted State in the project when the receipt says `LANDED`.
+
+| What you want to set up | Start here |
+| --- | --- |
+| Approve, rename or change what a terminal can reach | **Account → Sign-in and devices** (`/account/devices`) |
+| Add someone to this project | Project **Settings → People and access** |
+| Choose a check, runner or who approves landings | Project **Settings → Landing and checks** |
+| Connect your agent app to the clone | [Connect over MCP](agents.md#connect-over-mcp) |
+| Mirror accepted main to GitHub | Project **Settings → GitHub** |
 
 ## What you need installed
 
@@ -234,19 +250,14 @@ nforge agent /absolute/path/to/project start '{"outcome":"Improve the README","m
 
 Replace `LANE_PATH` with the path returned by `start` and edit inside it.
 Concurrent agents start separate Lanes. When a check and runner are ready,
-save the Lane:
-
-```sh
-nforge agent LANE_PATH save '{"message":"Improve the README"}'
-```
-
-If the save is settling, follow its wait command and confirm the save completed.
-If the project's policy requests local preflight, run
-`nforge agent LANE_PATH preflight '{}'` before landing.
+land from your Lane. This also saves your edits and runs any configured local preflight.
 
 ```sh
 nforge agent LANE_PATH land --save '{"message":"Improve the README"}'
 ```
+
+Use `nforge agent LANE_PATH save '{"message":"Improve the README"}'` if you want
+to keep a checkpoint before you're ready to land.
 
 Keep the landing's operation id and follow its wait command through the check and any
 [approval](#approve-the-first-landing). Follow the receipt's recovery for

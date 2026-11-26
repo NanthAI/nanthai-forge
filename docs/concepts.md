@@ -4,6 +4,8 @@ Forge tracks two kinds of thing: **source** (the files, stored as immutable snap
 
 ## Core model
 
+An Initiative groups Items, and an Item can have sub-items or link to other Items as dependencies. [Open an Item](guides/plan.md#open-an-item) shows those links, the work behind an Item and how Forge updates parent and Initiative status.
+
 An agent needs three nouns. Everything else is an internal record that receipts may name.
 
 | Term        | Plain meaning                                                                                                                                                                                      | GitHub analogy    |

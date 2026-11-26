@@ -17,10 +17,10 @@ nforge mcp ROOT --agent
 1. Read the project instructions and the Item. If nobody assigned an Item, [read Plan and check what is eligible](plan.md#find-the-work).
 
    ```sh
-   nforge agent ROOT planning '{"id":"ITEM_ID"}'
+   nforge agent ROOT planning '{"planningItemId":"ITEM_ID"}'
    ```
 
-   Read all Item comments, following a returned `commentsCursor` with `planning {planningItemId,cursor}`. Then start the Lane:
+   Read all Item comments. Pass the returned `commentsCursor` value as the next `planning` request's `cursor`, with the same `planningItemId`. Then start the Lane:
 
    ```sh
    nforge agent ROOT start '{"planningItemId":"ITEM_ID"}'

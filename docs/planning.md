@@ -72,6 +72,8 @@ In **New Item**, choose **Item** to enter a title, optional description and chec
 
 ## Item Work
 
+For the short path from Plan to a Lane and its landing, see [Open an Item](guides/plan.md#open-an-item).
+
 Open an Item from the Plan, including its Done and Dropped lists. **Text** renders the Item's Markdown and folds long prose in place. **Done when** lists the task lines in their stored order: open (`[ ]`), done (`[x]`) or moved (`[~]`, not counted). Text and Done when use one selected Item read, refreshed only when the Item's live version changes. When a retained body doesn't fit in the first record, **Show all text** loads it on request. Task examples inside Markdown fences are prose, not checklist lines. The Item page and wide Plan rows show the exact ticked count beside the same bar: one block per line up to 12, then 12 grouped blocks. Partial blocks fill from the bottom in thirds, so even one tick is visible. Narrow Plan rows keep the space for the title; open the Item to see its bar.
 
 The owner and current project writers can edit the text, add or edit a checklist line, mark it moved, reopen it, or remove it with Undo. **Tick and post** saves the tick and its decision comment together. A stale line edit retries only if it can still identify the unchanged line; a stale prose edit keeps the draft, offers the versions to compare and then lets you resume the draft against the newer version. New Item capture takes an optional Markdown description above the checklist. Readers cannot change Items. Managing the rest of the Plan, including shelving and deleting Items, remains owner-only.

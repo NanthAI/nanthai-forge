@@ -8,13 +8,13 @@ Your account has access. A device uses that access, a sign-in proves it, and a s
 nforge auth status DEPLOYMENT_URL
 ```
 
-Check the deployment as well as the account. Use the **Sign-in and devices** (`/account/devices`) for the rebuilt account flow and the [current status](../status.md) for capabilities that are still being rebuilt. The [sign-in steps](../quickstart.md#sign-in) cover terminal approval and reconnecting.
+Check the deployment as well as the account. Open **Account → Sign-in and devices** (`/account/devices`) to see this account's devices and manage the reach of a specific device. The [sign-in steps](../quickstart.md#sign-in) cover terminal approval and reconnecting.
 
 ## Keep the three records separate
 
 A device is the stable identity of a terminal or browser. A sign-in is its credential. A session is a live thread working for a person. Stopping a session, signing a device out and removing it have different effects; read the effect shown by the current control. A device name grants no access.
 
-The design calls for one holder per Lane and a recorded Resume, Takeover or Handoff. Those are not permission to invent a CLI command. Use [the generated reference](../reference/cli.md) for supported commands and the Lane's current receipt for recovery. `whoami` and holder handover recommendations remain **Proposed** until their owning implementation and owner decision are recorded. Device/session Pass 1 and Pass 2 recommendations remain **Proposed** where not decided; they are not current access policy.
+Use [the generated reference](../reference/cli.md) for supported Lane commands and the Lane's current receipt for recovery. Manage teammates in the project's **Settings → People and access**. Manage what a terminal can do from its device entry in **Account → Sign-in and devices**.
 
 ## Look at the recorded work
 
@@ -24,3 +24,15 @@ nforge agent ROOT lane-history '{"laneId":"LANE_ID"}'
 ```
 
 A refusal should name what did not save and where the local changes remain. Keep those changes and follow the exact recovery command. See [agent identity and client detection](../agents/workflow.md#agent-runs-and-client-detection), [access](../security.md) and [the current sign-in implementation](../development.md).
+
+## Browse or share a public project
+
+Open **Explore** to find public projects and browse a project's source and history. To find the project's address from a terminal, use:
+
+```sh
+nforge clone --find OWNER/PROJECT
+```
+
+To download the source with `nforge clone`, sign in first. Opening public pages in a browser works signed out.
+
+A project owner changes visibility under **Settings → Project → Visibility**. Making the project public opens browsing to visitors. Under **Settings → Project → Plan**, choose **Members only** to keep Items, Initiatives and discussion within the project membership. Review the [public Plan rules](../planning.md#public-plan) and [project access](../access.md#what-each-role-may-do) before switching visibility.

@@ -1,5 +1,7 @@
 # Billing in Phase 7
 
+Account Billing shows sample data for the planned subscriptions. For errors and limits that apply to live projects, see [Limits, errors and costs](limits.md#recover-from-an-error).
+
 Billing belongs to an owner, above projects. Each person or organisation has one
 calendar-month pool shared by its projects, with unlimited people. Hobby is free
 with 300 landings, Pro is $15 a month with 1,000, and Team is $49 a month with

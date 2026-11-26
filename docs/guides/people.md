@@ -4,7 +4,7 @@ Start with a small change whose result you can recognise.
 
 ## Get the CLI and sign in
 
-Follow the [development access and source installation](../quickstart.md) and [terminal sign-in](../quickstart.md#sign-in) steps.
+Follow the [first-landing checklist](../quickstart.md#first-landing) for installation, terminal approval and the first change.
 
 ## Bring your code
 

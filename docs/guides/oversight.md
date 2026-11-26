@@ -4,7 +4,9 @@ Start with what needs your answer, then read what is progressing.
 
 ## Find the next decision
 
-Needs me brings held work together. Open the linked Lane or Item, read the cause and answer there. A request asked ahead holds nothing yet; it should not be confused with a stalled landing. The project line shows editing, saved, in queue, checking and main.
+Open the project's **Needs me** page. **Needs you** shows decisions addressed to you, such as approving a landing, answering a question or responding to a Lane parked for you. Open the linked Lane or Item to read the evidence and answer. A question asked ahead joins the count once it holds work.
+
+Check **FYI** for news such as a failed check another Lane owner can fix. **Loose ends** lists work that was started and left open. The project line shows editing, saved, in queue, checking and main.
 
 ```sh
 nforge agent ROOT queue '{}'
