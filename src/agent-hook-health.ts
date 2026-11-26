@@ -7,6 +7,7 @@ import { shellQuote } from './shell-quote.js';
 import { cliInstallation, stableCliRunner } from './cli-installation.js';
 import { editHooksEnabled } from './agent-hook-settings.js';
 import { ANTIGRAVITY_HOOKS, antigravityHookRunner } from './agent-antigravity-install.js';
+import type { AgentHooks } from './hosted-lane.js';
 
 const FIRST_WRITE = '--forge-first-write';
 const TURN_END = '--forge-turn-end';
@@ -86,8 +87,8 @@ function antigravityHealth(home: string): { covered: boolean; problem?: HookProb
 }
 /** Read-only: report a Forge hook that is absent, unreadable, missing its target, or not an
  * installed CLI. Repair is the explicit install command, run with the installed `nforge`. */
-export function hookHealth(root: string, home = homedir()): HookHealth {
-  if (!editHooksEnabled(undefined, home)) return { status: 'disabled', problems: [], repair: null };
+export function hookHealth(root: string, home = homedir(), project?: string): HookHealth {
+  if (!editHooksEnabled(project, home)) return { status: 'disabled', problems: [], repair: null };
   const problems: HookProblem[] = [];
   const covered: string[] = [];
   for (const name of HOOK_FILES) {
@@ -133,4 +134,38 @@ export function hookHealthText(health: HookHealth) {
     problem => `${problem.file}: ${problem.reason}${problem.target ? ` (${problem.target})` : ''}`,
   );
   return `Forge agent hooks need repair:\n${lines.join('\n')}\nRepair, with the installed nforge: ${health.repair}`;
+}
+
+/** Only the state leaves the machine. Health problems, paths and settings stay local. */
+export async function agentHookState(
+  root: string,
+  project: string,
+  app: string | null,
+  home = homedir(),
+): Promise<AgentHooks> {
+  try {
+    const health = hookHealth(root, home, project);
+    if (health.status === 'disabled' || (await appHooksOff(app, home))) return 'off';
+    if (app && health.covered?.includes(app)) return 'configured';
+  } catch {
+    // Bad or unreadable local configuration must not prevent a Lane action.
+  }
+  return 'unavailable';
+}
+
+async function appHooksOff(app: string | null, home: string) {
+  if (app === 'claude-code') {
+    const file = join(home, HOOK_FILES[0]);
+    return existsSync(file) && JSON.parse(readFileSync(file, 'utf8'))?.disableAllHooks === true;
+  }
+  if (app === 'codex') {
+    const file = join(home, '.codex', 'config.toml');
+    if (!existsSync(file)) return false;
+    const { parse: parseToml } = await import('smol-toml');
+    const features = parseToml(readFileSync(file, 'utf8')).features as
+      | { hooks?: boolean; codex_hooks?: boolean }
+      | undefined;
+    return (features?.hooks ?? features?.codex_hooks) === false;
+  }
+  return false;
 }

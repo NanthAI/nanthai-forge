@@ -77,6 +77,31 @@ test('start reports the Lane before its checkout and opens it at the chosen path
   assert(!('path' in request) && !('open' in request));
 });
 
+test('start sends a local hook opt-out only to a server that accepts it, on the existing mutation', async t => {
+  stateHome(t);
+  const config = mkdtempSync(join(tmpdir(), 'forge-hook-config-'));
+  t.after(() => rmSync(config, { recursive: true, force: true }));
+  const settings = join(config, 'client.json');
+  const previous = process.env.FORGE_CLIENT_SETTINGS;
+  process.env.FORGE_CLIENT_SETTINGS = settings;
+  t.after(() => {
+    if (previous === undefined) delete process.env.FORGE_CLIENT_SETTINGS;
+    else process.env.FORGE_CLIENT_SETTINGS = previous;
+  });
+  writeFileSync(settings, JSON.stringify({ firstWriteHooks: false }));
+  const s = agentFixture(t);
+  s.caps.features = ['agent-slug'];
+  const transport = s.transport();
+  await transport.dispatch('start', { outcome: 'Older server', open: false });
+  s.caps.features.push('agent-hooks-state');
+  s.lane.laneId = randomUUID();
+  await transport.dispatch('start', { outcome: 'Current server', open: false });
+  const starts = s.calls.filter(call => call.name === 'projectHostedStart:start');
+  assert.equal(starts.length, 2);
+  assert.equal(starts[0].args.hooks, undefined);
+  assert.equal(starts[1].args.hooks, 'off');
+});
+
 test('Lane status names a live approval and keeps the status call budget for old and settled entries', async t => {
   stateHome(t);
   const s = agentFixture(t);

@@ -100,6 +100,7 @@ export const overlapEvidenceLevel = (capabilities: {
 /** What the server's save calls accept, from the capability read the session already made. */
 export type SaveContract = {
   authorship?: import('./hosted-agent-transport.js').HostedAgentSession['authorship'];
+  hooks?: import('./hosted-lane.js').AgentHooks;
   onCapture?: ((capture: Awaited<ReturnType<typeof captureHostedSave>>) => void | Promise<void>) | undefined;
   /** The sync's private save stops after local capture when the folder is clean. */
   syncCapture?: { inventory?: SaveInventory | undefined };
@@ -490,6 +491,7 @@ async function saveOnce(
       ...contract.authorship,
       operationId: command.operationId,
       laneId: selection.laneId,
+      ...(contract.hooks ? { hooks: contract.hooks } : {}),
       ...(contract.holderSessionId
         ? {
             holderSessionId: contract.holderSessionId,

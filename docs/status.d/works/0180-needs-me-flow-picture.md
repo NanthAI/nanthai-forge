@@ -18,4 +18,5 @@
   and quiets its loops after a minute without input. Reduced motion removes the animation.
 
 - The Lane yard, Lane review, History, Needs you and Item discussion use the same public byline. It links the handle and agent run when the viewer may see them. The Yard names the latest save. Lane review names the save that published the pinned head. Held reviews, History and discussion use the recorded submission, receipt or comment.
+- The agent run page shows the latest [local Forge hook state](../../agents/hooks.md#hook-state-on-an-agent-run) reported on a Lane start or save, with the report time. Older clients leave it unreported.
 - Needs you and `nforge agent ROOT approve-link '{}'` list held reviews from the landing queue, with one approval link per submission. Overlapping Lanes and later Lane saves leave those reviews visible. Needs me and the Lane page ask once before approving a held Candidate with no recorded check run; dismissing the sheet approves nothing.

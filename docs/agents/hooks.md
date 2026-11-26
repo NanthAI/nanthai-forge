@@ -20,6 +20,20 @@ Rule: **a hook guards or informs about the action happening now (this edit, this
 | Turn-end unsaved-work snapshot (`turnEndWithSnapshot` → `turnEndSnapshot`) | `Stop` on Claude Code & Codex (allowed stop only, inside a Lane with `autoSnapshot` on) | 0 when `autoSnapshot` is off, outside a Lane, or tree unchanged; uploads changed files only (3.5 s abort inside 5 s timeout); idle 0 | Yes (advisory; errors swallowed and never change the `Stop` decision) | **Kept (fits rule).** Directly guards the `Stop` happening now by capturing edits made after the last Forge command before the turn ends. |
 | Deny reading credential and secret files (`CLAUDE_SECRET_DENY_RULES`) | `permissions.deny` in `~/.claude/settings.json` (Claude Code only; `Read(**/*.pem)`, `Read(**/*.key)`, `Read(**/.env*)`, `Read(~/.config/forge/auth.json)`, `Read(~/.config/forge/sealed/**)`) | 0 calls (evaluated inside Claude Code; idle 0) | Client-enforced deny for `Read`; `nforge x ROOT uninstall-hooks '{}'` removes only Forge's rules | **Added (fits rule, Item `f3495abe`).** Guards the `Read` action happening now against reading private keys, `.env*` files, and Forge's own credential and sealed-key stores. Note: `permissions.deny` guards Claude's `Read` tool and is not an OS sandbox against arbitrary shell commands. |
 
+## Hook state on an agent run
+
+The project's agent run page shows the latest Forge hook state the CLI reported on a Lane start or save sent to
+Forge. **Off** reflects Forge's local user or project switch, Claude Code's user setting `disableAllHooks`, or
+Codex's user setting `features.hooks`. **Configured** means the CLI found a working hook target for that agent
+app. Its report describes local configuration. **Unavailable** means the CLI could not confirm a working target.
+Older clients leave the state unreported. The report includes the time of the action and uses the existing request.
+
+With first-write hooks off, edits lose the clone-root guard, the overlap and claim notices for the edited path,
+automatic touching claims, and the warnings about unsaved work and in-flight landings. Disabling hooks for the
+whole user also turns off the stop guard and its turn-end snapshot on clients that support them. Uninstalling
+Forge's hooks also removes the Claude Code deny rules that Forge added. Forge commands still deliver board notes
+and report saved overlap.
+
 ## Known gaps
 
 - **Codex `Stop` hook live verification:** tracked in Item `2f13b3cf` (see [turn-end guard](workflow.d/sections/2400-turn-end-guard.md)).

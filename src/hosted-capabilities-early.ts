@@ -4,6 +4,7 @@ import { makeFunctionReference } from 'convex/server';
 import { ConvexExchange } from './exchange-client.js';
 import { CUTOVER_CLI_VERSION } from './cutover-version.js';
 import {
+  agentHooksFeature,
   feedCommitOrder,
   hostedContractFeatures,
   initiativeProgressRequested,
@@ -54,10 +55,13 @@ export function capabilityOptions(
               // Planning uses the history-log slot for Work history. Check reads name ci-status-check
               // themselves, so audit-capable actions give its discovery slot to planning-audit.
               (action !== 'planning' || feature !== 'history-log') &&
-              (!planningAudit || feature !== 'ci-status-check') &&
-              (action !== 'start' || feature !== 'planning-import-pages'),
+              ((!planningAudit && action !== 'save') || feature !== 'ci-status-check') &&
+              (action !== 'start' ||
+                (feature !== 'planning-import-pages' && feature !== 'save-declarations')),
           ),
           // Start also sends mutation receipts; drop the unused import slot, not metric provenance.
+          // Start and save give an unused action-specific slot to the hook-state contract.
+          ...(action === 'start' || action === 'save' ? [agentHooksFeature] : []),
           ...(action === 'start'
             ? [planningStatusWorkerFeature, 'metric-cli-provenance']
             : planningAudit

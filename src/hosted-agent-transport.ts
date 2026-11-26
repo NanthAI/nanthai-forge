@@ -164,6 +164,7 @@ import {
 } from './hosted-changed-paths.js';
 import { publishClientSourcePack } from './source-pack-client.js';
 import {
+  agentHooksFeature,
   landingCancelReason,
   laneUndo,
   missingRequiredFeatures,
@@ -1609,6 +1610,14 @@ export class HostedAgentTransport {
         !sourceStamp && this.serverFeatures?.includes('landing-agent-client') && this.agentSlug()
           ? agentClient(process.env, this.agentSession)
           : undefined;
+      const hooks =
+        (action === 'start' || action === 'save') &&
+        (sourceStamp?.agentRun ?? this.sentAgent()) &&
+        this.serverFeatures?.includes(agentHooksFeature)
+          ? await (
+              await import('./agent-hook-health.js')
+            ).agentHookState(root, this.address.projectId, sessionAgentIdentity(this.agentSession).app)
+          : undefined;
       const session: HostedAgentSession = {
         ...(undoReplay?.selection ? { undoSelection: undoReplay.selection } : {}),
         ...(syncSaveInventory ? { syncSaveInventory } : {}),
@@ -1623,6 +1632,7 @@ export class HostedAgentTransport {
         journal,
         ...(operationId === undefined ? { autoAddressed: true as const } : {}),
         ...(sourceStamp ? { authorship: sourceStamp } : {}),
+        ...(hooks ? { hooks } : {}),
         ...(sourceStamp?.agentRun
           ? { agent: sourceStamp.agentRun }
           : this.sentAgent()
@@ -3081,6 +3091,7 @@ export type HostedAgentSession = {
   syncSaveInventory?: import('./hosted-save-capture.js').SaveInventory;
   checkedCheckout: () => void;
   authorship?: ReturnType<typeof agentAuthorship>;
+  hooks?: import('./hosted-lane.js').AgentHooks;
   root: string;
   address: HostedAgentAddress;
   exchange: HostedAgentExchange;

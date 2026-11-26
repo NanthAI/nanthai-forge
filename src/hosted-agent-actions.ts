@@ -627,6 +627,7 @@ export async function executeHostedAgent(
             }
           : {}),
         ...(session.agent ? { agent: session.agent } : {}),
+        ...(session.hooks ? { hooks: session.hooks } : {}),
         ...(session.holderSessionId
           ? {
               holderSessionId: session.holderSessionId,
@@ -765,6 +766,7 @@ export async function executeHostedAgent(
       {
         ...saveContract(session.capabilities),
         authorship: session.authorship,
+        ...(session.hooks ? { hooks: session.hooks } : {}),
         ...(session.holderSessionId
           ? {
               holderSessionId: session.holderSessionId,

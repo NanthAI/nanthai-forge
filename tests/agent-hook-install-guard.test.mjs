@@ -20,7 +20,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isMainModule } from '../scripts/main-module.mjs';
 import { installEditHooks } from '../dist/agent-install-hooks.js';
 import { editAntigravityHooks } from '../dist/agent-antigravity-install.js';
-import { hookHealth, hookHealthText } from '../dist/agent-hook-health.js';
+import { agentHookState, hookHealth, hookHealthText } from '../dist/agent-hook-health.js';
+import { setEditHooksEnabled } from '../dist/agent-hook-settings.js';
 import { selectCliBuild } from '../dist/cli-installation.js';
 import { readHostedCliStatus } from '../dist/hosted-cli-status.js';
 
@@ -68,6 +69,28 @@ function fixture(t) {
   const read = () => FILES.map(file => readFileSync(join(home, file), 'utf8'));
   return { directory, home, installed, other, write, read };
 }
+
+test('the reported hook state respects local opt-outs and the current agent app', async t => {
+  const f = fixture(t);
+  f.write(f.installed);
+  assert.equal(await agentHookState(f.directory, 'project', 'codex', f.home), 'configured');
+  assert.equal(await agentHookState(f.directory, 'project', 'gemini', f.home), 'unavailable');
+  const claude = join(f.home, FILES[0]);
+  writeFileSync(
+    claude,
+    JSON.stringify({ ...JSON.parse(readFileSync(claude, 'utf8')), disableAllHooks: true }),
+  );
+  assert.equal(await agentHookState(f.directory, 'project', 'claude-code', f.home), 'off');
+  const codex = join(f.home, '.codex', 'config.toml');
+  writeFileSync(codex, '[features]\nhooks = false\n');
+  assert.equal(await agentHookState(f.directory, 'project', 'codex', f.home), 'off');
+  rmSync(codex);
+  setEditHooksEnabled(false, 'project', f.home);
+  assert.equal(await agentHookState(f.directory, 'project', 'codex', f.home), 'off');
+  assert.equal(await agentHookState(f.directory, 'other', 'codex', f.home), 'configured');
+  setEditHooksEnabled(false, undefined, f.home);
+  assert.equal(await agentHookState(f.directory, 'other', null, f.home), 'off');
+});
 
 test('a dev build never writes its own path: automatic and explicit runs leave both files byte-identical', t => {
   const f = fixture(t);
