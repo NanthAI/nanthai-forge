@@ -247,10 +247,8 @@ async function workStorePass(
         else if (typeof value === 'number') total[name] = ((total[name] as number | undefined) ?? 0) + value;
         else if (value && typeof value === 'object') {
           total[name] = ((total[name] as number | undefined) ?? 0) + value.count;
-          total[`${name}Keys`] = [
-            ...((total[`${name}Keys`] as string[] | undefined) ?? []),
-            ...value.keys,
-          ].slice(0, 20);
+          const keys = [...((total[`${name}Keys`] as string[] | undefined) ?? []), ...value.keys];
+          total[`${name}Keys`] = name === 'purged' ? keys : keys.slice(0, 20);
         }
       }
       cursor = page.cursor;

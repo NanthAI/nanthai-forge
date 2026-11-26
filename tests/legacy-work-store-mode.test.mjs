@@ -16,12 +16,12 @@ test('the Work cleanup counts orphan comparison rows, stops at the reserve and r
   const s = state([]);
   s.ctx.runMutation = (_ref, args) => page._handler(s.ctx, args);
   const collection = s.tables.projectWorkDataRecords;
-  const put = (key, name) =>
+  const put = (key, name, generationId = 'discarded-generation') =>
     collection.set(key, {
       _id: key,
       _creationTime: collection.size + 1,
       projectId: 'project',
-      generationId: 'discarded-generation',
+      generationId,
       collection: name,
       key,
       parent: '',
@@ -32,23 +32,30 @@ test('the Work cleanup counts orphan comparison rows, stops at the reserve and r
   put('digest', '_workStoreDigests:notes');
   put('head', '_workStoreHeads:issue');
   put('history', 'planningVersions');
+  put('plan', '_workStorePlan', 'kept-generation');
+  put('orphan-head', '_workStoreHeads:issue', 'other-discarded-generation');
   const args = {
     family: 'comparison',
     cursor: null,
     deployment: 'fixture',
     apply: false,
-    pages: 1,
-    budgetBytes: 2 * 1024 * 1024,
+    pages: 10,
+    budgetBytes: 8 * 1024 * 1024,
   };
   await assert.rejects(run._handler(s.ctx, { ...args, deployment: 'wrong' }), { code: 'BAD_ARGUMENT' });
   const dry = await run._handler(s.ctx, args);
-  assert.deepEqual([dry.found, dry.changed, dry.stopped], [3, 0, null]);
+  assert.deepEqual([dry.found, dry.changed, dry.stopped], [4, 0, null]);
   const stopped = await run._handler(s.ctx, { ...args, apply: true, budgetBytes: 1024 * 1024 });
   assert.deepEqual([stopped.pages, stopped.changed, stopped.stopped], [0, 0, 'budget']);
-  assert.equal(collection.size, 4);
+  assert.equal(collection.size, 6);
+  const first = await run._handler(s.ctx, { ...args, pages: 1 });
+  assert.equal(first.stopped, 'pages');
+  const rest = await run._handler(s.ctx, { ...args, cursor: first.nextCursor });
+  assert.equal(first.found + rest.found, dry.found);
+  assert.equal(rest.stopped, null);
   const applied = await run._handler(s.ctx, { ...args, apply: true });
-  assert.deepEqual([applied.found, applied.changed, applied.stopped], [3, 3, null]);
-  assert.deepEqual([...collection.keys()], ['history']);
+  assert.deepEqual([applied.found, applied.changed, applied.stopped], [4, 4, null]);
+  assert.deepEqual([...collection.keys()], ['history', 'plan']);
   const replay = await run._handler(s.ctx, args);
   assert.deepEqual([replay.found, replay.changed, replay.stopped], [0, 0, null]);
 });

@@ -261,6 +261,36 @@ test('a purge redacts every store, checks completeness before purgedAt, and no t
   assert.deepEqual(await executor(s).run(itemId, operationId), done);
 });
 
+test('a full Item version comparison lists purges only with the recorded command and request', async t => {
+  const { s, itemId } = await deletedItem(t, { records: true, intentBorn: false, useAlias: false });
+  const done = await executor(s).run(itemId, randomUUID());
+  const compare = async () =>
+    JSON.parse(
+      await workStore.compare._handler(s.ctx, {
+        projectId: s.projectId,
+        collection: 'readVersions',
+        itemId,
+        cursor: null,
+        digestOnly: false,
+      }),
+    );
+  const valid = await compare();
+  assert.equal(valid.matched, 1, 'the Item tombstone compares as an ordinary retained version');
+  assert.ok(valid.purged.count > 1);
+  assert.equal(valid.checked, valid.matched + valid.purged.count);
+  assert.equal(valid.invalid.count + valid.different.count + valid.missing.count, 0);
+  assert.equal(new Set(valid.purged.keys).size, valid.purged.count);
+  const recorded = [
+    ...s.tables.projectWorkEvents.values(),
+    ...s.tables.projectHostedRecordBodies.values(),
+  ].find(row => row.operationId === done.operationId && row.command);
+  assert.ok(recorded, 'the purge has a canonical command');
+  recorded.request = '0'.repeat(64);
+  const invalid = await compare();
+  assert.deepEqual(invalid.purged, { count: 0, keys: [] });
+  assert.equal(invalid.invalid.count, valid.purged.count);
+});
+
 test('a purge stopped mid-way never reports done and resumes, also after an index rebuild', async t => {
   const { s, itemId } = await deletedItem(t);
   const operationId = randomUUID();

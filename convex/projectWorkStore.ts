@@ -41,6 +41,8 @@ import {
 import { sameValue, storeReadOf } from './projectWorkStoreReads';
 import { advancePlanningTimes, pinnedPlanningTimes } from './projectPlanningTimes';
 import { retainAuditVersion } from './projectPlanningAuditWindow';
+import { isPlanningUuid } from '../src/planning-id';
+import { purgedIndexValue } from '../src/work-planning-purge';
 
 type WorkStoreProject = Pick<Doc<'hostedProjects'>, '_id' | 'workStore' | 'workStoreCutoverRevision'>;
 const pinRequired =
@@ -88,18 +90,21 @@ async function indexPage(
   collection: string,
   cursor: string | null,
   newest?: number,
+  itemId?: string,
 ) {
-  const page = await ctx.db
-    .query(splitRecordTable(collection))
-    .withIndex('by_generation_and_collection_and_position', q =>
-      q.eq('generationId', partition).eq('collection', collection),
-    )
-    .order(newest ? 'desc' : 'asc')
-    .paginate({
-      cursor,
-      numItems: Math.min(newest ?? WORK_STORE_PAGE, WORK_STORE_PAGE),
-      maximumBytesRead: 4 * 1024 * 1024,
-    });
+  const rowsByCollection = ctx.db.query(splitRecordTable(collection));
+  const rowsInOrder = itemId
+    ? rowsByCollection.withIndex('by_generation_and_collection_and_parent_and_position', q =>
+        q.eq('generationId', partition).eq('collection', collection).eq('parent', itemId),
+      )
+    : rowsByCollection.withIndex('by_generation_and_collection_and_position', q =>
+        q.eq('generationId', partition).eq('collection', collection),
+      );
+  const page = await rowsInOrder.order(newest ? 'desc' : 'asc').paginate({
+    cursor,
+    numItems: Math.min(newest ?? WORK_STORE_PAGE, WORK_STORE_PAGE),
+    maximumBytesRead: 4 * 1024 * 1024,
+  });
   const rows: { key: string; position: number; value: unknown }[] = [];
   for (const row of page.page) {
     const header = JSON.parse(row.value);
@@ -570,6 +575,7 @@ export const compare = query({
     newest: v.optional(v.number()),
     digestOnly: v.optional(v.boolean()),
     ...journalPageProtocol,
+    itemId: v.optional(v.string()),
   },
   returns: v.string(),
   handler: journalWorkStoreCompare,
@@ -583,11 +589,17 @@ export async function journalWorkStoreCompare(
     newest?: number;
     digestOnly?: boolean;
     journalProtocol?: 1;
+    itemId?: string;
   },
 ) {
   const requestedCursor = input.cursor;
   try {
     const { project, partition } = await ownerStore(ctx, input.projectId);
+    invariant(
+      input.itemId === undefined || (input.collection === 'readVersions' && isPlanningUuid(input.itemId)),
+      'BAD_ARGUMENT',
+      'Select one Item by full UUID for a version reader comparison.',
+    );
     const fullPrefix = 'work-full:';
     invariant(
       !input.cursor?.startsWith('work-digest:'),
@@ -644,7 +656,8 @@ export async function journalWorkStoreCompare(
       collection === 'readLifecycle'
     ) {
       const source = readCompares[collection];
-      const page = await indexPage(ctx, partition, source, input.cursor, input.newest);
+      const page = await indexPage(ctx, partition, source, input.cursor, input.newest, input.itemId);
+      const purged = tally();
       for (const row of page.rows) {
         checked++;
         let read;
@@ -652,7 +665,23 @@ export async function journalWorkStoreCompare(
           read = await storeReadOf(ctx, input.projectId, source, row.value as { id?: string });
         } catch (error) {
           if (error instanceof JournalNeeded) throw error;
-          // A stored body that fails its digest: the reader refuses it, so the compare names it.
+          // The retained body reader emits this only after verifying the recorded purge and its request digest.
+          // The indexed version must independently agree with that purge's redacted form.
+          const version = row.value as { id?: string; purged?: unknown };
+          const purgeOperationId = error instanceof ForgeError ? error.recovery?.purgeOperationId : undefined;
+          if (
+            source === 'planningVersions' &&
+            error instanceof ForgeError &&
+            error.code === 'PLANNING_ITEM_PURGED' &&
+            error.recovery?.itemId === version.id &&
+            version.purged === undefined &&
+            typeof purgeOperationId === 'string' &&
+            sameValue(row.value, purgedIndexValue(source, row.value, purgeOperationId))
+          ) {
+            purged.count++;
+            purged.keys.push(row.key);
+            continue;
+          }
           note(invalid, row.key);
           continue;
         }
@@ -660,7 +689,7 @@ export async function journalWorkStoreCompare(
         else if (!sameValue(read, row.value)) note(different, row.key);
         else matched++;
       }
-      return full({ checked, matched, missing, different, invalid, cursor: page.cursor });
+      return full({ checked, matched, purged, missing, different, invalid, cursor: page.cursor });
     }
     const page = await indexPage(ctx, partition, collection, input.cursor, input.newest);
     for (const row of page.rows) {

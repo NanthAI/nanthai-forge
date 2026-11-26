@@ -5,6 +5,8 @@ import { internal } from './_generated/api';
 import { internalAction, internalMutation } from './server';
 import { invariant } from '../src/errors';
 import { pinnedPlanningTimes } from './projectPlanningTimes';
+import type { Id } from './_generated/dataModel';
+import type { MutationCtx } from './_generated/server';
 
 const pageBytes = 256 * 1024;
 const reserveBytes = pageBytes + 1024 * 1024;
@@ -40,6 +42,45 @@ function comparisonCollection(collection: string) {
     collection.startsWith('_workStoreDigests:') ||
     collection.startsWith('_workStoreHeads:')
   );
+}
+
+// Start from the data index itself so a missing project or generation document never hides a partition.
+async function comparisonPage(
+  ctx: MutationCtx,
+  bounds: {
+    cursor: string | null;
+    numItems: number;
+    maximumRowsRead: number;
+    maximumBytesRead: number;
+  },
+) {
+  const firstGeneration = async (after?: Id<'projectWorkGenerations'>) =>
+    (
+      await ctx.db
+        .query('projectWorkDataRecords')
+        .withIndex('by_generation_and_collection_and_key', q => (after ? q.gt('generationId', after) : q))
+        .take(1)
+    )[0]?.generationId;
+  const selection =
+    bounds.cursor === null
+      ? null
+      : (JSON.parse(bounds.cursor) as [Id<'projectWorkGenerations'>, string | null]);
+  const generation = selection?.[0] ?? (await firstGeneration());
+  if (generation === undefined) return { page: [], isDone: true, continueCursor: '' };
+  const result = await ctx.db
+    .query('projectWorkDataRecords')
+    .withIndex('by_generation_and_collection_and_key', q =>
+      q.eq('generationId', generation).gte('collection', '_workStoreDigest').lt('collection', '_workStoreI'),
+    )
+    .paginate({ ...bounds, cursor: selection?.[1] ?? null });
+  if (!result.isDone || result.pageStatus === 'SplitRequired')
+    return { ...result, continueCursor: JSON.stringify([generation, result.continueCursor]) };
+  const next = await firstGeneration(generation);
+  return {
+    ...result,
+    isDone: next === undefined,
+    continueCursor: next === undefined ? '' : JSON.stringify([next, null]),
+  };
 }
 
 /** A page performs one bounded index read, followed by zero or more writes in the same transaction. */
@@ -143,8 +184,7 @@ export const page = internalMutation({
       return finish(result);
     }
     if (input.family === 'comparison') {
-      // Include every project in the index, even a row whose generation or project has since gone away.
-      const result = await ctx.db.query('projectWorkDataRecords').withIndex('by_project').paginate(bounds);
+      const result = await comparisonPage(ctx, bounds);
       for (const row of result.page) {
         readBytes += getDocumentSize(row);
         if (!comparisonCollection(row.collection)) continue;
@@ -219,7 +259,9 @@ export const run = internalAction({
       pages: 0,
       stopped: null,
     };
-    while (total.pages < pages && total.readBytes + reserveBytes <= budgetBytes) {
+    // The comparison page may also read the first row of two partitions for cursor discovery.
+    const pageReserve = input.family === 'comparison' ? reserveBytes + 2 * 1024 * 1024 : reserveBytes;
+    while (total.pages < pages && total.readBytes + pageReserve <= budgetBytes) {
       const result = await ctx.runMutation(internal.legacyWorkStoreMode.page, {
         ...input,
         cursor: total.nextCursor,
@@ -235,7 +277,7 @@ export const run = internalAction({
       }
       if (result.nextCursor === null) return total;
     }
-    total.stopped = total.readBytes + reserveBytes > budgetBytes ? 'budget' : 'pages';
+    total.stopped = total.readBytes + pageReserve > budgetBytes ? 'budget' : 'pages';
     return total;
   },
 });
