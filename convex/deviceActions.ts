@@ -5,13 +5,12 @@ import { v, type Infer } from 'convex/values';
 import type { Doc } from './_generated/dataModel';
 import { accountAction, internalAction, isDeviceIdentity } from './cliServer';
 import { internal } from './_generated/api';
-import { deviceScope, deviceSettings } from './deviceFields';
+import { deviceDocument, deviceScope, deviceSettings } from './deviceFields';
 import {
   deviceSecret,
   deviceHash,
   userCode,
   normalizedCode,
-  equalHash,
   issueDeviceToken,
   tokenKeys,
   CLI_TOKEN_LIFETIME,
@@ -122,22 +121,13 @@ const pollView = v.object({
   scope: v.optional(deviceScope),
   signInId: v.optional(v.string()),
 });
-export const poll = internalAction({
-  args: { deviceCode: v.string(), operationId: v.string() },
+export const signPoll = internalAction({
+  args: { device: deviceDocument },
   returns: pollView,
-  handler: async (ctx, args): Promise<Infer<typeof pollView>> => {
+  handler: async (ctx, { device: row }): Promise<Infer<typeof pollView>> => {
     const { key, issuer } = deviceConfig();
-    uuid(args.operationId);
-    invariant(/^[0-9a-f]{64}$/.test(args.deviceCode), 'BAD_ARGUMENT', 'Use the original device code.');
-    const hashed = deviceHash(args.deviceCode);
-    const result = await ctx.runMutation(internal.deviceStore.poll, {
-      deviceHash: hashed,
-      operationId: args.operationId,
-    });
-    if (!result.device) return { status: result.status };
-    const row = result.device;
     invariant(
-      equalHash(hashed, row.deviceHash) && row.owner && row.issuedAt !== undefined,
+      row.state === 'consumed' && row.owner && row.issuedAt !== undefined,
       'AUTH_REQUIRED',
       'Device approval is unavailable.',
     );

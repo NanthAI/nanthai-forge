@@ -90,9 +90,10 @@ stdout, the next step on stderr) and opens instead of GitHub's page. The request
 quotes the agent's `--reason TEXT` (up to 500 characters). Allow on GitHub sends
 the owner person on to GitHub's authorization, which still proves repository
 access; Decline ends the connect (`REVIEW_DECLINED`) and the waiting
-command returns. Authorizing straight from the printed GitHub link also ends the
-request. Cost: two indexed reads and one write to hold it, one read when that
-connect completes or fails; a person's own connect asks and costs nothing extra. Pause, un-pause and Disconnect require the owner person
+command returns. The Forge grant is recorded on the exact connection before
+OAuth can start. A later request does not replace that grant. The grant adds one
+small write to the existing approval transaction. A person's own connect goes
+directly to GitHub. Pause, un-pause and Disconnect require the owner person
 in web Settings → GitHub mirror; owner CLI recovery remains available while the
 mirror is enabled. After a completed connect, and in status
 on a two-way project, the result carries `protection` for `main`

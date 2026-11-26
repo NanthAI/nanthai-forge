@@ -54,6 +54,8 @@ export const githubBindingTables = {
     mirrorResult: v.optional(v.union(v.literal('enabled'), v.literal('kept'))),
     /** Item c63c2171: an agent started it, so it is also the owner's Forge decision (`setting:github-connect`). */
     asked: v.optional(v.literal(true)),
+    /** The owner-person decision for this exact operation, independent of later requests. */
+    ownerApproved: v.optional(v.literal(true)),
   })
     .index('by_project_and_operation', ['projectId', 'operationId'])
     .index('by_state', ['state']),

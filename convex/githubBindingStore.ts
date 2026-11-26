@@ -4,6 +4,7 @@ import { v } from 'convex/values';
 import { internalMutation, internalQuery } from './server';
 import { mutation, query, isDeviceIdentity, type QueryCtx, type MutationCtx } from './cliServer';
 import { accessibleProject, activeOwnedProject } from './projectAuthority';
+import { projectRole } from './projectRole';
 import { requireOwnerPerson } from './ownerPerson';
 import { bindingInstallation } from './githubBindingAccess';
 import { effectivePolicy } from '../src/autonomy-policy';
@@ -11,7 +12,7 @@ import { enableConnectedMirror, disconnectMirrorPolicy } from './projectAutonomy
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { z } from 'zod';
-import { connectApproval, holdConnect, settleConnect } from './githubConnectRequest';
+import { connectApproval, holdConnect, requireConnectGrant } from './githubConnectRequest';
 const projectId = v.id('hostedProjects');
 async function owner(ctx: QueryCtx | MutationCtx, id: import('./_generated/dataModel').Id<'hostedProjects'>) {
   const user = await ctx.auth.getUserIdentity();
@@ -42,6 +43,8 @@ export const start = internalMutation({
       'GITHUB_ACCOUNT_REQUIRED',
       'Link a GitHub account to this Forge account, then connect again.',
     );
+    const identity = await ctx.auth.getUserIdentity();
+    const asked = Boolean(identity && isDeviceIdentity(identity));
     const prior = await ctx.db
       .query('githubBindingOperations')
       .withIndex('by_project_and_operation', q =>
@@ -50,35 +53,34 @@ export const start = internalMutation({
       .unique();
     if (prior) {
       invariant(
-        prior.actor === actor && prior.repository === input.repository,
+        prior.actor === actor && prior.repository === input.repository && Boolean(prior.asked) === asked,
         'WORK_OPERATION_CHANGED',
         'Retry the original connection.',
       );
       return startReply(prior, await connectApproval(ctx, prior));
     }
-    const identity = await ctx.auth.getUserIdentity();
-    // An agent (any device sign-in) asks the owner on Forge first; a person's connect goes straight to GitHub.
-    const asked = Boolean(identity && isDeviceIdentity(identity));
-    await ctx.db.insert('githubBindingOperations', {
+    const op = {
       ...input,
       actor,
-      status: 'waiting',
+      status: 'waiting' as const,
       ...(typeof identity?.forgeAuthSession === 'string' ? { authOwner: actor } : {}),
       ...(asked ? { asked: true as const } : {}),
-    });
+    };
+    await ctx.db.insert('githubBindingOperations', op);
     const approval = asked
       ? await holdConnect(ctx, { ...input, actor, ...(reason ? { reason } : {}) })
       : null;
-    return startReply({ ...input, status: 'waiting' }, approval);
+    return startReply(op, approval);
   },
 });
 function startReply(
-  op: { operationId: string; authorizeUrl: string; status: string },
+  op: { operationId: string; authorizeUrl: string; status: string; asked?: true },
   approval: Awaited<ReturnType<typeof connectApproval>>,
 ) {
   return JSON.stringify({
     operationId: op.operationId,
-    authorizeUrl: op.authorizeUrl,
+    // The released CLI requires this field even for a held connect. A device receives only the Forge link.
+    authorizeUrl: op.asked ? (approval?.url ?? undefined) : op.authorizeUrl,
     status: op.status,
     ...(approval ? { approval } : {}),
   });
@@ -97,13 +99,17 @@ export const consume = internalMutation({
       'Invalid or already used GitHub authorization state.',
     );
     await activeOwnedProject(ctx, op.projectId, op.actor);
+    await requireConnectGrant(ctx, op);
     // Operations started before account binding carry no linked accounts; they fail closed.
     invariant(
       op.githubAccounts?.length,
       'GITHUB_OAUTH_STATE',
       'This connection operation has expired. Start a new connection operation.',
     );
-    await ctx.db.patch(op._id, { status: 'processing' });
+    await ctx.db.patch(op._id, {
+      status: 'processing',
+      ...(op.asked ? { ownerApproved: true } : {}),
+    });
     return JSON.stringify({
       repository: op.repository,
       verifier: op.verifier,
@@ -159,6 +165,7 @@ export const complete = internalMutation({
     );
     const installationId = op.installationId;
     await activeOwnedProject(ctx, op.projectId, op.actor);
+    await requireConnectGrant(ctx, op);
     const install = await bindingInstallation(ctx, installationId);
     invariant(
       !install?.removed && (install?.revision ?? 0) === op.revision,
@@ -210,7 +217,6 @@ export const complete = internalMutation({
       verifier: '',
       ...(mirrorResult ? { mirrorResult } : {}),
     });
-    await settleConnect(ctx, op);
     return mirrorResult;
   },
 });
@@ -224,7 +230,6 @@ export const fail = internalMutation({
       .unique();
     if (op?.status === 'processing') {
       await ctx.db.patch(op._id, { status: 'failed', code: input.code, verifier: '' });
-      await settleConnect(ctx, op);
     }
     return null;
   },
@@ -262,7 +267,12 @@ export const list = query({
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read GitHub bindings.');
-      await accessibleProject(ctx, input.projectId, user.subject);
+      const project = await accessibleProject(ctx, input.projectId, user.subject);
+      invariant(
+        project.visibility !== 'public' || (await projectRole(ctx, project, user.subject)),
+        'PROJECT_UNAVAILABLE',
+        'Project membership is required to read GitHub bindings.',
+      );
       const page = await ctx.db
         .query('projectGithubBindings')
         .withIndex('by_project_and_installation', q => q.eq('projectId', input.projectId))

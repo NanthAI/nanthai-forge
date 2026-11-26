@@ -15,6 +15,7 @@ const auth = await import(moduleUrl('../convex/auth.ts'));
 const handles = await import(moduleUrl('../convex/urlAccounts.ts'));
 const passkeyFlows = await import(moduleUrl('../convex/authPasskeys.ts'));
 const device = await import(moduleUrl('../convex/deviceActions.ts'));
+const { pollDevice } = await import(moduleUrl('../convex/devicePoll.ts'));
 // Every sign-in is the stable device flow (ac85b100); `stable` is the proven device the HTTP action passes in.
 const begin = (ctx, input) =>
   device.beginDeviceLogin(ctx, {
@@ -96,7 +97,13 @@ function fixture(t) {
     }),
     auth: { getUserIdentity: async () => rawIdentity },
   };
-  const modules = { authIdentity, deviceStore, authUsers: users, githubUserTokens: tokenStore };
+  const modules = {
+    authIdentity,
+    deviceStore,
+    deviceActions: device,
+    authUsers: users,
+    githubUserTokens: tokenStore,
+  };
   const dispatch = async (ref, args) => {
     const address = getFunctionAddress(ref);
     if (address.reference) {
@@ -313,10 +320,13 @@ test('a Convex Auth browser approval issues the normal Forge CLI credential; a C
     scope: 'cli',
   });
   await device.decide._handler(s.ctx, { code: flow.user_code, approve: true, operationId: randomUUID() });
-  const issued = await device.poll._handler(s.ctx, {
-    deviceCode: flow.device_code,
-    operationId: randomUUID(),
-  });
+  const issued = await pollDevice(
+    { ...s.ctx, runAction: s.ctx.runMutation },
+    {
+      deviceCode: flow.device_code,
+      operationId: randomUUID(),
+    },
+  );
   const token = JSON.parse(Buffer.from(issued.token.split('.')[1], 'base64url'));
   assert.equal(token.sub, s.user.accountKey);
   assert.equal(token.aud, 'forge-cli');

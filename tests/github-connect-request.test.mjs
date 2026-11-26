@@ -13,6 +13,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { policyPreset } from '../dist/autonomy-policy.js';
 const store = await import(moduleUrl('../convex/githubBindingStore.ts'));
 const approvals = await import(moduleUrl('../convex/projectHostedApprovals.ts'));
+const { requireConnectGrant } = await import(moduleUrl('../convex/githubConnectRequest.ts'));
 
 const device = { subject: 'owner', forgeCredential: 'synthetic-device' };
 const words = 'Mirror main so reviewers on GitHub see each landing.';
@@ -78,6 +79,7 @@ test('an agent connect holds a Forge decision in its words; allowing it continue
   const f = fixture(t);
   const { input, reply } = await f.start(device, { reason: `  ${words}\n` });
   assert.equal(reply.status, 'waiting');
+  assert.equal(reply.authorizeUrl, reply.approval.url);
   assert.match(
     reply.approval.url,
     /^https:\/\/forge\.example\/approve\?project=.+&lane=setting%3Agithub-connect$/,
@@ -87,6 +89,10 @@ test('an agent connect holds a Forge decision in its words; allowing it continue
   const row = f.request();
   assert.equal(row.setting.origin, 'github-connect');
   assert.equal(row.reason, words, 'the owner reads the agent’s own words');
+  await assert.rejects(
+    f.s.call('authorization', { _handler: ctx => requireConnectGrant(ctx, f.op(input.operationId)) }, {}),
+    e => e.code === 'GITHUB_OAUTH_STATE',
+  );
   assert.deepEqual(JSON.parse(row.setting.request), {
     direction: 'two-way',
     operationId: input.operationId,
@@ -98,6 +104,7 @@ test('an agent connect holds a Forge decision in its words; allowing it continue
   // The replayed connect returns the same link.
   const replay = JSON.parse(await f.s.call('start', store.start, input, device));
   assert.equal(replay.approval.url, reply.approval.url);
+  assert.equal(replay.authorizeUrl, replay.approval.url);
   // Only the owner person decides; the agent's own sign-in cannot grant it.
   await assert.rejects(
     f.decide('grant', device),
@@ -126,16 +133,19 @@ test('declining an agent connect ends it, so the waiting CLI returns', async t =
   assert.equal(f.op(input.operationId).code, 'REVIEW_DECLINED');
 });
 
-test('a person connect asks nothing extra; GitHub authorization without the page settles an open request', async t => {
+test('a person can connect directly and an approved agent connection can continue to GitHub', async t => {
   const f = fixture(t);
   const person = await f.start('owner');
   assert.equal(person.reply.approval, undefined);
+  assert.equal(person.reply.authorizeUrl, person.input.authorizeUrl);
   assert.equal(f.request(), undefined);
   assert.equal(f.op(person.input.operationId).asked, undefined, 'its completion reads no request');
-  // The owner authorizes on GitHub straight from the printed link: the Forge request is no longer open.
   const { input } = await f.start(device);
   assert.equal(f.request().reason, 'Connect synthetic/repo to this project.');
+  await f.decide('grant');
+  await f.start(device, { repository: 'synthetic/next' });
   await f.s.call('consume', store.consume, { state: input.state });
   await f.s.call('fail', store.fail, { state: input.state, code: 'GITHUB_OAUTH_DENIED' });
-  assert(f.request().ended, 'the request ends with the connect');
+  assert.equal(f.op(input.operationId).status, 'failed');
+  assert.equal(f.request().status, 'requested', 'the newer request still needs the owner');
 });

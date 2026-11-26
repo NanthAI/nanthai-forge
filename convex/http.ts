@@ -15,6 +15,7 @@ import { httpAction } from './_generated/server';
 import { internal } from './_generated/api';
 import { CLIENT_HASH, CLIENT_HEADER, SITE_DEVICE_HEADER } from '../src/client-hash';
 import { sameSecret } from './siteSecret';
+import { pollDevice } from './devicePoll';
 import { githubWebhookAuthorized } from '../src/github-webhook';
 import { pullRequestEvent } from '../src/github-pull-check';
 import { INSTALLATION_EVENT_PAGE, installationRepositories } from './sync';
@@ -163,7 +164,7 @@ http.route({
   method: 'POST',
   handler: httpAction(async (ctx, request) => {
     try {
-      const result = await ctx.runAction(internal.deviceActions.poll, await request.json());
+      const result = await pollDevice(ctx, await request.json());
       return Response.json(result, { headers: { 'Cache-Control': 'no-store' } });
     } catch {
       return Response.json(

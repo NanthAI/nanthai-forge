@@ -14,6 +14,7 @@ import { authFile, readAuth, writeAuth, resolveAuthToken } from '../dist/auth-st
 import { coordinationCredentials } from '../dist/coordination-client.js';
 const store = await import(moduleUrl('../convex/deviceStore.ts'));
 const actions = await import(moduleUrl('../convex/deviceActions.ts'));
+const { pollDevice } = await import(moduleUrl('../convex/devicePoll.ts'));
 const approvalStore = await import(moduleUrl('../convex/deviceApprovalStore.ts'));
 const credentials = await import(moduleUrl('../convex/deviceCredentials.ts'));
 const hosted = await import(moduleUrl('../convex/projectBackups.ts'));
@@ -52,6 +53,7 @@ function fixture(t) {
     const [module, name] = getFunctionName(ref).split(':');
     return module === 'deviceStore' ? store[name]._handler(s.ctx, args) : originalMutation(ref, args);
   };
+  s.ctx.runAction = (ref, args) => actions[getFunctionName(ref).split(':')[1]]._handler(s.ctx, args);
   return s;
 }
 // Every sign-in is the stable device flow; `stable` is the proven device identity the HTTP action passes in.
@@ -79,7 +81,7 @@ const start = (s, extra = {}) => {
 const decide = (s, flow, approve = true, operationId = randomUUID()) =>
   actions.decide._handler(s.ctx, { code: flow.user_code, approve, operationId });
 const poll = (s, input, operationId = randomUUID()) =>
-  actions.poll._handler(s.ctx, { deviceCode: input.deviceCode, operationId });
+  pollDevice(s.ctx, { deviceCode: input.deviceCode, operationId });
 const rejected = code => error => (error.data?.code ?? error.code) === code;
 
 test('device flow hashes secrets, reconciles retries, signs Forge JWTs, and binds the approving identity', async t => {
@@ -359,7 +361,7 @@ test('public backend registrations all use the CLI credential guard; token signi
 test('device HTTP routes return no-store responses, reject malformed bodies and publish only the public JWK', async t => {
   const s = fixture(t),
     { default: http } = await import(moduleUrl('../convex/http.ts'));
-  const ctx = { runAction: (ref, args) => actions[getFunctionName(ref).split(':')[1]]._handler(s.ctx, args) };
+  const ctx = s.ctx;
   const route = path => http.getRoutes().find(([value]) => value === path)[2];
   const input = {
     operationId: randomUUID(),
@@ -387,7 +389,7 @@ test('device HTTP routes return no-store responses, reject malformed bodies and 
   assert.equal(bad.status, 400);
   assert.equal(s.tables.deviceCodes.size, 1);
   const polled = await route('/auth/device/poll')._handler(
-    ctx,
+    { ...ctx, runAction: () => assert.fail('A pending device cannot enter the Node signer.') },
     new Request('https://forge.example/auth/device/poll', {
       method: 'POST',
       body: JSON.stringify({ deviceCode: flow.device_code, operationId: randomUUID() }),

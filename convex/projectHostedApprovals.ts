@@ -153,7 +153,16 @@ export const decide = mutation({
       );
       const row = await approvalRow(ctx, input.projectId, input.laneId);
       if (row?.setting && row.decision?.operationId === input.operationId)
-        return canonicalPayload({ approval: approvalView(row, row.laneId), landing: null });
+        return canonicalPayload({
+          approval: approvalView(row, row.laneId),
+          landing: null,
+          ...(row.setting.origin === 'github-connect' &&
+          row.status === 'granted' &&
+          input.decision === 'grant' &&
+          input.head === row.decision.head
+            ? { applied: await grantConnect(ctx, row) }
+            : {}),
+        });
       if (row?.setting) {
         invariant(openSettingRequest(row), 'NOT_FOUND', 'This settings request is no longer open.');
         return canonicalPayload(await decideSetting(ctx, row, actor.id, input));

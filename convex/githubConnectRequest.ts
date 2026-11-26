@@ -2,12 +2,8 @@
 // Copyright 2026 Ferdinando Valsecchi
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
-import {
-  approvalRow,
-  openSettingRequest,
-  writeApproval,
-  type ApprovalRow,
-} from './projectHostedApprovalStore';
+import { approvalRow, type ApprovalRow } from './projectHostedApprovalStore';
+import { invariant } from '../src/errors';
 import { holdSetting, settingKey, settingReply } from './projectSettingApprovals';
 import { canonicalPayload } from '../src/hosted-source-operation';
 
@@ -63,8 +59,23 @@ export async function holdConnect(
 /** A replayed connect returns the same request link (one indexed read, replays only). */
 export async function connectApproval(ctx: QueryCtx | MutationCtx, op: BindingOperation) {
   if (!op.asked) return null;
+  const row = await matchingApproval(ctx, op);
+  return row ? reply(row) : null;
+}
+
+async function matchingApproval(ctx: QueryCtx | MutationCtx, op: BindingOperation) {
   const row = await approvalRow(ctx, op.projectId, key);
-  return row?.setting?.origin === 'github-connect' && row.operationId === op.operationId ? reply(row) : null;
+  return row?.setting?.origin === 'github-connect' && row.operationId === op.operationId ? row : null;
+}
+
+export async function requireConnectGrant(ctx: MutationCtx, op: BindingOperation) {
+  if (!op.asked || op.ownerApproved) return;
+  const row = await matchingApproval(ctx, op);
+  invariant(
+    row?.status === 'granted' && row.decision?.by === op.actor && row.decision.head === row.head,
+    'GITHUB_OAUTH_STATE',
+    'This GitHub connection needs its Forge owner approval.',
+  );
 }
 
 const requested = (row: ApprovalRow) => JSON.parse(row.setting!.request) as { operationId: string };
@@ -77,7 +88,10 @@ const operation = (ctx: MutationCtx, projectId: Id<'hostedProjects'>, operationI
 /** A grant: the page continues to GitHub's authorization for the waiting connect (one indexed read). */
 export async function grantConnect(ctx: MutationCtx, row: ApprovalRow) {
   const op = await operation(ctx, row.projectId, requested(row).operationId);
-  return op?.status === 'waiting' ? { authorizeUrl: op.authorizeUrl } : { status: op?.status ?? 'missing' };
+  if (!op?.asked || op.status !== 'waiting' || op.actor !== row.requester)
+    return { status: op?.status ?? 'missing' };
+  if (!op.ownerApproved) await ctx.db.patch(op._id, { ownerApproved: true });
+  return { authorizeUrl: op.authorizeUrl };
 }
 
 /** A decline ends the waiting connect (the decline code every owner decision uses), so the agent's `github connect` returns at once. */
@@ -85,12 +99,4 @@ export async function declineConnect(ctx: MutationCtx, row: ApprovalRow) {
   const op = await operation(ctx, row.projectId, requested(row).operationId);
   if (op?.status === 'waiting')
     await ctx.db.patch(op._id, { status: 'failed', code: 'REVIEW_DECLINED', verifier: '' });
-}
-
-/** GitHub's authorization finished (or failed) without the Forge page: the request is no longer open. */
-export async function settleConnect(ctx: MutationCtx, op: BindingOperation) {
-  if (!op.asked) return;
-  const row = await approvalRow(ctx, op.projectId, key);
-  if (row?.operationId === op.operationId && openSettingRequest(row))
-    await writeApproval(ctx, row, { ended: { kind: 'applied', at: Date.now() } });
 }

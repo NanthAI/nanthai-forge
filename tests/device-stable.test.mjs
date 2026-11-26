@@ -14,6 +14,7 @@ const modules = Object.fromEntries(
   await Promise.all(names.map(async name => [name, await import(moduleUrl(`../convex/${name}.ts`))])),
 );
 const actions = await import(moduleUrl('../convex/deviceActions.ts'));
+const { pollDevice } = await import(moduleUrl('../convex/devicePoll.ts'));
 const stable = await import(moduleUrl('../convex/deviceStableActions.ts'));
 const credentials = await import(moduleUrl('../convex/deviceCredentials.ts'));
 const policy = await import(moduleUrl('../convex/accessPolicy.ts'));
@@ -85,6 +86,7 @@ function fixture(t) {
     auth: { getUserIdentity: async () => ({ subject: actor, forgeAuthDeviceVerifiedUntil: freshUntil }) },
     runQuery: dispatch,
     runMutation: dispatch,
+    runAction: (ref, args) => actions[getFunctionName(ref).split(':')[1]]._handler(ctx, args),
   };
   const keys = new Map();
   const start = async (device, fields = {}) => {
@@ -100,7 +102,7 @@ function fixture(t) {
   const approve = (flow, fields = {}, operationId = randomUUID()) =>
     actions.decide._handler(ctx, { code: flow.user_code, approve: true, operationId, ...fields });
   const poll = async flow => {
-    const result = await actions.poll._handler(ctx, {
+    const result = await pollDevice(ctx, {
       deviceCode: flow.device_code,
       operationId: randomUUID(),
     });

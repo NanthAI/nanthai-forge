@@ -264,14 +264,17 @@ export async function githubConnectCli(
   );
   const started = z
     .object({
-      authorizeUrl: z.url(),
+      authorizeUrl: z.url().optional(),
       status: z.string(),
       // Item c63c2171: an agent's connect is the owner's decision on Forge first (absent for a person, older servers).
       approval: z.object({ url: z.url().nullable(), next: z.string() }).passthrough().optional(),
     })
     .parse(typeof result === 'string' ? JSON.parse(result) : result);
-  process.stdout.write(`${JSON.stringify({ operationId: journal.operationId, ...started })}\n`);
-  const link = started.approval ? started.approval.url : started.authorizeUrl;
+  const { authorizeUrl, ...status } = started;
+  process.stdout.write(
+    `${JSON.stringify({ operationId: journal.operationId, ...status, ...(!started.approval && authorizeUrl ? { authorizeUrl } : {}) })}\n`,
+  );
+  const link = started.approval ? started.approval.url : authorizeUrl;
   if (started.approval) process.stderr.write(`${started.approval.next}\n`);
   if (started.status === 'waiting' && link)
     (dependencies.approve ?? browserApproval)(link, values['no-browser']);
