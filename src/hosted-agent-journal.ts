@@ -271,7 +271,7 @@ export function finishCommandLaneIds(command: Record<string, unknown>, checkoutL
 /** The original action and parameters of an operation this checkout started, from
  * its local journal: `wait` resumes a save (or other source operation) by exact
  * replay, the same path its receipt's command takes. Local read only. */
-export function retainedHostedOperation(root: string, operationId: string) {
+function readRetainedOperation(root: string, operationId: string) {
   if (!z.uuid().safeParse(operationId).success) return null;
   try {
     const cache = clientCacheRoot(hostedAgentRoot(root));
@@ -285,9 +285,24 @@ export function retainedHostedOperation(root: string, operationId: string) {
       command?: unknown;
     };
     return typeof identity.action === 'string' && identity.command && typeof identity.command === 'object'
-      ? { action: identity.action, command: identity.command as Record<string, unknown> }
+      ? {
+          action: identity.action,
+          command: identity.command as Record<string, unknown>,
+          values: saved.values,
+        }
       : null;
   } catch {
     return null;
   }
+}
+
+export function retainedHostedOperation(root: string, operationId: string) {
+  const retained = readRetainedOperation(root, operationId);
+  return retained && { action: retained.action, command: retained.command };
+}
+
+/** Read only the named local action's journal values, without constructing a transport. */
+export function retainedHostedValues(root: string, operationId: string, action: string) {
+  const retained = readRetainedOperation(root, operationId);
+  return retained?.action === action ? retained.values : undefined;
 }

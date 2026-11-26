@@ -95,3 +95,16 @@ const verdictWords = {
 /** The word a receipt's verdict starts with: a run is passed, NOT COMPLETE, ENVIRONMENT or FAILED. */
 export const preflightVerdict = (receipt: Parameters<typeof preflightOutcome>[0]) =>
   verdictWords[preflightOutcome(receipt)];
+
+/** The bounded local outcome kept by land and by standalone preflight. */
+export function localPreflightSummary(
+  receipt: Parameters<typeof preflightOutcome>[0] & { tests: number; durationMs: number },
+  reused: boolean,
+) {
+  return {
+    tests: receipt.tests,
+    outcome: preflightOutcome(receipt),
+    seconds: Math.round(receipt.durationMs / 100) / 10,
+    reused,
+  };
+}

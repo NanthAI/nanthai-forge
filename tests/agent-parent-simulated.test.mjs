@@ -47,6 +47,7 @@ const EXCLUDED = {
   'tests/hosted-agent-start-placement.test.mjs': 'imports the session module only; placement is the subject',
   'tests/agent-turn-end-hook.test.mjs': 'slow (4 s); turn-end wake hook',
   'tests/cli-held-land.test.mjs': 'slow (9 s); forces foreground mode for the measurement hold CLI cases',
+  'tests/cli-preflight-wake.test.mjs': 'slow (8 s); preflight lifetime tests explicitly select wait modes',
   'tests/hosted-agent-cli.test.mjs': 'slow (3.4 s); CLI verbs',
   'tests/hosted-agent-mcp.test.mjs': 'slow (4.5 s); MCP verbs',
   'tests/source-authorship.test.mjs': 'slow (2.7 s); authorship record',

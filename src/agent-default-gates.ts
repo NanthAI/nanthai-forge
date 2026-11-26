@@ -2,7 +2,7 @@
 // Copyright 2026 Ferdinando Valsecchi
 import { ForgeError } from './errors.js';
 import { shellQuote } from './shell-quote.js';
-import { preflightOutcome } from './agent-preflight-incomplete.js';
+import { localPreflightSummary, preflightOutcome } from './agent-preflight-incomplete.js';
 import {
   planWithBudget,
   preflightPlan,
@@ -66,12 +66,7 @@ export function finishGates(
     // A full preflight run of this head: neither static-only nor land's quick head run.
     const fullRun = sameSource && receipt && !receipt.staticOnly && !receipt.quick ? receipt : null;
     const recordRun = (run: PreflightReceipt, reused: boolean) => {
-      advisories.localPreflight = {
-        tests: run.tests,
-        outcome: preflightOutcome(run),
-        seconds: Math.round(run.durationMs / 100) / 10,
-        reused,
-      };
+      advisories.localPreflight = localPreflightSummary(run, reused);
     };
     const preflightRecovery = () =>
       advisories.localPreflight ? { localPreflight: advisories.localPreflight } : {};

@@ -284,7 +284,8 @@ Two things can stay running, both opt-in and each with one job:
   stops with its own session. It is the harness's process, not a Forge daemon.
 
 A command may start a helper for one job. A landing submitter can wait for a
-measurement hold to release, then submit the landing and exit.
+measurement hold to release, then submit the landing and exit. A preflight
+supervisor records one run's result and exits even if the initiating shell closes.
 `tests/no-resident-process.test.mjs` lists each helper. The old dogfood owner service (a launchd job on one Mac)
 is retired because the hosted queue lands changes
 (removed with one client mode).

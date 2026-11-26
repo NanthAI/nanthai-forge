@@ -17,7 +17,7 @@ import {
   discoversCapabilitiesFirst,
   startEarlyCapabilities,
 } from './hosted-capabilities-early.js';
-import { hostedAgentRoot } from './hosted-agent-journal.js';
+import { hostedAgentRoot, retainedHostedOperation } from './hosted-agent-journal.js';
 import { LAND_CHILD_ENV, MEASUREMENT_LAND_RECORD } from './hosted-land-child-env.js';
 import { canonicalOperationIds } from './operation-id-case.js';
 import { coreVerbs } from '../scripts/agent-verb-forms.mjs';
@@ -179,6 +179,7 @@ export async function agentCli(args: string[], options: AgentCliOptions = {}): P
             waitCommand?: string;
             next?: Record<string, unknown>;
             wake?: unknown;
+            phase?: unknown;
           };
         }
       | undefined
@@ -194,7 +195,13 @@ export async function agentCli(args: string[], options: AgentCliOptions = {}): P
   )
     process.stderr.write(`Forge work is unfinished; keep this turn active and run: ${pending.waitCommand}\n`);
   // Unfinished work this agent session owns, for its turn-end hook (one local write).
-  if (options.process && pending?.inProgress && args[0] && ['land', 'finish', 'wait'].includes(args[1] ?? ''))
+  if (
+    options.process &&
+    pending?.inProgress &&
+    pending.phase !== 'preflight' &&
+    args[0] &&
+    ['land', 'finish', 'wait'].includes(args[1] ?? '')
+  )
     recordTurnWait(resolve(effective.root ?? args[0]), pending.next, null);
   return result;
 }
@@ -461,6 +468,42 @@ async function runAgentCli(
           here = localRoot();
           command = canonicalOperationIds(here, landSaveCommand(form!, true, selected));
         }
+      }
+      const waitIds: string[] =
+        options.process && action === 'wait' && Array.isArray(command.operationIds)
+          ? command.operationIds
+          : [];
+      const preflightIds = [
+        ...new Set(waitIds.filter(id => retainedHostedOperation(here, id)?.action === 'preflight')),
+      ];
+      const preflightRun = options.process && action === 'preflight' && command.run !== false;
+      if (preflightIds.length || preflightRun) {
+        validateHostedCliCommand(here, action, command);
+        const hostedIds = waitIds.filter(id => !preflightIds.includes(id));
+        if (preflightIds.length && !hostedIds.length) {
+          // A local wake needs neither an update nor a hosted read.
+          delete effective.analytics;
+        } else if (
+          options.beforeDispatch &&
+          !(await options.beforeDispatch(stdin === undefined ? undefined : { stdin }))
+        )
+          return;
+        const preflight = (await import(
+          /* @vite-ignore */ new URL('./hosted-preflight-cli.js', import.meta.url).href
+        )) as typeof import('./hosted-preflight-cli.js');
+        if (preflightIds.length)
+          return await preflight.waitLocalPreflights(
+            here,
+            command,
+            preflightIds,
+            hostedIds.length
+              ? async () => {
+                  const { hostedAgentCli } = await import('./hosted-agent-cli.js');
+                  return await hostedAgentCli(here, 'wait', { ...command, operationIds: hostedIds }, hosted);
+                }
+              : undefined,
+          );
+        return await preflight.hostedPreflightCli(here, hosted, command, client.wait);
       }
       // The hosted command modules load while the release check (and, for commands that start with
       // it, capability discovery) is on the network, not before it (fea47345 round 3).
