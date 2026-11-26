@@ -17,13 +17,16 @@ const settle = async () => {
   for (let i = 0; i < 30; i++) await React.act(() => new Promise(resolve => setImmediate(resolve)));
 };
 
-for (const upgradeError of [false, true])
-  test(`archive pagination preserves live pages and viewer fencing through ${upgradeError ? 'structured upgrade errors' : 'legacy markers'}`, async () => {
+for (const legacyServer of [false, true])
+  test(`archive pagination preserves live pages and viewer fencing through ${legacyServer ? 'legacy server negotiation' : 'continuation markers'}`, async () => {
     let view = 'writer',
       resolveRead,
       actions = 0;
     const fake = fakeConvex({
       resolve: (_name, args) => {
+        if (legacyServer && args.journalProtocol)
+          throw new Error('ArgumentValidationError: Object contains extra field `journalProtocol`');
+        if (!legacyServer) assert.equal(args.journalProtocol, 1);
         if (args.paginationOpts.cursor === null)
           return { page: [{ id: 'live' }], isDone: false, continueCursor: 'cold' };
         const marker = {
@@ -33,7 +36,7 @@ for (const upgradeError of [false, true])
           journalHistory: true,
           viewVersion: view,
         };
-        if (upgradeError)
+        if (legacyServer)
           throw new ConvexError({ code: 'CLI_UPGRADE_REQUIRED', message: 'Update the client.', ...marker });
         return marker;
       },

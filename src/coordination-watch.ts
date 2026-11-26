@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-import { hydrateLandingHistory, hasJournalHistory } from './landing-capsule-client.js';
+import {
+  hydrateLandingHistory,
+  hasJournalHistory,
+  journalPageProtocolRejected,
+} from './landing-capsule-client.js';
 import { invariant } from './errors.js';
 import { getFunctionName } from 'convex/server';
 import { deadlineConvexSubscription } from './network-convex-client.js';
@@ -108,16 +112,24 @@ export async function watchCoordinationFeed(
         });
         void hydrated.then(apply, reject);
       };
-      unsubscribe = client.onUpdate(reference, args, observe, error =>
-        hasJournalHistory(error)
-          ? observe(error)
-          : reject(
+      const subscribe = (protocol: boolean) =>
+        client.onUpdate(reference, protocol ? { ...args, journalProtocol: 1 } : args, observe, error => {
+          if (protocol && journalPageProtocolRejected(error)) {
+            queueMicrotask(() => {
+              if (!active) return;
+              unsubscribe?.();
+              unsubscribe = subscribe(false);
+            });
+          } else if (hasJournalHistory(error)) observe(error);
+          else
+            reject(
               new ForgeError(
                 'COORDINATION_UNAVAILABLE',
                 'The live feed failed or current authority expired. Retain the original cursor and obtain current authentication through the existing integration.',
               ),
-            ),
-      );
+            );
+        });
+      unsubscribe = subscribe(true);
     });
   } finally {
     active = false;

@@ -4,7 +4,7 @@ import { makeFunctionReference } from 'convex/server';
 import { ConvexExchange } from './exchange-client.js';
 import { downloadArchiveFile } from './archive-download-file.js';
 import { hostedRecoveryPageSchema, type RecoveryTable } from './recovery-hosted-protocol.js';
-import { hydrateLandingHistory, hasJournalHistory } from './landing-capsule-client.js';
+import { hydrateLandingHistory, hasJournalHistory, queryJournalPage } from './landing-capsule-client.js';
 import { invariant } from './errors.js';
 import type { RecoveryRequest, RecoverySelection } from './recovery-protocol.js';
 import type { RecoveryTransport } from './recovery-source.js';
@@ -23,10 +23,12 @@ export function recoveryTransport(request: RecoveryRequest): RecoveryTransport {
   const query = async (name: string, args: Record<string, unknown>) => {
     const reference = makeFunctionReference<'query'>(name);
     try {
-      return await exchange.client.query(reference, {
-        ...args,
-        ...(capsuleProtocol ? { capsuleProtocol: 1 } : {}),
-      });
+      return await queryJournalPage(
+        exchange.client,
+        name,
+        { ...args, ...(capsuleProtocol ? { capsuleProtocol: 1 } : {}) },
+        input => exchange.client.query(reference, input),
+      );
     } catch (error) {
       if (hasJournalHistory(error)) return error;
       if (
@@ -61,11 +63,19 @@ export function recoveryTransport(request: RecoveryRequest): RecoveryTransport {
         physicalProtocol = false;
         value = await query('projectRecoveryHosted:page', args);
       }
-      const hydrated = await hydrateLandingHistory('projectRecoveryHosted:page', args, value, (name, input) =>
-        exchange.client.action(makeFunctionReference<'action'>(name), {
-          ...input,
-          projectId: request.projectId,
-        }),
+      const hydrated = await hydrateLandingHistory(
+        'projectRecoveryHosted:page',
+        {
+          ...args,
+          ...(capsuleProtocol ? { capsuleProtocol: 1 } : {}),
+          ...(physicalProtocol ? { physicalProtocol: 1 } : {}),
+        },
+        value,
+        (name, input) =>
+          exchange.client.action(makeFunctionReference<'action'>(name), {
+            ...input,
+            projectId: request.projectId,
+          }),
       );
       return hostedRecoveryPageSchema.parse(JSON.parse(hydrated as string));
     },

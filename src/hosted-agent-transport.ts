@@ -2,7 +2,12 @@
 // Copyright 2026 Ferdinando Valsecchi
 import { protectedPathNotice, type ProtectedPathPolicy } from './public-governance.js';
 import type { SaveContract } from './hosted-save-client.js';
-import { capsuleHistoryQueries, hydrateLandingHistory, hasJournalHistory } from './landing-capsule-client.js';
+import {
+  capsuleHistoryQueries,
+  hydrateLandingHistory,
+  hasJournalHistory,
+  queryJournalPage,
+} from './landing-capsule-client.js';
 import { agentClient, agentAuthorship, modelTipOnce } from './agent-turn-work.js';
 import { workIndexRecovery } from './error-teaching.js';
 import { clientLandingMessage, suppliedLandingMessage } from './landing-message.js';
@@ -2865,7 +2870,9 @@ export class HostedAgentTransport {
     };
     const read = async (input: Record<string, unknown>) => {
       try {
-        return await this.exchange.client.query(makeFunctionReference<'query'>(name), input);
+        return await queryJournalPage(this.exchange.client, name, input, args =>
+          this.exchange.client.query(makeFunctionReference<'query'>(name), args),
+        );
       } catch (error) {
         if (hasJournalHistory(error)) return error;
         throw error;

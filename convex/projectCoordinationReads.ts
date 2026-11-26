@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-import { JournalNeeded, journalReadReply } from './projectJournalStore';
+import { JournalNeeded, journalPageProtocol, journalReadReply } from './projectJournalStore';
 import type { PaginationOptions } from 'convex/server';
 import { withActorName } from './projectActorNames';
 import { v } from 'convex/values';
@@ -63,6 +63,7 @@ export const inbox = query({
     projectId: v.id('hostedProjects'),
     paginationOpts: paginationOptsValidator,
     sessionId: v.optional(v.string()),
+    ...journalPageProtocol,
   },
   returns: v.object({
     journalHistory: v.optional(v.literal(true)),
@@ -77,7 +78,12 @@ export const inbox = query({
 
 export async function journalCoordinationInbox(
   ctx: QueryCtx,
-  input: { projectId: Id<'hostedProjects'>; paginationOpts: PaginationOptions; sessionId?: string },
+  input: {
+    projectId: Id<'hostedProjects'>;
+    paginationOpts: PaginationOptions;
+    sessionId?: string;
+    journalProtocol?: 1;
+  },
 ) {
   const { projectId, paginationOpts, sessionId } = input;
   try {
@@ -100,16 +106,18 @@ export async function journalCoordinationInbox(
       cursorReset,
     };
   } catch (error) {
-    if (error instanceof JournalNeeded) {
-      const marker = JSON.parse(await journalReadReply(ctx, error, projectId));
-      return {
-        ...marker,
-        page: [],
-        isDone: false,
-        continueCursor: paginationOpts.cursor ?? '',
-        cursorReset: false,
-      };
-    }
+    if (error instanceof JournalNeeded)
+      return JSON.parse(
+        await journalReadReply(ctx, error, projectId, {
+          protocol: input.journalProtocol,
+          continuation: {
+            page: [],
+            isDone: false,
+            continueCursor: paginationOpts.cursor ?? '',
+            cursorReset: false,
+          },
+        }),
+      );
     return report(error);
   }
 }
@@ -223,6 +231,7 @@ export const related = query({
     laneIds: v.optional(v.array(v.string())),
     paths: v.optional(v.array(v.string())),
     includeMine: v.optional(v.boolean()),
+    ...journalPageProtocol,
   },
   returns: v.object({
     journalHistory: v.optional(v.literal(true)),
@@ -250,6 +259,7 @@ export async function journalCoordinationRelated(
     laneIds?: string[];
     paths?: string[];
     includeMine?: boolean;
+    journalProtocol?: 1;
   },
 ) {
   try {
@@ -302,14 +312,18 @@ export async function journalCoordinationRelated(
     };
   } catch (error) {
     if (error instanceof JournalNeeded)
-      return {
-        ...JSON.parse(await journalReadReply(ctx, error, input.projectId)),
-        page: [],
-        isDone: false,
-        continueCursor: input.paginationOpts.cursor ?? '',
-        cursorReset: false,
-        scope: { intentIds: [], laneIds: [], paths: [] },
-      };
+      return JSON.parse(
+        await journalReadReply(ctx, error, input.projectId, {
+          protocol: input.journalProtocol,
+          continuation: {
+            page: [],
+            isDone: false,
+            continueCursor: input.paginationOpts.cursor ?? '',
+            cursorReset: false,
+            scope: { intentIds: [], laneIds: [], paths: [] },
+          },
+        }),
+      );
     return report(error);
   }
 }

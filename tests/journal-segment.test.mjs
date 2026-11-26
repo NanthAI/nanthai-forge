@@ -10,6 +10,8 @@ import { canonicalPayload } from '../dist/hosted-source-operation.js';
 import { encodeArchiveBytes, decodeArchiveBytes } from '../dist/landing-capsule-bytes.js';
 import { journalSegmentText, journalTablePins, readJournalSegment } from '../dist/journal-segment.js';
 import { hydrateLandingHistory, hasJournalHistory } from '../dist/landing-capsule-client.js';
+import { HOSTED_WORK_INDEX_FORMAT } from '../dist/work-hosted-summary.js';
+import { hostedRecordValue } from '../dist/hosted-records.js';
 import { synthetic } from './hosted-landing-batches-fixture.mjs';
 const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 const reads = await import(moduleUrl('../convex/projectHostedRecordReads.ts'));
@@ -18,61 +20,93 @@ const internalReads = await import(moduleUrl('../convex/projectJournalRead.ts'))
 const actions = await import(moduleUrl('../convex/projectJournalActions.ts'));
 const people = await import(moduleUrl('../convex/publicPeople.ts'));
 const code = expected => error => (error.code ?? error.data?.code) === expected;
-async function fixture(t, { inline = false, lane = false, shared = false } = {}) {
+async function fixture(t, { inline = false, lane = false, issue = false, shared = false } = {}) {
   const f = recordsFixture(),
     auth = await f.setup();
   let actor = 'owner';
   f.ctx.auth = { getUserIdentity: async () => ({ subject: actor }) };
-  const old = lane
-    ? {
-        kind: 'lane',
-        id: randomUUID(),
-        version: 0,
-        at: '2026-01-01T00:00:00.000Z',
-        intentId: randomUUID(),
-        actor: 'owner',
-        base: { head: 'a'.repeat(64), receiptId: 'receipt' },
-        head: 'a'.repeat(64),
-        sourceVersion: 0,
-        lifecycleVersion: 0,
-        state: 'active',
-        authorityEpoch: 1,
-      }
-    : {
-        kind: 'job',
-        id: randomUUID(),
-        version: 0,
-        at: '2026-01-01T00:00:00.000Z',
-        operationId: randomUUID(),
-        jobKind: 'save',
-        input: { sha256: 'a'.repeat(64), size: 1 },
-        inputDigest: 'a'.repeat(64),
-        authorityEpoch: 1,
-        attempt: 0,
-        fence: 0,
-        status: 'pending',
-        executionId: null,
-        output: null,
-      };
-  const first = await f.run('old version', () =>
-    records.writeHostedRecord(f.ctx, { ...auth, record: old, expectedVersion: null }),
-  );
-  await f.run('current version', () =>
-    records.writeHostedRecord(f.ctx, {
-      ...auth,
-      record: lane
-        ? { ...old, version: 1, lifecycleVersion: 1, state: 'completed' }
-        : { ...old, version: 1, status: 'failed' },
-      expectedVersion: 0,
-    }),
-  );
+  const item = {
+    id: randomUUID(),
+    operationId: randomUUID(),
+    request: 'f'.repeat(64),
+    kind: 'issue',
+    version: 1,
+    previousVersion: 0,
+    title: 'First Issue version',
+    body: '',
+    status: 'open',
+    intentIds: [],
+    at: '2026-01-01T00:00:00.000Z',
+    provenance: 'user-declared-local',
+  };
+  const old = issue
+    ? { kind: 'issue', id: item.id, version: item.version, at: item.at, item }
+    : lane
+      ? {
+          kind: 'lane',
+          id: randomUUID(),
+          version: 0,
+          at: '2026-01-01T00:00:00.000Z',
+          intentId: randomUUID(),
+          actor: 'owner',
+          base: { head: 'a'.repeat(64), receiptId: 'receipt' },
+          head: 'a'.repeat(64),
+          sourceVersion: 0,
+          lifecycleVersion: 0,
+          state: 'active',
+          authorityEpoch: 1,
+        }
+      : {
+          kind: 'job',
+          id: randomUUID(),
+          version: 0,
+          at: '2026-01-01T00:00:00.000Z',
+          operationId: randomUUID(),
+          jobKind: 'save',
+          input: { sha256: 'a'.repeat(64), size: 1 },
+          inputDigest: 'a'.repeat(64),
+          authorityEpoch: 1,
+          attempt: 0,
+          fence: 0,
+          status: 'pending',
+          executionId: null,
+          output: null,
+        };
+  const current = issue
+    ? { ...old, version: 2, item: { ...item, version: 2, previousVersion: 1, title: 'Current Issue' } }
+    : lane
+      ? { ...old, version: 1, lifecycleVersion: 1, state: 'completed' }
+      : { ...old, version: 1, status: 'failed' };
+  let first;
+  if (issue) {
+    const { storeVersion } = await import(moduleUrl('../convex/projectWorkStore.ts'));
+    const project = await f.ctx.db.get(auth.projectId);
+    await storeVersion(f.ctx, project, hostedRecordValue(old));
+    await storeVersion(f.ctx, project, hostedRecordValue(current));
+    first = await records.recordVersion(f.ctx, auth.projectId, old.kind, old.id, old.version);
+  } else {
+    first = await f.run('old version', () =>
+      records.writeHostedRecord(f.ctx, { ...auth, record: old, expectedVersion: null }),
+    );
+    await f.run('current version', () =>
+      records.writeHostedRecord(f.ctx, {
+        ...auth,
+        record: current,
+        expectedVersion: old.version,
+      }),
+    );
+  }
   if (inline) {
     await f.ctx.db.patch(first._id, { inline: first.value });
     await f.ctx.db.patch(first.bodyId, { value: '' });
   }
   const request = {
     projectId: auth.projectId,
-    request: canonicalPayload({ collection: lane ? 'lanes' : 'jobs', id: old.id, version: 0 }),
+    request: canonicalPayload({
+      collection: issue ? 'issues' : lane ? 'lanes' : 'jobs',
+      id: old.id,
+      version: old.version,
+    }),
   };
   const before = await reads.read._handler(f.ctx, request);
   const header = f.tables.projectHostedRecords.get(first._id),
@@ -82,22 +116,26 @@ async function fixture(t, { inline = false, lane = false, shared = false } = {})
     kind: 'forge-journal-segment',
     projectId: auth.projectId,
     scope: shared ? 'records' : store.journalScope(old.kind, old.id),
-    from: 0,
-    through: 0,
+    from: old.version,
+    through: old.version,
     tables: {
       projectHostedRecords: [canonicalPayload(header)],
       projectHostedRecordBodies: [canonicalPayload(body)],
     },
   };
-  const encoded = encodeArchiveBytes(journalSegmentText(segment), 0, journalTablePins(segment.tables));
+  const encoded = encodeArchiveBytes(
+    journalSegmentText(segment),
+    old.version,
+    journalTablePins(segment.tables),
+  );
   const index = {
     scope: segment.scope,
-    from: 0,
-    through: 0,
+    from: segment.from,
+    through: segment.through,
     pointer: encoded.pointer,
     records: [
       [
-        0,
+        old.version,
         header._id,
         header._creationTime,
         header.bodyId,
@@ -119,7 +157,7 @@ async function fixture(t, { inline = false, lane = false, shared = false } = {})
       recordKind: old.kind,
       firstPosition: `${auth.projectId}:${header._creationTime.toFixed(6).padStart(23, '0')}:${header._id}`,
       lastPosition: `${auth.projectId}:${header._creationTime.toFixed(6).padStart(23, '0')}:${header._id}`,
-      key: shared ? encoded.pointer.sha256 : store.journalIndexKey(auth.projectId, index.scope, 0),
+      key: shared ? encoded.pointer.sha256 : store.journalIndexKey(auth.projectId, index.scope, index.from),
       projectId: auth.projectId,
       value: canonicalPayload(
         receipts ? Object.fromEntries(Object.entries(index).filter(([key]) => key !== 'records')) : index,
@@ -180,6 +218,7 @@ async function fixture(t, { inline = false, lane = false, shared = false } = {})
     ...f,
     auth,
     old,
+    current,
     request,
     before,
     first,
@@ -198,6 +237,7 @@ async function fixture(t, { inline = false, lane = false, shared = false } = {})
       }
     },
     read: () => actions.history._handler(actionCtx, { ...request, query: 'projectHostedRecordReads:read' }),
+    actionCtx,
     actor: value => {
       actor = value;
     },
@@ -624,6 +664,62 @@ test('unsupported clients get a structured upgrade before archived history can l
       !('index' in error.data),
   );
   assert.equal(h.gets.length, 0);
+});
+
+test('archived Work-store comparison resumes a saved full cursor and returns the final counts', async t => {
+  const h = await fixture(t, { issue: true });
+  const { compare } = await import(moduleUrl('../convex/projectWorkStore.ts'));
+  const { projectId } = h.auth;
+  const backupId = 'synthetic-backup';
+  const generationId = await h.ctx.db.insert('projectWorkGenerations', {
+    projectId,
+    backupId,
+    format: HOSTED_WORK_INDEX_FORMAT,
+    status: 'ready',
+    initialRevision: 0,
+    revision: 0,
+    nextBatch: 0,
+    metadata: '{}',
+  });
+  await h.ctx.db.patch(projectId, {
+    work: { generationId, backupId, operationId: randomUUID(), initialRevision: 0, revision: 0 },
+  });
+  for (const { item, version } of [h.old, h.current])
+    await h.ctx.db.insert('projectWorkRecords', {
+      projectId,
+      generationId,
+      collection: 'planningVersions',
+      key: `${item.id}:${version}`,
+      parent: item.id,
+      position: version,
+      value: JSON.stringify(item),
+    });
+  const args = { projectId, collection: 'readVersions', cursor: null, newest: 1 };
+  const first = JSON.parse(await compare._handler(h.ctx, args));
+  assert.equal(first.matched, 1);
+  assert.match(first.cursor, /^work-full:/);
+  const continuation = { ...args, cursor: first.cursor };
+  const expected = JSON.parse(await compare._handler(h.ctx, continuation));
+  assert.equal(expected.matched, 1);
+  await h.relocate();
+
+  await assert.rejects(compare._handler(h.ctx, continuation), code('CLI_UPGRADE_REQUIRED'));
+  const name = 'projectWorkStore:compare';
+  const raw = await compare._handler(h.ctx, { ...continuation, journalProtocol: 1 });
+  const marker = JSON.parse(raw);
+  assert.equal(marker.cursor, first.cursor);
+  assert.equal(marker.done, false);
+  assert.equal(marker.journalHistory, true);
+  assert(!('index' in marker));
+  assert.equal(h.gets.length, 0);
+  const result = await hydrateLandingHistory(name, continuation, raw, (action, request) => {
+    assert.equal(action, 'projectJournalActions:history');
+    return actions.history._handler(h.actionCtx, { projectId, ...request });
+  });
+  assert.deepEqual(JSON.parse(result), expected);
+  assert.equal(expected.cursor, null);
+  assert.equal(expected.done, true);
+  assert.equal(h.gets.length, 1);
 });
 
 test('compact version receipts preserve exact reads, source pins and complete metrics without one archive index per version', async t => {

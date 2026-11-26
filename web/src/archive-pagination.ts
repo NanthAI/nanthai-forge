@@ -10,7 +10,12 @@ import type {
 } from 'convex/react';
 import { getFunctionName, makeFunctionReference, type FunctionReference } from 'convex/server';
 import { convexToJson, type Value } from 'convex/values';
-import { hasJournalHistory, hydrateLandingHistory } from '../../src/landing-capsule-client';
+import {
+  hasJournalHistory,
+  hydrateLandingHistory,
+  journalPageProtocolRejected,
+  journalPageQueries,
+} from '../../src/landing-capsule-client';
 
 type Page = { page: unknown[]; isDone: boolean; continueCursor: string };
 type Cached = { token: string; value?: Page; error?: Error };
@@ -23,6 +28,8 @@ export function useArchivePaginatedQuery<Q extends PaginatedQueryReference>(
 ) {
   const client = useConvex(),
     name = getFunctionName(query);
+  const [legacy, setLegacy] = useState<string | null>(null);
+  const journalProtocol = legacy !== name && journalPageQueries.has(name);
   const selection =
     args === 'skip' ? null : `${name}:${JSON.stringify(convexToJson(args as Record<string, Value>))}`;
   const [requested, setRequested] = useState({
@@ -42,11 +49,15 @@ export function useArchivePaginatedQuery<Q extends PaginatedQueryReference>(
               String(i),
               {
                 query: query as FunctionReference<'query'>,
-                args: { ...(args as Record<string, Value>), paginationOpts: page } as Record<string, Value>,
+                args: {
+                  ...(args as Record<string, Value>),
+                  paginationOpts: page,
+                  ...(journalProtocol ? { journalProtocol: 1 } : {}),
+                } as Record<string, Value>,
               },
             ]),
           ),
-    [selection, JSON.stringify(pages)],
+    [selection, JSON.stringify(pages), journalProtocol],
   );
   const observed = useQueries(requests);
   const [cached, setCached] = useState<Record<string, Cached>>({});
@@ -67,6 +78,10 @@ export function useArchivePaginatedQuery<Q extends PaginatedQueryReference>(
   }, []);
   const tokens = candidates.map(item => item.token).join('\n');
   useEffect(() => {
+    if (journalProtocol && candidates.some(item => journalPageProtocolRejected(item.raw))) {
+      setLegacy(name);
+      return;
+    }
     for (const item of candidates) {
       if (
         item.raw === undefined ||
@@ -102,7 +117,7 @@ export function useArchivePaginatedQuery<Q extends PaginatedQueryReference>(
         )
         .finally(() => pending.current.delete(item.token));
     }
-  }, [client, name, tokens, cached]);
+  }, [client, name, tokens, cached, journalProtocol]);
   let error: Error | undefined,
     loading = false;
   const resolved: Page[] = [];
@@ -120,7 +135,8 @@ export function useArchivePaginatedQuery<Q extends PaginatedQueryReference>(
       }
     }
     if (item.raw instanceof Error && !hasJournalHistory(item.raw)) {
-      error = item.raw;
+      if (journalProtocol && journalPageProtocolRejected(item.raw)) loading = true;
+      else error = item.raw;
       break;
     }
     const hit = cached[item.id]?.token === item.token ? cached[item.id] : undefined;

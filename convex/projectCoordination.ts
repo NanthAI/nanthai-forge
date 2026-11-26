@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import { wakeJournal } from './projectJournalWake';
-import { JournalNeeded, journalReadReply } from './projectJournalStore';
+import { JournalNeeded, journalPageProtocol, journalReadReply } from './projectJournalStore';
 import type { QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import type { PaginationOptions } from 'convex/server';
@@ -249,13 +249,18 @@ export const feed = query({
     intentId: v.optional(v.string()),
     laneId: v.optional(v.string()),
     planningItemId: v.optional(v.string()),
+    ...journalPageProtocol,
   },
   returns: feedResult,
   handler: journalCoordinationFeed,
 });
 
 export const recent = query({
-  args: { projectId: v.id('hostedProjects'), paginationOpts: paginationOptsValidator },
+  args: {
+    projectId: v.id('hostedProjects'),
+    paginationOpts: paginationOptsValidator,
+    ...journalPageProtocol,
+  },
   returns: v.object({
     ...paginationResultValidator(eventDocument).fields,
     journalHistory: v.optional(v.literal(true)),
@@ -272,12 +277,14 @@ export async function journalCoordinationFeed(
     intentId,
     laneId,
     planningItemId,
+    journalProtocol,
   }: {
     projectId: Id<'hostedProjects'>;
     paginationOpts: PaginationOptions;
     intentId?: string;
     laneId?: string;
     planningItemId?: string;
+    journalProtocol?: 1;
   },
 ) {
   try {
@@ -306,20 +313,28 @@ export async function journalCoordinationFeed(
     return result;
   } catch (error) {
     if (error instanceof JournalNeeded)
-      return {
-        ...JSON.parse(await journalReadReply(ctx, error, projectId)),
-        page: [],
-        isDone: false,
-        continueCursor: paginationOpts.cursor ?? '',
-        cursorReset: false,
-      };
+      return JSON.parse(
+        await journalReadReply(ctx, error, projectId, {
+          protocol: journalProtocol,
+          continuation: {
+            page: [],
+            isDone: false,
+            continueCursor: paginationOpts.cursor ?? '',
+            cursorReset: false,
+          },
+        }),
+      );
     return report(error);
   }
 }
 
 export async function journalCoordinationRecent(
   ctx: QueryCtx,
-  { projectId, paginationOpts }: { projectId: Id<'hostedProjects'>; paginationOpts: PaginationOptions },
+  {
+    projectId,
+    paginationOpts,
+    journalProtocol,
+  }: { projectId: Id<'hostedProjects'>; paginationOpts: PaginationOptions; journalProtocol?: 1 },
 ) {
   try {
     const actor = await signedIn(ctx, 'read project coordination');
@@ -330,12 +345,12 @@ export async function journalCoordinationRecent(
     return result;
   } catch (error) {
     if (error instanceof JournalNeeded)
-      return {
-        ...JSON.parse(await journalReadReply(ctx, error, projectId)),
-        page: [],
-        isDone: false,
-        continueCursor: paginationOpts.cursor ?? '',
-      };
+      return JSON.parse(
+        await journalReadReply(ctx, error, projectId, {
+          protocol: journalProtocol,
+          continuation: { page: [], isDone: false, continueCursor: paginationOpts.cursor ?? '' },
+        }),
+      );
     return report(error);
   }
 }

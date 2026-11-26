@@ -1713,6 +1713,12 @@ coordination and snapshot/display tables. A physical journal-revision fence
 invalidates an export that crosses relocation. No writer or automatic relocation
 is installed by this reader expansion. Planning-version and Lane history pages,
 coordination feed/recent/related reads and Lane metric facts accept both forms.
+A paged read that needs archived bytes returns a history marker with the request's
+cursor and an unfinished page to clients that advertise journal support. The
+archive action reads that same page and returns the next cursor when more rows
+remain. Work-store comparisons keep the `work-full:` cursor format and report
+completion in `done`. Clients that lack the journal protocol receive
+`CLI_UPGRADE_REQUIRED`.
 A dedicated segment table isolates archive range-index cost from hot finish rows.
 Readers also accept self-contained compact source-operation receipts (including
 the complete terminal result), compact Work command retry facts and closed-save

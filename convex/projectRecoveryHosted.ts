@@ -3,7 +3,7 @@
 import { findObjects } from './projectObjectFind';
 import { journalSourceRow } from './projectJournalCanonical';
 import { journalRecoveryPage } from './projectJournalRecovery';
-import { JournalNeeded, journalReadReply } from './projectJournalStore';
+import { JournalNeeded, journalPageProtocol, journalReadReply } from './projectJournalStore';
 import { v } from 'convex/values';
 import { query, type QueryCtx } from './cliServer';
 import type { Doc, Id } from './_generated/dataModel';
@@ -245,6 +245,7 @@ export const page = query({
     selection: v.string(),
     capsuleProtocol: v.optional(v.literal(1)),
     physicalProtocol: v.optional(v.literal(1)),
+    ...journalPageProtocol,
     table: v.string(),
     cursor: v.union(v.string(), v.null()),
   },
@@ -278,6 +279,7 @@ export async function journalRecoveryRead(
     selection: string;
     capsuleProtocol?: 1;
     physicalProtocol?: 1;
+    journalProtocol?: 1;
     table: string;
     cursor: string | null;
   },
@@ -299,7 +301,7 @@ export async function journalRecoveryRead(
     );
     const table = recoveryTableSchema.parse(input.table);
     const selected = readRecoveryCapsuleCursor(table, input.cursor);
-    if (selected.phase === 'journal') return journalRecoveryPage(ctx, project, table, selected);
+    if (selected.phase === 'journal') return await journalRecoveryPage(ctx, project, table, selected);
     if (selected.phase === 'capsules')
       return recoveryCapsulePage(ctx, project, table, selected, input.capsuleProtocol);
     const result = await readPage(ctx, input.projectId, table, selected.cursor);
@@ -360,7 +362,11 @@ export async function journalRecoveryRead(
       done: !partial && result.isDone && !usesArchives,
     });
   } catch (error) {
-    if (error instanceof JournalNeeded) return journalReadReply(ctx, error, input.projectId);
+    if (error instanceof JournalNeeded)
+      return journalReadReply(ctx, error, input.projectId, {
+        protocol: input.journalProtocol,
+        continuation: { table: input.table, rows: [], cursor: input.cursor, done: false },
+      });
     return report(error);
   }
 }

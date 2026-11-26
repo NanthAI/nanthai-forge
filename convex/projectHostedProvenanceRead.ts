@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import { journalRecordPage } from './projectJournalRecordPage';
-import { JournalNeeded, journalReadReply } from './projectJournalStore';
+import { JournalNeeded, journalPageProtocol, journalReadReply } from './projectJournalStore';
 import { v } from 'convex/values';
 import { query, type QueryCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
@@ -17,7 +17,7 @@ const PAGE = 20;
  * history page; at most 20 returned versions, O(page) indexed DB reads, no writes/wakes/idle.
  * State manifests and selected file bytes stay in R2. No Work-wide hydration or global revision. */
 export const read = query({
-  args: { projectId: v.id('hostedProjects'), request: v.string() },
+  args: { projectId: v.id('hostedProjects'), request: v.string(), ...journalPageProtocol },
   returns: v.string(),
   handler: journalProvenanceRead,
 });
@@ -52,12 +52,14 @@ async function sourceOperation(
 
 export async function journalProvenanceRead(
   ctx: QueryCtx,
-  input: { projectId: Id<'hostedProjects'>; request: string },
+  input: { projectId: Id<'hostedProjects'>; request: string; journalProtocol?: 1 },
 ) {
+  let requestedCursor: { index: number; cursor: string | null } | null = null;
   try {
     const user = await ctx.auth.getUserIdentity();
     invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read Candidate provenance.');
     const command = provenanceHistoryRequest.parse(JSON.parse(input.request));
+    requestedCursor = command.cursor ?? null;
     const auth = { projectId: input.projectId, actor: user.subject };
     const row = await readHostedRecord(ctx, { ...auth, kind: 'candidate', key: command.candidateId });
     invariant(row, 'NOT_FOUND', 'Candidate not found on this project.');
@@ -163,7 +165,11 @@ export async function journalProvenanceRead(
     if (!nextCursor && index < command.lanes.length) nextCursor = { index, cursor: null };
     return JSON.stringify({ candidate, histories, why: [...intents.values()], nextCursor });
   } catch (error) {
-    if (error instanceof JournalNeeded) return journalReadReply(ctx, error, input.projectId);
+    if (error instanceof JournalNeeded)
+      return journalReadReply(ctx, error, input.projectId, {
+        protocol: input.journalProtocol,
+        continuation: { nextCursor: requestedCursor, done: false },
+      });
     return report(error);
   }
 }

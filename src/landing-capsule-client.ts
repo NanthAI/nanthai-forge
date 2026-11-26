@@ -9,6 +9,45 @@ export const capsuleHistoryQueries = new Set([
   'projectHostedFinish:inputs',
   'projectRecoveryHosted:page',
 ]);
+export const journalPageQueries = new Set([
+  'projectCoordination:feed',
+  'projectCoordination:recent',
+  'projectCoordinationReads:inbox',
+  'projectCoordinationReads:related',
+  'projectHostedProvenanceRead:read',
+  'projectHostedRecordReads:read',
+  'projectRecoveryHosted:page',
+  'projectWorkIndex:records',
+  'projectWorkStore:compare',
+]);
+
+export function journalPageProtocolRejected(error: unknown) {
+  return (
+    error instanceof Error &&
+    error.message.includes('ArgumentValidationError') &&
+    /extra field `?journalProtocol\b|journalProtocol.*\(extra field\)/.test(error.message)
+  );
+}
+
+const legacyJournalQueries = new WeakMap<object, Set<string>>();
+export async function queryJournalPage<T>(
+  client: object,
+  name: string,
+  args: Record<string, unknown>,
+  read: (input: Record<string, unknown>) => Promise<T>,
+): Promise<T> {
+  let legacy = legacyJournalQueries.get(client);
+  if (!journalPageQueries.has(name) || legacy?.has(name)) return read(args);
+  try {
+    return await read({ ...args, journalProtocol: 1 });
+  } catch (error) {
+    if (!journalPageProtocolRejected(error)) throw error;
+    if (!legacy) legacyJournalQueries.set(client, (legacy = new Set()));
+    legacy.add(name);
+    return read(args);
+  }
+}
+
 export const hasLandingCapsule = (value: unknown): boolean => {
   const parsed = typeof value === 'string' ? JSON.parse(value) : value;
   return !!parsed && typeof parsed === 'object' && 'landingCapsule' in parsed;

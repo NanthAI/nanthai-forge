@@ -6,7 +6,6 @@ import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { state } from './hosted-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
-import { hasJournalHistory } from '../dist/landing-capsule-client.js';
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
 import { encodeArchiveBytes } from '../dist/landing-capsule-bytes.js';
 import { journalSegmentText, journalTablePins } from '../dist/journal-segment.js';
@@ -131,12 +130,7 @@ async function fixture(t) {
   const call = async (name, args) => {
     const [file, method] = name.split(':');
     if (file === 'projectCoordination') {
-      try {
-        return await api[method]._handler(f.ctx, { projectId: 'project', ...args });
-      } catch (error) {
-        if (hasJournalHistory(error)) return error.data;
-        throw error;
-      }
+      return api[method]._handler(f.ctx, { projectId: 'project', ...args, journalProtocol: 1 });
     }
     assert.fail(name);
   };
@@ -152,6 +146,11 @@ async function fixture(t) {
   };
   const page = async (method, args) => {
     const raw = await call(`projectCoordination:${method}`, args);
+    if (raw.journalHistory) {
+      assert.equal(raw.isDone, false);
+      assert.equal(raw.continueCursor, args.paginationOpts.cursor ?? '');
+      assert(!('index' in raw));
+    }
     return raw.journalHistory
       ? JSON.parse(
           await cold.history._handler(actionCtx, {

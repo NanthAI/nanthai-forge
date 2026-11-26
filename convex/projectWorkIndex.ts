@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-import { JournalNeeded, journalReadReply } from './projectJournalStore';
+import { JournalNeeded, journalPageProtocol, journalReadReply } from './projectJournalStore';
 import type { QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import type { PaginationOptions } from 'convex/server';
@@ -134,6 +134,7 @@ export const records = query({
     newestFirst: v.optional(v.boolean()),
     parentId: v.optional(v.string()),
     paginationOpts: paginationOptsValidator,
+    ...journalPageProtocol,
   },
   returns: v.object({
     ...identity,
@@ -324,6 +325,7 @@ export async function journalWorkRecordsRead(
     newestFirst?: boolean;
     parentId?: string;
     paginationOpts: PaginationOptions;
+    journalProtocol?: 1;
   },
 ) {
   try {
@@ -519,14 +521,18 @@ export async function journalWorkRecordsRead(
     };
   } catch (error) {
     if (error instanceof JournalNeeded)
-      return {
-        ...JSON.parse(await journalReadReply(ctx, error, input.projectId)),
-        generationId: input.generationId ?? null,
-        revision: null,
-        page: [],
-        isDone: false,
-        continueCursor: input.paginationOpts.cursor ?? '',
-      };
+      return JSON.parse(
+        await journalReadReply(ctx, error, input.projectId, {
+          protocol: input.journalProtocol,
+          continuation: {
+            generationId: input.generationId ?? null,
+            revision: null,
+            page: [],
+            isDone: false,
+            continueCursor: input.paginationOpts.cursor ?? '',
+          },
+        }),
+      );
     return report(error);
   }
 }

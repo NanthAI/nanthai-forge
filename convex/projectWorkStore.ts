@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import { readyJournalRecord } from './projectJournalWake';
-import { JournalNeeded, journalReadReply } from './projectJournalStore';
+import { JournalNeeded, journalPageProtocol, journalReadReply } from './projectJournalStore';
 import { splitRecordTable } from './projectWorkRecordTables';
 import {
   eventDocument,
@@ -569,6 +569,7 @@ export const compare = query({
     cursor: v.union(v.string(), v.null()),
     newest: v.optional(v.number()),
     digestOnly: v.optional(v.boolean()),
+    ...journalPageProtocol,
   },
   returns: v.string(),
   handler: journalWorkStoreCompare,
@@ -581,8 +582,10 @@ export async function journalWorkStoreCompare(
     cursor: string | null;
     newest?: number;
     digestOnly?: boolean;
+    journalProtocol?: 1;
   },
 ) {
+  const requestedCursor = input.cursor;
   try {
     const { project, partition } = await ownerStore(ctx, input.projectId);
     const fullPrefix = 'work-full:';
@@ -594,7 +597,12 @@ export async function journalWorkStoreCompare(
     if (input.cursor?.startsWith(fullPrefix))
       input = { ...input, cursor: input.cursor.slice(fullPrefix.length) };
     const full = (value: { cursor: string | null } & Record<string, unknown>) =>
-      JSON.stringify({ ...value, method: 'full', cursor: value.cursor ? fullPrefix + value.cursor : null });
+      JSON.stringify({
+        ...value,
+        method: 'full',
+        cursor: value.cursor ? fullPrefix + value.cursor : null,
+        done: value.cursor === null,
+      });
     const collection = input.collection as CompareSource;
     let checked = 0,
       matched = 0,
@@ -697,7 +705,11 @@ export async function journalWorkStoreCompare(
     }
     return full({ checked, matched, hosted, missing, different, invalid, cursor: page.cursor });
   } catch (error) {
-    if (error instanceof JournalNeeded) return journalReadReply(ctx, error, input.projectId);
+    if (error instanceof JournalNeeded)
+      return journalReadReply(ctx, error, input.projectId, {
+        protocol: input.journalProtocol,
+        continuation: { cursor: requestedCursor, done: false },
+      });
     return report(error);
   }
 }

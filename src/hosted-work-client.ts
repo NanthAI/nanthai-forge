@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-import { hydrateLandingHistory, hasJournalHistory } from './landing-capsule-client.js';
+import { hydrateLandingHistory, hasJournalHistory, queryJournalPage } from './landing-capsule-client.js';
 import { metadataCommandSchema } from './work-intent-types.js';
 import { rebuildWorkIndex } from './work-index-client.js';
 import { hostedActionError } from './hosted-action-error.js';
@@ -69,17 +69,18 @@ async function queryWorkHistory(
   ref: FunctionReference<'query'>,
   args: Record<string, unknown>,
 ) {
+  const name = getFunctionName(ref);
   let value;
   try {
-    value = await client.query(ref, args);
+    value = await queryJournalPage(client, name, args, input => client.query(ref, input));
   } catch (error) {
     if (!hasJournalHistory(error)) throw error;
     value = error;
   }
-  const hydrated = await hydrateLandingHistory(getFunctionName(ref), args, value, (name, request) =>
+  const hydrated = await hydrateLandingHistory(name, args, value, (name, request) =>
     client.action(makeFunctionReference<'action'>(name), { projectId: args.projectId, ...request }),
   );
-  return getFunctionName(ref) !== 'projectWorkStore:compare' && typeof hydrated === 'string'
+  return name !== 'projectWorkStore:compare' && typeof hydrated === 'string'
     ? JSON.parse(hydrated)
     : hydrated;
 }

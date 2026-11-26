@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-import { hydrateLandingHistory, hasJournalHistory } from './landing-capsule-client.js';
+import { hydrateLandingHistory, hasJournalHistory, queryJournalPage } from './landing-capsule-client.js';
 import { randomUUID } from 'node:crypto';
 import { makeFunctionReference } from 'convex/server';
 import type { CoordinationTransport } from './coordination-client.js';
@@ -79,7 +79,9 @@ export async function dispatchCoordination(
     const request = { projectId, ...defined(args) };
     const value = await call<Record<string, unknown>>(async () => {
       try {
-        return (await client.query(ref.query(name), request)) as Record<string, unknown>;
+        return (await queryJournalPage(client, name, request, input =>
+          client.query(ref.query(name), input),
+        )) as Record<string, unknown>;
       } catch (error) {
         if (hasJournalHistory(error)) return error as Record<string, unknown>;
         throw error;

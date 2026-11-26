@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-import { ConvexError } from 'convex/values';
+import { ConvexError, v } from 'convex/values';
 import { historyViewVersion } from './projectLandingCapsuleContext';
 import type { QueryCtx, MutationCtx } from './_generated/server';
 import type { Id, Doc } from './_generated/dataModel';
@@ -57,7 +57,15 @@ export class JournalNeeded extends Error {
     super('Selected journal segment requires a server read.');
   }
 }
-export async function journalReadReply(ctx: Context, error: unknown, projectId: Id<'hostedProjects'>) {
+/** A paged read can hand the same request to the archive action without advancing its cursor. */
+export const journalPageProtocol = { journalProtocol: v.optional(v.literal(1)) };
+
+export async function journalReadReply(
+  ctx: Context,
+  error: unknown,
+  projectId: Id<'hostedProjects'>,
+  page?: { protocol: 1 | undefined; continuation: Record<string, unknown> },
+) {
   if (!(error instanceof JournalNeeded)) throw error;
   const project = !(ctx as LoadedContext).journalPrivate ? await ctx.db.get(projectId) : null;
   invariant(
@@ -65,16 +73,21 @@ export async function journalReadReply(ctx: Context, error: unknown, projectId: 
     'PROJECT_UNAVAILABLE',
     'Selected history is unavailable.',
   );
-  if (project)
-    throw new ConvexError({
-      code: 'CLI_UPGRADE_REQUIRED',
-      message: 'Run nforge update to read archived Work history.',
+  if (project) {
+    const marker = {
       journalHistory: true,
       viewVersion: digest(
         canonicalPayload([await historyViewVersion(ctx, project), [...(dependencies.get(ctx) ?? [])]]),
       ),
+    };
+    if (page?.protocol === 1) return canonicalPayload({ ...page.continuation, ...marker });
+    throw new ConvexError({
+      code: 'CLI_UPGRADE_REQUIRED',
+      message: 'Run nforge update to read archived Work history.',
+      ...marker,
     });
-  return canonicalPayload({ journalHistory: true, index: error.index });
+  }
+  return canonicalPayload({ ...page?.continuation, journalHistory: true, index: error.index });
 }
 export function loadedJournalRows<T extends keyof JournalSegment['tables']>(
   ctx: Context,

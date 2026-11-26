@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import type { Id } from './_generated/dataModel';
-import { JournalNeeded, journalReadReply } from './projectJournalStore';
+import { JournalNeeded, journalPageProtocol, journalReadReply } from './projectJournalStore';
 import { v } from 'convex/values';
 import { query, type QueryCtx } from './cliServer';
 import { hostedRecordBody, hostedRecordPage, readHostedRecord } from './projectHostedRecords';
@@ -16,19 +16,21 @@ import { landingAttemptRecords } from './projectLandingAttemptRecords';
  * saves: each save names its saved State (`head`, `at`), one small body read per row, so a Lane's save
  * history lists its State ids in one call (Issue 17ea21ac). */
 export const read = query({
-  args: { projectId: v.id('hostedProjects'), request: v.string() },
+  args: { projectId: v.id('hostedProjects'), request: v.string(), ...journalPageProtocol },
   returns: v.string(),
   handler: journalRecordRead,
 });
 
 export async function journalRecordRead(
   ctx: QueryCtx,
-  input: { projectId: Id<'hostedProjects'>; request: string },
+  input: { projectId: Id<'hostedProjects'>; request: string; journalProtocol?: 1 },
 ) {
+  let pageCursor: string | null | undefined;
   try {
     const user = await ctx.auth.getUserIdentity();
     invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read hosted Work records.');
     const command = hostedRecordsReadSchema.parse(JSON.parse(input.request));
+    if (!command.id) pageCursor = command.cursor;
     const { collection } = command;
     if (collection === 'landing-attempts' || collection === 'retained-landing-attempts')
       return JSON.stringify(
@@ -96,7 +98,18 @@ export async function journalRecordRead(
       coverage: 'Each row pins its immutable version; this page is not a project-wide snapshot.',
     });
   } catch (error) {
-    if (error instanceof JournalNeeded) return journalReadReply(ctx, error, input.projectId);
+    if (error instanceof JournalNeeded)
+      return journalReadReply(
+        ctx,
+        error,
+        input.projectId,
+        pageCursor === undefined
+          ? undefined
+          : {
+              protocol: input.journalProtocol,
+              continuation: { items: [], nextCursor: pageCursor, done: false },
+            },
+      );
     return report(error);
   }
 }
