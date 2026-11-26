@@ -1,0 +1,127 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedCheckFields.ts": "563ef17f92544806e698c25b8bd79ecbcfa9683a1b9d604db7e9b3e0cad51883",
+    "convex/projectHostedCheckStore.ts": "aee677b55947fbd9dede93d8c7e9c1cd6f31cc7524daa5ead6b94e046edb6b88",
+    "convex/projectHostedCheckVerdictReuse.ts": "18f5e444734caaeed463c0eca0f66a665f79cd992222657ecd81fa2da61badc8",
+    "convex/projectHostedLandingReplay.ts": "3a66c6ed2f0bd509f90a5be9fb5c6b18d46049db39b14765a3952b8b60746408"
+  },
+  "replay": {
+    "incident": "5e3c3a3c",
+    "test": "incident 5e3c3a3c: passed followers land within the pass-to-land ceiling while the holder re-checks",
+    "receipt": "c24bc13d-f6dc-47f3-be85-116f0bd230ea"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "thread:delegated-task:command%3Amcp%3Ae9b79936-4aef-4418-8727-04902f50c404%3Adelegate-task%3Ac0c0adc2-94ba-4250-a02a-5fd961af12f6",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "thread:delegated-task:command%3Amcp%3Ab80ca834-39d7-4c03-b71a-6f537ebc98ae%3Adelegate-task%3A775a58de-1a77-4118-8070-b8d5d2bd33d1",
+    "receipt": "c24bc13d-f6dc-47f3-be85-116f0bd230ea"
+  },
+  "exercised": {
+    "convex/projectHostedCheckFields.ts": {
+      "executed": [
+        "hostedCheckTables"
+      ],
+      "digest": "9fb0ec8c51af3f02cd7598101a0c4ba47ad074e40370fa131aac2002d83d2ef8",
+      "units": [
+        [
+          "checkCause",
+          "951898d2c83b24b33455ecfb98acea9ce436ed50e52d985a280b89061f7ab66d"
+        ],
+        [
+          "checkGate",
+          "ffd015ffb9e883b99c8ce3a2a2e2b5310c7882382b94343b28baf37b1e6ef43a"
+        ],
+        [
+          "defineTable",
+          "b47c67ba5772cdb88aa4a6b681e8b5447b2dc09879b915898b6f088274e1b34b"
+        ],
+        [
+          "hostedCheckTables",
+          "33a57f8124052fea8affbbf54bc27c9a54009e4e257567c00fb228fbfab421d9"
+        ],
+        [
+          "retainedCheckGate",
+          "522fc075ac39c5fdbf41e5c5447f315221c91361c20705d7fbab5a8dabd14e32"
+        ],
+        [
+          "setting",
+          "e4b5989ffb335184ea7cde43b0da61ff7b76bec56bf789d75a19ae3b8626620e"
+        ],
+        [
+          "v",
+          "c9b23930c9b094848cdb5f563a16f0a2f497fc28d7ea9a82afca6bc52741e95f"
+        ]
+      ],
+      "shell": "187707ea01849a4302b15cd7fbeae8042254ebbe610649249aca41f5a3def73d"
+    },
+    "convex/projectHostedLandingReplay.ts": {
+      "executed": [
+        "bindCheckReplayGate",
+        "checkReplay"
+      ],
+      "digest": "f8e7ff8b51939aa95dfbf8d147783c7068da1d079e73e30c8842dfa0c96ef328",
+      "units": [
+        [
+          "base",
+          "a74227fcc7e6d29cee481aa2652ded15a0927cb0ed957a6be66830034dda8b0a"
+        ],
+        [
+          "bindCheckReplayGate",
+          "a57970a69023bba6e233267d82475c5297d4198001323eae9c6d10036d92157c"
+        ],
+        [
+          "check",
+          "481cdfb00d8b2856a5fe57385210d5445450b54102f4d19f124c343789fdcfa8"
+        ],
+        [
+          "checkReplay",
+          "88ecaa36830a73ca436d3998bbbc74bdf1961d05895237f55d288ac5b7dd4461"
+        ],
+        [
+          "hostedCheckClock",
+          "0804332a385d9dc4c5c42ef790369758079d66d2bd24679aa4b6af7e1c65be22"
+        ],
+        [
+          "inheritRecheckCause",
+          "4623213fe74562f27b880ada888ce207c36e749ee2931ea022b05e33e30c53aa"
+        ],
+        [
+          "isMachineRunner",
+          "bc7d4c4c7c8ebf8048cc592787cf1d6ece8c5f561b4c5bb4f34279acd67a0640"
+        ],
+        [
+          "landingReplay",
+          "66d1daecb167790ee34d401d41ed5c80b46dea60c7a665d512c415d5ae8eaf10"
+        ],
+        [
+          "replayCause",
+          "f0d078bd3d36de65a113a4aa98e49ed7035377cb2504762ce4d6055285714f0c"
+        ],
+        [
+          "replayHoldEdges",
+          "7a07fa75d7bca947ac045550b69c7fd9891211bcd3772d45db92281d3e602772"
+        ],
+        [
+          "replayRead",
+          "e335fc4b06a0008166f1a04c412d1e5314d4ddae2d266ab5d4d6ad4a6b7214a1"
+        ],
+        [
+          "retainedCheckGate",
+          "f80b6ea2dd6968c630f613015caec481e1e7b99f8af45e5ef523c5c5ad509962"
+        ],
+        [
+          "runGates",
+          "89813bafb3ee99ecefd8cfb6ad0b3ea86e1427e641cffb3ad5bd71bb968277d9"
+        ],
+        [
+          "v",
+          "c9b23930c9b094848cdb5f563a16f0a2f497fc28d7ea9a82afca6bc52741e95f"
+        ]
+      ],
+      "shell": "fda5d6fdf730265b2492b5d2c119082e678ca249fb0f3ceafcc4a5ef7ecf7865"
+    }
+  }
+}

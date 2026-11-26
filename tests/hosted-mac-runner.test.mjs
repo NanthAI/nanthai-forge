@@ -27,6 +27,7 @@ import { fakeSourceR2 } from './convex-source-r2-fixture.mjs';
 const worker = await import(moduleUrl('../convex/projectHostedCheckWorker.ts'));
 const lease = await import(moduleUrl('../convex/projectHostedCheckLease.ts'));
 const outputApi = await import(moduleUrl('../convex/projectHostedOutputApi.ts'));
+const { checkReplay } = await import(moduleUrl('../convex/projectHostedLandingReplay.ts'));
 const secret = 'synthetic-mac-fixed-collector';
 
 async function fixture(t, actualEnvironment = false, provider = 'mac', source = {}) {
@@ -269,6 +270,15 @@ test('cancel fences a reserved execution immediately and late signed success can
   ).run;
   const cancelled = await f.cancel(id);
   assert.equal(cancelled.status, 'cancelled');
+  const { gateMode, fullReason, stop } = checkReplay(cancelled).check;
+  assert.deepEqual(
+    { gateMode, fullReason, stop },
+    {
+      gateMode: 'full',
+      fullReason: 'The machine runner executes the full configured check.',
+      stop: 'CHECK_CANCELLED',
+    },
+  );
   assert.equal(cancelled.fence, running.fence + 1);
   assert.deepEqual(await f.cancel(id), cancelled);
   const callback = f.complete(running, 'passed');

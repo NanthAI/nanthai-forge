@@ -4,6 +4,7 @@ import { checkCause } from '../src/hosted-check';
 import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
 import { checkGate } from './projectHostedMainAuditFields';
+import { retainedCheckGate } from './projectHostedLandingReplay';
 
 const setting = {
   projectId: v.id('hostedProjects'),
@@ -97,6 +98,7 @@ export const hostedCheckTables = {
     reportStorage: v.optional(v.literal('r2')),
     /** The run-scoped immutable timing version, even for Actions recipes from older runners. */
     timingHistoryGeneration: v.optional(v.string()),
+    gateSelection: v.optional(retainedCheckGate),
     machineSelection: v.optional(v.object({ sha256: v.string(), size: v.number() })),
     resultBatch: v.optional(v.object({ packed: v.boolean() })),
     reportTimingStamp: v.optional(v.object({ generation: v.string(), sequence: v.number() })),

@@ -3,13 +3,23 @@
 import { v, type Infer } from 'convex/values';
 import type { HostedCheckRun } from '../src/hosted-check';
 import type { HostedLandingAttempt, HostedLandingState } from '../src/hosted-landing';
+import { isMachineRunner } from '../src/hosted-machine-runner';
 import { hostedCheckClock } from './projectHostedCheckClock';
 
 const base = v.object({ head: v.string(), receiptId: v.string() });
+export const retainedCheckGate = v.object({
+  gateMode: v.union(v.literal('full'), v.literal('scoped')),
+  fullReason: v.optional(v.string()),
+});
+const runGates = new WeakMap<HostedCheckRun, Infer<typeof retainedCheckGate>>();
+/** The stored plan selection belongs to server replay evidence and stays outside runner replies. */
+export function bindCheckReplayGate(run: HostedCheckRun, gate?: Infer<typeof retainedCheckGate>) {
+  if (gate) runGates.set(run, gate);
+}
 const check = v.object({
   runId: v.string(),
-  gateMode: v.optional(v.union(v.literal('full'), v.literal('scoped'))),
-  fullReason: v.optional(v.string()),
+  gateMode: v.optional(retainedCheckGate.fields.gateMode),
+  fullReason: retainedCheckGate.fields.fullReason,
   // Omit when the check uses the immutable attempt's own base.
   predictedBase: v.optional(base),
   dispatchedAt: v.optional(v.number()),
@@ -60,9 +70,31 @@ export type LandingReplay = Infer<typeof landingReplay>;
 export function checkReplay(run: HostedCheckRun): LandingReplay {
   const clock = hostedCheckClock(run);
   const dispatchedAt = clock?.dispatchedAt ?? run.actions?.reservedAt;
+  const effective = run.gate?.effective;
+  const legacyFullReason = run.fallbackReason ?? (run.gate?.mode === 'full' ? run.gate.reason : undefined);
+  const wholeProvider =
+    run.plan &&
+    (run.configuration?.provider === 'ci-status'
+      ? 'The CI status runner treats the configured workflow as one full check.'
+      : run.configuration && isMachineRunner(run.configuration)
+        ? 'The machine runner executes the full configured check.'
+        : undefined);
+  const gate =
+    runGates.get(run) ??
+    (effective === 'full'
+      ? {
+          gateMode: 'full' as const,
+          ...(legacyFullReason ? { fullReason: legacyFullReason.slice(0, 200) } : {}),
+        }
+      : effective || run.plan?.scoped || run.plan?.skipped
+        ? { gateMode: 'scoped' as const }
+        : wholeProvider
+          ? { gateMode: 'full' as const, fullReason: wholeProvider }
+          : undefined);
   return {
     check: {
       runId: run.id,
+      ...gate,
       predictedBase: run.candidate.base,
       ...(dispatchedAt === undefined ? {} : { dispatchedAt }),
       ...(clock?.startedAt === undefined ? {} : { startedAt: clock.startedAt }),

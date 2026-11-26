@@ -22,6 +22,8 @@ import { checksFixture, code } from './hosted-checks-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 const plans = await import(moduleUrl('../convex/projectHostedActionsPlan.ts'));
 const direct = await import(moduleUrl('../convex/projectHostedActionsDirect.ts'));
+const { checkReplay } = await import(moduleUrl('../convex/projectHostedLandingReplay.ts'));
+const { loadHostedCheck } = await import(moduleUrl('../convex/projectHostedCheckStore.ts'));
 
 // A pnpm workspace with its own CI script: nothing about Forge's layout.
 const pnpmRepo = () =>
@@ -292,6 +294,12 @@ async function server(t, check, gate) {
     queued,
     planFor,
     tables: f.tables,
+    replay: async () =>
+      f.call(
+        'read plan replay',
+        { _handler: async ctx => checkReplay((await loadHostedCheck(ctx, id, false)).run) },
+        {},
+      ),
     prepare: async (selection, groups = []) => {
       const pins = {
         head: queued.request.expectedHead,
@@ -331,7 +339,11 @@ test('pnpm-style repository: the server counts a declared scoped pass as contrac
   const run = await s.prepare(echo(selected, contract), commandShardGroups(3));
   assert.equal(run.gate.effective, 'contract');
   assert.equal(run.plan.shardCount, 4);
-  assert.equal([...s.tables.projectHostedCheckRuns.values()][0].gate.effective, 'contract');
+  const stored = [...s.tables.projectHostedCheckRuns.values()][0];
+  assert.equal(stored.gate.effective, 'contract');
+  const { check } = await s.replay();
+  assert.equal(check.gateMode, 'scoped');
+  assert.equal(check.fullReason, undefined);
 });
 
 test('the server refuses command plans the check did not declare', async t => {
@@ -346,6 +358,19 @@ test('the server refuses command plans the check did not declare', async t => {
     await assert.rejects(s.prepare(selection, groups), code('EVIDENCE_CHANGED'));
   const run = await s.prepare(echo(selected, contract));
   assert.equal(run.gate.effective, 'full');
+  assert.equal(run.gateSelection, undefined, 'an older runner can still parse the plan response');
+  const { check } = await s.replay();
+  assert.equal(check.gateMode, 'full');
+  assert.equal(check.fullReason, selected.reason);
+});
+
+test('a full Actions plan without a server gate still records why it ran full in landing replays', async t => {
+  const s = await server(t, pnpmCheck());
+  const selected = s.planFor(changed);
+  await s.prepare(selected);
+  const { check } = await s.replay();
+  assert.equal(check.gateMode, 'full');
+  assert.equal(check.fullReason, selected.reason);
 });
 
 test('the server refuses shard counts, gate tests and changes pins that differ from the declaration', async t => {

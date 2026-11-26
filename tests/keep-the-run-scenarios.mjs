@@ -296,9 +296,11 @@ export const fullListUsd = c => servingUsd(c) + c.calls * RATES.perCall + c.gbHo
 // landing row fewer. The arms run different numbers of wakes, so carry moves by -2,165, scoped recheck by -3,145 and
 // red by +4,158 read bytes against their retires. No call or write changes.
 // Item c0af6cfa: the `reportStorage: 'r2'` field (21 bytes) on every new run row moves red by -375 read and -295 write bytes.
+// Item 3abaec5e: retained gate mode and reason ride existing check replay writes. The carry delta
+// moves by +1,092 read bytes, and the scoped-recheck delta by +770 read and +451 write bytes. Calls stay exact.
 export const WIRED = {
-  carry: { calls: -2, readBytes: 187_212, writeBytes: 18_883 },
-  'scoped-recheck': { calls: 8, readBytes: 325_944, writeBytes: 89_950 },
+  carry: { calls: -2, readBytes: 188_304, writeBytes: 18_883 },
+  'scoped-recheck': { calls: 8, readBytes: 326_714, writeBytes: 90_401 },
   red: { calls: -17, readBytes: -383_886, writeBytes: -141_900 },
 };
 

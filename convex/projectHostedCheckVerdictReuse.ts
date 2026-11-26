@@ -6,6 +6,7 @@ import { hostedCheckRunSchema } from '../src/hosted-check';
 import { hostedVerdictKey } from '../src/hosted-check-evidence';
 import { hostedWriteProject } from './projectHostedRecords';
 import { canonicalPayload } from '../src/hosted-source-operation';
+import { bindCheckReplayGate } from './projectHostedLandingReplay';
 /** Indexed lookup, not a scan of old runs. Only provider conclusion handlers mark this index.
  * Reuse writes no check run, shard, callback verdict or dispatch; an alias is small provenance
  * when the same exact tree occurs in a different Candidate. */
@@ -48,5 +49,6 @@ export async function reusedHostedVerdict(ctx: MutationCtx, run: HostedCheckRun)
         value: canonicalPayload({ candidateId: run.request.candidateId, actor: run.actor }),
       });
   }
+  bindCheckReplayGate(prior, row.gateSelection);
   return prior;
 }

@@ -16,7 +16,10 @@ const finishStore = await import(moduleUrl('../convex/projectHostedFinishStore.t
 const store = await import(moduleUrl('../convex/projectHostedLandingStore.ts'));
 const park = await import(moduleUrl('../convex/projectHostedLandingParkExact.ts'));
 const { reserveFinishRetry } = await import(moduleUrl('../convex/projectHostedFinishCompose.ts'));
-const { checkReplay } = await import(moduleUrl('../convex/projectHostedLandingReplay.ts'));
+const { bindCheckReplayGate, checkReplay } = await import(
+  moduleUrl('../convex/projectHostedLandingReplay.ts')
+);
+const landings = await import(moduleUrl('../convex/projectHostedLandings.ts'));
 const { markCheckDispatch, observeCheckStart, observeCheckEnd } = await import(
   moduleUrl('../convex/projectHostedCheckClock.ts')
 );
@@ -393,6 +396,49 @@ test('a parked no-check child owns only the new queue interval, even when its pa
     current.periods.map(period => [period.phase, period.endedAt]),
     [['queued', undefined]],
   );
+});
+
+test('the accepted receipt keeps an earlier scoped check and the full replacement reason on one attempt', async t => {
+  const f = await finishFixture(t);
+  const submitted = await f.enqueue(f.request());
+  await f.drain();
+  const runRow = [...f.tables.projectHostedCheckRuns.values()][0];
+  const full = JSON.parse(runRow.value);
+  assert.equal(full.status, 'queued');
+  const scoped = { ...full, id: randomUUID() };
+  bindCheckReplayGate(scoped, { gateMode: 'scoped' });
+  await f.transaction(
+    'retain the earlier selection before the configured full check',
+    {
+      _handler: async ctx => {
+        const { state } = await store.loadLanding(ctx, {
+          projectId: f.projectId,
+          submissionId: submitted.id,
+        });
+        await store.retainLandingProgress(ctx, state, false, undefined, checkReplay(scoped));
+      },
+    },
+    {},
+  );
+  const fullReason = 'The root check configuration changed.';
+  f.patch('projectHostedCheckRuns', runRow._id, { gateSelection: { gateMode: 'full', fullReason } });
+  await f.passChecks();
+  await f.drain();
+  const receipt = [...f.tables.projectHostedAcceptances.values()].find(r => r.submissionId === submitted.id);
+  assert(receipt);
+  const reply = JSON.parse(
+    await f.tx('read both retained gate decisions', landings.read, {
+      projectId: f.projectId,
+      receiptId: receipt.receiptId,
+    }),
+  );
+  const attempt = reply.landings[0].attemptReplay.find(attempt => attempt.runId === full.id);
+  assert.equal(attempt.outcome, 'landed');
+  assert.equal(attempt.gateMode, 'full');
+  assert.equal(attempt.fullReason, fullReason);
+  const earlier = attempt.earlierChecks.find(check => check.runId === scoped.id);
+  assert.equal(earlier.gateMode, 'scoped');
+  assert.equal(earlier.fullReason, undefined);
 });
 
 test('shared recomposition shows an open compose interval when its member is still queued', async t => {

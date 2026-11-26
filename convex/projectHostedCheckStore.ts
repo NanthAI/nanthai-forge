@@ -16,6 +16,7 @@ import {
 } from './projectHostedCheckReports';
 import { hostedVerdictKey } from '../src/hosted-check-evidence';
 import { hostedCheckClock } from './projectHostedCheckClock';
+import { bindCheckReplayGate } from './projectHostedLandingReplay';
 import { onGateRunTerminal } from './projectHostedMainAuditState';
 import { auditCoverageSchema } from '../src/landing-audit-cadence';
 import { noteMirrorCheck } from './projectGithubMirrorVerify';
@@ -138,6 +139,7 @@ export async function loadHostedCheck(
   );
   const run = hostedCheckRunSchema.parse(JSON.parse(row.value));
   hostedCheckClock(run, row.replayClock);
+  bindCheckReplayGate(run, row.gateSelection);
   invariant(
     run.id === input.runId && run.projectId === input.projectId,
     'EVIDENCE_CHANGED',
@@ -185,7 +187,10 @@ export async function writeHostedCheck(
   run: HostedCheckRun,
   providerAttested = false,
   mainMoveDecision?: Doc<'projectHostedCheckRuns'>['mainMoveDecision'],
-  evidence?: Pick<Partial<Doc<'projectHostedCheckRuns'>>, 'timingHistoryGeneration' | 'machineSelection'>,
+  evidence?: Pick<
+    Partial<Doc<'projectHostedCheckRuns'>>,
+    'timingHistoryGeneration' | 'machineSelection' | 'gateSelection'
+  >,
 ) {
   const providerDelayChanged = run.failureReason?.startsWith('provider-delayed:') === true;
   // A platform retry's check-infrastructure wait (0d8a85a3) ends once Forge takes the run's plan,

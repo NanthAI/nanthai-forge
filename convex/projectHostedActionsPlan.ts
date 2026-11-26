@@ -184,6 +184,14 @@ export const prepare = internalMutation({
       run.plan = plan;
       run.planDigest = checkPin(plan);
       if (input.controlBuildKey) run.controlBuildKey = input.controlBuildKey;
+      const fullReason = ((run.gate?.mode === 'full' && run.gate.reason) || recipe.selection.reason).slice(
+        0,
+        200,
+      );
+      const gateSelection =
+        recipe.selection.scope === 'full'
+          ? { gateMode: 'full' as const, ...(fullReason ? { fullReason } : {}) }
+          : { gateMode: 'scoped' as const };
       // A runner's fallback code and its reason ride this plan write; unknown codes are dropped (7c2e69e1, 7cb61db1).
       Object.assign(run, runFallback(recipe.selection));
       // Recorded for the run's evidence; every pass reads the required jobs' conclusions.
@@ -216,7 +224,10 @@ export const prepare = internalMutation({
       if (run.gate) await ctx.db.patch(row._id, { gate: run.gate });
       // This generation is the create-only R2 slot this run’s timings session uses.
       // Older runners never echo a digest in the recipe, but they read the same slot.
-      await writeHostedCheck(ctx, row._id, run, false, undefined, { timingHistoryGeneration: run.id });
+      await writeHostedCheck(ctx, row._id, run, false, undefined, {
+        timingHistoryGeneration: run.id,
+        gateSelection,
+      });
     }
     if (input.resultsPacked && replay) {
       const batch = await ctx.db
