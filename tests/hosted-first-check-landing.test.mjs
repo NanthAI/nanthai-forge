@@ -185,9 +185,22 @@ test('a change whose composition is clean and path-disjoint from what main gaine
 });
 
 test('Item 5b4b5918: a lone admitted change binds its admission run and is judged in the same queue tick', async t => {
-  const f = await wave(t, { ...disjoint, count: 1 });
+  const f = await wave(t, {
+    ...disjoint,
+    count: 1,
+    until: fixture =>
+      [...fixture.tables.projectHostedLandingRequests.values()].some(
+        row => row.admission?.status === 'passed',
+      ),
+  });
+  const [original] = f.tables.projectHostedLandingAttempts.values();
+  await drive(f);
   const [state] = states(f);
   assert.equal(state.phase, 'landed');
+  assert.equal(state.attemptId, original.attemptId);
+  assert.equal(f.tables.projectHostedLandingAttempts.get(original._id).value, original.value);
+  const status = await f.status(state.id);
+  assert.equal(status.attempt.check.runId, receipts(f)[0].check.runId);
   assert.deepEqual(receipts(f)[0].firstCheck, { landedOn: 'admission-run', mainMoved: false });
   // Landing-state writes are the state version plus one: submit, admission settles, claim,
   // bind-and-judge, publish. Binding in its own tick added a queued write and a second claim (7).
@@ -195,16 +208,14 @@ test('Item 5b4b5918: a lone admitted change binds its admission run and is judge
   const ticks = f.counts.filter(c => c.name === 'finishLandingAdvance').length;
   assert.equal(ticks, 1, 'one queue tick between the admission and publication');
   const [sample] = JSON.parse([...f.tables.projectLandingSpeed.values()][0].value).samples;
-  assert.deepEqual(sample.slice(5, 7), [2, 5], 'the speed row records 2 attempts and 5 writes');
-  // The ledger stays truthful: the admission attempt is replaced by the bound one on the same run.
+  assert.deepEqual(sample.slice(5, 7), [1, 5], 'the speed row records one attempt and five writes');
   const history = JSON.parse(
     await f.tx('attempt-history', attemptHistory.read, { projectId: f.projectId, submissionId: state.id }),
-  ).attempts.map(attempt => attempt.replay);
-  assert.equal(history.length, 2);
-  const [bound, admitted] = history;
-  assert.equal(admitted.censorReason, 'ATTEMPT_REPLACED');
-  assert.deepEqual(admitted.replacementCause, { kind: 'check-binding', link: receipts(f)[0].check.runId });
-  assert.equal(bound.outcome, 'landed');
+  ).attempts;
+  assert.equal(history.length, 1);
+  assert.equal(history[0].replay.outcome, 'landed');
+  assert.equal(history[0].replay.replacementCause, 'none');
+  assert.equal(history[0].runId, receipts(f)[0].check.runId);
   assert.equal(runCount(f), 1, 'no new run');
 });
 
@@ -238,17 +249,22 @@ test('Item 5b4b5918 moved main: a proof bound after main moved recomposes in its
   const cost = budget(f);
   assert.equal(cost.transactions, 107);
   assert(cost.documentsRead <= 1827 && cost.writes <= 753, JSON.stringify(cost));
-  // The ledger is unchanged: the bound attempt is replaced by the main-race carry on the same run.
+  // The main-race carry is the only replacement and retains the same run.
   const history = JSON.parse(
     await f.tx('attempt-history', attemptHistory.read, { projectId: f.projectId, submissionId: state.id }),
   ).attempts.map(attempt => attempt.replay);
   assert.deepEqual(
     history.map(replay => replay.replacementCause?.kind ?? replay.outcome),
-    ['landed', 'main-race', 'check-binding'],
+    ['landed', 'main-race'],
   );
   assert.equal(history[1].censorReason, 'CHANNEL_CHANGED');
   assert.equal(history[1].runId, carried.check.runId, 'the bound attempt keeps its check evidence');
-  assert.equal(history[2].censorReason, 'ATTEMPT_REPLACED');
+  assert.equal(history[0].runId, carried.check.runId);
+  const samples = JSON.parse([...f.tables.projectLandingSpeed.values()][0].value).samples;
+  assert.deepEqual(
+    samples.map(sample => sample[5]),
+    [1, 2],
+  );
 });
 
 test('Item 5b4b5918 review: progress the admission run reported while running stays on the bound attempt', async t => {

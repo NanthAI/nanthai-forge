@@ -185,6 +185,19 @@ const drainedEntry = async t => {
   return { f, key: keyOf(f, f.entries[0].state.id) };
 };
 
+test('adopting an already pinned exact run keeps the same attempt and child operations', async t => {
+  const { f, key } = await finishEntry(t);
+  const proof = syntheticProof();
+  await tx(f, 'bind-exact-proof', ctx => bindProof(ctx, f, key, proof));
+  const before = (await f.status(key.submissionId)).attempt;
+  const rows = f.tables.projectHostedLandingAttempts.size;
+  await tx(f, 'replay-exact-proof', ctx => bindProof(ctx, f, key, proof));
+  const after = (await f.status(key.submissionId)).attempt;
+  assert.equal(f.tables.projectHostedLandingAttempts.size, rows);
+  assert.deepEqual(after, before);
+  assert.deepEqual(after.check, proof);
+});
+
 // Every convex writer that forks a replacement attempt or cancels an entry, with the cause it
 // records. `drive` runs the real writer and returns the attempt it retired and the expected cause.
 // A writer without `drive` passes a literal cause the type checker requires; `why` says where.

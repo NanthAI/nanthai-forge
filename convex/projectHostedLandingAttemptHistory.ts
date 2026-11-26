@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
+import { landingAttemptValue } from './projectHostedLandingAttemptValue';
 import { v } from 'convex/values';
 import { query } from './cliServer';
 import type { QueryCtx } from './_generated/server';
@@ -17,7 +18,6 @@ import { reviewState } from './projectHostedOwnerReview';
 import { preparingSourceStep } from './projectHostedPreparingSource';
 import { hostedFinishSchema } from '../src/hosted-finish';
 import {
-  hostedLandingAttemptSchema,
   hostedLandingStateSchema,
   type HostedLandingAttempt,
   type HostedLandingState,
@@ -174,7 +174,7 @@ export function archivedAttemptHistory(capsule: LandingCapsule, context: Record<
   const progress = new Map(page.map(row => [row.attemptId, landingAttemptProgress(row, state)]));
   const replays = new Map(page.map(row => [row.attemptId, row.replay]));
   const attempts = page.map(row => {
-    const attempt = hostedLandingAttemptSchema.parse(JSON.parse(row.value));
+    const attempt = landingAttemptValue(row, true);
     const parent = attempt.parentAttemptId ? progress.get(attempt.parentAttemptId)?.timing : undefined;
     const runId =
       attempt.check?.runId ??

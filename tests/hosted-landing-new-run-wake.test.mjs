@@ -7,6 +7,7 @@ import { moduleUrl } from './convex-module.mjs';
 import { batchesFixture, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { parkedIncident } from './queue-sim/parked-incident.mjs';
 import { isFinishWake } from './hosted-finish-fixture.mjs';
+const { landingAttemptValue } = await import(moduleUrl('../convex/projectHostedLandingAttemptValue.ts'));
 const { bindsNewRun } = await import(moduleUrl('../convex/projectHostedFinishWake.ts'));
 const { HOSTED_ORDER_WAITS } = await import(moduleUrl('../convex/projectHostedLandingOrder.ts'));
 const environment = { ...synthetic, FORGE_HOSTED_CHECK_KEY_SYNTHETIC: 'synthetic-queue-sim' };
@@ -145,8 +146,9 @@ test('5e3c3a3c new-run wake: overtakes in successive generations re-check the ho
   });
   f.rawChecks.setPlanSelection(JSON.stringify({ scope: 'full', tests: [] }));
   const owner = run =>
-    [...f.tables.projectHostedLandingAttempts.values()].find(r => JSON.parse(r.value).check?.runId === run.id)
-      ?.submissionId;
+    [...f.tables.projectHostedLandingAttempts.values()].find(
+      r => landingAttemptValue(r).check?.runId === run.id,
+    )?.submissionId;
   const h = (await f.add(0)).id,
     a = (await f.add(1)).id;
   const holderRuns = new Set();

@@ -89,6 +89,30 @@ test('incident replay: four finishes in one minute share one full check and one 
   );
 });
 
+test('a deferred solo check lands on its original immutable attempt', async t => {
+  const f = await batchesFixture(t, { count: 1, admissionCheck: false });
+  const [submitted] = states(f);
+  const [original] = f.tables.projectHostedLandingAttempts.values();
+  assert.equal(JSON.parse(original.value).deferredCheck, true);
+  assert.equal(f.runs().length, 0);
+  await f.drain();
+  const [run] = f.runs();
+  const checking = await f.status(submitted.id);
+  assert.equal(checking.attempt.id, original.attemptId);
+  assert.equal(checking.attempt.check.runId, run.id);
+  await f.passChecks();
+  await f.drain();
+  const [state] = states(f);
+  assert.equal(state.phase, 'landed');
+  assert.equal(state.attemptId, original.attemptId);
+  assert.equal(f.tables.projectHostedLandingAttempts.size, 1);
+  assert.equal(f.tables.projectHostedLandingAttempts.get(original._id).value, original.value);
+  const [receipt] = [...f.tables.projectHostedAcceptances.values()].map(row => JSON.parse(row.value));
+  assert.equal(receipt.check.runId, run.id);
+  const [sample] = JSON.parse([...f.tables.projectLandingSpeed.values()][0].value).samples;
+  assert.equal(sample[5], 1);
+});
+
 test('a failed batch checks both halves at once; a culprit retains its own named test', async t => {
   const f = await batchesFixture(t);
   const runOf = i =>

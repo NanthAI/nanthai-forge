@@ -424,6 +424,8 @@ export const hostedLandingTables = {
     /** Last delivered event of the current run, independent of queue phase. */
     checkWakeVersion: v.optional(v.number()),
     attemptId: v.string(),
+    /** Dispatch backoff retains the ordinal it would have had with binding forks. */
+    checkBindings: v.optional(v.number()),
     /** This exact solo generation is recomposing and cannot back a successor. */
     pipelineRetiredAttemptId: v.optional(v.string()),
     /** A protected-path review known from trusted composition, independent of check state. */
@@ -562,6 +564,16 @@ export const hostedLandingTables = {
     number: v.number(),
     progress: v.optional(v.string()),
     replay: v.optional(landingReplay),
+    /** The first exact run selected for immutable deferred pins. Written once with progress. */
+    boundCheck: v.optional(
+      v.object({
+        runId: v.string(),
+        checkId: v.string(),
+        definition: v.string(),
+        configuration: v.string(),
+        environment: v.string(),
+      }),
+    ),
     value: v.string(),
   })
     // index-order: caller: convex/projectSelfMetrics.ts#page; order: metrics bound _creationTime for attempt windows.

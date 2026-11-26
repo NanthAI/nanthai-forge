@@ -12,6 +12,7 @@ import { moduleUrl } from '../convex-module.mjs';
 import { hostedLandingStall } from '../../dist/hosted-landing-stall.js';
 import { inspectQueue } from './invariants.mjs';
 import { ticketState } from '../landing-ticket-fixture.mjs';
+const { landingAttemptValue } = await import(moduleUrl('../convex/projectHostedLandingAttemptValue.ts'));
 const wake = await import(moduleUrl('../convex/projectHostedFinishWake.ts'));
 const gate = await import(moduleUrl('../convex/projectHostedGate.ts'));
 const store = await import(moduleUrl('../convex/projectHostedLandingStore.ts'));
@@ -68,8 +69,9 @@ const rows = f => [...f.tables.projectHostedLandingRequests.values()];
 const row = (f, id) => rows(f).find(r => r.submissionId === id);
 const finish = (f, id) => [...f.tables.projectHostedFinishes.values()].find(r => r.submissionId === id);
 const owner = (f, run) =>
-  [...f.tables.projectHostedLandingAttempts.values()].find(r => JSON.parse(r.value).check?.runId === run.id)
-    ?.submissionId;
+  [...f.tables.projectHostedLandingAttempts.values()].find(
+    r => landingAttemptValue(r).check?.runId === run.id,
+  )?.submissionId;
 const work = f => f.pending().find(task => !/MainAudit:start|LandingStall/.test(task.name));
 /** Main is red: the project's audit row records a red episode (red-main holds count as live). */
 export function setMainRed(f, red = { since: new Date().toISOString(), head: 'red-head', runId: 'red-run' }) {

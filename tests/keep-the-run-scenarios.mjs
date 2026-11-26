@@ -301,8 +301,10 @@ export const fullListUsd = c => servingUsd(c) + c.calls * RATES.perCall + c.gbHo
 // Item a2457f95: the opted-in recipe adds 33 bytes to each check row. Calls stay exact.
 // Item 686ecdde: compose cause labels change the red retire's read bytes by 456. Calls stay exact.
 export const WIRED = {
-  carry: { calls: -2, readBytes: 188_700, writeBytes: 18_883 },
-  'scoped-recheck': { calls: 8, readBytes: 327_328, writeBytes: 90_401 },
+  // ab9766f3: direct admission binding saves 5,286 read and 6,554 write bytes in the carry delta.
+  carry: { calls: -2, readBytes: 183_414, writeBytes: 12_329 },
+  // ab9766f3: the same in-place bindings save 8,794 read and 13,584 write bytes in the scoped delta.
+  'scoped-recheck': { calls: 8, readBytes: 318_534, writeBytes: 76_817 },
   red: { calls: -17, readBytes: -384_626, writeBytes: -141_900 },
 };
 

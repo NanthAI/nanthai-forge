@@ -26,14 +26,8 @@ import { semanticVerdict } from '../src/intent-semantic-conflict';
 import type { MutationCtx } from './_generated/server';
 import { reviewCheckAhead, type LandingClaim, type requireLandingLease } from './projectHostedLandingControl';
 import { cancelPendingTask } from './schedulerCancel';
-import {
-  formLandingBatch,
-  installBatchAttempt,
-  loadBatch,
-  wakeBatch,
-  writeBatch,
-} from './projectHostedLandingBatchStore';
-import { loadLanding, writeLanding } from './projectHostedLandingStore';
+import { formLandingBatch, loadBatch, wakeBatch, writeBatch } from './projectHostedLandingBatchStore';
+import { bindDeferredLandingCheck, loadLanding, writeLanding } from './projectHostedLandingStore';
 import { loadHostedCheck } from './projectHostedCheckStore';
 import { enqueueHostedCheck } from './projectHostedChecks';
 import { retainLandingTrain, releaseLandingQueue } from './projectHostedLandingWake';
@@ -410,18 +404,27 @@ async function prepareLandingCheckOnce(
     await ctx.db.patch(queue._id, { exactReview: state.id });
     await ctx.db.patch(selected.row._id, { exactReview: true });
   }
-  await installBatchAttempt(ctx, {
-    projectId: claim.projectId,
-    original: attempt,
-    checkSettled: hostedCheckTerminal(run),
-    check: {
-      runId: run.id,
-      checkId: run.check.id,
-      definition: run.check.definition,
-      configuration: run.request.expectedConfiguration,
-      environment: run.request.expectedEnvironment,
-    },
+  bindDeferredLandingCheck(ctx, attempt, {
+    runId: run.id,
+    checkId: run.check.id,
+    definition: run.check.definition,
+    configuration: run.request.expectedConfiguration,
+    environment: run.request.expectedEnvironment,
   });
+  const reviewing = state.observation.pendingReason === 'waiting-for-review';
+  await writeLanding(
+    ctx,
+    protectedReview ? { ...selected.row, exactReview: true } : selected.row,
+    {
+      ...state,
+      version: state.version + 1,
+      phase: 'checking',
+      observation: reviewing ? state.observation : landingObservation('checking'),
+      error: reviewing ? state.error : null,
+    },
+    // A retained verdict has already sent its completion wake.
+    hostedCheckTerminal(run),
+  );
   await releaseLandingQueue(ctx, queue, now);
   return true;
 }

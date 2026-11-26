@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-import {
-  expandUnreportedCounts,
-  type HostedLandingAttempt,
-  type HostedLandingState,
-} from '../src/hosted-landing';
+import { landingAttemptValue } from './projectHostedLandingAttemptValue';
+import { expandUnreportedCounts, type HostedLandingState } from '../src/hosted-landing';
 import type { Doc } from './_generated/dataModel';
 
 export function metricRequestRow(
@@ -84,9 +81,9 @@ export function metricRequestRow(
 
 export function metricAttemptSource(
   row: Pick<Doc<'projectHostedLandingAttempts'>, 'value' | '_creationTime'> &
-    Partial<Pick<Doc<'projectHostedLandingAttempts'>, 'attemptId' | 'submissionId'>>,
+    Partial<Pick<Doc<'projectHostedLandingAttempts'>, 'attemptId' | 'submissionId' | 'boundCheck'>>,
 ) {
-  const attempt = JSON.parse(row.value) as HostedLandingAttempt;
+  const attempt = landingAttemptValue(row);
   return {
     id: row.attemptId ?? attempt.id,
     submissionId: row.submissionId ?? attempt.submissionId,

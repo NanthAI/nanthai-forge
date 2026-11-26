@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
+import { landingAttemptValue } from './projectHostedLandingAttemptValue';
 import type { Doc, Id } from './_generated/dataModel';
 import type { QueryCtx } from './_generated/server';
 import { accessibleProject, readProjectRole } from './projectAuthority';
 import { invariant } from '../src/errors';
-import { hostedLandingProgressSchema, type HostedLandingAttempt } from '../src/hosted-landing';
+import { hostedLandingProgressSchema } from '../src/hosted-landing';
 import { sanitizeFailureMessage } from './projectFailureLog';
 import { readMetricAttemptPins } from './projectMetricReadProjection';
 
@@ -14,7 +15,7 @@ const PAGE_BYTES = 48 * 1024;
 const ATTEMPT_KIND = 'projectHostedLandingAttempts';
 
 function attemptRecord(row: AttemptRow, detail = false) {
-  const attempt = JSON.parse(row.value) as HostedLandingAttempt;
+  const attempt = landingAttemptValue(row);
   const { parentAttemptId, number } = attempt;
   const progress = row.progress ? hostedLandingProgressSchema.parse(JSON.parse(row.progress)) : null;
   invariant(

@@ -13,6 +13,7 @@ import { armed, pendingClaim } from './queue-sim/invariants.mjs';
 import { hostedLandingStall } from '../dist/hosted-landing-stall.js';
 import { LANDING_DROP_MS, LANDING_STALL_MS } from '../dist/landing-stall.js';
 import { patchTicketState, ticketState } from './landing-ticket-fixture.mjs';
+const { landingAttemptValue } = await import(moduleUrl('../convex/projectHostedLandingAttemptValue.ts'));
 const wake = await import(moduleUrl('../convex/projectHostedFinishWake.ts'));
 const gate = await import(moduleUrl('../convex/projectHostedGate.ts'));
 const reservation = await import(moduleUrl('../convex/projectHostedLandingReservation.ts'));
@@ -29,8 +30,9 @@ test.after(() => {
 const rows = f => [...f.tables.projectHostedLandingRequests.values()];
 const row = (f, id) => rows(f).find(r => r.submissionId === id);
 const owner = (f, run) =>
-  [...f.tables.projectHostedLandingAttempts.values()].find(r => JSON.parse(r.value).check?.runId === run.id)
-    ?.submissionId;
+  [...f.tables.projectHostedLandingAttempts.values()].find(
+    r => landingAttemptValue(r).check?.runId === run.id,
+  )?.submissionId;
 const work = f => f.pending().find(task => !/MainAudit:start|LandingStall/.test(task.name));
 
 /** Three requests on one file; the oldest keeps checking while the two newer ones pass and park

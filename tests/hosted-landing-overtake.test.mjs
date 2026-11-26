@@ -8,6 +8,7 @@ import { drive, overlapBase, overlapEdits } from './queue-sim/overtake-drive.mjs
 import { storageClock } from './storage-clock.mjs';
 import { reportWriteSites } from './landing-cost-write-sites.mjs';
 import { isDeepStrictEqual } from 'node:util';
+const { landingAttemptValue } = await import(moduleUrl('../convex/projectHostedLandingAttemptValue.ts'));
 const { generationStartedAfterPass, overtakeOlder, overtakeMark, sealedOlder, unsealedBy, olderRiskOnly } =
   await import(moduleUrl('../src/landing-overtake.ts'));
 const { PASS_HELD } = await import(moduleUrl('../src/landing-speed-alerts.ts'));
@@ -29,7 +30,7 @@ test.after(() => {
 });
 const runOwner = (f, run) =>
   [...f.tables.projectHostedLandingAttempts.values()].find(
-    row => JSON.parse(row.value).check?.runId === run.id,
+    row => landingAttemptValue(row).check?.runId === run.id,
   )?.submissionId;
 
 test('a spent hold only releases a real pass earlier than the holder’s generation', () => {
@@ -425,10 +426,13 @@ test('incident replay 70a9bd2f: global-risk A/C overtake meets the unchanged 1.5
   // Item a2457f95: the opted-in recipe adds 990 read and 693 write bytes on existing rows.
   // Item 686ecdde: cause and direct-Node routing stamps add 1,367 read and 470 write bytes on existing rows.
   // Item 686ecdde: the exact direct-storage delta marker adds 560 read and 112 write bytes, with unchanged calls.
+  // Item ab9766f3: binding the admission check in place removes its attempt fork.
+  // This pair uses the same 103 calls and 1.5x timing bar, 2,542 fewer read bytes and
+  // 6,358 fewer write bytes in this canonical document meter.
   const pair = await guardReplayCost(t, '70a9bd2f pair', pairInput, {
     calls: 103,
-    readBytes: 1_669_818,
-    writeBytes: 570_418,
+    readBytes: 1_667_276,
+    writeBytes: 564_060,
   });
   assert.equal(pair.idle, 0, 'the settled pair has no idle queue work');
   assert.equal(pair.runs[0], 1);
@@ -493,10 +497,11 @@ test('70a9bd2f: admission pipeline calls and metadata bytes stay bounded at 4000
   // Item 3abaec5e: the same 180 read and 84 write bytes for the accepted path count at 4,000 files.
   // Item 686ecdde: the same 1,367 read and 470 write bytes for the compose and routing stamps.
   // Item 686ecdde: the same 560 read and 112 write bytes for the direct-storage delta marker.
+  // Item ab9766f3: the same in-place binding saves 2,542 read and 6,366 write bytes at 4,000 files.
   const after = await guardReplayCost(t, '70a9bd2f 4,000-file pair', input, {
     calls: 103,
-    readBytes: 1_674_330,
-    writeBytes: 572_611,
+    readBytes: 1_671_788,
+    writeBytes: 566_245,
   });
   assert(after.landedAt[1] <= 1500, 'one check duration plus bounded source/queue progress');
   assert.deepEqual(after.runs, [1, 1]);

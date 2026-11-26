@@ -76,10 +76,12 @@ for (const history of [0, 1150])
     // Reads 2969 -> 2966 (Item c0af6cfa): the per-completion range read of overlap rows with no lastActivityAt is gone
     // (three completion ticks); no call or write.
     assert.equal(after.metricAliasWrites, before.metricAliasWrites);
-    assert.equal(after.metricAliasWrites, 47);
+    // ab9766f3: in-place check binding removes four reads, three canonical writes and one alias
+    // from both arms. Calls, timing and idle are unchanged.
+    assert.equal(after.metricAliasWrites, 46);
     assert.deepEqual(
       [after.calls, after.reads, after.writes - after.metricAliasWrites, after.lateTaskMs, after.idle],
-      [153, 2966, 1084, 180000, 0],
+      [153, 2962, 1081, 180000, 0],
       '8c9b84fc: disjoint baseline must not grow',
     );
     t.diagnostic(JSON.stringify({ history, before, after }));

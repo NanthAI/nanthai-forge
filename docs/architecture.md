@@ -2212,7 +2212,11 @@ or publish source.
 Requests and attempts have their own indexed tables, separate from Work/display
 projections. An attempt freezes canonical Candidate digest/input/dependency roots,
 main receipt, actor, current policy snapshot/digest, exact check identity and child
-operations. Progress updates never replace those pins. A later agent rebase can
+operations. Progress updates never replace those pins. When a deferred attempt's
+first exact run is selected on the same Candidate and base, the progress write
+records that binding once alongside the original pins. The same rule applies
+when the queue adopts an admission run on its original Candidate and base.
+Live and archived readers resolve the bound run on that attempt. A later agent rebase can
 append a named child attempt; the original request and all earlier attempts remain.
 A person request cannot silently become approval of another Candidate. The shared
 `landing-submission-state` module is extracted from the S01 submission contract;

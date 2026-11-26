@@ -3,6 +3,7 @@
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import type { LandingCapsulePointer } from '../src/hosted-landing';
+import { withBoundCheck } from './projectHostedLandingAttemptValue';
 import { hostedLandingAttemptSchema } from '../src/hosted-landing';
 import { digest } from '../src/state/hash';
 import { invariant } from '../src/errors';
@@ -129,7 +130,9 @@ export async function capsuleAttempt(
     'EVIDENCE_CHANGED',
     'Capsule replay pins differ from the selected attempt.',
   );
-  return attempt;
+  return summary.boundCheck
+    ? withBoundCheck(attempt, hostedLandingAttemptSchema.shape.check.unwrap().parse(summary.boundCheck))
+    : attempt;
 }
 export async function capsulePlan(ctx: Ctx, input: { projectId: Id<'hostedProjects'>; receiptId: string }) {
   const receipt = await ctx.db

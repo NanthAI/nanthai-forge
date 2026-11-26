@@ -46,7 +46,8 @@ for (const { cell, history } of [
     assert.equal(result.idle, 0);
     assert.equal(result.landed.length, 10);
     assert.equal(result.feedWrites, result.landed.length, 'one feed insert per landed Lane');
-    assert.equal(result.metricAliasWrites, cell.concurrency === 10 ? 151 : 150);
+    // ab9766f3: in-place check binding removes two alias writes at N=10 and three at N=5 or N=3.
+    assert.equal(result.metricAliasWrites, cell.concurrency === 10 ? 149 : 147);
     t.diagnostic(
       JSON.stringify({
         N: cell.concurrency,

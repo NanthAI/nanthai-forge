@@ -151,6 +151,7 @@ removed, skipped or moved out of `tests/*.test.mjs`, or when this page stops nam
 | `843dc73a` | Hosted checks retain exact shard groups, pool units, machine selections and the original timing inputs for replay. |
 | `a61e2106` | A fresh hosted project with no check or runner publishes an unchecked receipt through the normal finish and main CAS. |
 | `368d2d2e` | An authenticated browser shard remains active beyond the stall window and a late pickup clears an earlier stall. |
+| `ab9766f3` | Admission adoption and deferred solo checks each keep one immutable attempt; a main-race carry adds only its recomposition. |
 
 A new core-claim incident adds its replay to the registry and a row here in the Lane that fixes
 it.

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
+import { landingAttemptValue } from './projectHostedLandingAttemptValue';
 import { heldCommand } from './projectHostedLandingEnvironmentHold';
 import { memberWorkBudgetReply } from './abuseLimits';
 import { checkCause, submittedCheckCause } from '../src/hosted-check';
@@ -335,7 +336,7 @@ export const attempts = query({
           : {}),
         version: state.version,
         page: page.page.map(row => ({
-          ...JSON.parse(row.value),
+          ...landingAttemptValue(row),
           progress: landingAttemptProgress(row, state),
           observation: landingAttemptProgress(row, state)?.observation ?? null,
           superseded: row.attemptId !== state.attemptId,

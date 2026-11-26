@@ -10,7 +10,7 @@ import { invariant } from '../src/errors';
  * bulk of the pointer. They are read only on replay (`capsuleAttempt`, `capsulePlan`), so they live
  * in one unindexed body row owned by the 11-copy pointer row. `removalDone`, `attemptPin` and the
  * compact `evidence` chain (read by landing history) stay on the pointer. */
-const coldFields = ['attempt', 'plan'] as const;
+const coldFields = ['attempt', 'boundCheck', 'plan'] as const;
 type Identity = { projectId: Id<'hostedProjects'>; submissionId: string };
 type Summary = Record<string, unknown> & { pins?: string };
 type Db = QueryCtx['db'];

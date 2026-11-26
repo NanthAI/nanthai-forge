@@ -62,6 +62,7 @@ export const publish = internalMutation({
       ...(plan ? { plan } : {}),
       removalDone: input.rows.length === count,
     };
+    if (attempt.boundCheck) summary.boundCheck = attempt.boundCheck;
     if (new TextEncoder().encode(attempt.value).length <= 64 * 1024)
       summary.attempt = JSON.parse(attempt.value);
     else {

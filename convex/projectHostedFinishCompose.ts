@@ -18,6 +18,7 @@ import {
   loadLanding,
   loadLandingAttempt,
   forkLandingAttempt,
+  landingCheckBindingOffset,
   insertLandingAttempt,
   writeLanding,
   retainLandingProgress,
@@ -119,6 +120,7 @@ export async function reserveFinishRetry(
     ? { row: bound.landing, state: bound.state }
     : await loadLanding(ctx, input);
   const previous = await loadLandingAttempt(ctx, { projectId: row.projectId, attemptId: state.attemptId });
+  const backoffOffset = landingCheckBindingOffset(landing, previous);
   const main = observedMain ?? (await hostedStartMain(ctx, row.projectId));
   const cached =
     !precompose &&
@@ -204,7 +206,7 @@ export async function reserveFinishRetry(
   await scheduleFinish(
     ctx,
     current,
-    precompose ? 0 : hostedFinishBackoff(pending.number),
+    precompose ? 0 : hostedFinishBackoff(pending.number + backoffOffset),
     cause === 'BATCH_FALLBACK',
     !precompose,
   );

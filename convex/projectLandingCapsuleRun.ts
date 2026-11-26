@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
+import { landingAttemptValue } from './projectHostedLandingAttemptValue';
 import { v, type ObjectType } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { internalAction, type ActionCtx } from './_generated/server';
@@ -54,11 +55,12 @@ function evidence(rows: string[]) {
         n +
         row.value.length +
         (row.progress?.length ?? 0) +
-        (row.replay ? utf8(JSON.stringify(row.replay)) : 0),
+        (row.replay ? utf8(JSON.stringify(row.replay)) : 0) +
+        (row.boundCheck ? utf8(JSON.stringify(row.boundCheck)) : 0),
       0,
     ),
     chain: selected.map(row => {
-      const attempt = JSON.parse(row.value),
+      const attempt = landingAttemptValue(row),
         progress = row.progress ? JSON.parse(row.progress) : null;
       return {
         number: row.number,
@@ -238,7 +240,7 @@ export async function packLandingCapsule(
       return await finish(stored, pointer);
     }
     const attempts = (tables.projectHostedLandingAttempts ?? []).map(text =>
-      JSON.parse(JSON.parse(text).value),
+      landingAttemptValue(JSON.parse(text)),
     );
     const refs = [
       ...new Map(

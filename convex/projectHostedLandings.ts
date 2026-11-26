@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
+import { landingAttemptValue } from './projectHostedLandingAttemptValue';
 import { v } from 'convex/values';
 import { query } from './cliServer';
 import type { QueryCtx } from './_generated/server';
@@ -140,8 +141,11 @@ async function evidence(
   const attempts = chain.map(row => {
     if (!archived)
       bytes +=
-        row.value.length + (row.progress?.length ?? 0) + (row.replay ? JSON.stringify(row.replay).length : 0);
-    return JSON.parse(row.value) as HostedLandingAttempt;
+        row.value.length +
+        (row.progress?.length ?? 0) +
+        (row.replay ? JSON.stringify(row.replay).length : 0) +
+        ('boundCheck' in row && row.boundCheck ? JSON.stringify(row.boundCheck).length : 0);
+    return landingAttemptValue(row);
   });
   const progress = chain.map(row => (row.progress ? (JSON.parse(row.progress) as AttemptProgress) : null));
   if (archived) bytes += archived.bytes;

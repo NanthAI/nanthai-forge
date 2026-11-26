@@ -16,6 +16,7 @@ import {
   reachesMainRaceCap,
 } from '../dist/landing-overtake.js';
 
+const { landingAttemptValue } = await import(moduleUrl('../convex/projectHostedLandingAttemptValue.ts'));
 const stallAlertApi = await import(moduleUrl('../convex/projectHostedLandingStallAlert.ts'));
 const priorityApi = await import(moduleUrl('../convex/projectHostedLandingPriority.ts'));
 const env = {
@@ -35,8 +36,9 @@ const full = JSON.stringify({ scope: 'full', tests: [] });
 const rows = f => [...f.tables.projectHostedLandingRequests.values()];
 const row = (f, id) => rows(f).find(r => r.submissionId === id);
 const owner = (f, run) =>
-  [...f.tables.projectHostedLandingAttempts.values()].find(a => JSON.parse(a.value).check?.runId === run.id)
-    ?.submissionId;
+  [...f.tables.projectHostedLandingAttempts.values()].find(
+    a => landingAttemptValue(a).check?.runId === run.id,
+  )?.submissionId;
 // Different, line-clean edits of one shared file: a main race on it needs a re-check.
 const shared = {
   baselineFiles: [['src/shared.ts', 'a\nb\nc\n']],

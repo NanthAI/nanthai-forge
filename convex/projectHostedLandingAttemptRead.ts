@@ -3,7 +3,8 @@
 import { capsuleAttempt } from './projectLandingCapsuleStore';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Id, Doc } from './_generated/dataModel';
-import { hostedLandingAttemptSchema, type HostedLandingAttempt } from '../src/hosted-landing';
+import type { HostedLandingAttempt } from '../src/hosted-landing';
+import { deferredPins, landingAttemptValue } from './projectHostedLandingAttemptValue';
 import { invariant } from '../src/errors';
 import { HOSTED_PLATFORM_RETRIES } from '../src/hosted-landing-admission';
 import { LANDINGS_ATTEMPTS } from '../src/hosted-landings-view';
@@ -52,7 +53,7 @@ export async function loadLandingAttempt(
     pins.set(key, stored);
     return stored;
   }
-  const attempt = hostedLandingAttemptSchema.parse(JSON.parse(row.value));
+  const attempt = landingAttemptValue(row, true);
   invariant(
     attempt.projectId === row.projectId &&
       attempt.id === row.attemptId &&
@@ -76,7 +77,10 @@ export async function deferredOrigin(
   attempt: HostedLandingAttempt,
 ) {
   let current = attempt;
-  for (let hop = 0; hop <= HOSTED_PLATFORM_RETRIES && current.parentAttemptId; hop++) {
+  for (let hop = 0; hop <= HOSTED_PLATFORM_RETRIES; hop++) {
+    const own = deferredPins.get(current);
+    if (own) return own;
+    if (!current.parentAttemptId) break;
     const parent = await loadLandingAttempt(ctx, { projectId, attemptId: current.parentAttemptId });
     if (parent.deferredCheck && !parent.check) return parent;
     if (!current.platformRetries) return null;

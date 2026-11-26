@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
+import { landingAttemptValue } from './projectHostedLandingAttemptValue';
 import { z } from 'zod';
 import type { Doc, Id } from './_generated/dataModel';
 import type { QueryCtx } from './_generated/server';
@@ -12,7 +13,7 @@ import { capsuleHistoryContext } from './projectLandingCapsuleContext';
 import { readMetricAttemptPins } from './projectMetricReadProjection';
 import { ForgeError, invariant } from '../src/errors';
 import { saveObjectSchema } from '../src/hosted-save';
-import { hostedLandingAttemptSchema, type HostedLandingAttempt } from '../src/hosted-landing';
+import { type HostedLandingAttempt } from '../src/hosted-landing';
 import type { LandingCapsule } from '../src/landing-capsule';
 import type { CrossHeadProof } from '../src/hosted-cross-head-proof';
 import { LANDINGS_OUTPUT_BYTES } from '../src/hosted-landings-view';
@@ -148,7 +149,7 @@ export function archivedSelectedAttempt(capsule: LandingCapsule | null, selected
   if (!selectedRow) return compactSelectionReply(selected);
   let attempt: HostedLandingAttempt;
   try {
-    attempt = hostedLandingAttemptSchema.parse(JSON.parse(selectedRow.value));
+    attempt = landingAttemptValue(selectedRow, true);
   } catch {
     throw new ForgeError('EVIDENCE_CHANGED', 'The selected capsule attempt record is invalid.');
   }

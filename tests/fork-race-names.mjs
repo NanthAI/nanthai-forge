@@ -4,8 +4,11 @@
 // runner-min, had no reason. `metrics` counts a main race whenever a child attempt pins another
 // main than its parent, so every writer that forks a checked parent onto a moved main names why.
 import assert from 'node:assert/strict';
+import { moduleUrl } from './convex-module.mjs';
 
-const attempts = f => [...f.tables.projectHostedLandingAttempts.values()].map(row => JSON.parse(row.value));
+const { landingAttemptValue } = await import(moduleUrl('../convex/projectHostedLandingAttemptValue.ts'));
+const attempts = f =>
+  [...f.tables.projectHostedLandingAttempts.values()].map(row => landingAttemptValue(row));
 
 /** Child attempts on another main than their checked parent that carry no reason, no carried proof
  * and do not adopt the parent's run: the rows with runner minutes `metrics` would leave unnamed. */

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
+import { landingAttemptValue } from './projectHostedLandingAttemptValue';
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { metricRunRow } from '../src/self-metrics-run';
 import type { HostedCheckRun } from '../src/hosted-check';
-import type { HostedLandingAttempt } from '../src/hosted-landing';
 import { classifyRuns, type StatsAttempt, type StatsRun, type StatsStopCause } from '../src/stats-runs';
 import { metricRunKind } from './projectMetricReadProjection';
 import { capsuleIndexKind } from './projectLandingCapsuleIndex';
@@ -267,7 +267,7 @@ async function dayAttempts(ctx: MutationCtx, projectId: Id<'hostedProjects'>, fr
     STATS_CLOSE_ATTEMPTS,
   );
   const attempts: StatsAttempt[] = read.rows.map(row => {
-    const a = JSON.parse(row.value) as HostedLandingAttempt;
+    const a = landingAttemptValue(row);
     return {
       id: a.id,
       submissionId: a.submissionId,

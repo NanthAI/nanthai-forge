@@ -58,6 +58,7 @@ export const finishReadFields = {
     'attemptId',
     'number',
     'sourceCreatedAt',
+    'boundCheck',
     'value',
   ],
   projectHostedCheckRuns: ['projectId', 'runId', 'value'],
@@ -128,9 +129,13 @@ export function finishReadProjection(kind: FinishReadKind, row: Record<string, u
   }
   if (kind === 'projectHostedLandingAttempts') {
     const attempt = JSON.parse(row.value as string);
+    const metric = attempt.metric ?? metricAttemptRow(attempt);
+    const binding = row.boundCheck as Doc<'projectHostedLandingAttempts'>['boundCheck'];
+    if (binding) metric[3] = binding.runId;
+    delete result.boundCheck;
     result.value = canonicalPayload({
       candidate: { head: attempt.candidate.head, inputs: attempt.candidate.inputs },
-      metric: attempt.metric ?? metricAttemptRow(attempt),
+      metric,
     });
   }
   if (kind === 'projectHostedCheckRuns')

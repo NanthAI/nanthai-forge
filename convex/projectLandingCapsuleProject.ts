@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
+import { landingAttemptValue } from './projectHostedLandingAttemptValue';
 import { validateComposePage, composeLaneSchema } from '../src/hosted-compose';
 import { sourceSubmission } from '../src/landing-submission-state';
 import { supersededOutcome } from '../src/landing-state';
@@ -7,7 +8,6 @@ import type { LandingCapsule } from '../src/landing-capsule';
 import {
   readLandingTransition,
   storedLandingStateSchema,
-  hostedLandingAttemptSchema,
   type HostedLandingState,
 } from '../src/hosted-landing';
 import { finishPendingForReader } from '../src/hosted-finish';
@@ -73,14 +73,14 @@ export function capsuleStatusReply(capsule: LandingCapsule, context: Context) {
   const state = context.request as HostedLandingState;
   const row = attempts(capsule).find(row => row.attemptId === state.attemptId);
   invariant(row, 'SOURCE_UNAVAILABLE', 'The original landing attempt is unavailable.');
-  return { ...context, attempt: hostedLandingAttemptSchema.parse(JSON.parse(row.value)) };
+  return { ...context, attempt: landingAttemptValue(row, true) };
 }
 
 /** The capable-client ordinal cursor is stable on both sides of relocation. */
 export function capsuleAttemptsReply(capsule: LandingCapsule, context: Context, command: Context) {
   const after = readCapsuleAttemptCursor(command.cursor as string | null, capsule.submissionId);
   const state = context.capsuleState as HostedLandingState;
-  const remaining = new Map(
+  const remaining = new Map<number, { bytes: number; value: { number: number } }>(
     attempts(capsule)
       .filter(row => row.number > after)
       .map(row => [
@@ -88,7 +88,7 @@ export function capsuleAttemptsReply(capsule: LandingCapsule, context: Context, 
         {
           bytes: new TextEncoder().encode(JSON.stringify(row)).length,
           value: {
-            ...JSON.parse(row.value),
+            ...landingAttemptValue(row),
             progress: landingAttemptProgress(row, state),
             observation: landingAttemptProgress(row, state)?.observation ?? null,
             superseded: row.attemptId !== state.attemptId,
@@ -121,7 +121,7 @@ export function capsuleAttemptsReply(capsule: LandingCapsule, context: Context, 
 export function capsuleInputSelection(capsule: LandingCapsule, context: Context, command: Context) {
   const row = attempts(capsule).find(row => row.attemptId === command.attemptId);
   invariant(row, 'SOURCE_UNAVAILABLE', 'The original landing attempt is unavailable.');
-  const attempt = hostedLandingAttemptSchema.parse(JSON.parse(row.value));
+  const attempt = landingAttemptValue(row, true);
   invariant(
     attempt.submissionId === capsule.submissionId,
     'NOT_FOUND',

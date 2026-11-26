@@ -41,7 +41,11 @@ export async function capsuleIndexPage(ctx: MutationCtx, projectId: Id<'hostedPr
       .withIndex('by_project', q => q.eq('projectId', projectId))
       .paginate({ cursor: state.cursor, numItems: 4, maximumRowsRead: 4, maximumBytesRead: 128 * 1024 });
     for (const row of rows.page)
-      await ctx.db.patch(row._id, { sourceCreatedAt: row._creationTime, value: row.value });
+      await ctx.db.patch(row._id, {
+        sourceCreatedAt: row._creationTime,
+        value: row.value,
+        ...(row.boundCheck ? { boundCheck: row.boundCheck } : {}),
+      });
     done = rows.isDone;
     cursor = done ? null : rows.continueCursor;
   }

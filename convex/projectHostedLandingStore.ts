@@ -15,6 +15,7 @@ export { landingAttemptRow, loadLandingAttempt } from './projectHostedLandingAtt
 import { checkReplay, type LandingReplay, type ReplayCause } from './projectHostedLandingReplay';
 import { recordLandingFeed } from './projectFeedTerminal';
 import { landingAttemptRow, loadLandingAttempt, pinsFor } from './projectHostedLandingAttemptRead';
+import { withBoundCheck } from './projectHostedLandingAttemptValue';
 import { closeOrderWait, holdsLandingOrder, landingPriorityState } from './projectHostedLandingOrder';
 import { invalidatePipeline } from './projectHostedLandingPipelineInvalidation';
 import { cancelUnneededHostedCheck } from './projectHostedCheckCancel';
@@ -192,6 +193,26 @@ export async function insertLandingAttempt(ctx: MutationCtx, input: HostedLandin
   );
   pinsFor(ctx).set(`${attempt.projectId}:${attempt.id}`, attempt);
 }
+// A binding is visible to the rest of this tick, including a finish retry that
+// freezes the attempt before writeLanding. The existing progress write persists it.
+const pendingBindings = new WeakSet<HostedLandingAttempt>();
+export function bindDeferredLandingCheck(
+  ctx: MutationCtx,
+  attempt: HostedLandingAttempt,
+  check: NonNullable<HostedLandingAttempt['check']>,
+) {
+  const bound = withBoundCheck(attempt, check);
+  const key = `${attempt.projectId}:${attempt.id}`;
+  const pins = pinsFor(ctx);
+  invariant(pins.get(key) === attempt, 'WORK_STALE', 'The current landing attempt pin changed.');
+  pins.set(key, bound);
+  pendingBindings.add(bound);
+  return bound;
+}
+export function landingCheckBindingOffset(row: LandingRow, attempt: HostedLandingAttempt) {
+  return (row.checkBindings ?? 0) + Number(pendingBindings.has(attempt));
+}
+
 export async function writeLanding(
   ctx: MutationCtx,
   row: LandingRow,
@@ -229,10 +250,16 @@ export async function writeLanding(
   // Attempt clocks can restart. Client hold time belongs to the original submission.
   const heldMs = previous.timing?.heldMs;
   if (heldMs !== undefined) (state.timing ??= { submittedAt: state.at }).heldMs = heldMs;
-  // A new attempt starts with empty check progress: counts and the progress
+  const attempt = await loadLandingAttempt(ctx, {
+    projectId: row.projectId,
+    attemptId: state.attemptId,
+  });
+  const binding = pendingBindings.has(attempt);
+  const advancedAttempt = state.attemptId !== previous.attemptId || binding;
+  // A new attempt or exact check starts with empty check progress: counts and the progress
   // digest belong to the attempt that observed them (9f94c28a). Fresh values
   // written with this transition differ from the previous attempt's and stay.
-  if (state.attemptId !== previous.attemptId && !options?.freshProgress) {
+  if (advancedAttempt && !options?.freshProgress) {
     if (state.checkProgress === previous.checkProgress) delete state.checkProgress;
     if (
       state.testFiles &&
@@ -264,10 +291,6 @@ export async function writeLanding(
     'WORK_OPERATION_CHANGED',
     'Landing progress must retain its original request and identity.',
   );
-  const attempt = await loadLandingAttempt(ctx, {
-    projectId: row.projectId,
-    attemptId: state.attemptId,
-  });
   invariant(
     attempt.submissionId === state.id &&
       attempt.operationId === state.operationId &&
@@ -319,8 +342,7 @@ export async function writeLanding(
     state.phase !== 'landed' &&
     (entersReview ||
       state.phase === 'terminal-failed' ||
-      (row.pipelineRetiredAttemptId !== previous.attemptId &&
-        (state.phase === 'queued' || previous.attemptId !== state.attemptId)));
+      (row.pipelineRetiredAttemptId !== previous.attemptId && (state.phase === 'queued' || advancedAttempt)));
   if (retiresSolo)
     await invalidatePipeline(
       ctx,
@@ -402,7 +424,7 @@ export async function writeLanding(
   if (alarm && alarm.id !== row._id) await ctx.db.patch(alarm.id, { alarm: alarm.alarm });
   // The existing release lookup can supply the exact check when a withdrawal
   // ends a live run before its first landing progress update. Freeze once.
-  const freezeAfterRelease = ended && !changedAttempt && releaseRun && row.runId !== null;
+  const freezeAfterRelease = ended && !advancedAttempt && releaseRun && row.runId !== null;
   // A failed or cancelled entry keeps its hold edges typed, as a landed one does (ced8e98f).
   const endReplay: LandingReplay | undefined =
     state.phase === 'terminal-failed' && previous.phase !== 'terminal-failed' && !options?.replay?.holdEdges
@@ -510,6 +532,7 @@ export async function writeLanding(
     ...(passToLand === null ? {} : { passToLandMinutes: passToLand }),
     ...(proofMainReceiptId === row.proofMainReceiptId ? {} : { proofMainReceiptId }),
     attemptId: state.attemptId,
+    ...(binding ? { checkBindings: landingCheckBindingOffset(row, attempt) } : {}),
     // A retire named for the new attempt itself (a bound proof retried in its binding write) stays.
     pipelineRetiredAttemptId:
       previous.attemptId === state.attemptId || row.pipelineRetiredAttemptId === state.attemptId
@@ -561,6 +584,7 @@ export async function writeLanding(
     orderWaited: orderLive || reserving || admissionHolds ? row.orderWaited : undefined,
     value: semanticPayload(state),
   });
+  if (binding) pendingBindings.delete(attempt);
   if (row.admitting && !admitting) await releaseAdmissionWaiters(ctx, row.projectId);
   if (row.deciding !== undefined && deciding === undefined) await releaseCohortHolds(ctx, row.projectId);
   if (
@@ -723,6 +747,8 @@ export async function retainLandingProgress(
     attemptId: state.attemptId,
   });
   invariant(row, 'SOURCE_UNAVAILABLE', 'The original attempt is unavailable.');
+  const pinned = pinsFor(ctx).get(`${row.projectId}:${row.attemptId}`);
+  const boundCheck = pinned && pendingBindings.has(pinned) && !row.boundCheck ? pinned.check : null;
   const observedBase = nextMain ?? replay?.actualBase;
   const observedCheck = replay?.check;
   const main =
@@ -791,6 +817,7 @@ export async function retainLandingProgress(
   if (row.progress) {
     const retained = hostedLandingProgressSchema.parse(JSON.parse(row.progress));
     if (retained.settled) {
+      invariant(!boundCheck, 'WORK_STALE', 'A settled landing attempt cannot bind another check.');
       // Keep settled source/outcome evidence frozen; pair diagnosis can arrive
       // when another member finishes its existing fallback later.
       if (
@@ -806,7 +833,8 @@ export async function retainLandingProgress(
       return;
     }
   }
-  await ctx.db.patch(row._id, {
+  const patch = {
+    ...(boundCheck ? { boundCheck } : {}),
     ...(row.sourceCreatedAt === undefined ? { sourceCreatedAt: row._creationTime, value: row.value } : {}),
     ...(Object.keys(evidence).length || state.phase === 'landed' || state.phase === 'terminal-failed'
       ? { replay: evidence }
@@ -830,7 +858,20 @@ export async function retainLandingProgress(
           }
         : {}),
     }),
-  });
+  };
+  if (boundCheck) {
+    const sourceCreatedAt = row.sourceCreatedAt ?? row._creationTime;
+    withMetricAliases(
+      patch,
+      metricAliasRows(
+        row.projectId,
+        row.attemptId,
+        { stream: 'attempts', sourceCreatedAt, row: metricAttemptSource({ ...row, boundCheck }) },
+        { stream: 'attempts', sourceCreatedAt, row: metricAttemptSource(row) },
+      ),
+    );
+  }
+  await ctx.db.patch(row._id, patch);
 }
 export function landingAttemptProgress(row: Doc<'projectHostedLandingAttempts'>, state: HostedLandingState) {
   if (row.progress) return hostedLandingProgressSchema.parse(JSON.parse(row.progress));

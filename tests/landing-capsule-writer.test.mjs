@@ -2,6 +2,7 @@
 // Copyright 2026 Ferdinando Valsecchi
 import test from 'node:test';
 import { ticketState } from './landing-ticket-fixture.mjs';
+import { batchesFixture, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';
 import { randomBytes } from 'node:crypto';
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
@@ -20,6 +21,10 @@ const { decodeLandingCapsule, encodeLandingCapsule } = await import(
 const run = await import(moduleUrl('../convex/projectLandingCapsuleRun.ts'));
 const store = await import(moduleUrl('../convex/projectLandingCapsuleStore.ts'));
 const capture = await import(moduleUrl('../convex/projectLandingCapsuleCapture.ts'));
+const { capsuleStatusReply, capsuleAttemptsReply } = await import(
+  moduleUrl('../convex/projectLandingCapsuleProject.ts')
+);
+const { landingAttemptRecords } = await import(moduleUrl('../convex/projectLandingAttemptRecords.ts'));
 const { landingNoteWindow } = await import(moduleUrl('../convex/projectIntentLandingNoteArchive.ts'));
 const { postIntentLandingNote } = await import(moduleUrl('../convex/projectIntentLandingNotes.ts'));
 
@@ -136,6 +141,81 @@ test('S1 packs one verified complete object, removes bounded canonical copies an
       peakRssKiB: process.resourceUsage().maxRSS,
     }),
   );
+});
+
+test('a deferred check binding survives capsule relocation and the compact attempt index', async t => {
+  const prior = Object.fromEntries(Object.keys(synthetic).map(key => [key, process.env[key]]));
+  Object.assign(process.env, synthetic);
+  t.after(() => {
+    for (const [key, value] of Object.entries(prior))
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+  });
+  const f = await batchesFixture(t, { count: 1, admissionCheck: false });
+  const [submitted] = f.entries.map(entry => entry.state);
+  const [original] = f.tables.projectHostedLandingAttempts.values();
+  await f.drain();
+  await f.passChecks();
+  await f.drain();
+  const [run] = f.runs();
+  const h = await fixture(t, { f, state: submitted });
+  const { request: state, attempt: live } = await f.status(submitted.id);
+  assert.equal(live.id, original.attemptId);
+  assert.equal(live.check.runId, run.id);
+  const result = await h.pack();
+  const capsule = decodeLandingCapsule(
+    h.objects.get(result.pointer.sha256),
+    result.pointer,
+    f.projectId,
+    state.id,
+  );
+  const [archived] = capsule.tables.projectHostedLandingAttempts.map(JSON.parse);
+  assert.equal(archived.value, original.value);
+  assert.deepEqual(capsuleStatusReply(capsule, { request: state }).attempt, live);
+  await t.test('the capsule status reader rejects a malformed bound check', () => {
+    const invalid = {
+      ...archived,
+      boundCheck: { ...archived.boundCheck, configuration: 'invalid' },
+    };
+    const malformed = {
+      ...capsule,
+      tables: { ...capsule.tables, projectHostedLandingAttempts: [JSON.stringify(invalid)] },
+    };
+    assert.throws(
+      () => capsuleStatusReply(malformed, { request: state }),
+      error => error.issues?.some(issue => issue.path.join('.') === 'configuration'),
+    );
+  });
+  const page = capsuleAttemptsReply(
+    capsule,
+    { capsuleState: state, capsuleLiveBytes: [], page: [] },
+    { cursor: null },
+  );
+  assert.deepEqual(
+    page.page.map(row => row.check),
+    [live.check],
+  );
+  const cold = await f.tx(
+    'capsule-attempt',
+    {
+      _handler: ctx => store.capsuleAttempt(ctx, { projectId: f.projectId, attemptId: live.id }),
+    },
+    {},
+  );
+  assert.deepEqual(cold, live);
+  const compact = await f.tx(
+    'retained-attempt',
+    {
+      _handler: ctx =>
+        landingAttemptRecords(ctx, f.projectId, 'owner', {
+          collection: 'retained-landing-attempts',
+          id: live.id,
+          cursor: null,
+        }),
+    },
+    {},
+  );
+  assert.equal(compact.record.runId, run.id);
 });
 
 test('S1 verification failure preserves every canonical history row and publishes no pointer', async t => {

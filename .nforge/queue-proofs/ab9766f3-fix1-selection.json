@@ -1,0 +1,164 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "thread:delegated-task:command%3Amcp%3A4be285c0-5e1d-4b1c-a413-f55a3ae0c78b%3Adelegate-task%3A64a6d2f9-0699-4d55-8075-d06c38120023",
+  "changes": {
+    "convex/projectHostedLandingSelectionRead.ts": "5e0a0c4fab22503abf6784eff2c308ae53f92f2c69121c1469fee73e178e4730"
+  },
+  "replay": {
+    "incident": "c7ad22b0",
+    "test": "incident replay c7ad22b0: CLI and MCP resolve only the earlier selected attempt's ${wide ? 'bounded proof pins' : 'exact capsule-only proof'}",
+    "receipt": "9479107d-9bbf-478a-a86f-41572c0a0a53"
+  },
+  "review": {
+    "model": "Gemini 4 Neon",
+    "session": "thread:delegated-task:command%3Amcp%3A03cf6319-7df1-4b76-acaf-86ac522507bd%3Adelegate-task%3Ab372cf35-1031-4f83-ac01-2bf83698613a",
+    "receipt": "f369c58c-7903-4c43-9c31-6fa74fb6d830"
+  },
+  "exercised": {
+    "convex/projectHostedLandingSelectionRead.ts": {
+      "executed": [
+        "archivedSelectedAttempt",
+        "candidateSelection",
+        "compactSelectionReply",
+        "composeForCandidate",
+        "landingSelectionRead",
+        "reusePins",
+        "reuseProofPins",
+        "selectArchivedAttempt",
+        "selectedAttemptReply",
+        "selectedProof",
+        "selectionManifest"
+      ],
+      "digest": "40572623843f24e3921604a0a3613d35629a370439f6f08b8f9e35fbf5e95e17",
+      "units": [
+        [
+          "ForgeError",
+          "c8934d5ec6f70ce797a0d05c3ecfb78031a48937ad3336194885e4520006a12d"
+        ],
+        [
+          "LANDINGS_OUTPUT_BYTES",
+          "3be2d9f021bee62642e365850c1b27cf745926008b2c25d9fa67f96ee22423a9"
+        ],
+        [
+          "LANE_PAGE",
+          "c178bf21cd61930504aedda6407cd49e07c7b388134404476e61337721a6012c"
+        ],
+        [
+          "archivedSelectedAttempt",
+          "be00ef117854a3883f01079b31a21c78741650cc3a1aced083a89b85b390fc4c"
+        ],
+        [
+          "batchRow",
+          "9ba54e1c9950d217482dddbbda0848bcb9fc6f6192ea60c3b4c1dce7c11805ff"
+        ],
+        [
+          "batchSchema",
+          "8e06922f54c632f1258b464f5b1af4be53a47f79e5a2e57617fb6a17a03279b6"
+        ],
+        [
+          "candidateSelection",
+          "97294fb38440e0167b65746cf47042ea9ea6c27d8442dacca8e722860cee12ba"
+        ],
+        [
+          "canonicalPayload",
+          "95124f3098690f0b83a3927221e9cee6fc53fe1b0c044ab43a9f934e9effe9bb"
+        ],
+        [
+          "capsuleAttempt",
+          "bbe0b7d5f8bf22d979629b7774b153e8009165dc6b6ec5abd48b48a7efe2b191"
+        ],
+        [
+          "capsuleHistoryContext",
+          "fd06427262c0fd4e08b65c460ca76a7a7f156d19fede1ab973bc57407fae6cc4"
+        ],
+        [
+          "compactSelectionReply",
+          "df93256ef7c15172e10a4b97d16bc744f81b4821eb99e58687738e43aabd48ff"
+        ],
+        [
+          "composeForCandidate",
+          "98c1cb1707a21c44cb9bf067730c4f28f634bcdae23de9f090c6d16868a920e9"
+        ],
+        [
+          "composePinSchema",
+          "a85fbfaeb1696a01eb8abdb8df103efb27a21e1d62419cb445be9ab7091df25b"
+        ],
+        [
+          "composeStateSchema",
+          "c969701c240a5d71d76d456e0c36ae96f696b8415b0bb91af6f5ce62b00a419f"
+        ],
+        [
+          "invariant",
+          "a25036d770aae805d10bdb41ade261044ed7f7ba6fbbf3ccd57a32c56a3d4c20"
+        ],
+        [
+          "landingAttemptRow",
+          "0b638aa960c6e9fb3571f38cb7669d989f36bfa1f42d82bcd202472dba2e7910"
+        ],
+        [
+          "landingAttemptValue",
+          "7c0d2189f2d34264abee72213c9b62ecd8b832f14052349da158b622d58d9fe1"
+        ],
+        [
+          "landingCapsulePointer",
+          "471003b1b42567be16724a0044b6b1308aaf0e39eafef60c762ad3ace331d19d"
+        ],
+        [
+          "landingRow",
+          "9b2f0188e0b4cde94aab9a444ecb94a974871df87818b7d98abd5a37b26204aa"
+        ],
+        [
+          "landingSelectionRead",
+          "887409c6f474cb6219a7e6aa4e753f2a6ba15afc4bca8411ea7f0192ed1a34f6"
+        ],
+        [
+          "landingStateFromRow",
+          "e9544abb32ec380806ee05d0c5356ffef65c48ef8e5f2b615f74e09b65bd7af6"
+        ],
+        [
+          "loadLandingAttempt",
+          "dc24c29748a2166c91f395c24af74f3b3feff418a6aeb0341b9392e1e4c45331"
+        ],
+        [
+          "readMetricAttemptPins",
+          "397fda4bd1cf0794aa560336a80bd6ffde62c201fb45493472c6c70c4298cc3c"
+        ],
+        [
+          "reusePins",
+          "846bbbdc311566fa95152ff1fbdb7bf6514d564305b3c1327c86e622abb08da8"
+        ],
+        [
+          "reuseProofPins",
+          "302ff83a4556aaef8c2350b053c7437c26d61d5e28d21522810d590e12815114"
+        ],
+        [
+          "saveObjectSchema",
+          "5f5e984856f967a7e5e071df0b63fd29846990ace2890a5f7bff2a505150bad8"
+        ],
+        [
+          "selectArchivedAttempt",
+          "d6e0f62adbe4bc984e83a54e3168e1b0d319118a43d189ed1ae8e703e9c1c47e"
+        ],
+        [
+          "selectedAttemptReply",
+          "e98cd9e229f038b518ea83a8257b4a0dc7e2a9b94bc60bd452ed269eb4fb09ec"
+        ],
+        [
+          "selectedProof",
+          "7a8a6ac5844b5c0a6ecd06fa62dcccc087fabf4af6ff57352d97f002e092dfe9"
+        ],
+        [
+          "selectionManifest",
+          "cd20470b638f3c894ee03fd49e04fc3c514f632ae3484133b5d20ed828522b9d"
+        ],
+        [
+          "z",
+          "0be8b14a719fbad954f3dc9bb19b1716bed3a588afba2e97f0a99e168ee0a700"
+        ]
+      ],
+      "shell": "3d4c413da1bf5e9cfa5669a258d1b579102657f9259e18e90bee537999bd3231"
+    }
+  }
+}

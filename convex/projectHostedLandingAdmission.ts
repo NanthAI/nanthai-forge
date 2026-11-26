@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import { providerRetryDelay } from '../src/ci-provider-recovery';
+import { canonicalPayload } from '../src/hosted-source-operation';
 import {
   clearCiDown,
   holdOnCiDown,
@@ -24,6 +25,7 @@ import { claimFinishPrecompose } from './projectHostedFinishPrecompose';
 import { retireSoloCheck } from './projectHostedLandingStaleChecks';
 import { CHECK_FAILED_NEXT } from '../src/check-failure-detail';
 import {
+  bindDeferredLandingCheck,
   forkLandingAttempt,
   insertLandingAttempt,
   landingQueue,
@@ -400,7 +402,7 @@ export async function admittedReuseFirst(ctx: MutationCtx, selected: Selected) {
     ...(moved ? { staleOn: main } : {}),
   };
 }
-/** Bind a held admission proof as the exact check of a new attempt pinned to
+/** Bind a held admission proof as the exact check of an attempt pinned to
  * the member's own Candidate; the next queue tick evaluates it like any passed
  * run. No new run, compose or provider call. */
 export async function bindAdmissionProof(
@@ -412,7 +414,7 @@ export async function bindAdmissionProof(
   const { state } = await bindAdmissionAttempt(ctx, selected, original, check);
   return writeLanding(ctx, selected.row, { ...state, version: state.version + 1 }, true);
 }
-/** The bound attempt (inserted) and the queued state that selects it, at the stored version. */
+/** The exact attempt and the queued state that selects it, at the stored version. */
 async function bindAdmissionAttempt(
   ctx: MutationCtx,
   selected: Pick<Selected, 'state' | 'attempt'>,
@@ -430,17 +432,23 @@ async function bindAdmissionAttempt(
   } = original;
   void _deferred;
   void [_member, _reason, _fork, _scoped];
-  const next = {
-    ...pins,
-    operations: {
-      ...pins.operations,
-      ...(attempt.id !== original.id ? { accept: crypto.randomUUID() } : {}),
-    },
-    // The queue binds the held proof without a recheck.
-    ...(await forkLandingAttempt(ctx, state, { kind: 'check-binding', link: check.runId })),
-    check,
-  };
-  await insertLandingAttempt(ctx, next);
+  const exact = attempt.id === original.id;
+  const sameCheck = exact && attempt.check && canonicalPayload(attempt.check) === canonicalPayload(check);
+  const next = sameCheck
+    ? attempt
+    : exact && attempt.deferredCheck && !attempt.check
+      ? bindDeferredLandingCheck(ctx, attempt, check)
+      : {
+          ...pins,
+          operations: {
+            ...pins.operations,
+            ...(attempt.id !== original.id ? { accept: crypto.randomUUID() } : {}),
+          },
+          // The queue binds the held proof without a recheck.
+          ...(await forkLandingAttempt(ctx, state, { kind: 'check-binding', link: check.runId })),
+          check,
+        };
+  if (next.id !== attempt.id) await insertLandingAttempt(ctx, next);
   // The bound attempt starts with no check progress of its own; its run's progress is observed fresh.
   const { checkProgress: _progress, testFiles: _files, ranInFull: _full, ...fresh } = state;
   void [_progress, _files, _full];
