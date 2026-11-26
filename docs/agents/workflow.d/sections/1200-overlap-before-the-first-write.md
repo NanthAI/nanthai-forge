@@ -58,7 +58,7 @@ Hook observations add no save attribution. No transcripts or prompts are read. D
 acknowledges; missing evidence never proves independence.
 See [hosted advice](#hosted-overlap-advice) for start/save/status notices.
 
-Antigravity (Issue c6615b66). Only the person-run `nforge connect antigravity` installs
+Antigravity (Issues c6615b66, d0e9ce11). Only the person-run `nforge connect antigravity` installs
 its hook (`~/.gemini/config/hooks.json`, entry `forge-first-write`); `uninstall-hooks` removes
 it. Its contract differs: a `PreToolUse` reply must carry a decision (`{}` denies, `allow`
 skips the user's permission rules), and an allow reason never reaches the model. So Forge
@@ -66,6 +66,9 @@ never answers `PreToolUse` there. `PostToolUse` on a write tool runs the same ch
 `{}`) and keeps any notice in a per-conversation file under the state directory;
 `PreInvocation` injects it into the next model call once (builtins only, no network). Both
 fire under `agy -p` and `agy acp`. Antigravity's write still happens before the notice.
+The same entry also installs a fail-open `Stop` handler (`--forge-turn-end`) for the turn-end
+guard (`decision: "continue"` on a normal first stop with unfinished Forge work) and the
+advisory turn-end snapshot on allowed normal stops.
 
 Overlap notices teach coordination once per notice: the hook context, and the CLI or MCP
 reply's `coordinate` field, add one line under 200 bytes naming `peers`, `start {stackOn}`

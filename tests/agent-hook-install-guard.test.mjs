@@ -336,4 +336,16 @@ test('health counts Antigravity as covered once connected and names its person-r
     [[file, 'missing-target']],
   );
   assert.equal(broken.repair, 'nforge connect antigravity');
+  // A healthy PostToolUse paired with a broken Stop target is also flagged for repair.
+  const mixed = JSON.parse(editAntigravityHooks(null, f.installed));
+  mixed['forge-first-write'].Stop[0].command =
+    `'${process.execPath}' '${join(f.directory, 'gone', 'dist', 'agent-antigravity-hook.js')}' '--forge-turn-end'`;
+  writeFileSync(file, JSON.stringify(mixed));
+  const brokenStop = hookHealth(f.directory, f.home);
+  assert.equal(brokenStop.status, 'attention');
+  assert.deepEqual(
+    brokenStop.problems.map(problem => [problem.file, problem.reason]),
+    [[file, 'missing-target']],
+  );
+  assert.equal(brokenStop.repair, 'nforge connect antigravity');
 });

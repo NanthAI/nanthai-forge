@@ -78,11 +78,13 @@ function antigravityHealth(home: string): { covered: boolean; problem?: HookProb
   const entry = antigravityHookRunner(text);
   if ('unreadable' in entry) return { covered: false, problem: { file, reason: 'unreadable' } };
   if (!entry.installed) return { covered: false };
-  const target = forgeHookRunner(entry.command);
-  if (!target || !existsSync(target))
-    return { covered: false, problem: { file, reason: 'missing-target', ...(target ? { target } : {}) } };
-  if (!isInstalledTarget(target))
-    return { covered: false, problem: { file, reason: 'not-installed-cli', target } };
+  for (const command of entry.commands) {
+    const target = forgeHookRunner(command);
+    if (!target || !existsSync(target))
+      return { covered: false, problem: { file, reason: 'missing-target', ...(target ? { target } : {}) } };
+    if (!isInstalledTarget(target))
+      return { covered: false, problem: { file, reason: 'not-installed-cli', target } };
+  }
   return { covered: true };
 }
 /** Read-only: report a Forge hook that is absent, unreadable, missing its target, or not an

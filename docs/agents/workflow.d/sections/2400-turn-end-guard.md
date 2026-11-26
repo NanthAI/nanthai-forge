@@ -1,9 +1,11 @@
 ### Turn-end guard
 
 The first-write hooks also install a turn-end guard: a Claude Code and a Codex
-`Stop` hook. Landings, check runs and waits that an agent session starts are
+`Stop` hook, plus an Antigravity `Stop` hook installed by `nforge connect antigravity`
+(`~/.gemini/config/hooks.json`, replying `decision: "continue"` on a normal first stop
+and `{}` on cancel/error/limit stops or on the second stop). Landings, check runs and waits that an agent session starts are
 recorded in a local ledger, keyed by a digest of the client session id
-(`CLAUDE_CODE_SESSION_ID` or `CODEX_THREAD_ID`). While one still runs, the first
+(`CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID`, `T3CODE_THREAD_ID`, or the Antigravity ancestor process). While one still runs, the first
 stop attempt is blocked: "Your landing ID is still running. Run: nforge wait ID.
 To stop anyway, stop again." The next attempt is always allowed. In a client with
 background wakes the message instead names the one background settle wait

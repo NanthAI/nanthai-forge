@@ -81,7 +81,7 @@ export function connectAntigravity(input: {
     : hooksBefore;
   preview(
     runner
-      ? `~/${ANTIGRAVITY_HOOKS}: ${hooksAfter === hooksBefore ? 'keep' : 'add'} the Forge first-write hook (PostToolUse check, PreInvocation notice; it never blocks a write).`
+      ? `~/${ANTIGRAVITY_HOOKS}: ${hooksAfter === hooksBefore ? 'keep' : 'add'} the Forge first-write and turn-end hooks (PostToolUse check, PreInvocation notice, Stop guard/snapshot; never blocks a write).`
       : `~/${ANTIGRAVITY_HOOKS}: keep (development CLI). Run connect with the installed nforge.`,
   );
   const changes: Change[] = [];

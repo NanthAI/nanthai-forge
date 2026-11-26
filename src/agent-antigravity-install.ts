@@ -16,13 +16,9 @@ export const ANTIGRAVITY_HOOK_NAME = 'forge-first-write';
 
 /** The hook entry for an installed first-write runner (`…/current/dist/agent-edit-hook.js`). */
 export function antigravityHookEntry(editRunner: string) {
-  const command = [
-    process.execPath,
-    join(dirname(editRunner), 'agent-antigravity-hook.js'),
-    '--forge-first-write',
-  ]
-    .map(shellQuote)
-    .join(' ');
+  const hook = join(dirname(editRunner), 'agent-antigravity-hook.js');
+  const command = [process.execPath, hook, '--forge-first-write'].map(shellQuote).join(' ');
+  const stopCommand = [process.execPath, hook, '--forge-turn-end'].map(shellQuote).join(' ');
   return {
     PostToolUse: [
       {
@@ -31,6 +27,7 @@ export function antigravityHookEntry(editRunner: string) {
       },
     ],
     PreInvocation: [{ type: 'command', command, timeout: 5 }],
+    Stop: [{ type: 'command', command: stopCommand, timeout: 5 }],
   };
 }
 
@@ -95,7 +92,7 @@ export const editAntigravityHooks = (before: string | null, editRunner: string |
     [ANTIGRAVITY_HOOK_NAME]: editRunner ? antigravityHookEntry(editRunner) : undefined,
   });
 
-/** Read-only coverage: the installed runner path when Forge's entry exists, else null. */
+/** Read-only coverage: the installed runner commands when Forge's entry exists, else not installed. */
 export function antigravityHookRunner(text: string | null) {
   let config: Record<string, unknown>;
   try {
@@ -104,8 +101,16 @@ export function antigravityHookRunner(text: string | null) {
     return { installed: false as const, unreadable: true as const };
   }
   const entry = config[ANTIGRAVITY_HOOK_NAME] as
-    | { PostToolUse?: { hooks?: { command?: unknown }[] }[] }
+    | {
+        PostToolUse?: { hooks?: { command?: unknown }[] }[];
+        PreInvocation?: { command?: unknown }[];
+        Stop?: { command?: unknown }[];
+      }
     | undefined;
   const command = entry?.PostToolUse?.[0]?.hooks?.[0]?.command;
-  return typeof command === 'string' ? { installed: true as const, command } : { installed: false as const };
+  if (typeof command !== 'string') return { installed: false as const };
+  const commands = [command, entry?.PreInvocation?.[0]?.command, entry?.Stop?.[0]?.command].filter(
+    (value): value is string => typeof value === 'string',
+  );
+  return { installed: true as const, command, commands };
 }

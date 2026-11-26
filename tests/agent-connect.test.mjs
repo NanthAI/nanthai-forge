@@ -183,12 +183,19 @@ test('antigravity: connect adds the forge MCP server and the first-write hook to
   assert.deepEqual(installed.lint, JSON.parse(other).lint);
   const entry = installed['forge-first-write'];
   // Never PreToolUse: there `allow` bypasses the user's permission rules and `{}` denies the tool.
-  assert.deepEqual(Object.keys(entry).sort(), ['PostToolUse', 'PreInvocation']);
+  assert.deepEqual(Object.keys(entry).sort(), ['PostToolUse', 'PreInvocation', 'Stop']);
   assert.match(entry.PostToolUse[0].matcher, /write_file\|.*edit_file/);
   for (const command of [entry.PostToolUse[0].hooks[0].command, entry.PreInvocation[0].command]) {
     assert.ok(command.includes(join(root, 'dist', 'agent-antigravity-hook.js')), command);
     assert.match(command, /'--forge-first-write'$/);
   }
+  assert.equal(entry.Stop.length, 1);
+  assert.equal(entry.Stop[0].timeout, 5);
+  assert.ok(
+    entry.Stop[0].command.includes(join(root, 'dist', 'agent-antigravity-hook.js')),
+    entry.Stop[0].command,
+  );
+  assert.match(entry.Stop[0].command, /'--forge-turn-end'$/);
   assert.equal(agentConnect(['antigravity'], root, { home, hookRunner }).status, 'already-configured');
   assert.equal(
     agentConnect(['antigravity', '--undo', result.undo.split(' ').at(-1)], root, { home }).status,

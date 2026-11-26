@@ -34,6 +34,8 @@ import {
 import { resolveTurnWait } from '../dist/agent-turn-wait.js';
 import { AGENT_WAIT_SECONDS, operationWait, parseWaitBudget } from '../dist/agent-operation-wait.js';
 import { installEditHooks, migrateEditHookRunner } from '../dist/agent-install-hooks.js';
+import { antigravityHook } from '../dist/agent-antigravity-hook.js';
+import { setEditHooksEnabled } from '../dist/agent-hook-settings.js';
 import { hostedAgentCli } from '../dist/hosted-agent-cli.js';
 import { agentCli } from '../dist/agent-cli.js';
 import { ForgeError } from '../dist/errors.js';
@@ -622,4 +624,161 @@ test('the turn-end snapshot runs once on an allowed stop, never before a block, 
   // The repeated stop is allowed and ends the turn: one snapshot.
   assert.deepEqual(await turnEndWithSnapshot(stop, snapshot), {});
   assert.equal(seen.length, 2);
+});
+
+test('d0e9ce11: Antigravity Stop translates block to continue, skips non-normal stops, runs snapshot on allowed stop, and fails open', async t => {
+  const s = session(t);
+  const home = join(s.directory, 'home');
+  mkdirSync(home, { recursive: true });
+  const prevHome = process.env.HOME;
+  const prevConfig = process.env.XDG_CONFIG_HOME;
+  process.env.HOME = home;
+  process.env.XDG_CONFIG_HOME = join(home, '.config');
+  t.after(() => {
+    if (prevHome === undefined) delete process.env.HOME;
+    else process.env.HOME = prevHome;
+    if (prevConfig === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = prevConfig;
+  });
+  const seen = [];
+  const snapshot = async input => seen.push(input.cwd);
+  // Idle normal stop: allowed, runs snapshot once using workspacePaths fallback when cwd is absent.
+  assert.deepEqual(
+    await antigravityHook(
+      {
+        hookEventName: 'Stop',
+        conversationId: s.id,
+        terminationReason: 'NO_TOOL_CALL',
+        workspacePaths: [s.root],
+      },
+      undefined,
+      { snapshot },
+    ),
+    {},
+  );
+  assert.deepEqual(seen, [s.root]);
+  // Running landing: first normal Stop returns Antigravity's decision: "continue" and skips snapshot.
+  const work = landing(s.root, randomUUID(), process.pid);
+  recordTurnWork(work, s.id);
+  const first = await antigravityHook(
+    { hookEventName: 'Stop', conversationId: s.id, terminationReason: 'NO_TOOL_CALL', cwd: s.root },
+    undefined,
+    { snapshot },
+  );
+  assert.equal(first.decision, 'continue');
+  assert.equal(first.reason, turnEndMessage(work));
+  assert.equal(seen.length, 1, 'snapshot does not run when Stop continues');
+  // Second Stop is allowed and runs the turn-end snapshot.
+  assert.deepEqual(
+    await antigravityHook(
+      {
+        hookEventName: 'Stop',
+        conversationId: s.id,
+        terminationReason: 'NO_TOOL_CALL',
+        continuationActive: true,
+        cwd: s.root,
+      },
+      undefined,
+      { snapshot },
+    ),
+    {},
+  );
+  assert.equal(seen.length, 2);
+  // Non-normal termination reasons never force continuation and never delay cancel with a snapshot.
+  recordTurnWork(work, s.id);
+  for (const reason of [
+    'USER_CANCELED',
+    'ERROR',
+    'MAX_INVOCATIONS',
+    'MAX_FORCED_INVOCATIONS',
+    'MAX_TOKEN_BUDGET_EXCEEDED',
+    'TERMINAL_CUSTOM_HOOK',
+  ]) {
+    assert.deepEqual(
+      await antigravityHook(
+        { hookEventName: 'Stop', conversationId: s.id, terminationReason: reason, cwd: s.root },
+        undefined,
+        { snapshot },
+      ),
+      {},
+      reason,
+    );
+  }
+  assert.equal(seen.length, 2);
+  // Disabled hooks always allow stop and skip snapshot.
+  setEditHooksEnabled(false, undefined, home);
+  assert.deepEqual(
+    await antigravityHook(
+      { hookEventName: 'Stop', conversationId: s.id, terminationReason: 'NO_TOOL_CALL', cwd: s.root },
+      undefined,
+      { snapshot },
+    ),
+    {},
+  );
+  assert.equal(seen.length, 2);
+  setEditHooksEnabled(true, undefined, home);
+  // Snapshot failures never alter the allowed stop reply.
+  recordTurnWork(work, s.id);
+  const blocked = await antigravityHook(
+    { hookEventName: 'Stop', conversationId: s.id, terminationReason: 'model_stop', cwd: s.root },
+    undefined,
+    { snapshot },
+  );
+  assert.equal(blocked.decision, 'continue');
+  assert.deepEqual(
+    await antigravityHook(
+      { hookEventName: 'Stop', conversationId: s.id, terminationReason: 'model_stop', cwd: s.root },
+      undefined,
+      {
+        snapshot: async () => {
+          throw new Error('synthetic snapshot error');
+        },
+      },
+    ),
+    {},
+  );
+  // When Antigravity runs under T3 Code, conversationId differs from T3CODE_THREAD_ID; fallback matches the T3 ledger.
+  const t3Thread = `t3-thread-${randomUUID()}`;
+  const t3Work = landing(s.root, randomUUID(), process.pid);
+  recordTurnWork(t3Work, t3Thread);
+  const viaT3 = await antigravityHook(
+    { hookEventName: 'Stop', conversationId: `agy-conv-${randomUUID()}`, terminationReason: 'NO_TOOL_CALL' },
+    undefined,
+    { snapshot, env: { T3CODE_THREAD_ID: t3Thread } },
+  );
+  assert.equal(viaT3.decision, 'continue');
+  assert.equal(viaT3.reason, turnEndMessage(t3Work));
+  // Real installed hook process through a `current` symlink blocks once with continue, then allows.
+  const procConv = `agy-proc-${randomUUID()}`;
+  const procWork = landing(s.root, randomUUID(), process.pid);
+  recordTurnWork(procWork, procConv);
+  const link = join(s.directory, 'current');
+  symlinkSync(fileURLToPath(new URL('..', import.meta.url)), link);
+  const installed = join(link, 'dist', 'agent-antigravity-hook.js');
+  const stopProc = () =>
+    spawnSync(process.execPath, [installed, '--forge-turn-end'], {
+      env: {
+        PATH: process.env.PATH,
+        HOME: home,
+        XDG_STATE_HOME: process.env.XDG_STATE_HOME,
+        XDG_CONFIG_HOME: join(home, '.config'),
+      },
+      input: JSON.stringify({
+        hookEventName: 'Stop',
+        conversationId: procConv,
+        terminationReason: 'NO_TOOL_CALL',
+        cwd: s.root,
+      }),
+      encoding: 'utf8',
+      timeout: 10_000,
+    });
+  const procFirst = stopProc();
+  assert.equal(procFirst.status, 0, procFirst.stderr);
+  assert.deepEqual(JSON.parse(procFirst.stdout), {
+    decision: 'continue',
+    reason: turnEndMessage(procWork),
+  });
+  const procSecond = stopProc();
+  assert.equal(procSecond.status, 0, procSecond.stderr);
+  assert.deepEqual(JSON.parse(procSecond.stdout), {});
 });
