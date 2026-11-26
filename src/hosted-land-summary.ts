@@ -49,12 +49,15 @@ type Result = {
   submission?: {
     id?: string;
     phase?: string;
+    request?: NonNullable<LandingRecord['request']>;
     timing?: { heldMs?: number };
     observation?: { state: string; pendingReason?: string | null; stall?: LandingStall };
     error?: { code: string; message: string } | null;
     acceptance?: {
       receiptId: string;
       head: string;
+      checked?: false;
+      sequence?: number;
       proof?: z.infer<typeof proofSummarySchema>;
       acceptedBy?: { kind: 'person' | 'auto'; actor?: string; note: string };
       checkTime?: CheckTime;
@@ -142,6 +145,9 @@ function classifyLand(
           ? `, ${result.changedPaths} changed path${result.changedPaths === 1 ? '' : 's'}`
           : ''
       }`,
+      ...(submission?.acceptance?.checked === false
+        ? [`Landed on main as #${submission.acceptance.sequence}, unchecked (no check set up).`]
+        : []),
       // A person's acceptance or policy's, never inferred from the submitter (fe5bea80).
       ...(submission?.acceptance?.proof ? [proofLine(submission.acceptance.proof)] : []),
       ...(submission?.acceptance?.acceptedBy ? [acceptedByLine(submission.acceptance.acceptedBy)] : []),
@@ -168,13 +174,15 @@ function classifyLand(
   if (hold) return out('held', holdLines(hold));
   // A passed check is not a landing, and a queued landing is not a failure: say which.
   if ((presentation?.phase ?? phase) === 'ready' && submission?.observation?.state !== 'terminal-failed') {
+    const check =
+      (presentation?.request ?? submission?.request)?.check === null ? 'NO CHECK RAN' : 'CHECK PASSED';
     const blocker = presentation?.orderWait?.submissionId;
     if (blocker && blocker !== result.orderWait?.submissionId)
-      return out('ready', [`CHECK PASSED; not landed yet: waiting for submission ${blocker}`]);
+      return out('ready', [`${check}; not landed yet: waiting for submission ${blocker}`]);
     const orderWait =
       !presentation || blocker === result.orderWait?.submissionId ? result.orderWait : undefined;
     const reservation = phase === 'ready' ? result.reservation : undefined;
-    return out('ready', readyLines(orderWait, reservation));
+    return out('ready', readyLines(check, orderWait, reservation));
   }
   if (presentation)
     return out('pending', [`${pendingLabel(presentation.observation?.pendingReason)}; not landed yet`]);
@@ -278,15 +286,15 @@ const pendingLabels: Record<string, string> = {
 };
 const pendingLabel = (reason: string | null | undefined) => pendingLabels[reason ?? ''] ?? 'IN PROGRESS';
 
-function readyLines(orderWait: Result['orderWait'], reservation: Result['reservation']) {
+function readyLines(check: string, orderWait: Result['orderWait'], reservation: Result['reservation']) {
   return [
     orderWait?.submissionId
       ? orderWait.reason === 'reservation'
-        ? `CHECK PASSED; not landed yet: submission ${orderWait.submissionId} reserved files this change touches; it lands first or its reservation ends`
-        : `CHECK PASSED; not landed yet: waiting for older submission ${orderWait.submissionId} to take main first`
+        ? `${check}; not landed yet: submission ${orderWait.submissionId} reserved files this change touches; it lands first or its reservation ends`
+        : `${check}; not landed yet: waiting for older submission ${orderWait.submissionId} to take main first`
       : reservation?.live
-        ? `CHECK PASSED; queued to land first on its reserved files (reserved until ${reservation.until})`
-        : 'CHECK PASSED; queued to land, not landed yet (waiting for acceptance)',
+        ? `${check}; queued to land first on its reserved files (reserved until ${reservation.until})`
+        : `${check}; queued to land, not landed yet (waiting for acceptance)`,
   ];
 }
 

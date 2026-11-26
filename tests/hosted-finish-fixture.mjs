@@ -343,6 +343,7 @@ export async function finishFixture(
       projectId: f.projectId,
       submissionId: id,
       priorityInfo: 1,
+      checklessInfo: 1,
     }).then(JSON.parse);
   const row = id => [...f.tables.projectHostedFinishes.values()].find(x => x.submissionId === id);
   const scheduled = () =>

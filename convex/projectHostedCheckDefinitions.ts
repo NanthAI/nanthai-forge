@@ -161,7 +161,7 @@ export async function saveCheckSetting(
   await ctx.db.insert('projectHostedCheckSettingVersions', saved);
   if (old) await ctx.db.replace(old._id, saved);
   else await ctx.db.insert('projectHostedCheckSettings', saved);
-  await refreshCheckEntries(ctx, projectId);
+  await refreshCheckEntries(ctx, project);
   // Item 0d14c456: a changed check or runner configuration is the resume step of an environment
   // hold: it ends and its held landings go back to the queue (one queue read, settings writes only).
   await clearCiDownOnSettingChange(ctx, projectId);

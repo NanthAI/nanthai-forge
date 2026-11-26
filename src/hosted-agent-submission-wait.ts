@@ -824,6 +824,9 @@ async function observeHostedSubmissionsOnce(
               operationId,
               nextVersion: cursor.versions.get(operationId) ?? 0,
               ...capsuleArgs,
+              ...(Array.isArray(features) && features.includes('checkless-landing')
+                ? { checklessInfo: 1 }
+                : {}),
               ...(boardWait && index === 0
                 ? {
                     board: { laneId: boardWait.laneId, after: boardWait.after },

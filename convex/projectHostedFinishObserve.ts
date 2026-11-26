@@ -42,6 +42,7 @@ export const page = query({
     operationId: v.string(),
     nextVersion: v.number(),
     priorityInfo: v.optional(v.literal(1)),
+    checklessInfo: v.optional(v.literal(1)),
     capsuleProtocol: v.optional(v.literal(1)),
     arrivalFence: v.optional(v.literal(1)),
     /** Wait delivery (feature board-wait): the live wait subscription only, never a page drain.
@@ -105,6 +106,7 @@ async function observePage(
     operationId: string;
     nextVersion: number;
     priorityInfo?: 1;
+    checklessInfo?: 1;
     capsuleProtocol?: 1;
   },
 ) {
@@ -160,14 +162,14 @@ async function observePage(
         operationId: input.operationId,
         canonicalOperationId: state.operationId,
         authority: sourceAuthority(project),
-        submission: landingStateForReader(state, input.priorityInfo),
+        submission: landingStateForReader(state, input),
         queuePosition: null,
         queue: null,
         queueAheadSelection: await hostedQueueAheadSelection(ctx, state),
         pendingAttempt: null,
         events: [
           {
-            submission: landingStateForReader(state, input.priorityInfo),
+            submission: landingStateForReader(state, input),
             pendingAttempt: null,
           },
         ],
@@ -210,7 +212,7 @@ async function observePage(
         .unique();
       if (!row) {
         events.push({
-          submission: landingStateForReader(queueAwareLandingState(state, queue), input.priorityInfo),
+          submission: landingStateForReader(queueAwareLandingState(state, queue), input),
           pendingAttempt,
           ...(wouldConflict ? { wouldConflict } : {}),
         });
@@ -227,7 +229,7 @@ async function observePage(
       events.push({
         ...event,
         pendingAttempt: finishPendingForReader(event.pendingAttempt),
-        submission: landingStateForReader(submission, input.priorityInfo),
+        submission: landingStateForReader(submission, input),
       });
       nextVersion++;
       eventCount = events.length;
@@ -270,10 +272,7 @@ async function observePage(
       operationId: input.operationId,
       canonicalOperationId: state.operationId,
       authority: sourceAuthority(project),
-      submission: noteHeldPolicy(
-        landingStateForReader(queueAwareLandingState(state, queue), input.priorityInfo),
-        pin,
-      ),
+      submission: noteHeldPolicy(landingStateForReader(queueAwareLandingState(state, queue), input), pin),
       queuePosition: queue?.position ?? null,
       queue: syncRequiredQueue(queue, wouldConflict),
       ...(wouldConflict ? { wouldConflict } : {}),

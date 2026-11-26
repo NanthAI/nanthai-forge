@@ -63,7 +63,12 @@ export const resume = mutation({
 /** S05-style cursor over one submission. Reads cause no wake or compute.
  * Current project writers can also read a failure recorded before admission. */
 export const status = query({
-  args: { ...identity, version: v.optional(v.number()), priorityInfo: v.optional(v.literal(1)) },
+  args: {
+    ...identity,
+    version: v.optional(v.number()),
+    priorityInfo: v.optional(v.literal(1)),
+    checklessInfo: v.optional(v.literal(1)),
+  },
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
@@ -88,7 +93,7 @@ export const status = query({
         return canonicalPayload({
           version: state.version,
           unchanged: input.version === state.version,
-          submission: landingStateForReader(state, input.priorityInfo),
+          submission: landingStateForReader(state, input),
           queuePosition: null,
           queue: null,
           pendingAttempt: null,
@@ -115,7 +120,7 @@ export const status = query({
         version: state.version,
         unchanged: state.phase !== 'queued' && input.version === state.version,
         submission: noteHeldPolicy(
-          landingStateForReader(queueAwareLandingState(state, queue), input.priorityInfo),
+          landingStateForReader(queueAwareLandingState(state, queue), input),
           policy,
         ),
         queuePosition: queue?.position ?? null,

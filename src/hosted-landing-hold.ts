@@ -32,6 +32,7 @@ type HoldInput = LandingReview & {
   id?: string;
   operationId?: string;
   phase?: string | null;
+  request?: { check?: unknown };
   observation?: { state?: string; pendingReason?: string | null } | null;
   error?: { code?: string; message?: string } | null;
 };
@@ -69,7 +70,7 @@ export function landingHold(state: HoldInput | null | undefined, laneId?: string
       next: 'Held while CI is failing for every check; one held landing checks again on a backoff, and the first check CI runs again releases the rest (no queue position meanwhile). Nothing to do in this Lane. Keep waiting.',
     };
   if (reason === 'waiting-for-review') {
-    const stored = state?.error?.message?.trim() || 'Waiting for review by a person';
+    const stored = state?.error?.message?.trim() || 'Waiting for the owner to approve';
     const named = PATHS.exec(stored)?.[1];
     const review = state?.approver || state?.url ? { approver: state.approver, url: state.url } : undefined;
     const lane = `{"laneId":"${laneId ?? 'LANE_ID'}"}`;
@@ -85,7 +86,7 @@ export function landingHold(state: HoldInput | null | undefined, laneId?: string
         : null,
       next: review?.url
         ? `Hand the approval link to the owner and keep waiting for their decision. To withdraw: nforge agent ROOT land --withdraw '${lane}'.`
-        : `${state?.phase === 'checking' ? 'Check in progress' : 'Check passed'}; held until the project owner approves ${state?.id ? `submission ${state.id}` : 'it'} as a person (agents cannot approve; it does not time out). Hand the owner the link from nforge agent ROOT approve-link '{"operationId":"${state?.operationId ?? 'ORIGINAL_UUID'}"}' and keep waiting: this wait returns on their decision. To drop it instead: nforge agent ROOT land --withdraw '${lane}'.`,
+        : `${state?.request?.check === null ? 'No check ran' : state?.phase === 'checking' ? 'Check in progress' : 'Check passed'}. Held until the owner approves ${state?.id ? `submission ${state.id}` : 'it'}. Hand the owner the link from nforge agent ROOT approve-link '{"operationId":"${state?.operationId ?? 'ORIGINAL_UUID'}"}' and keep waiting for their decision. To drop it instead: nforge agent ROOT land --withdraw '${lane}'.`,
     };
   }
   if (reason === 'waiting-for-dependency')

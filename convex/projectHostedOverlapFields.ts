@@ -73,6 +73,7 @@ export const hostedOverlapTables = {
         commit: v.string(),
         laneHead: v.string(),
         at: v.string(),
+        unchecked: v.optional(v.literal(true)),
         revertedBy: v.optional(v.object({ receiptId: v.string(), at: v.string() })),
         /** The receipt's main-red holds (held, released), for lane-history (Item 687d1eda). */
         mainRedHolds: v.optional(v.array(mainRedHoldValidator)),

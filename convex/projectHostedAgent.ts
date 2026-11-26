@@ -169,6 +169,9 @@ export const capabilities = query({
                   // Only clients that may carry metrics need to ask for this field.
                   ...(features.includes('metric-cli-provenance') ? ['metric-cli-provenance'] : []),
                   ...(features.includes('queue-switch-state') ? ['queue-switch-state'] : []),
+                  ...(features.includes('checkless-landing') && project.checklessDefault
+                    ? ['checkless-landing']
+                    : []),
                 ],
               }
             : {}),

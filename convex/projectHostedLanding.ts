@@ -191,6 +191,7 @@ export const status = query({
     projectId: v.id('hostedProjects'),
     submissionId: v.string(),
     priorityInfo: v.optional(v.literal(1)),
+    checklessInfo: v.optional(v.literal(1)),
     capsuleProtocol: v.optional(v.literal(1)),
   },
   returns: v.string(),
@@ -220,10 +221,7 @@ export const status = query({
       const review = await heldReview(ctx, project, state);
       const payload = {
         ...review,
-        request: noteHeldPolicy(
-          landingStateForReader(queueAwareLandingState(state, queue), input.priorityInfo),
-          pin,
-        ),
+        request: noteHeldPolicy(landingStateForReader(queueAwareLandingState(state, queue), input), pin),
         queuePosition: queue?.position ?? null,
         queue: syncRequiredQueue(queue, wouldConflict),
         ...(orderWait ? { orderWait } : {}),

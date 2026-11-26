@@ -112,6 +112,19 @@ const importRequest = (select, expected = null, operationId = randomUUID()) =>
   JSON.stringify({ operationId, authorityEpoch: 1, expected, select });
 const settings = s => [...s.tables.projectHostedCheckSettings.values()];
 
+test('check setup folds definition presence into projects with the unchecked fallback', async () => {
+  for (const checklessDefault of [undefined, true]) {
+    const { s, projectId } = project();
+    if (checklessDefault)
+      s.patch('hostedProjects', projectId, { checklessDefault, hasCheckDefinitions: false });
+    await s.call('fromWork', imports.fromWork, {
+      projectId,
+      request: importRequest({ name: 'verify' }),
+    });
+    assert.equal(s.tables.hostedProjects.get(projectId).hasCheckDefinitions, checklessDefault);
+  }
+});
+
 test('fromWork imports the newest verify from hosted Work with bounded reads and replays its receipt', async t => {
   const { s, projectId, newer } = project();
   const operationId = randomUUID();

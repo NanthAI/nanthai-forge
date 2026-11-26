@@ -2825,6 +2825,7 @@ export class HostedAgentTransport {
     const request = {
       ...args,
       projectId: this.address.projectId,
+      ...(priorityRead && this.serverFeatures?.includes('checkless-landing') ? { checklessInfo: 1 } : {}),
       ...(capsuleHistoryQueries.has(name) && this.serverFeatures?.includes('landing-capsules-v1')
         ? { capsuleProtocol: 1 }
         : {}),

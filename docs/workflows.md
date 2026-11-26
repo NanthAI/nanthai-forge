@@ -82,6 +82,14 @@ link, not an empty log; the check summary of a passed run quotes the failure eac
 
 ## Who can land without a check
 
+In a new project with no check definition, `land --save` still runs local preflight.
+Forge composes against current main and applies the project's acceptance policy,
+including protected paths. A landing under that policy records `checked: false`
+and retains its revert command. A configured check still requires passing
+evidence for the exact Candidate. Earlier projects keep their existing check policy.
+
+### Person acceptance
+
 The web setting and CLI edit the same `acceptance.withoutCheck` policy. Omission
 means `owner`. Modes are `owner`, `selected` and `writers`; every mode includes the
 owner person. For selected people, use Forge handles (`@handle` or `handle`),
@@ -98,9 +106,8 @@ nforge x ROOT set-policy '{"acceptance":{"withoutCheck":{"mode":"owner","people"
 `check-settings` includes the effective setting. Policy changes retain their old
 and new values in project history; **Landing policy history → Undo** restores the
 previous selection through the same retry-safe policy writer. An agent sign-in's
-setting edit follows the existing owner-approval policy; changing this setting
-does not let an agent land without a check. The stored-field rollout is reader
-compatibility first, writer second.
+setting edit follows the existing owner-approval policy. This setting controls
+person acceptance. The stored-field rollout is reader compatibility first, writer second.
 
 ## Hosted acceptance gate
 

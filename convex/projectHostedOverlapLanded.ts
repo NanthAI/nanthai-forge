@@ -20,7 +20,7 @@ const RETIRE_LIMIT = 100;
 export async function retireLandedOverlapLanes(
   ctx: MutationCtx,
   identity: ReceiptIdentity,
-  landed: { commit: string; at: string; sequence?: number; mainRedHolds?: MainRedHold[] },
+  landed: { commit: string; at: string; sequence?: number; unchecked?: true; mainRedHolds?: MainRedHold[] },
   index = 0,
   resolutionCandidates?: Set<string>,
 ) {
@@ -84,6 +84,7 @@ export async function retireLandedOverlapLanes(
           commit: landed.commit,
           laneHead: row.head,
           at: landed.at,
+          ...(landed.unchecked ? { unchecked: true as const } : {}),
           ...(landed.mainRedHolds ? { mainRedHolds: landed.mainRedHolds } : {}),
         }
       : undefined;

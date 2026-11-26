@@ -6,8 +6,8 @@ import { z } from 'zod';
 export const ACCEPTED_BY_PATHS = 20;
 
 /** Who accepted a landing (Issue fe5bea80). `person`: a person accepted it (the project owner on the
- * review page or /approve, or their own web acceptance). `auto`: project policy accepted it after its
- * check passed and no person reviewed it. `actor` is stored as the account and leaves the server as
+ * review page or /approve, or their own web acceptance). `auto`: project policy accepted it.
+ * `actor` is stored as the account and leaves the server as
  * the public Forge handle (the public identity rule maps `actor`); readers who may not see people get
  * none. For `auto` it is the submitter. The submission's own `actor` is the submitter, not who
  * accepted it: an owner's agent and the owner share one account, so read this field to tell them
@@ -62,6 +62,8 @@ export function landingAcceptedBy(input: {
   actor: { kind: 'person' | 'agent'; id: string };
   /** When it landed (ISO). */
   at: string;
+  /** An unchecked receipt carries this fact from publication. */
+  checked?: false;
   /** person: when they accepted (ms); defaults to `at`. */
   acceptedAt?: number | undefined;
   head?: string | undefined;
@@ -72,7 +74,18 @@ export function landingAcceptedBy(input: {
 }): LandingAcceptedBy {
   if (input.actor.kind !== 'person') {
     const approval = input.protectedApproval;
-    if (!approval) return { kind: 'auto', actor: input.actor.id, at: input.at, note: AUTO_ACCEPTED_NOTE };
+    const unchecked = input.checked === false;
+    const withoutCheck = 'Accepted automatically under project policy. No check ran.';
+    if (!approval)
+      return {
+        kind: 'auto',
+        actor: input.actor.id,
+        at: input.at,
+        note: unchecked ? withoutCheck : AUTO_ACCEPTED_NOTE,
+      };
+    const basis = unchecked
+      ? withoutCheck
+      : 'Accepted automatically under project policy after its check passed.';
     const approvedAt = new Date(approval.at).toISOString();
     const shown = approval.paths.slice(0, ACCEPTED_BY_PATHS);
     const more = approval.paths.length - shown.length;
@@ -86,7 +99,7 @@ export function landingAcceptedBy(input: {
         paths: shown,
         ...(more ? { pathsMore: more } : {}),
       },
-      note: `Accepted automatically under project policy after its check passed. Its protected paths ${shown.join(', ')}${more ? ` +${more} more` : ''} carry the project owner's approval of submission ${short(approval.submissionId)} at ${approvedAt}, whose protected changes it kept.`,
+      note: `${basis} Its protected paths ${shown.join(', ')}${more ? ` +${more} more` : ''} carry the project owner's approval of submission ${short(approval.submissionId)} at ${approvedAt}, whose protected changes it kept.`,
     };
   }
   const at = input.acceptedAt === undefined ? input.at : new Date(input.acceptedAt).toISOString();
@@ -120,6 +133,7 @@ export function landingAcceptedBy(input: {
 export function receiptAcceptedBy(receipt: {
   actor: { kind: 'person' | 'agent'; id: string };
   at: string;
+  checked?: false;
 }): LandingAcceptedBy {
   const by = landingAcceptedBy(receipt);
   return {

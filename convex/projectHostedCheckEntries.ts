@@ -3,7 +3,7 @@
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import { invariant } from '../src/errors';
 import type { AcceptanceActor } from '../src/autonomy-policy';
-import type { Doc, Id } from './_generated/dataModel';
+import type { Doc } from './_generated/dataModel';
 import { definedCheckEntryPaths } from '../src/public-governance';
 import { checkSchema } from '../src/work-types';
 import { ciStatusEntryPaths } from '../src/ci-status';
@@ -17,7 +17,11 @@ const maxDefinitions = 100;
  * two indexed reads and one patch), so each landing
  * decision reads the list from the project row it already loaded: no extra read or call.
  */
-export async function refreshCheckEntries(ctx: MutationCtx, projectId: Id<'hostedProjects'>) {
+export async function refreshCheckEntries(
+  ctx: MutationCtx,
+  project: Pick<Doc<'hostedProjects'>, '_id' | 'checklessDefault'>,
+) {
+  const projectId = project._id;
   const rows = await ctx.db
     .query('projectHostedCheckSettings')
     .withIndex('by_project_and_kind', q => q.eq('projectId', projectId).eq('kind', 'definition'))
@@ -39,8 +43,24 @@ export async function refreshCheckEntries(ctx: MutationCtx, projectId: Id<'hoste
     checkEntries: entries,
     globalRiskPaths,
     landingCheckId: landingCheckSelection(checks),
+    ...(project.checklessDefault ? { hasCheckDefinitions: checks.length > 0 } : {}),
   });
   return entries;
+}
+
+/** The current project row covers new projects and refreshed settings. On older
+ * rows, a bounded index lookup distinguishes no definitions from an ambiguous set. */
+export async function projectHasChecks(ctx: MutationCtx, project: Doc<'hostedProjects'>) {
+  return (
+    project.hasCheckDefinitions ??
+    (typeof project.landingCheckId === 'string' ||
+      Boolean(
+        await ctx.db
+          .query('projectHostedCheckSettings')
+          .withIndex('by_project_and_kind', q => q.eq('projectId', project._id).eq('kind', 'definition'))
+          .first(),
+      ))
+  );
 }
 
 /** The canonical landing check is verify, or the sole definition; never a client selection. */

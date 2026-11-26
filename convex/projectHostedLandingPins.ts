@@ -151,7 +151,7 @@ export async function pinLandingAttempt(
   // need its check-entry paths before choosing a potentially shared check.
   const checkEntries =
     canReview && paths?.length
-      ? (project.checkEntries ?? (await refreshCheckEntries(ctx, input.projectId)))
+      ? (project.checkEntries ?? (await refreshCheckEntries(ctx, project)))
       : project.checkEntries;
   const earlyReview =
     canReview && protectedPathMatches(policy, paths, checkEntries)?.length

@@ -22,9 +22,18 @@ const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 const strip = ({ action, ...parameters }) => [action, parameters];
 
 /** Conflict on finish from the original Lane's own checkout, then follow the returned steps. */
-async function conflicted(t, laneRoot) {
+async function conflicted(t, laneRoot, unchecked = false) {
   const s = await resolutionFixture(t, { overlap: true }),
     f = s.f;
+  if (unchecked) {
+    f.tables.projectHostedCheckSettings.clear();
+    f.patch('hostedProjects', f.projectId, {
+      checklessDefault: true,
+      landingCheckId: null,
+      hasCheckDefinitions: false,
+      checkEntries: [],
+    });
+  }
   f.moveMain({ overlap: true });
   const root = laneRoot?.(s) ?? s.root;
   await s.transport(root).dispatch('open', { laneId: f.lane.laneId });
@@ -98,6 +107,26 @@ test('incident replay 5c2b5e1b: a resolution Lane landed with keepOpen completes
   const overlap = [...f.tables.projectHostedOverlapLanes.values()].find(row => row.laneId === f.lane.laneId);
   assert.equal(overlap?.open ?? false, false, 'the original leaves the open overlap index');
 });
+
+for (const [mode, options] of [
+  ['default', {}],
+  ['keepOpen', { keepOpen: true }],
+  ['closes:false', { closes: false }],
+])
+  test(`unchecked resolution stamps its origin with the same receipt (${mode})`, async t => {
+    const run = await conflicted(t, undefined, true);
+    const { f, conflict } = run;
+    const { submitted } = await resolveAndLand(run, options);
+    const landed = (await f.current(submitted.result.submission.id)).submission;
+    assert.equal(landed.request.check, null);
+    assert.equal(landed.acceptance.checked, false);
+    const stamp = id =>
+      [...f.tables.projectHostedOverlapLanes.values()].find(row => row.laneId === id)?.landed;
+    assert.equal(stamp(conflict.laneId).unchecked, true);
+    assert.equal(stamp(f.lane.laneId).receiptId, landed.acceptance.receiptId);
+    assert.equal(stamp(f.lane.laneId).unchecked, true);
+    assert.equal((await f.readLane(f.lane.laneId)).state, options.closes === false ? 'active' : 'completed');
+  });
 
 // Item 593fc2d7 (Lane 0200969a, receipt 93b3b701): the original was saved again with the same bytes
 // ("save to refresh binding"), so only its sourceVersion moved; it stayed open and was abandoned by

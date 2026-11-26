@@ -40,7 +40,7 @@ test('a review hold names its reason, protected paths and next step from the sta
   assert.equal(hold.kind, 'review');
   assert.deepEqual(hold.paths, ['.github/workflows/forge-check.yml']);
   assert.match(hold.reason, /protected paths: \.github\/workflows\/forge-check\.yml/);
-  assert.match(hold.next, /owner approves submission 24828b1f-9bc4-4fa6-815a-de200ecaa7d3 as a person/);
+  assert.match(hold.next, /owner approves submission 24828b1f-9bc4-4fa6-815a-de200ecaa7d3\./);
   assert.match(hold.next, new RegExp(`land --withdraw '\\{"laneId":"${LANE}"\\}'`));
   // The owner's link comes from approve-link on this exact operation (fe5bea80).
   assert.match(hold.next, /approve-link '\{"operationId":"0d5394e3-4ccf-4cdc-964e-0df73decfacc"\}'/);
@@ -64,7 +64,10 @@ test('a review hold names its reason, protected paths and next step from the sta
   // A hold that names no paths says so with null, never a guess.
   const supervised = landingHold({ ...incident, error: null });
   assert.equal(supervised.paths, null);
-  assert.equal(supervised.reason, 'Waiting for review by a person');
+  assert.equal(supervised.reason, 'Waiting for the owner to approve');
+  const unchecked = landingHold({ ...incident, request: { check: null } });
+  assert.match(unchecked.next, /^No check ran\. Held until the owner approves submission /);
+  assert.doesNotMatch(unchecked.next, /Check passed/);
   assert.equal(
     landingHold({ ...incident, observation: { state: 'pending', pendingReason: 'waiting-for-dependency' } })
       .kind,

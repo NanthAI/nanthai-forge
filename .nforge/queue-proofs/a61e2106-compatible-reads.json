@@ -1,0 +1,216 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedFinishObserve.ts": "a676692a37b7d1de2a8450ee580eb052b31f7293f36e377acf3e3cb620072b3e"
+  },
+  "replay": {
+    "incident": "a61e2106",
+    "test": "released strict status and wait readers can consume an unchecked acceptance",
+    "receipt": "351b7a24-3298-46b9-9c31-f88ff7442fc8"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "thread:delegated-task:command%3Amcp%3A1b59c402-0b0f-4e50-9d3b-a36308227689%3Adelegate-task%3A129142b4-85ab-4661-a673-8b21d5c1da9e",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "thread:delegated-task:command%3Amcp%3Ada75401b-42cf-4c49-8af3-a20dbe8afcf4%3Adelegate-task%3Ac462d539-381e-4710-b2ec-4325fe01b3d2",
+    "receipt": "d9b1632a-b5d8-4095-bb40-021140f48ac7"
+  },
+  "exercised": {
+    "convex/projectHostedFinishObserve.ts": {
+      "executed": [
+        "observePage",
+        "page",
+        "selectOperation"
+      ],
+      "digest": "c1b34ed7102da14423b195ce59287383fdd3731fa17a6bd7a8970219c3c0d343",
+      "units": [
+        [
+          "ConvexError",
+          "211036670c4e5270a47f08197845e9ca5c732e482b6ecb51ce3c89df5b378773"
+        ],
+        [
+          "ForgeError",
+          "c8934d5ec6f70ce797a0d05c3ecfb78031a48937ad3336194885e4520006a12d"
+        ],
+        [
+          "accessibleProject",
+          "50a4d4f1047573513f361192189b40078a2daa64c945e440ac80ed1a45c7d270"
+        ],
+        [
+          "boardWake",
+          "9d40543c48619121e1c647ceddcf90c19b4b62950588ccab8cc8ef3883f7fca0"
+        ],
+        [
+          "canonicalPayload",
+          "95124f3098690f0b83a3927221e9cee6fc53fe1b0c044ab43a9f934e9effe9bb"
+        ],
+        [
+          "capsuleHistoryContext",
+          "fd06427262c0fd4e08b65c460ca76a7a7f156d19fede1ab973bc57407fae6cc4"
+        ],
+        [
+          "desiredLanding",
+          "a16cab9e2518219f1ae223b2363df2dbeaca3f54d7d23c324cf4335792d90483"
+        ],
+        [
+          "failureCauseReply",
+          "e4060c68f51066cfacb04ae07ac742af8fab70bf3baafaf46c7054b99a0619d6"
+        ],
+        [
+          "feedArrivalAnchor",
+          "e2ecd1bb55e423142a286263d08a1f45ed2848ab282ac6a4bf665103e7b7bffd"
+        ],
+        [
+          "finishPendingForReader",
+          "a258d379a86e810f00fc21c856376087d933db4708f9eea7274425f8125dc003"
+        ],
+        [
+          "finishReadReader",
+          "d249c055104f74b084a4528c0c5f6e488686808d2f46cce7812a9ab5ba5f6694"
+        ],
+        [
+          "finishReadSourceDb",
+          "3c74d067b760503554c54674d6c3bf17086f307deed961548a98a608abc45039"
+        ],
+        [
+          "finishRow",
+          "42f05b1aac53a7d0d1b32027b90939cd2afcd2e8f6f2648e459e44a2ca8c92b5"
+        ],
+        [
+          "held",
+          "3afb58ffec10c6c4d90d2fdf72081b3e67a7489e098a0802a05bb7aa9dd13c62"
+        ],
+        [
+          "heldReview",
+          "b25dd3a2f168316632fabcc4cce379549aa5c17937ba771573601862b90514ee"
+        ],
+        [
+          "hostedQueueAheadSelection",
+          "6305d72e0f3547bbaef29e311c90d4d10cf509de5d721437ae3c31c066e194cd"
+        ],
+        [
+          "invariant",
+          "a25036d770aae805d10bdb41ade261044ed7f7ba6fbbf3ccd57a32c56a3d4c20"
+        ],
+        [
+          "landingAlias",
+          "b6741f9c05efbf6942be98da861c5a9bbcaddfe73c861ad015087766b75058ea"
+        ],
+        [
+          "landingOrderWaitForReader",
+          "485d14f839ac232af99c71f181f9e01b740fe6772700a9d1a484c3ec6f65db19"
+        ],
+        [
+          "landingReservationForReader",
+          "517627907d411058969346e30d36b58e861ed054105269f7e070326f7a411b20"
+        ],
+        [
+          "landingRow",
+          "9b2f0188e0b4cde94aab9a444ecb94a974871df87818b7d98abd5a37b26204aa"
+        ],
+        [
+          "landingStateForReader",
+          "23b1188000d73b169289bae01534e2bf4735c5790cf4f50dd9ce78e54302aa66"
+        ],
+        [
+          "landingStateFromRow",
+          "e9544abb32ec380806ee05d0c5356ffef65c48ef8e5f2b615f74e09b65bd7af6"
+        ],
+        [
+          "loadHeldPolicy",
+          "fe7760532e98b4aa241de8315a97db7660eccf0a3e13dc8cb78d3e3d1ccf1078"
+        ],
+        [
+          "noteHeldPolicy",
+          "b596b0ef8bf09da12844d92dc866ec871f67ce07cdba6a506a76dcda9e58b764"
+        ],
+        [
+          "observePage",
+          "45cd7a9200a194faee34cf7342c9b490e819762afaf1592af6cc8a7d4f84d038"
+        ],
+        [
+          "page",
+          "2d01d1d56d7030639d1570885c0bebd262c8649a5097173d9db67d962311fdb9"
+        ],
+        [
+          "pendingRunnerState",
+          "6cb03b2a8a6dc0589b3196a1497c93d29cd2c3b7daedabcff92d49f671b6a190"
+        ],
+        [
+          "preparingSourceStep",
+          "1439b77961c6b84fb3fc09cc16c7774657bd439bc2a516a7d4e4582e50c96945"
+        ],
+        [
+          "query",
+          "8579e7e542da24b278c7d1c4114393ed546ba1b2b36245f75e07a3b46da660e9"
+        ],
+        [
+          "queueAwareLandingState",
+          "54c3c0f5d451d90b3b66b63134d998b7ad6b515193e049e0e73bb382100a4d05"
+        ],
+        [
+          "readLandingTransition",
+          "2d70227a971a3c61f24e249b6416f2e4e8e500de9d2967c79d31f27fe9b689a7"
+        ],
+        [
+          "readProviderDelay",
+          "8d830175714877864a2fcd017b9c4e57f0a5eedbee826a5c84651a38e967f4e0"
+        ],
+        [
+          "readQueueStatus",
+          "1854f5fd6e7620cf2f766a3715f8f5db040919584df9b93e4a6592b464277603"
+        ],
+        [
+          "readWouldConflict",
+          "7b4b7317df9943777a33d841c94666c71032f8d525e706dddc4506a7dfb2e24f"
+        ],
+        [
+          "report",
+          "11f51c908ed7b15c3270a2410f7282cdb9c431b81d35e62cdff8695c9d306e0b"
+        ],
+        [
+          "reviewState",
+          "3f0b7dd6a87a986530c992dc560b261c8a2662bdfb20013dda117f1f2612e3a5"
+        ],
+        [
+          "selectExactFinishProject",
+          "8be57813547c0268a4e30e9cda0fa9a50e9a70d5524fef90e0bbe6b27ceca52d"
+        ],
+        [
+          "selectOperation",
+          "a07063a8a616720f506d69769b1a766825bfdfe8059ed141ce67de1a0800361f"
+        ],
+        [
+          "sourceAuthority",
+          "eb32e73637d57e614cf4e6336ef9cc7e7e91e97205dc92858eedf675be78c60e"
+        ],
+        [
+          "sourceStepFailureField",
+          "d97f67bcb525067a1b6e7aef77875b04f234c4f63982648ec2c89920a505ac3d"
+        ],
+        [
+          "stoppedMirror",
+          "5e5a1ea3f1df0baee624c27ef725afeb6f299452bf9d4c35a2d1fbe45f01f7aa"
+        ],
+        [
+          "storedLandingStateSchema",
+          "84f2e6ac995c11ec270f1529329561cce7a49b20ebc8bf42dd09977cfa51b6a4"
+        ],
+        [
+          "syncRequiredQueue",
+          "3f271c0a9ce2c58250b6b2a4136d15cc4e8cff2ac8c3569d703733b7aac09932"
+        ],
+        [
+          "v",
+          "c9b23930c9b094848cdb5f563a16f0a2f497fc28d7ea9a82afca6bc52741e95f"
+        ],
+        [
+          "withLandingCapsule",
+          "e0d956d2f0fd907bcc75173c228ccf5e01ebb30cb8e9606f8ac8257893b994e1"
+        ]
+      ],
+      "shell": "67a582337933087ee7ebb1b515617a3662b3f6853df2456bc8b18705708be68e"
+    }
+  }
+}

@@ -265,7 +265,9 @@ export function agentFixture(t, source) {
       else completed.add(id);
     } else if (name === 'projectHostedCheckDefinitions:list')
       result = {
-        page: [{ check: { id: '22222222-2222-4222-8222-222222222222', name: 'verify' } }],
+        page: source?.noChecks
+          ? []
+          : [{ check: { id: '22222222-2222-4222-8222-222222222222', name: 'verify' } }],
         isDone: true,
         continueCursor: '',
       };

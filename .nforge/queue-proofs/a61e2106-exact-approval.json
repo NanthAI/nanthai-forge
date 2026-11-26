@@ -1,0 +1,212 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedAcceptance.ts": "5dacdbd21facb6819b0ff2847e9896e52622553547dc7ffa20caa2ff5d490f9b"
+  },
+  "replay": {
+    "incident": "a61e2106",
+    "test": "an unchecked owner approval after main moves asks for a fresh exact approval",
+    "receipt": "351b7a24-3298-46b9-9c31-f88ff7442fc8"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "thread:delegated-task:command%3Amcp%3A1b59c402-0b0f-4e50-9d3b-a36308227689%3Adelegate-task%3A129142b4-85ab-4661-a673-8b21d5c1da9e",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "thread:delegated-task:command%3Amcp%3Ada75401b-42cf-4c49-8af3-a20dbe8afcf4%3Adelegate-task%3Ac462d539-381e-4710-b2ec-4325fe01b3d2",
+    "receipt": "d9b1632a-b5d8-4095-bb40-021140f48ac7"
+  },
+  "exercised": {
+    "convex/projectHostedAcceptance.ts": {
+      "executed": [
+        "approve",
+        "approveHeldLanding",
+        "publishSelected"
+      ],
+      "digest": "1e60f7ccf804b0b53142f8b7a963f6418d9dffc2c6f77a07d306f11411dc0aac",
+      "units": [
+        [
+          "ForgeError",
+          "c8934d5ec6f70ce797a0d05c3ecfb78031a48937ad3336194885e4520006a12d"
+        ],
+        [
+          "accept",
+          "ee395d81f45de99ce1deb006bc6991e2f41f159da72c8d91b679ad0cbc3332cf"
+        ],
+        [
+          "acceptanceActor",
+          "0c9112e8326de402fdb77b8cece78b3ea8676c6d95760b6ea8075135b05abaf0"
+        ],
+        [
+          "acceptancePlan",
+          "aa37cecd0d6d247ca7125af00ccf2c8fbf3a33208889969db6cd5dd541745b03"
+        ],
+        [
+          "acceptanceRow",
+          "98deb415e96c9a4a60049727beb64c3e9a1835ebf28219984c26218fb31b4986"
+        ],
+        [
+          "acceptanceSelection",
+          "46c5920b363500520e7a015044b21cf280401a5f8890c842cb2e31c59c2c086b"
+        ],
+        [
+          "accessibleProject",
+          "50a4d4f1047573513f361192189b40078a2daa64c945e440ac80ed1a45c7d270"
+        ],
+        [
+          "activeOwnedProject",
+          "f69cc92d65d5e23f3f54c78049427c8fe9d6ac4a6bf76fa36d5650d551fc38fb"
+        ],
+        [
+          "approve",
+          "7fbe5728883c39335489ec147233b63d5ca129452851116a6b2dccc61c2b3fb3"
+        ],
+        [
+          "approveHeldLanding",
+          "a6099c98f206777d32d1e65eb38b322887dace7af6ed22252139d8128a01f68a"
+        ],
+        [
+          "caller",
+          "04d33ac8d415a7780d69f736983348a49d4de20a261cc1a079871da7f01ed790"
+        ],
+        [
+          "canonicalPayload",
+          "95124f3098690f0b83a3927221e9cee6fc53fe1b0c044ab43a9f934e9effe9bb"
+        ],
+        [
+          "claimReadyLanding",
+          "b7596b8c137b92b5bc2145d46f2233de2a7c5944be2aa447f81c74b2f1c9f32f"
+        ],
+        [
+          "complete",
+          "a2c17fa0f3b918ea6d7c1e5e2106adae3cb7c24be6fc6b8c38fb67f73cf92bbc"
+        ],
+        [
+          "completeAcceptedHeads",
+          "f4a798942fcd8d059f77fd0f6af98d2d63d469fc62c5c6f0b4a4b2a154d0b75c"
+        ],
+        [
+          "finishRow",
+          "42f05b1aac53a7d0d1b32027b90939cd2afcd2e8f6f2648e459e44a2ca8c92b5"
+        ],
+        [
+          "grantOwnerApproval",
+          "7e6ebb7ccf64dc965fd25e31c9b96656c7851637060a8fade2de33cc239ff2d1"
+        ],
+        [
+          "guard",
+          "f54e9d27be8fe9ef45f40c10addd2a021951e2d138ac58d94e28a4e5c802c54a"
+        ],
+        [
+          "guardAcceptanceCompletion",
+          "a80fe9c0bf7db343ea9b82abbfddb43c1b0170761f08a643e0189a8ff6607cc1"
+        ],
+        [
+          "held",
+          "3afb58ffec10c6c4d90d2fdf72081b3e67a7489e098a0802a05bb7aa9dd13c62"
+        ],
+        [
+          "heldPolicy",
+          "260415914eaba46844b94833cb8653619669f1bb258a636b8b90208eb4c59615"
+        ],
+        [
+          "internalMutation",
+          "ad8bc3b3467b48874a9b8a7695205b860617a360baed788cc47dbc2e6f4b18a6"
+        ],
+        [
+          "invariant",
+          "a25036d770aae805d10bdb41ade261044ed7f7ba6fbbf3ccd57a32c56a3d4c20"
+        ],
+        [
+          "landElsewhere",
+          "63834eba4aad555bbfaf20d480d0e522bea8e57c6fe3371b75071f73bb325a79"
+        ],
+        [
+          "landingQueue",
+          "133b8765bccbb695ac3fb29795469a9976b57700cf9bc517906aafaf600427f8"
+        ],
+        [
+          "mutation",
+          "4f17c7855059ce010489b8b943f417aba3333721a20f7872a46abe0eee887bc9"
+        ],
+        [
+          "prepare",
+          "1f928558412d77d4331ba899b244d68950659069e3a6a6422e040abbeb15b0c1"
+        ],
+        [
+          "prepareAcceptance",
+          "34949976c5a6df9f1b6668472e504ea15b7c981e62d249638285fd2dac57db01"
+        ],
+        [
+          "publish",
+          "8d1eb709cbbdb4d8f764845d4e8ff97fa4f425af07afacc527af639bca662888"
+        ],
+        [
+          "publishAcceptance",
+          "9f96b490a3fe85395ed0cdd88b0b6ac4d6b1dcd26e81b25b42a697de3e1d96b5"
+        ],
+        [
+          "publishLandingBatch",
+          "98883b45039c44a40d1c22a6899af4ef126475cd6eabf63046236ad1aa6792b0"
+        ],
+        [
+          "publishSelected",
+          "ecf9b8c1ffa2d49af90495c5787ababf4354926615ea6dbfac4ea2ab06151128"
+        ],
+        [
+          "query",
+          "daf3f45820a616be793e9371cc4c356cef17e60a669e2c4a3587a50a99345ee8"
+        ],
+        [
+          "receipt",
+          "2272db022095ea3d855642b3788f23098ddff9854639ace5f957a6d3c2681cfb"
+        ],
+        [
+          "receiptMessageForReader",
+          "b9e522c275f334344d9264c73319119334e1a47f506905250daaf13155ab5904"
+        ],
+        [
+          "recordMutationReceipt",
+          "7094e3505424520d3f5d9497fd533fdd4f4ddc7df34bd134eca14c47f83bd982"
+        ],
+        [
+          "releaseApprovedReview",
+          "9d3406e211738944422d9d1d0459965f5f4b422cfa7a09e81e101fbc701ccaac"
+        ],
+        [
+          "releaseLandingQueue",
+          "f1468f75263fc83bc19a62f42dcba21c51ce4af14563404ff398bd7d995ceab6"
+        ],
+        [
+          "report",
+          "11f51c908ed7b15c3270a2410f7282cdb9c431b81d35e62cdff8695c9d306e0b"
+        ],
+        [
+          "reserveFinishRetry",
+          "d614cb0da1a790e665f56f87dac66093ac8e368511d253cb41e34a3cb29e2d05"
+        ],
+        [
+          "selection",
+          "e8a24c7cb1fe2f79c85417b20762525c927e2983009dc6b4481d484077e5066a"
+        ],
+        [
+          "settleAttemptApprovals",
+          "6d713d58c3f735f921512dbf4f954d03d84ab0c664df9534da71abe202ce2fff"
+        ],
+        [
+          "stage",
+          "9e21447c814de295e21159eb72538f76684d2cb5b61f01880f786903cf96e204"
+        ],
+        [
+          "stageAcceptance",
+          "c1dc102be10cbacfb1a9412b1821e9708d50b8bb4629ad365dfc4f8134c950a9"
+        ],
+        [
+          "v",
+          "c9b23930c9b094848cdb5f563a16f0a2f497fc28d7ea9a82afca6bc52741e95f"
+        ]
+      ],
+      "shell": "6834721e42ff89e958ab4790715d91b1f4f6248c2091da055a403a9a83dc1f20"
+    }
+  }
+}

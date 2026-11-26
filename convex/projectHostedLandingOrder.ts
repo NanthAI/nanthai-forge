@@ -594,6 +594,7 @@ export function landingOrderWaitForReader(
   }
   if (!row?.orderWait || row.phase !== 'ready' || state.phase !== 'ready') return null;
   if (state.observation.state !== 'pending') return null;
+  const check = state.request.check === null ? 'No check ran' : 'Check passed';
   const last = row.orderWaits?.at(-1);
   const { orderWaits } = orderWaitsField(row.orderWaits);
   // Why it waits now and every wait so far, as the receipt's `orderWaits` will record them: from the
@@ -608,18 +609,18 @@ export function landingOrderWaitForReader(
       submissionId: row.orderWait,
       reason: 'reservation' as const,
       ...why,
-      message: `Check passed; submission ${row.orderWait} holds a landing reservation on files this change touches (it was superseded after a passed check, Issue 10d253c6). This landing continues when that one lands or fails, or when its reservation ends (at most ${HOSTED_RESERVATION_MS / 60_000} minutes). observe {"submissionId":"${row.orderWait}"} follows it.`,
+      message: `${check}; submission ${row.orderWait} holds a landing reservation on files this change touches (it was superseded after a passed check, Issue 10d253c6). This landing continues when that one lands or fails, or when its reservation ends (at most ${HOSTED_RESERVATION_MS / 60_000} minutes). observe {"submissionId":"${row.orderWait}"} follows it.`,
     };
   if (last?.submissionId === row.orderWait && last.held === 'approved-check')
     return {
       submissionId: row.orderWait,
       ...why,
-      message: `Check passed. Submission ${row.orderWait} has the publication turn while its approved exact check runs.`,
+      message: `${check}. Submission ${row.orderWait} has the publication turn while its approved exact check runs.`,
     };
   return {
     submissionId: row.orderWait,
     ...why,
-    message: `Check passed; waiting for older submission ${row.orderWait} to take main first (submission order). When it lands or leaves the order this landing continues; observe {"submissionId":"${row.orderWait}"} follows it.`,
+    message: `${check}; waiting for older submission ${row.orderWait} to take main first (submission order). When it lands or leaves the order this landing continues; observe {"submissionId":"${row.orderWait}"} follows it.`,
   };
 }
 /** A passed proof ages with every main move, so a READY entry accepts before any
@@ -715,9 +716,11 @@ export async function activeLandingOrder(
   return [...running, ...orderHostedLandingRows(keys.filter(row => row.phase === 'queued'))];
 }
 export type LandingOrder = Awaited<ReturnType<typeof activeLandingOrder>>;
-/** Released wait/stack readers parse submission bodies strictly. Keep their
- * original read shape unless the caller explicitly selects priority metadata. */
-export function landingStateForReader(state: HostedLandingState, priorityInfo?: 1): HostedLandingState {
+/** Released readers parse submission bodies strictly. Select optional read fields independently. */
+export function landingStateForReader(
+  state: HostedLandingState,
+  reader: { priorityInfo?: 1; checklessInfo?: 1 },
+): HostedLandingState {
   // Retry links remain in canonical records and admission receipts. Selected
   // read DTOs keep the released strict shape, including priority-aware readers.
   const {
@@ -739,7 +742,13 @@ export function landingStateForReader(state: HostedLandingState, priorityInfo?: 
   void _ms;
   void _heldMs;
   const readable = { ...publicState, ...(state.timing ? { timing } : {}), request: publicRequest };
-  if (priorityInfo === 1) return readable;
+  if (readable.acceptance && reader.checklessInfo !== 1) {
+    const acceptance = { ...readable.acceptance };
+    delete acceptance.checked;
+    delete acceptance.sequence;
+    readable.acceptance = acceptance;
+  }
+  if (reader.priorityInfo === 1) return readable;
   const { priority: _priority, priorityReason: _reason, priorityVersion: _version, ...legacy } = readable;
   const { priority: _requested, ...request } = readable.request;
   void _priority;

@@ -3,7 +3,8 @@
 import { attributeCheckTime } from '../src/check-time-added';
 import { queueProjectSnapshots } from './publicSnapshotJobs';
 import { writeLineMain } from './projectLiveLineStore';
-import { requireLandingCheck } from './projectHostedCheckEntries';
+import { projectHasChecks, requireLandingCheck } from './projectHostedCheckEntries';
+import { fixGate } from '../src/culprit-bisect';
 import { earlyPredecessor } from './projectHostedEarlyResolution';
 import { cancelStaleLandingChecks } from './projectHostedLandingStaleChecks';
 import { scheduleLandingPrecompose } from './projectHostedLandingPrecompose';
@@ -310,10 +311,22 @@ export async function publishAcceptance(
       ...(run.actions?.isolation ? { isolation: run.actions.isolation } : {}),
     };
   }
-  // Checked landings never consult this setting or read its membership/team rows.
-  const uncheckedPerson = !check && (await mayLandUnchecked(ctx, project, policy, actor));
+  // A driven agent finish may omit a check only when the project still has none
+  // at publication. A deferred or missing run for a selected check is never evidence.
+  const projectUnchecked =
+    !check &&
+    state.request.check === null &&
+    project.checklessDefault === true &&
+    !(await projectHasChecks(ctx, project));
+  const uncheckedFinish =
+    projectUnchecked &&
+    state.request.finish !== undefined &&
+    attempt.actor.kind === 'agent' &&
+    !fixGate({ needsFix: candidateRow.restoreBases ?? project.needsFix?.[candidate.intentId] });
+  // The separate person selection only applies when a person accepts unchecked.
+  const uncheckedPerson = !check && !uncheckedFinish && (await mayLandUnchecked(ctx, project, policy, actor));
   invariant(
-    check || uncheckedPerson,
+    check || uncheckedFinish || uncheckedPerson,
     'CHECK_NOT_PASSED',
     'This actor requires an exact passing check under the current unchecked landing policy.',
   );
@@ -403,6 +416,7 @@ export async function publishAcceptance(
   const acceptedBy = landingAcceptedBy({
     actor,
     at: new Date(now).toISOString(),
+    ...(projectUnchecked ? { checked: false as const } : {}),
     acceptedAt: grant?.at ?? now,
     head: grant ? (grant.head ?? (grant.attemptId === attempt.id ? head : undefined)) : head,
     protectedPaths:
@@ -440,6 +454,7 @@ export async function publishAcceptance(
     ...(row.agentRun ? { agentRun: row.agentRun } : {}),
     ...(row.agentClient ? { agentClient: row.agentClient } : {}),
     policyDigest: attempt.policyDigest,
+    ...(projectUnchecked ? { checked: false as const } : {}),
     check,
     ...(reuse ? { crossHeadProof: reuse } : {}),
     ...firstCheckField(
@@ -540,6 +555,7 @@ export async function publishAcceptance(
     acceptance: {
       receiptId: receipt.id,
       head,
+      ...(receipt.checked === false ? { checked: false as const, sequence: receipt.snapshot.revision } : {}),
       ...(run?.proofOnLanding ? { proofRunId: run!.id } : {}),
       ...(receipt.docsResolution ? { docsResolution: receipt.docsResolution } : {}),
       acceptedBy,
@@ -567,14 +583,15 @@ export async function publishAcceptance(
   await settleLandingOperation(ctx, next);
   await releaseLandingQueue(ctx, queue, now, receipt.id);
   await noteMainLanding(ctx, { project, receipt, run, paths: candidate.governance?.paths ?? null });
-  await noteTrustLanding(ctx, {
-    project,
-    actor: attempt.actor.id,
-    receiptId: receipt.id,
-    at: receipt.at,
-    paths: candidate.governance?.paths ?? null,
-    run,
-  });
+  if (!projectUnchecked)
+    await noteTrustLanding(ctx, {
+      project,
+      actor: attempt.actor.id,
+      receiptId: receipt.id,
+      at: receipt.at,
+      paths: candidate.governance?.paths ?? null,
+      run,
+    });
   await enqueueGithubMirror(ctx, project, receipt, {
     run,
     coverage: run ? coverageLanding(run, candidate.governance?.paths ?? null) : false,

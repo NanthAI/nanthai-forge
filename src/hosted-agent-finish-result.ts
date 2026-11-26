@@ -35,13 +35,20 @@ export function pendingLandingPresentation(
     progress.orderWait?.submissionId === recorded.orderWait?.submissionId
   )
     return undefined;
-  const submission: LandingRecord = { id: recorded.id, operationId: recorded.operationId, ...progress };
+  const submission: LandingRecord = {
+    id: recorded.id,
+    operationId: recorded.operationId,
+    ...(recorded.request ? { request: recorded.request } : {}),
+    ...progress,
+  };
   const blocker = progress.orderWait?.submissionId;
   const knownOrder = blocker && recorded.orderWait?.submissionId === blocker && recorded.orderWait.message;
   if (blocker)
     submission.orderWait = {
       submissionId: blocker,
-      message: knownOrder || `The check passed. Waiting for submission ${blocker} to clear.`,
+      message:
+        knownOrder ||
+        `${submission.request?.check === null ? 'No check ran' : 'The check passed'}. Waiting for submission ${blocker} to clear.`,
     };
   const landingState = landingStateField(submission, laneId);
   if (landingState.state === 'waiting-for-order' && !knownOrder)

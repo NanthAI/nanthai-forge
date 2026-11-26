@@ -94,6 +94,7 @@ export async function postIntentLandingNote(
     ...(note.landedBy ? { landedBy: note.landedBy } : {}),
     ...(note.viaLaneId ? { viaLaneId: note.viaLaneId } : {}),
     ...(note.revertOf ? { revertOf: note.revertOf } : {}),
+    ...(note.checked === false ? { checked: false as const } : {}),
   });
   return true;
 }

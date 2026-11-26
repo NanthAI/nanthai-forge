@@ -22,7 +22,7 @@ import {
   planningInitiativeCountsFeature,
   planningWaitingFeature,
 } from '../dist/hosted-contract-features.js';
-import { capabilityOptions } from '../dist/hosted-capabilities-early.js';
+import { capabilityOptions, requestFeedCapability } from '../dist/hosted-capabilities-early.js';
 import {
   checkResponseCompatibility,
   replyBreakMessage,
@@ -78,6 +78,20 @@ test('finish negotiates its client hold in the existing discovery budget', async
   assert(!finish.features.includes('main-today'));
   const general = await candidateCapabilities();
   assert(!general.features.includes('landing-client-hold'));
+});
+
+test('checkless finish, status and wait negotiate within the released capability budget', async () => {
+  for (const action of ['finish', 'status', 'observe', 'capabilities']) {
+    const options = capabilityOptions('synthetic-root', false, false, action);
+    const features =
+      action === 'finish'
+        ? [...options.features, 'landing-client-hold']
+        : action === 'capabilities'
+          ? requestFeedCapability(options).features
+          : options.features;
+    assert(features.includes('checkless-landing'));
+    await candidateCapabilities(features);
+  }
 });
 
 test('only planning reads and puts negotiate waiting reasons within the existing discovery budget', async () => {

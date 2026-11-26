@@ -106,6 +106,8 @@ export const hostedAcceptanceSchema = z
      * (`claude-code:claude-opus-5-5`; 81d12a32). Not verified. Absent on older receipts. */
     agentClient: authorshipFields.agentClient,
     policyDigest: hash,
+    /** This landing used the project's no-check policy. Older unchecked person receipts omit it. */
+    checked: z.literal(false).optional(),
     check: z
       .object({
         runId: z.uuid(),
@@ -146,6 +148,7 @@ export const hostedAcceptanceSchema = z
     docsResolution: docsResolutionSchema.optional(),
   })
   .strict()
+  .refine(receipt => receipt.checked !== false || receipt.check === null, 'An unchecked receipt has no run.')
   .refine(personStampValid, 'A person stamp has no model or run.');
 export type HostedAcceptance = z.infer<typeof hostedAcceptanceSchema>;
 /** What a landing's completion tick does. A refs-only landing (`closes:false`, GitHub `Refs #N`) names the work without finishing it,

@@ -15,11 +15,16 @@ import {
   finishIOTask,
   isFinishWake,
 } from './hosted-finish-fixture.mjs';
+import { hostedLandingStateSchema } from '../dist/hosted-landing.js';
+import { landSummary } from '../dist/hosted-land-summary.js';
+import { withFinishLandingState, pendingLandingPresentation } from '../dist/hosted-agent-finish-result.js';
 import { hostedFinishBackoff } from '../dist/hosted-finish.js';
 import { compactDiscardedChecks, stampExecution } from './landing-ticket-fixture.mjs';
 import { landingCosts } from '../dist/hosted-landings-view.js';
 import { fixtureLayers } from './hosted-lanes-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
+import { api as acceptanceApi } from './hosted-acceptance-fixture.mjs';
+const observeApi = await import(moduleUrl('../convex/projectHostedFinishObserve.ts'));
 const synthetic = {
   FORGE_HOSTED_CHECK_KEY_ID: 'SYNTHETIC',
   FORGE_SOURCE_PROVIDER: 'convex',
@@ -867,6 +872,207 @@ test('unchecked person finish stays available without adding a check obligation'
   assert.equal((await f.current(person.state.id)).submission.phase, 'landed');
   assert.equal(f.tables.projectHostedCheckRuns.size, 0);
   assert.equal(f.pending().length, 0);
+});
+
+test('incident a61e2106: a trusted project can land its first change with no check or runner', async t => {
+  const f = await finishFixture(t);
+  for (const id of f.tables.projectHostedCheckSettings.keys()) f.tables.projectHostedCheckSettings.delete(id);
+  f.patch('hostedProjects', f.projectId, {
+    checklessDefault: true,
+    landingCheckId: null,
+    hasCheckDefinitions: false,
+    checkEntries: [],
+  });
+  const countsStart = f.counts.length;
+  const started = performance.now();
+  const { request, state } = await begin(f, { check: null });
+  const landed = (await f.current(state.id)).submission;
+  assert.equal(landed.phase, 'landed', JSON.stringify(landed.error));
+  assert.equal(landed.request.check, null);
+  assert.equal(landed.acceptance.checked, false);
+  assert.match(landed.acceptance.acceptedBy.note, /no check ran/i);
+  assert.doesNotMatch(landSummary({ result: { submission: landed } }).join('\n'), /check passed/i);
+  const receipt = JSON.parse([...f.tables.projectHostedAcceptances.values()][0].value);
+  assert.equal(receipt.check, null);
+  assert.equal(receipt.checked, false);
+  assert.equal(receipt.actor.kind, 'agent');
+  assert.equal(receipt.automatic, true);
+  assert.equal(receipt.undo.receiptId, receipt.id);
+  assert.equal(f.currentMain().head, receipt.candidate.head);
+  assert.equal(landed.acceptance.sequence, f.currentMain().sourceRevision);
+  assert.deepEqual((await f.enqueue(request)).acceptance, landed.acceptance);
+  assert.equal(f.tables.projectHostedCheckRuns.size, 0);
+  assert.equal(f.pending().length, 0);
+  const counts = f.counts.slice(countsStart);
+  assert.equal(
+    counts.reduce((n, call) => n + (call.readRangesByTable.projectHostedCheckSettings ?? 0), 0),
+    0,
+  );
+  t.diagnostic(
+    JSON.stringify({
+      calls: counts.length,
+      reads: counts.reduce((n, call) => n + call.documents, 0),
+      writes: counts.reduce((n, call) => n + call.writes, 0),
+      elapsedMs: performance.now() - started,
+      rssBytes: process.memoryUsage().rss,
+      pendingWakes: f.pending().length,
+    }),
+  );
+});
+
+test('unchecked ready and ordered finishes describe the wait without claiming a check passed', async t => {
+  const f = await finishFixture(t);
+  f.tables.projectHostedCheckSettings.clear();
+  f.patch('hostedProjects', f.projectId, {
+    checklessDefault: true,
+    landingCheckId: null,
+    hasCheckDefinitions: false,
+    checkEntries: [],
+  });
+  const state = await f.enqueue(f.request({ check: null }));
+  while ((await f.current(state.id)).submission.phase !== 'ready') {
+    assert(f.pending().length > 0, 'a ready finish has pending work before publication');
+    await f.execute();
+  }
+  const ready = await f.current(state.id);
+  const blocker = randomUUID();
+  const row = [...f.tables.projectHostedLandingRequests.values()].find(r => r.submissionId === state.id);
+  f.patch('projectHostedLandingRequests', row._id, { orderWait: blocker });
+  const ordered = await f.current(state.id);
+  assert.equal(ordered.orderWait?.submissionId, blocker);
+  const later = pendingLandingPresentation(ready.submission, {
+    phase: 'ready',
+    observation: ready.submission.observation,
+    orderWait: { submissionId: blocker },
+  });
+  for (const line of [
+    landSummary({ result: ready })[0],
+    withFinishLandingState({}, ready).landingState.nextStep,
+    landSummary({ result: ordered })[0],
+    withFinishLandingState({}, ordered).landingState.nextStep,
+    later.landingState.nextStep,
+  ]) {
+    assert.match(line, /no check ran/i);
+    assert.doesNotMatch(line, /check passed/i);
+  }
+  assert.equal(f.tables.projectHostedCheckRuns.size, 0);
+});
+
+test('released strict status and wait readers can consume an unchecked acceptance', async t => {
+  const f = await finishFixture(t);
+  f.tables.projectHostedCheckSettings.clear();
+  f.patch('hostedProjects', f.projectId, {
+    checklessDefault: true,
+    landingCheckId: null,
+    hasCheckDefinitions: false,
+    checkEntries: [],
+  });
+  const { state } = await begin(f, { check: null });
+  const released = hostedLandingStateSchema.extend({
+    acceptance: hostedLandingStateSchema.shape.acceptance
+      .unwrap()
+      .omit({ checked: true, sequence: true })
+      .optional(),
+  });
+  const identity = { projectId: f.projectId, submissionId: state.id };
+  const operation = { projectId: f.projectId, operationId: state.operationId, nextVersion: 0 };
+  const read = async (name, endpoint, args) => JSON.parse(await f.tx(name, endpoint, args));
+  for (const reader of [{}, { priorityInfo: 1 }, { priorityInfo: 1, checklessInfo: 1 }]) {
+    const finish = await read('compatFinish', api.status, { ...identity, ...reader });
+    const landing = await read('compatLanding', landingApi.status, { ...identity, ...reader });
+    const page = await read('compatObserve', observeApi.page, { ...operation, ...reader });
+    const landedEvents = page.events.filter(event => event.submission.phase === 'landed');
+    assert(landedEvents.length > 0, 'the wait delivers the landed journal event');
+    for (const submission of [
+      finish.submission,
+      landing.request,
+      page.submission,
+      ...landedEvents.map(e => e.submission),
+    ]) {
+      assert.equal(submission.phase, 'landed');
+      if (reader.checklessInfo) {
+        assert.equal(submission.acceptance.checked, false);
+        assert.equal(submission.acceptance.sequence, f.currentMain().sourceRevision);
+      } else released.parse(submission);
+    }
+  }
+});
+
+test('an unchecked owner approval after main moves asks for a fresh exact approval', async t => {
+  const f = await finishFixture(t, { selectedFiles: [['.github/workflows/check.yml', 'name: check\n']] });
+  f.tables.projectHostedCheckSettings.clear();
+  f.patch('hostedProjects', f.projectId, {
+    checklessDefault: true,
+    landingCheckId: null,
+    hasCheckDefinitions: false,
+    checkEntries: [],
+  });
+  const { state } = await begin(f, { check: null });
+  const held = (await f.current(state.id)).submission;
+  assert.equal(held.observation.pendingReason, 'waiting-for-review');
+  f.moveMain();
+  const reply = JSON.parse(await f.tx('finishApprove', acceptanceApi.approve, f.select(held)));
+  await f.drain();
+  const replacement = (await f.current(state.id)).submission;
+  assert.notEqual(replacement.attemptId, held.attemptId);
+  assert.equal(replacement.observation.pendingReason, 'waiting-for-review');
+  assert.equal(f.tables.projectHostedCheckRuns.size, 0);
+  assert.equal(reply.status, 'pending');
+  assert.match(reply.reason, /main moved.*approve.*new Candidate/i);
+  assert.doesNotMatch(reply.reason, /checked again|lands with this approval/i);
+  assert.equal(reply.needsReapproval, true);
+  await f.tx('finishApprove', acceptanceApi.approve, f.select(replacement));
+  await f.drain();
+  assert.equal((await f.current(state.id)).submission.phase, 'landed');
+});
+
+test('an agent cannot omit a defined check even when no runner or unique default is available', async t => {
+  const f = await finishFixture(t);
+  for (const [id, row] of f.tables.projectHostedCheckSettings)
+    if (row.kind === 'runner') f.tables.projectHostedCheckSettings.delete(id);
+  f.patch('hostedProjects', f.projectId, {
+    checklessDefault: true,
+    landingCheckId: null,
+    hasCheckDefinitions: true,
+  });
+  const { state } = await begin(f, { check: null });
+  const ended = (await f.current(state.id)).submission;
+  assert.equal(ended.phase, 'terminal-failed');
+  assert.equal(ended.error.code, 'CHECK_NOT_PASSED');
+  assert.equal(f.currentMain().sourceRevision, 0);
+  assert.equal(f.tables.projectHostedCheckRuns.size, 0);
+});
+
+test('protected files still require an exact owner approval without a project check', async t => {
+  const f = await finishFixture(t, { selectedFiles: [['.github/workflows/check.yml', 'name: check\n']] });
+  for (const id of f.tables.projectHostedCheckSettings.keys()) f.tables.projectHostedCheckSettings.delete(id);
+  f.patch('hostedProjects', f.projectId, {
+    checklessDefault: true,
+    landingCheckId: null,
+    hasCheckDefinitions: false,
+    checkEntries: [],
+  });
+  const { state } = await begin(f, { check: null });
+  const held = (await f.current(state.id)).submission;
+  assert.equal(held.observation.pendingReason, 'waiting-for-review');
+  assert.match(held.error.message, /needs owner approval: protected paths/);
+  assert.equal(f.currentMain().sourceRevision, 0);
+  await f.tx('finishApprove', acceptanceApi.approve, f.select(held));
+  await f.drain();
+  const landed = (await f.current(state.id)).submission;
+  assert.equal(landed.phase, 'landed', JSON.stringify(landed.error));
+  assert.equal(landed.acceptance.acceptedBy.kind, 'person');
+  assert.equal(f.tables.projectHostedCheckRuns.size, 0);
+});
+
+test('trusted projects created under the older defaults keep agent check requirements', async t => {
+  const f = await finishFixture(t);
+  for (const id of f.tables.projectHostedCheckSettings.keys()) f.tables.projectHostedCheckSettings.delete(id);
+  f.patch('hostedProjects', f.projectId, { landingCheckId: null });
+  const { state } = await begin(f, { check: null });
+  const ended = (await f.current(state.id)).submission;
+  assert.equal(ended.error.code, 'CHECK_NOT_PASSED');
+  assert.equal(f.currentMain().sourceRevision, 0);
 });
 
 test('reviewed person finish requests keep independent selections for the same saved head', async t => {

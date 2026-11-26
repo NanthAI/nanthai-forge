@@ -262,6 +262,8 @@ export const hostedLandingStateSchema = z
       .object({
         receiptId: z.uuid(),
         head: hash,
+        checked: z.literal(false).optional(),
+        sequence: checkNumber.optional(),
         proofRunId: z.uuid().optional(),
         proof: proofSummarySchema.optional(),
         docsResolution: docsResolutionSchema.optional(),

@@ -138,6 +138,7 @@ export type LandingRecord = {
   id?: string;
   operationId?: string;
   phase?: string | null;
+  request?: { check?: unknown };
   observation?: { state?: string; pendingReason?: string | null; cause?: string | null } | null;
   error?: { code?: string; message?: string } | null;
   /** The waiting check's provider-delayed reason (`readProviderDelay`), when the reply carries it:
@@ -211,19 +212,21 @@ export function landingStateOf(record: LandingRecord | null | undefined, laneId?
   const state = record ? stateOf(record) : 'unknown';
   const hold = record ? landingHold(record, laneId) : null;
   const view = views[state];
+  const unchecked = record?.request?.check === null;
+  const order = record?.orderWait;
+  const readyStep =
+    state === 'waiting-for-order' && order
+      ? (order.message ??
+        `${unchecked ? 'No check ran' : 'The check passed'}; older submission ${order.submissionId} takes main first, then this one lands by itself. Nothing to do.`)
+      : state === 'landing' && unchecked
+        ? 'No check ran. The landing is being accepted into main. Wait.'
+        : view.nextStep;
   const nextStep =
     record?.error?.code === 'SOURCE_STATE_TOO_LARGE'
       ? `Split the repository. ${sourceSizeDocs}`
       : record?.phase === 'composing' && record.observation?.state === 'pending'
         ? 'Preparing source before queue admission; waiting for the server source/landing controller. No queue position is assigned yet.'
-        : (hold?.next ??
-          (state === 'waiting-for-order' && record?.orderWait
-            ? (record.orderWait.message ??
-              `The check passed; older submission ${record.orderWait.submissionId} takes main first, then this one lands by itself. Nothing to do.`)
-            : // A queued change held before its Lane check names its holder (Item 1018d0f8).
-              state === 'queued' && record?.orderWait?.message
-              ? record.orderWait.message
-              : view.nextStep));
+        : (hold?.next ?? (state === 'queued' && order?.message ? order.message : readyStep));
   // Every platform retry says since when it waits (Item 0d8a85a3), in UTC like the server's reasons.
   // A CI-down hold (e62d834b) names its own start in its message.
   const since =

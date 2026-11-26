@@ -44,6 +44,7 @@ export async function retainLandingNoteReference(
     ...(row.revertOf ? { revertOf: row.revertOf } : {}),
     ...(row.revertedBy ? { revertedBy: row.revertedBy } : {}),
     ...(row.landedBy ? { landedBy: { by: row.landedBy.by } } : {}),
+    ...(row.checked === false ? { checked: false as const } : {}),
     capsule: submissionId,
   });
 }

@@ -18,6 +18,7 @@ export type LandingNote = {
   laneIds: string[];
   commit: string;
   sequence: number;
+  checked?: false | undefined;
   actor: string;
   agentRun?: string | undefined;
   agentClient?: string | undefined;
@@ -58,11 +59,13 @@ export function landingNoteText(note: LandingNote) {
     note.landedBy?.review === 'person'
       ? ' A person accepted it.'
       : note.landedBy
-        ? ' Project policy accepted it after its check passed.'
+        ? note.checked === false
+          ? ' Project policy accepted it.'
+          : ' Project policy accepted it after its check passed.'
         : '';
   const via = note.viaLaneId ? ` through Lane ${short(note.viaLaneId)}` : '';
   return (
-    `${landed}: ${lanes(note.laneIds)}${via}, receipt ${short(note.receiptId)}, ` +
+    `${landed}: ${lanes(note.laneIds)}${via}, receipt ${short(note.receiptId)}${note.checked === false ? ' unchecked' : ''}, ` +
     `commit ${short(note.commit)}, main #${note.sequence}.${accepted}`
   );
 }
@@ -85,6 +88,7 @@ function noteComment(note: LandingNote) {
       laneIds: note.laneIds,
       commit: note.commit,
       sequence: note.sequence,
+      ...(note.checked === false ? { checked: false as const } : {}),
       actor: note.agentRun ? `${note.actor}/${note.agentRun}` : note.actor,
       ...(note.agentClient ? { agentClient: note.agentClient } : {}),
       // `landedBy`, never `by`: `by` is a person key the identity mapper would resolve as a handle (66f9ed38).

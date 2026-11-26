@@ -79,7 +79,7 @@ when their version in the existing workspace response changes. They add no polli
 
 ## Autonomy
 
-Each project has one autonomy policy. New projects are **supervised**: agents propose checked Candidates and a person accepts them. **Trusted** permits agent acceptance after an exact-Candidate check passes. **Autonomous** also completes accepted work and cleans eligible local regenerable copies. Editing an individual setting makes the preset **custom**. Protected-path globs always require a person. Automatic actions record what changed and how to undo it; accepted history is retained and nothing irreversible is automatic.
+Each project has one autonomy policy. **Supervised** sends agent landings to the owner. **Trusted** permits agent acceptance after an exact-Candidate check passes, or an unchecked landing when the project has no check. **Autonomous** also completes accepted work and cleans eligible local regenerable copies. Editing an individual setting makes the preset **custom**. Protected-path globs always ask the owner. Automatic actions record what changed and how to undo it. Accepted history is retained.
 
 Existing projects, including Forge's dogfooding owner, read as custom with their previous auto-accept behavior, automatic native Lane updates and completion, without enabling cleanup. See [workflows](workflows.md#autonomy-policy) for the fields and migration boundary.
 

@@ -58,10 +58,10 @@ export function capsuleObserveReply(capsule: LandingCapsule, context: Context, c
       events.push({
         ...event,
         pendingAttempt: finishPendingForReader(event.pendingAttempt),
-        submission: landingStateForReader(
-          storedLandingStateSchema.parse(event.submission),
-          command.priorityInfo as 1 | undefined,
-        ),
+        submission: landingStateForReader(storedLandingStateSchema.parse(event.submission), {
+          ...(command.priorityInfo === 1 ? { priorityInfo: 1 } : {}),
+          ...(command.checklessInfo === 1 ? { checklessInfo: 1 } : {}),
+        }),
       });
     } else events.push(current!);
     nextVersion++;

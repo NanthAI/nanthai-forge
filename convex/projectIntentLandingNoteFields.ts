@@ -22,6 +22,7 @@ const identity = {
   laneIds: v.array(v.string()),
   viaLaneId: v.optional(v.string()),
   revertOf: v.optional(v.string()),
+  checked: v.optional(v.literal(false)),
   /** Set on a `landed` note when a revert of it is accepted: the revert's receipt (Item c0af6cfa). */
   revertedBy: v.optional(v.string()),
 };

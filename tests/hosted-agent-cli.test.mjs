@@ -331,6 +331,34 @@ test('hosted CLI refuses a verification claim explicitly when the server lacks i
   );
 });
 
+test('hosted CLI sends an unchecked landing only when the project advertises it', async t => {
+  const s = agentFixture(t, { noChecks: true });
+  http(t, s);
+  process.env[LAND_CHILD_ENV] = '1';
+  t.after(() => delete process.env[LAND_CHILD_ENV]);
+  const landing = {
+    ...s.address,
+    candidateId: s.candidate.id,
+    composeOperationId: randomUUID(),
+  };
+  const run = fields =>
+    agentCli([
+      s.root,
+      'land',
+      '--save',
+      '--no-wait',
+      JSON.stringify({ ...landing, operationId: randomUUID(), ...fields }),
+    ]);
+  await assert.rejects(run(), errorCode('BAD_ARGUMENT'));
+  s.caps.features = ['checkless-landing'];
+  await assert.rejects(run({ accept: false }), errorCode('BAD_ARGUMENT'));
+  await run();
+  const submissions = s.calls.filter(call => call.name === 'projectHostedLanding:enqueue');
+  assert.equal(submissions.length, 1);
+  assert.equal(JSON.parse(submissions[0].args.request).check, null);
+  assert(!s.calls.some(call => call.name === 'projectHostedCheckDefinitions:current'));
+});
+
 test('hosted CLI forwards urgent finish and retained queued Candidate reprioritisation', async t => {
   const s = agentFixture(t);
   http(t, s);

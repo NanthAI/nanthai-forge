@@ -176,6 +176,7 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: CompletionI
     commit: receipt.candidate.head,
     at: receipt.at,
     sequence: row.sequence,
+    ...(receipt.checked === false ? { unchecked: true as const } : {}),
     ...(receipt.mainRedHolds ? { mainRedHolds: receipt.mainRedHolds } : {}),
   };
   // Landing declares the Intents of its Lanes even when the Lanes themselves stay open (completeOnAccept off or
@@ -185,7 +186,7 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: CompletionI
     declares = receipt.completion.closeIntents ?? lanesDone;
   if (plan.appliedPage === plan.inputPages) return settleCompletion(ctx, plan);
   // A landing that neither completes Lanes nor declares Intents (closes:false) still tells its Items
-  // (Issue 3a733ee8): the same head-only walk as keepOpen, notes only, no record writes.
+  // (Issue 3a733ee8). An unchecked receipt still stamps the origin's overlap row without closing it.
   const notesOnly = !lanesDone && !declares;
   const resolutionCandidates = new Set<string>();
   if (plan.appliedEntry === 0)
@@ -229,6 +230,16 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: CompletionI
         return { laneId, actor: page.laneActors?.[laneId] };
       }),
     );
+  const resolutionLanding = {
+    ...landed,
+    projectId: input.projectId,
+    receiptId: input.receiptId,
+  };
+  const originCompletion = {
+    ...resolutionLanding,
+    owner: project.owner,
+    authorityEpoch: receipt.authorityEpoch,
+  };
   const finished = new Set<string>();
   // The first landed Lane of each Intent: earlier quiet attempts of that Intent leave presence and
   // advisory notices when the Intent completion reads its sibling heads (friction b7f93deb).
@@ -289,19 +300,8 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: CompletionI
     if (!supersededBy.has(lane.intentId)) supersededBy.set(lane.intentId, lane.id);
     // A resolution Lane carries its conflicted original's work: complete that Lane too.
     if (lane.resolution?.origin)
-      for (const intentId of await completeResolutionOrigins(
-        ctx,
-        {
-          projectId: input.projectId,
-          owner: project.owner,
-          authorityEpoch: receipt.authorityEpoch,
-          receiptId: input.receiptId,
-          commit: landed.commit,
-          at: receipt.at,
-          ...(landed.mainRedHolds ? { mainRedHolds: landed.mainRedHolds } : {}),
-        },
-        lane,
-        origin => note(origin.intentId, origin.id, origin.intentId === lane.intentId ? undefined : lane.id),
+      for (const intentId of await completeResolutionOrigins(ctx, originCompletion, lane, origin =>
+        note(origin.intentId, origin.id, origin.intentId === lane.intentId ? undefined : lane.id),
       ))
         finished.add(intentId);
   }
@@ -309,25 +309,19 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: CompletionI
   // Lane's own record is handled by a later tick of this page. A landing that keeps its Lanes open
   // (keepOpen, completeOnAccept off) still completes each landed resolution's conflicted original:
   // only the resolution Lane carries on, so the original never stays active producing notices
-  // (friction f1a09ee2, regression of 55024d40). `closes: false` changes nothing.
+  // (friction f1a09ee2, regression of 55024d40). A refs-only landing stamps the origin in place.
   if (resolutionCandidates.size)
     for (const entry of entries)
       if ('laneId' in entry && resolutionCandidates.has(entry.laneId)) {
-        const resolution = await noteResolutionOrigins(ctx, input.projectId, entry, note);
+        const resolution = await noteResolutionOrigins(
+          ctx,
+          input.projectId,
+          entry,
+          note,
+          notesOnly && landed.unchecked ? resolutionLanding : undefined,
+        );
         if (resolution && !notesOnly)
-          for (const intentId of await completeResolutionOrigins(
-            ctx,
-            {
-              projectId: input.projectId,
-              owner: project.owner,
-              authorityEpoch: receipt.authorityEpoch,
-              receiptId: input.receiptId,
-              commit: landed.commit,
-              at: receipt.at,
-              ...(landed.mainRedHolds ? { mainRedHolds: landed.mainRedHolds } : {}),
-            },
-            resolution,
-          ))
+          for (const intentId of await completeResolutionOrigins(ctx, originCompletion, resolution))
             finished.add(intentId);
       }
   const currentWorkItems = [];
@@ -356,6 +350,7 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: CompletionI
         agentRun: receipt.agentRun,
         agentClient: receipt.agentClient,
         landedBy: plan.landedBy,
+        ...(receipt.checked === false ? { checked: false as const } : {}),
         viaLaneId,
       });
     // Reuse the Intent head when its last Lane lets the planning read close the Issue.

@@ -482,8 +482,14 @@ async function reuseCheckedFinish(session: HostedAgentSession, command: FinishCo
   if (!request || !run || typeof composeOperationId !== 'string') return null;
   const checked = await session.query<{ status: string }>('projectHostedCheckRead:status', { runId: run.id });
   if (checked.status !== 'passed') return null;
-  const current = await checkSelection(session, command.check);
+  const current = await checkSelection(
+    session,
+    command.check,
+    undefined,
+    session.capabilities.features?.includes('checkless-landing'),
+  );
   if (
+    !current ||
     request.checkId !== current.checkId ||
     request.expectedDefinition !== current.expectedDefinition ||
     request.expectedConfiguration !== current.expectedConfiguration ||
@@ -683,6 +689,8 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
   const context = session.journal.get<FinishContext>('finish-context');
   const parameters = context?.command ?? (input as Record<string, unknown>);
   const command = hostedAgentCommandSchemas.finish.parse(parameters);
+  const allowUnchecked =
+    command.accept !== false && session.capabilities.features?.includes('checkless-landing');
   // No early settings read for ordinary landings. When a proof is flagged, reuse the
   // selection at submission so projects with custom checks still read it just once.
   let selectedCheck: ReturnType<typeof checkSelection> | undefined;
@@ -890,9 +898,14 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
     const standard = () =>
       (standardCheck ??= (async () => {
         let isStandard = false;
-        selectedCheck = checkSelection(session, command.check, () => {
-          isStandard = true;
-        });
+        selectedCheck = checkSelection(
+          session,
+          command.check,
+          () => {
+            isStandard = true;
+          },
+          allowUnchecked,
+        );
         // Check-selection errors still surface at submission, so they cannot hide source conflicts.
         await selectedCheck.catch(() => {
           isStandard = false;
@@ -1009,7 +1022,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
           ...(session.capabilities.landingMessageVersion === 1 ? { message: command.message ?? null } : {}),
           after: command.after,
           ...(command.priority ? { priority: command.priority } : {}),
-          check: await (selectedCheck ?? checkSelection(session, command.check)),
+          check: await (selectedCheck ?? checkSelection(session, command.check, undefined, allowUnchecked)),
           ...(command.reason ? { retryReason: command.reason } : {}),
           ...(command.keepOpen === undefined ? {} : { keepOpen: command.keepOpen }),
           ...(command.closes === undefined ? {} : { closes: command.closes }),
@@ -1063,6 +1076,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
     if (command.accept === false) {
       invariant(candidate.result.status === 'clean', 'VIEW_CONFLICT', 'Check a clean hosted Candidate.');
       const check = await (selectedCheck ?? checkSelection(session, command.check));
+      invariant(check, 'BAD_ARGUMENT', 'Select a configured hosted check.');
       const { kind: _kind, ...selection } = check;
       void _kind;
       return hostedCheckRequestSchema.parse({
@@ -1086,7 +1100,9 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
       expectedHead: candidate.result.status === 'clean' ? candidate.result.head : null,
       agent: true,
       ...(command.priority ? { priority: command.priority } : {}),
-      check: checked?.check ?? (await (selectedCheck ?? checkSelection(session, command.check))),
+      check:
+        checked?.check ??
+        (await (selectedCheck ?? checkSelection(session, command.check, undefined, allowUnchecked))),
       ...(command.reason ? { retryReason: command.reason } : {}),
       finish: { composeOperationId, after: command.after },
       ...(command.keepOpen === undefined ? {} : { keepOpen: command.keepOpen }),

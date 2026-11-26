@@ -56,13 +56,21 @@ export function capabilityOptions(
               // Planning uses the history-log slot for Work history. Check reads name ci-status-check
               // themselves, so audit-capable actions give its discovery slot to planning-audit.
               (action !== 'planning' || feature !== 'history-log') &&
-              ((!planningAudit && action !== 'save') || feature !== 'ci-status-check') &&
-              // Finish uses the planning-import slot for accepted path counts.
-              (action !== 'finish' || feature !== 'planning-import-pages') &&
+              ((!planningAudit && action !== 'save' && action !== 'finish') ||
+                feature !== 'ci-status-check') &&
+              // Finish uses the planning-import slot for accepted path counts. Wait discovery uses it for unchecked status.
+              ((action !== 'finish' && action !== 'capabilities') || feature !== 'planning-import-pages') &&
               (action !== 'start' ||
                 (feature !== 'planning-import-pages' && feature !== 'save-declarations')),
           ),
           ...(action === 'finish' ? [landedPathCountFeature] : []),
+          ...(action === 'finish' ||
+          action === 'status' ||
+          action === 'observe' ||
+          action === 'capabilities' ||
+          action === 'check-settings'
+            ? ['checkless-landing']
+            : []),
           // Start also sends mutation receipts; drop the unused import slot, not metric provenance.
           // Start and save give an unused action-specific slot to the hook-state contract.
           ...(action === 'start' || action === 'save' ? [agentHooksFeature] : []),

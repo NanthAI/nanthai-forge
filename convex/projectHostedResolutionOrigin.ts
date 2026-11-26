@@ -19,6 +19,43 @@ import type { MainRedHold } from '../src/hosted-acceptance';
 /** A conflict inside a resolution makes a short chain; the walk stays bounded. */
 const DEPTH = 4;
 type Lane = z.infer<typeof hostedLaneSchema>;
+type ResolutionLanding = {
+  projectId: Id<'hostedProjects'>;
+  receiptId: string;
+  commit: string | null;
+  at: string;
+  unchecked?: true;
+  mainRedHolds?: MainRedHold[];
+};
+
+async function stampResolutionOrigin(
+  ctx: MutationCtx,
+  input: ResolutionLanding,
+  lane: Lane,
+  retire: boolean,
+) {
+  const overlap = await ctx.db
+    .query('projectHostedOverlapLanes')
+    .withIndex('by_project_and_lane', q => q.eq('projectId', input.projectId).eq('laneId', lane.id))
+    .unique();
+  if (retire && overlap?.passedMark) await ctx.db.delete(overlap.passedMark);
+  if (overlap && overlap.head === lane.head && overlap.landed?.receiptId !== input.receiptId)
+    await ctx.db.patch(overlap._id, {
+      ...(retire ? { open: false, passedAt: undefined, passedMark: undefined } : {}),
+      ...(input.commit
+        ? {
+            landed: {
+              receiptId: input.receiptId,
+              commit: input.commit,
+              laneHead: lane.head,
+              at: input.at,
+              ...(input.unchecked ? { unchecked: true as const } : {}),
+              ...(input.mainRedHolds ? { mainRedHolds: input.mainRedHolds } : {}),
+            },
+          }
+        : {}),
+    });
+}
 
 /** Read the accepted resolution's origin even after a sync replaced the Lane's current version.
  * Returns the accepted resolution Lane (its pinned version) when it names an origin. */
@@ -27,6 +64,7 @@ export async function noteResolutionOrigins(
   projectId: Id<'hostedProjects'>,
   accepted: z.infer<typeof composeLaneSchema>,
   reached: (intentId: string, laneId: string, viaLaneId?: string) => void,
+  refsLanding?: ResolutionLanding,
 ) {
   const pinned = await recordVersion(ctx, projectId, 'lane', accepted.laneId, accepted.version);
   if (!pinned) return undefined;
@@ -47,6 +85,7 @@ export async function noteResolutionOrigins(
     if (!row) break;
     const current = hostedLaneSchema.parse(JSON.parse(await hostedRecordBody(ctx, row)));
     if (current.head !== origin.head || current.sourceVersion !== origin.sourceVersion) break;
+    if (refsLanding) await stampResolutionOrigin(ctx, refsLanding, current, false);
     origin = current.resolution?.origin;
   }
   return lane.resolution?.origin ? lane : undefined;
@@ -60,16 +99,7 @@ export async function noteResolutionOrigins(
  * of the Lanes it completed. */
 export async function completeResolutionOrigins(
   ctx: MutationCtx,
-  input: {
-    projectId: Id<'hostedProjects'>;
-    owner: string;
-    authorityEpoch: number;
-    receiptId: string;
-    commit: string | null;
-    at: string;
-    /** The receipt's main-red holds, stamped for the origin Lane's lane-history (Item 687d1eda). */
-    mainRedHolds?: MainRedHold[];
-  },
+  input: ResolutionLanding & { owner: string; authorityEpoch: number },
   lane: Lane,
   /** Each origin Lane whose source reached main through this resolution, from the record already read
    * (Issue 3a733ee8: its Item gets the landing note too). */
@@ -123,28 +153,7 @@ export async function completeResolutionOrigins(
       },
     });
     // Its work landed through the resolution: leave open overlap evidence, stamped with this receipt.
-    const overlap = await ctx.db
-      .query('projectHostedOverlapLanes')
-      .withIndex('by_project_and_lane', q => q.eq('projectId', input.projectId).eq('laneId', current.id))
-      .unique();
-    if (overlap?.passedMark) await ctx.db.delete(overlap.passedMark);
-    if (overlap && overlap.head === current.head && overlap.landed?.receiptId !== input.receiptId)
-      await ctx.db.patch(overlap._id, {
-        open: false,
-        passedAt: undefined,
-        passedMark: undefined,
-        ...(input.commit
-          ? {
-              landed: {
-                receiptId: input.receiptId,
-                commit: input.commit,
-                laneHead: current.head,
-                at: input.at,
-                ...(input.mainRedHolds ? { mainRedHolds: input.mainRedHolds } : {}),
-              },
-            }
-          : {}),
-      });
+    await stampResolutionOrigin(ctx, input, current, true);
     intents.add(current.intentId);
     origin = current.resolution?.origin;
   }

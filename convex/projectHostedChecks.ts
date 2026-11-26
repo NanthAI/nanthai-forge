@@ -221,7 +221,7 @@ export async function enqueueHostedCheck(
   // A project that predates the derived entry list gets it here once, before the gate reads it.
   const project =
     loaded.checkEntries === undefined || loaded.landingCheckId === undefined
-      ? { ...loaded, checkEntries: await refreshCheckEntries(ctx, input.projectId) }
+      ? { ...loaded, checkEntries: await refreshCheckEntries(ctx, loaded) }
       : loaded;
   // Older controller/provider clients strictly parse run documents. Only the
   // direct Actions session has the additive gate handshake; all other routes

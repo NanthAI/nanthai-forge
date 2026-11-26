@@ -417,6 +417,10 @@ const projectFields = {
   checkEntries: v.optional(v.array(v.string())),
   /** Server-selected verify (or sole) definition; null means the definition set is ambiguous. */
   landingCheckId: v.optional(v.union(v.string(), v.null())),
+  /** Distinguishes zero definitions from an ambiguous landing-check selection. */
+  hasCheckDefinitions: v.optional(v.boolean()),
+  /** New projects permit governed no-check finishes; earlier projects keep their acceptance behavior. */
+  checklessDefault: v.optional(v.literal(true)),
   /** Declared `globalRiskPaths` globs of every check definition, refreshed with `checkEntries`; global-risk only, never owner-protected. */
   globalRiskPaths: v.optional(v.array(v.string())),
   agentGuidance: v.optional(v.string()),

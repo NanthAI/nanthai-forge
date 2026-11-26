@@ -245,6 +245,14 @@ export async function approveHeldLanding(
       undefined,
       error.code === 'POLICY_CHANGED' ? { kind: 'policy', link: attempt.policyDigest } : undefined,
     );
+    if (!attempt.check)
+      return {
+        status: 'pending',
+        ...(policyMoved ? {} : { needsReapproval: true }),
+        reason: policyMoved
+          ? 'The landing policy changed. If it still asks for approval, approve the new Candidate when it appears.'
+          : 'Main moved. Approve the new Candidate when it appears.',
+      };
     return {
       status: 'pending',
       reason: policyMoved

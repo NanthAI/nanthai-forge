@@ -128,6 +128,7 @@ export async function checkSelection(
   session: HostedAgentSession,
   command: z.infer<typeof hostedAgentCommandSchemas.finish>['check'],
   onStandardCheck?: () => void,
+  allowUnchecked = false,
 ) {
   if (!command) {
     let cursor: string | null = null;
@@ -146,6 +147,7 @@ export async function checkSelection(
       }
       cursor = page.isDone ? null : page.continueCursor;
     } while (cursor !== null);
+    if (allowUnchecked && !found.length) return null;
     if (!command && found.length === 1) command = { checkId: found[0]!.id };
     invariant(
       command,
@@ -290,10 +292,11 @@ export async function hostedCheckSettings(query: HostedQuery, capabilities: Host
   const selected =
     definitions.find(d => d.check.name === 'verify') ??
     (definitions.length === 1 ? definitions[0] : undefined);
+  const unchecked = definitions.length === 0 && capabilities.features?.includes('checkless-landing');
   const blockers = [
-    ...(selected ? [] : ['No verify (or single) hosted check definition: run configure-check.']),
-    ...(current.configuration ? [] : ['No hosted check runner: run configure-runner.']),
-    ...(capabilities.checkCallbackConfigured
+    ...(selected || unchecked ? [] : ['No verify (or single) hosted check definition: run configure-check.']),
+    ...(current.configuration || unchecked ? [] : ['No hosted check runner: run configure-runner.']),
+    ...(capabilities.checkCallbackConfigured || unchecked
       ? []
       : ['FORGE_HOSTED_CHECK_KEY_ID is not set on the deployment.']),
     ...(review ? [`Agent landings wait for review: ${review}.`] : []),
@@ -306,6 +309,7 @@ export async function hostedCheckSettings(query: HostedQuery, capabilities: Host
       version,
     })),
     finishCheck: selected ? selected.check.id : null,
+    ...(unchecked ? { unchecked: true } : {}),
     runner: current.configuration
       ? {
           digest: current.configurationDigest,
