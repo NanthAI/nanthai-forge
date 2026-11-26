@@ -3,7 +3,7 @@
 import { v } from 'convex/values';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
 import { query } from './cliServer';
-import { activeOwnedProject, accessibleProject } from './projectAuthority';
+import { activeOwnedProject, projectSettingsReader } from './projectAuthority';
 import { autonomyPolicy } from './autonomyFields';
 import { effectivePolicy } from '../src/autonomy-policy';
 import { invariant } from '../src/errors';
@@ -19,7 +19,7 @@ export const read = query({
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read the landing policy.');
-      const project = await accessibleProject(ctx, projectId, user.subject);
+      const project = await projectSettingsReader(ctx, projectId, user.subject);
       const policy = effectivePolicy(project);
       const teamNames: Record<string, string> = {};
       if (user.subject === project.owner)

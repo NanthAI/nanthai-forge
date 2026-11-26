@@ -428,3 +428,15 @@ test('browser review and object metadata return real plans and URLs only while a
     error => error.data?.code === 'INVALID_WORK_BACKUP',
   );
 });
+
+test('project settings access follows explicit membership even when the source is public', async () => {
+  const s = setup();
+  const { projectSettingsReader } = await import(moduleUrl('../convex/projectAuthority.ts'));
+  s.tables.hostedProjects.get('project').visibility = 'public';
+  for (const actor of ['owner', 'reader', 'former'])
+    assert.equal((await projectSettingsReader(s.ctx, 'project', actor))._id, 'project');
+  await assert.rejects(
+    projectSettingsReader(s.ctx, 'project', 'stranger'),
+    error => error.code === 'PROJECT_UNAVAILABLE',
+  );
+});

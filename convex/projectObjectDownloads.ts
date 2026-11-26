@@ -9,7 +9,7 @@ import { isStored } from './projectObjectFields';
 import type { DownloadRow } from '../src/blob-download-format';
 import { selectedGeneration, readRecord, recordPartition } from './projectWorkIndexStore';
 import { workProject } from './projectWorkHead';
-import { accessibleProject } from './projectAuthority';
+import { accessibleProject, publicSourceAvailable } from './projectAuthority';
 import { isR2Object } from './projectObjectFields';
 import { r2Config, presignGet, r2ObjectKey } from './r2';
 import { invariant } from '../src/errors';
@@ -55,14 +55,15 @@ export async function readableProject(
   client?: string,
 ) {
   const user = await ctx.auth.getUserIdentity();
-  if (user) return accessibleProject(ctx, projectId, user.subject);
-  const project = await ctx.db.get(projectId);
+  const project = user ? await accessibleProject(ctx, projectId, user.subject) : await ctx.db.get(projectId);
   invariant(
-    project && project.visibility === 'public' && !project.removal,
+    project &&
+      (user || (project.visibility === 'public' && !project.removal)) &&
+      (await publicSourceAvailable(ctx, project, user?.subject)),
     'PROJECT_UNAVAILABLE',
     'This Forge project is unavailable with the current account.',
   );
-  if (charge) {
+  if (charge && !user) {
     // The visitor's own limit comes first, so a visitor over it spends none of the project's shared budget.
     if (client) await chargeVisitorRead(ctx, client);
     await chargeAnonymousRead(ctx, projectId);

@@ -6,7 +6,7 @@
 // writes, never on a timer.
 import { v } from 'convex/values';
 import { query, isDeviceIdentity } from './cliServer';
-import { accessibleProject } from './projectAuthority';
+import { projectSettingsReader } from './projectAuthority';
 import { effectivePolicy } from '../src/autonomy-policy';
 import { githubMirrorStatus } from './projectGithubMirrorStatus.idle';
 import { mirrorSummary } from '../src/github-mirror-sentence';
@@ -52,7 +52,7 @@ export const read = query({
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read the GitHub mirror.');
-      const project = await accessibleProject(ctx, projectId, user.subject);
+      const project = await projectSettingsReader(ctx, projectId, user.subject);
       const policy = effectivePolicy(project).githubMirror;
       const status = policy ? await githubMirrorStatus(ctx, project) : null;
       const owner = project.owner === user.subject && !isDeviceIdentity(user);

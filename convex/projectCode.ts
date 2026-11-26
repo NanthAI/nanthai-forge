@@ -5,7 +5,7 @@
 import { v } from 'convex/values';
 import { query } from './cliServer';
 import { internalQuery } from './server';
-import { accessibleProject } from './projectAuthority';
+import { accessibleProject, publicSourceAvailable } from './projectAuthority';
 import { isPublicProject } from './publicVisibility';
 import { report } from './errors';
 import { invariant } from '../src/errors';
@@ -29,7 +29,12 @@ export const history = query({
       const user = await ctx.auth.getUserIdentity();
       // Signed-out visitors read the same rows through the cached public route (publicCode.ts), never this query.
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read what landed.');
-      await accessibleProject(ctx, input.projectId, user.subject);
+      const project = await accessibleProject(ctx, input.projectId, user.subject);
+      invariant(
+        await publicSourceAvailable(ctx, project, user.subject),
+        'PROJECT_UNAVAILABLE',
+        'This Forge project is unavailable with the current account.',
+      );
       if (input.receiptId !== undefined)
         return JSON.stringify({
           schema: 1,
@@ -64,7 +69,12 @@ export const fileHistory = query({
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read what landed.');
-      await accessibleProject(ctx, projectId, user.subject);
+      const project = await accessibleProject(ctx, projectId, user.subject);
+      invariant(
+        await publicSourceAvailable(ctx, project, user.subject),
+        'PROJECT_UNAVAILABLE',
+        'This Forge project is unavailable with the current account.',
+      );
       return JSON.stringify(await codeFileHistory(ctx, projectId, path, before, false));
     } catch (error) {
       return report(error);
@@ -87,7 +97,9 @@ export const checkpoint = internalQuery({
         ? await accessibleProject(ctx, projectId, user.subject)
         : await ctx.db.get(projectId);
       invariant(
-        isPublicProject(project) || (user && project),
+        project &&
+          (isPublicProject(project) || user) &&
+          (await publicSourceAvailable(ctx, project, user?.subject)),
         'PROJECT_UNAVAILABLE',
         'This Forge project is unavailable with the current account.',
       );

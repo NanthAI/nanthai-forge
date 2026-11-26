@@ -4,7 +4,7 @@ import { isMachineRunner } from '../src/hosted-machine-runner';
 import { v } from 'convex/values';
 import { query, type QueryCtx, type MutationCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
-import { accessibleProject } from './projectAuthority';
+import { accessibleProject, projectSettingsReader } from './projectAuthority';
 import { requireMacMachine } from './projectHostedCheckMachines';
 import { effectivePolicy } from '../src/autonomy-policy';
 import { checkPin, type HostedCheckRun } from '../src/hosted-check';
@@ -19,10 +19,14 @@ import { report } from './errors';
 import { boardWake } from './projectBoardDelivery';
 
 const identity = { projectId: v.id('hostedProjects'), runId: v.string() };
-export async function checkReader(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>) {
+export async function checkReader(
+  ctx: QueryCtx | MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  settings = false,
+) {
   const user = await ctx.auth.getUserIdentity();
   invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read hosted checks.');
-  return accessibleProject(ctx, projectId, user.subject);
+  return (settings ? projectSettingsReader : accessibleProject)(ctx, projectId, user.subject);
 }
 export const status = query({
   args: {
@@ -33,7 +37,7 @@ export const status = query({
   returns: v.string(),
   handler: async (ctx, { features, board: cursor, ...input }) => {
     try {
-      const project = await checkReader(ctx, input.projectId);
+      const project = await checkReader(ctx, input.projectId, true);
       const { run } = await loadHostedCheck(ctx, input, !features?.includes('check-report-detail'));
       invariant(
         !run.reportPointer || features?.includes('check-report-detail'),

@@ -77,7 +77,8 @@ export const workspace = query({
       const backup = await ctx.db.get(generation.backupId);
       invariant(backup?.projectId === projectId, 'PROJECT_UNAVAILABLE', 'Select this project’s source.');
       const owner = project.owner === user.subject;
-      const contributor = owner || (await hasWriteRole(ctx, project, user.subject));
+      const role = await readProjectRole(ctx, project, user.subject);
+      const contributor = role === 'owner' || role === 'write';
       return JSON.stringify({
         ...hostedPaths({ ...metadata, counts }),
         ...(planningDuplicateText === undefined
@@ -86,9 +87,10 @@ export const workspace = query({
         ...(planningRollup
           ? { rollupCatchup: await readRollupCatchup(ctx, project, recordPartition(generation)) }
           : {}),
-        autonomyPolicy: effectivePolicy(project),
+        ...(role
+          ? { autonomyPolicy: effectivePolicy(project), githubMirror: await githubMirrorStatus(ctx, project) }
+          : {}),
         ...(project.needsFix ? { needsFix: needsFix(project) } : {}),
-        githubMirror: await githubMirrorStatus(ctx, project),
         generationId: generation._id,
         planningFilteredReads: generation.planningSearchVersion === 2,
         planningActiveReads: generation.planningSearchVersion === 2,

@@ -17,6 +17,8 @@ import {
 import type { Doc } from './_generated/dataModel';
 import { invariant } from '../src/errors';
 import { projectExecution } from './projectExecution';
+import { accountFor } from './urlIdentity';
+import { accountSuspended } from './accountLimits';
 import { checkedProjectRole, hasWriteRole, projectRole, shareQueryRoles } from './projectRole';
 import type { ProjectRole } from './projectAccessContract';
 import { audienceOf, coordinationAccess } from './projectAudience';
@@ -286,6 +288,34 @@ export async function coordinationProject(ctx: QueryCtx, projectId: Id<'hostedPr
     await coordinationAccess(ctx, project, actor),
     'PROJECT_UNAVAILABLE',
     'This Forge project is unavailable with the current account.',
+  );
+  return project;
+}
+
+/** Public source projections also honor an owner's suspension or account closure. */
+export async function publicSourceAvailable(
+  ctx: QueryCtx | MutationCtx,
+  project: Doc<'hostedProjects'>,
+  actor?: string,
+  account?: Doc<'forgeAccounts'> | null,
+) {
+  if (project.visibility !== 'public' || actor === project.owner) return true;
+  if (account === undefined) account = await accountFor(ctx, project.owner);
+  if (!account?.closing && !(await accountSuspended(ctx, project.owner))) return true;
+  return actor !== undefined && Boolean(await projectRole(ctx, project, actor));
+}
+
+/** Settings are shared with explicit readers and writers, independent of public source visibility. */
+export async function projectSettingsReader(
+  ctx: QueryCtx | MutationCtx,
+  id: Id<'hostedProjects'>,
+  actor: string,
+) {
+  const project = await accessibleProject(ctx, id, actor);
+  invariant(
+    project.visibility !== 'public' || (await projectRole(ctx, project, actor)),
+    'PROJECT_UNAVAILABLE',
+    'Project membership is required to access project settings.',
   );
   return project;
 }

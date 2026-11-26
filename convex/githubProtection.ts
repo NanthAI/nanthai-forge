@@ -9,7 +9,7 @@ import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { action } from './cliServer';
 import { internalQuery } from './server';
-import { accessibleProject } from './projectAuthority';
+import { projectSettingsReader } from './projectAuthority';
 import { assertRepositoryName, installationTokenMinter } from './githubAppToken';
 import { githubRequest } from '../src/hosted-github-api';
 import { forgeRuleset, protectionAdvice, protectionFindings } from '../src/github-pull-check';
@@ -24,7 +24,7 @@ export const binding = internalQuery({
     v.object({ role: v.union(v.null(), v.string()), targetBranch: v.optional(v.string()) }),
   ),
   handler: async (ctx, input) => {
-    const project = await accessibleProject(ctx, input.projectId, input.actor);
+    const project = await projectSettingsReader(ctx, input.projectId, input.actor);
     const row = await ctx.db
       .query('projectGithubBindings')
       .withIndex('by_project_and_name', q =>

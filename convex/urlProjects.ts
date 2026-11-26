@@ -3,7 +3,7 @@
 import { ForgeError } from '../src/errors';
 import { v } from 'convex/values';
 import { query } from './cliServer';
-import { accessibleProject } from './projectAuthority';
+import { accessibleProject, publicSourceAvailable } from './projectAuthority';
 import { accountFor } from './urlIdentity';
 import type { QueryCtx } from './server';
 import { landingRow, landingStateFromRow } from './projectHostedLandingStore';
@@ -53,7 +53,8 @@ export async function readableProject(
     throw error;
   }
   const account = await accountFor(ctx, project.owner);
-  if (!account || !project.slug) return null;
+  if (!account || !project.slug || !(await publicSourceAvailable(ctx, project, user?.subject, account)))
+    return null;
   return { id, handle: account.handle, slug: project.slug, name: project.name, project };
 }
 export const resolve = query({

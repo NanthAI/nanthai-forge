@@ -20,7 +20,7 @@ import {
   type SettingRule,
 } from './projectSettingApprovals';
 import type { Doc, Id } from './_generated/dataModel';
-import { accessibleProject } from './projectAuthority';
+import { projectSettingsReader } from './projectAuthority';
 import {
   checkSetting,
   checkCaller,
@@ -251,7 +251,7 @@ export const current = query({
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read check settings.');
-      const project = await accessibleProject(ctx, input.projectId, user.subject);
+      const project = await projectSettingsReader(ctx, input.projectId, user.subject);
       const definition = await checkSetting(ctx, input.projectId, 'definition', input.checkId);
       const runner = await checkSetting(ctx, input.projectId, 'runner', 'runner');
       const bindings = input.includeGithubBindings
@@ -313,7 +313,7 @@ export const list = query({
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read check definitions.');
-      await accessibleProject(ctx, input.projectId, user.subject);
+      await projectSettingsReader(ctx, input.projectId, user.subject);
       const page = await ctx.db
         .query('projectHostedCheckSettings')
         .withIndex('by_project_and_kind', q => q.eq('projectId', input.projectId).eq('kind', 'definition'))

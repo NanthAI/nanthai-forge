@@ -16,7 +16,7 @@ import {
   type MutationCtx,
   type ActionCtx,
 } from './cliServer';
-import { accessibleProject, activeOwnedProject } from './projectAuthority';
+import { projectSettingsReader, activeOwnedProject } from './projectAuthority';
 import { autonomyPolicy, policyImpactFields } from './autonomyFields';
 import {
   effectivePolicy,
@@ -67,7 +67,7 @@ export const read = query({
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read project policy.');
-      return policyReadView(effectivePolicy(await accessibleProject(ctx, input.projectId, user.subject)));
+      return policyReadView(effectivePolicy(await projectSettingsReader(ctx, input.projectId, user.subject)));
     } catch (error) {
       return report(error);
     }

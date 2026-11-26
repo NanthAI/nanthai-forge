@@ -7,6 +7,7 @@ import { githubMirrorStatus } from './projectGithubMirrorStatus.idle';
 import { v } from 'convex/values';
 import { query } from './cliServer';
 import { accessibleProject } from './projectAuthority';
+import { projectRole } from './projectRole';
 import { channelRow } from './projectHostedChannels';
 import { hostedMainV2Schema } from '../src/hosted-main';
 import { sourceAuthority } from '../src/hosted-source-authority';
@@ -123,6 +124,13 @@ export const capabilities = query({
         'BAD_ARGUMENT',
         `Name at most ${MAX_CONTRACT_FEATURES} contract features.`,
       );
+      const protectedPaths = features?.includes('protected-path-notice');
+      const includesSettings = mirrorVersion === 1 || protectedPaths;
+      const seesSettings =
+        includesSettings &&
+        (project.visibility !== 'public' || (await projectRole(ctx, project, user.subject)));
+      const defaults =
+        defaultsVersion === 1 ? effectiveAgentDefaults(effectivePolicy(project).agentDefaults) : undefined;
       // One channel read serves mainReady and, for capabilities-main, the main a command reads next.
       const channel = await channelRow(ctx, projectId);
       return canonicalPayload(
@@ -147,7 +155,7 @@ export const capabilities = query({
           ...(features?.includes('capabilities-main')
             ? carriedMain(channel?.selection, projectId, authority)
             : {}),
-          ...(features?.includes('protected-path-notice')
+          ...(protectedPaths && seesSettings
             ? {
                 protectedPathPolicy: {
                   acceptance: effectivePolicy(project).acceptance,
@@ -190,10 +198,12 @@ export const capabilities = query({
           ...(overlapVersion === 1 ? { overlapVersion: 1 } : {}),
           ...(overlapEvidenceVersion === 1 ? { overlapEvidenceVersion: 1 } : {}),
           ...(metricReceiptVersion === 1 ? { metricReceiptVersion: 1 } : {}),
-          ...(defaultsVersion === 1
+          ...(defaults
             ? {
                 agentDefaults: wireAgentDefaults(
-                  effectiveAgentDefaults(effectivePolicy(project).agentDefaults),
+                  seesSettings
+                    ? defaults
+                    : { ...defaults, stallAlerts: { ...defaults.stallAlerts, email: [] } },
                   Boolean(features?.includes('agent-defaults-extended')),
                 ),
               }
@@ -203,7 +213,9 @@ export const capabilities = query({
           ...(features?.includes('main-today')
             ? { mainDay: await readMainDay(ctx.db, projectId, true) }
             : {}),
-          ...(mirrorVersion === 1 ? { githubMirror: await githubMirrorStatus(ctx, project) } : {}),
+          ...(mirrorVersion === 1 && seesSettings
+            ? { githubMirror: await githubMirrorStatus(ctx, project) }
+            : {}),
           ...(settling !== undefined
             ? { settledSave: await settledSave(ctx, projectId, user.subject, settling) }
             : {}),

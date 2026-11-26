@@ -1,5 +1,7 @@
 ## Downloads and public viewing
 
+Project settings, setup and check definitions require an explicit project role. Public source visibility does not grant access to alert recipients, protected paths, or GitHub connection and runner configuration. Public project and Code pages hide projects whose owner is suspended or closing their account.
+
 Cloning and downloading from Forge require sign-in, including public projects. Git ref
 listings and fetches, bulk State reads and source packs refuse anonymous callers before
 history, pack or object IO. Git replies with HTTP 401 and a sign-in instruction; a public

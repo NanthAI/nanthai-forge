@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedCheckDefinitions.ts": "68c2d6361c9cc4ee0afa785cfc88240c2f3a5e2bd701d4ed797f29735d91dbc2",
+    "convex/projectHostedCheckRead.ts": "750c65b67d6eaf4bde5d2e0a34e763941e9c4cad7a108d76e2f6f8643eab91b6"
+  },
+  "replay": {
+    "incident": "70477a56",
+    "test": "GitHub inbound: main moved after proof keeps a full check",
+    "receipt": "b69d8244-f86c-4655-b5e7-40749f1903bd"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "thread:delegated-task:command%3Amcp%3A4099990f-0a03-44f3-b5aa-600614d23018%3Adelegate-task%3A6df293cf-d767-4620-bae4-ae330437e038",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "thread:delegated-task:command%3Amcp%3A4099990f-0a03-44f3-b5aa-600614d23018%3Adelegate-task%3A6df293cf-d767-4620-bae4-ae330437e038/root/settings_review",
+    "receipt": "8ed8e65d-ac04-4896-8491-466bf9046900"
+  }
+}

@@ -100,10 +100,12 @@ test('snapshot projections redact hidden Plan and Lane titles and never publish 
   const account = s.tables.forgeAccounts.get('acct');
   account.closing = { operationId: 'close' };
   assert.equal(await project(), null);
+  assert.equal(await page(s), null);
   assert.equal(await profile(), null);
   delete account.closing;
   s.tables.boardSwitches.set('switch', { _id: 'switch', key: 'account:owner', off: true });
   assert.equal(await project(), null);
+  assert.equal(await page(s), null);
   assert.equal(await profile(), null);
   s.tables.boardSwitches.clear();
   const row = s.tables.hostedProjects.get('project');

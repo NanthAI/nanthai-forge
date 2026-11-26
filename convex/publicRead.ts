@@ -43,14 +43,8 @@ export async function publicProject(ctx: QueryCtx, handle: string, slug: string,
   if (!project || !isPublicProject(project)) return null;
   const account = await accountFor(ctx, project.owner);
   if (!account?.handle || !project.slug) return null;
-  if (
-    snapshot &&
-    (account.handle !== handle ||
-      project.slug !== slug ||
-      account.closing ||
-      (await accountSuspended(ctx, project.owner)))
-  )
-    return null;
+  if (snapshot && (account.handle !== handle || project.slug !== slug)) return null;
+  if (account.closing || (await accountSuspended(ctx, project.owner))) return null;
   return { project, handle: account.handle };
 }
 
@@ -358,7 +352,8 @@ async function profileProjection(
   // A suspended account has no public profile (its listed projects are unlisted too).
   if (
     !account?.handle ||
-    (snapshot && (account.handle !== handle || account.closing)) ||
+    account.closing ||
+    (snapshot && account.handle !== handle) ||
     (await accountSuspended(ctx, alias.owner))
   )
     return null;

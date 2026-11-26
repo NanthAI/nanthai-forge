@@ -18,6 +18,7 @@ const { publicPeople } = await import(moduleUrl('../convex/publicPeople.ts'));
 
 const secret = {
   email: 'stall-alerts@example.invalid',
+  protectedPath: 'private-policy-path/**',
   credentials: 'SYNTHETIC_CREDENTIAL_SECRET_NAME',
   purgedItem: 'purged-item-marker',
   guidance: 'owner-guidance-marker',
@@ -59,6 +60,7 @@ function setup() {
     ],
     autonomyPolicy: {
       ...policy,
+      acceptance: { ...policy.acceptance, protectedPaths: [secret.protectedPath] },
       checks: {
         runner: 'github-actions',
         credentialsRef: { kind: 'env', tokenId: secret.credentials, tokenSecret: secret.credentials },
@@ -77,7 +79,13 @@ const reads = {
   'projectAutonomy.read': s => projectAutonomy.read._handler(s.ctx, { projectId: 'project' }),
   'projectUncheckedLandingSettings.read': s => unchecked.read._handler(s.ctx, { projectId: 'project' }),
   'projectHostedAgent.capabilities': async s =>
-    JSON.parse(await agent.capabilities._handler(s.ctx, { projectId: 'project', defaultsVersion: 1 })),
+    JSON.parse(
+      await agent.capabilities._handler(s.ctx, {
+        projectId: 'project',
+        defaultsVersion: 1,
+        features: ['protected-path-notice'],
+      }),
+    ),
 };
 const leaked = reply => Object.values(secret).filter(value => JSON.stringify(reply).includes(value));
 
@@ -85,6 +93,10 @@ test('a signed-in stranger on a public project gets no owner-only or personal fi
   for (const [name, read] of Object.entries(reads)) {
     const s = setup();
     s.caller('stranger');
+    if (name === 'projectAutonomy.read' || name === 'projectUncheckedLandingSettings.read') {
+      await assert.rejects(read(s), error => error.data?.code === 'PROJECT_UNAVAILABLE');
+      continue;
+    }
     const reply = await read(s);
     assert.deepEqual(leaked(reply), [], name);
   }
@@ -115,7 +127,8 @@ test('a signed-in stranger on a public project gets no owner-only or personal fi
 test('a pinned policy inside any read loses its alert addresses and check credentials for a stranger only', async () => {
   // The shape a landing attempt or workspace reply carries: canonical JSON with the policy nested inside.
   const s = setup();
-  const policy = s.tables.hostedProjects.get('project').autonomyPolicy;
+  const stored = s.tables.hostedProjects.get('project').autonomyPolicy;
+  const policy = { ...stored, acceptance: { ...stored.acceptance, protectedPaths: [] } };
   const reply = JSON.stringify({ attempt: { attemptId: 'a', policy } });
   s.caller('stranger');
   assert.deepEqual(leaked(await publicPeople(s.ctx, { projectId: 'project' }, reply)), []);
@@ -134,6 +147,7 @@ test('the owner still reads the stall-alert recipients and check credentials of 
   assert.equal(policy.checks.credentialsRef.tokenId, secret.credentials);
   const capabilities = await reads['projectHostedAgent.capabilities'](s);
   assert.deepEqual(capabilities.agentDefaults.stallAlerts.email, [secret.email]);
+  assert.deepEqual(capabilities.protectedPathPolicy.acceptance.protectedPaths, [secret.protectedPath]);
 });
 
 test('the empty-hosted-project marker still reaches a viewer, so the web opens its first channel', async () => {

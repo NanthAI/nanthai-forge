@@ -18,7 +18,7 @@ import {
   skippableSetupStep,
 } from './projectLandingReadFields';
 import { report } from './errors';
-import { accessibleProject } from './projectAuthority';
+import { projectSettingsReader, requireDeviceWrite } from './projectAuthority';
 import { checkSetting } from './projectHostedCheckStore';
 import { accountFor } from './urlIdentity';
 import type { Id } from './_generated/dataModel';
@@ -113,7 +113,8 @@ export const setPreferences = mutation({
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to change your Getting started preferences.');
-      await accessibleProject(ctx, projectId, user.subject);
+      await requireDeviceWrite(ctx, projectId);
+      await projectSettingsReader(ctx, projectId, user.subject);
       invariant(z.uuid().safeParse(operationId).success, 'BAD_ARGUMENT', 'Use an operation UUID.');
       const row = await landingReadState(ctx, projectId, user.subject);
       const { operationId: previous, ...before } = row?.setup ?? {
@@ -159,7 +160,8 @@ export const setPreferences = mutation({
 
 async function setup(ctx: QueryCtx, projectId: Id<'hostedProjects'>, checklist: boolean) {
   const user = await ctx.auth.getUserIdentity();
-  const project = await accessibleProject(ctx, projectId, user?.subject ?? '');
+  invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read project setup.');
+  const project = await projectSettingsReader(ctx, projectId, user.subject);
   const [binding, mirror, runner, first] = await Promise.all([
     ctx.db
       .query('projectGithubBindings')
@@ -180,7 +182,7 @@ async function setup(ctx: QueryCtx, projectId: Id<'hostedProjects'>, checklist: 
   const owner = await handle(ctx, project.owner);
   return {
     owner,
-    viewerIsOwner: !!user && user.subject === project.owner,
+    viewerIsOwner: user.subject === project.owner,
     created: { at: project._creationTime, by: owner },
     repository: binding
       ? {
