@@ -4,13 +4,17 @@ Bring a [GitHub repository](#import-from-github-in-the-app) or a [local folder](
 
 Forge is not published to npm or deployed as a public production service yet.
 For a development trial, get the app URL, account access and the CLI deployment
-URL from the person who invited you. Open the app URL in your browser and pass
-the deployment URL to `nforge login`. You can build the CLI and read its packaged
-guides while you wait for access.
+URL from the person who invited you. Use the app URL in your browser and the CLI
+deployment URL in terminal commands that take `DEPLOYMENT_URL`. You can build the
+CLI and read its packaged guides while you wait for access.
 
 ## First landing
 
-1. [Build and link the CLI](#install-the-development-cli) if you do not have it yet, then [sign in from your terminal](#sign-in).
+For a checked landing on a new project, confirm which [runner](#configure-the-first-hosted-check)
+you can use and who will [approve the first landing](#approve-the-first-landing).
+You can host and clone the project while arranging those.
+
+1. [Build and link the CLI](#install-the-development-cli) if you do not have it yet. [Check your terminal sign-in](#sign-in) and sign in if needed.
 2. [Import committed GitHub source](#import-from-github-in-the-app), or [host a local folder](#host-a-local-folder). For a new project, start with a folder and a short README.
 3. [Clone the hosted project](#clone-the-project). Use the project URL from the web or the host or import receipt.
 4. [Choose a check and runner](#configure-the-first-hosted-check) if the project has none.
@@ -113,6 +117,12 @@ runner. Forge paths always use `/`. Differences from macOS and Linux:
 
 ## Sign in
 
+With the CLI already installed, `nforge auth status` shows the deployment for
+the current saved sign-in. Confirm the URL is your development deployment. If you
+know the exact deployment URL, pass it to `nforge auth status DEPLOYMENT_URL` to
+check that sign-in directly. If the CLI reports a current sign-in for your target,
+continue to hosting or import. Otherwise, sign in with the CLI deployment URL:
+
 ```sh
 nforge login DEPLOYMENT_URL
 nforge auth status DEPLOYMENT_URL
@@ -150,12 +160,12 @@ refusal says so and names the install step. No Forge setting changes.
 The separate **Import from GitHub · read-only analysis** link opens an analysis
 tour; use **New project** for an editable project.
 
-Agents and scripts import the same way from the CLI, after `nforge login`:
+Agents and scripts can import from a signed-in CLI. Pass the verified CLI deployment URL:
 
 ```sh
-nforge import https://github.com/OWNER/REPO --ref v1.2.0 --name REPO
-nforge import https://github.com/OWNER/REPO --preview   # what comes across and which limits apply; creates nothing
-nforge import https://github.com/OWNER/REPO --private   # a public repository, private here
+nforge import https://github.com/OWNER/REPO --deployment DEPLOYMENT_URL --ref v1.2.0 --name REPO
+nforge import https://github.com/OWNER/REPO --deployment DEPLOYMENT_URL --preview   # what comes across and which limits apply; creates nothing
+nforge import https://github.com/OWNER/REPO --deployment DEPLOYMENT_URL --private   # a public repository, private here
 nforge import --resume OPERATION_UUID   # after an interruption
 nforge import --resume OPERATION_UUID --at-reset   # rate-limited: Forge resumes at GitHub's reset
 ```
