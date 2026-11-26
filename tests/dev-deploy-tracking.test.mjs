@@ -736,13 +736,42 @@ test('Item 8b6efb50: observeDeploy subscribes reactively without polling and set
   assert.equal(outcome.status, 'deployed');
   assert.equal(outcome.deploy.deploys.web.sequence, 12);
   assert.equal(closed, true);
-  assert.equal(deployWaitResult(outcome, 5, {}).status, 'terminal');
+  const resume = { waitCommand: 'nforge agent . wait \'{"deploy":"latest"}\'' };
+  assert.equal(deployWaitResult(outcome, 5, resume).status, 'terminal');
   assert.equal(
     deployWaitResult(
       { status: 'failed', deploy: { sequence: 12, target: 'web', state: 'failed', deploys: {} } },
       5,
-      {},
+      resume,
     ).reason,
     'deploy-failed',
   );
+});
+
+test('a deploy wait keeps its observed queue timestamp after dispatch claims the queued record', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const lastProgressAt = '2026-11-23T21:00:00.000Z';
+  const deploy = { sequence: 12, target: 'web', state: 'pending', deploys: { web: null } };
+  const waiting = observeDeploy(
+    { address: { url: 'https://example.invalid', projectId: 'p1' } },
+    { selection: { sequence: 12, target: 'web' }, timeoutSeconds: 5 },
+    undefined,
+    () => ({
+      onUpdate(_query, _args, onValue) {
+        onValue({ deploy: { ...deploy, lastProgressAt } });
+        onValue({ deploy });
+        return () => {};
+      },
+      async close() {},
+    }),
+  );
+  t.mock.timers.tick(5_000);
+  const outcome = await waiting;
+  assert.equal(outcome.status, 'timeout');
+  const resume = { waitCommand: 'nforge agent . wait \'{"deploy":{"sequence":12,"target":"web"}}\'' };
+  const pending = deployWaitResult(outcome, 5, resume);
+  assert.equal(pending.waitOutcome, 'still-landing');
+  assert.equal(pending.stage, 'deploying');
+  assert.equal(pending.lastProgressAt, lastProgressAt);
+  assert(pending.message.includes(resume.waitCommand));
 });

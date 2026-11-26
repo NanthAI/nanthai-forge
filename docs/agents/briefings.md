@@ -107,7 +107,8 @@ If a command waits for approval and nobody can answer, cancel it and use the rou
    Copy the full line starting with “Never print environment values or
    secrets” from [AGENTS.md](../../AGENTS.md#hard-rules). Check the benchmark hold before each submission.
    When ready to land under a dev-check cap, use `"maxChecks":N` (it waits for queue room and wakes when a check ends) rather than polling `queue`; a check-only run still needs a `queue` read.
-   Never end the turn while your landing, dry run or wait runs; follow the command land prints. End the
+   Never end the turn while your landing, dry run or wait runs. On a wait timeout, run the
+   printed wait command again until you have a receipt or a refusal. End the
    land message with the commit trailers your harness asks for (for example `Co-Authored-By:`).
 10. Fix failures in the same Lane and land again; never cancel and recreate. Before filing an Issue or
     friction, run one `planning {"search":"relevant words","limit":10}` and comment on a match instead. Log

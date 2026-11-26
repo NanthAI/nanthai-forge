@@ -15,12 +15,21 @@ import { markerIdentity } from './lane-prune.js';
 import { landExitsFailed, landingStallReport, landSummary, selfReviewLine } from './hosted-land-summary.js';
 import { syncRequiredAdvice, syncRequiredContinuation } from './hosted-would-conflict.js';
 import { holdLines, landingHold } from './hosted-landing-hold.js';
-import { landingStateField, type LandingRecord } from './landing-state.js';
-import { causeNextStep, pendingLandingPresentation } from './hosted-agent-finish-result.js';
+import { landingStateField } from './landing-state.js';
+import {
+  causeNextStep,
+  landingWaitProgress,
+  pendingLandingPresentation,
+} from './hosted-agent-finish-result.js';
 import { orderWaitOf } from './hosted-wait-line.js';
 import { learnFromLanding } from './preflight-learned.js';
 import { operationLine } from './hosted-land-wait.js';
-import { AGENT_WAIT_SECONDS, interruptedWait, operationWait } from './agent-operation-wait.js';
+import {
+  AGENT_WAIT_SECONDS,
+  interruptedWait,
+  landingWaitBudgetReply,
+  operationWait,
+} from './agent-operation-wait.js';
 import { recordTurnWait, settleTurnWork } from './agent-turn-work.js';
 import { HostedAgentTransport, type HostedAgentResponse } from './hosted-agent-transport.js';
 import { waitHostedAgentSource } from './hosted-agent-source-wait.js';
@@ -287,13 +296,15 @@ async function dispatchHostedAgentCli(
               : outcome.status === 'cancelled'
                 ? 130
                 : 3;
+        const result = deployWaitResult(outcome, budgetSeconds, resume);
+        if ('message' in result && result.message) process.stderr.write(`${result.message}\n`);
         return {
           schema: 1 as const,
           transport: 'hosted' as const,
           action: 'observe' as const,
           operationId: null,
           resolved: null,
-          result: deployWaitResult(outcome, budgetSeconds, resume),
+          result,
         };
       }
       if (selectedWait.main) {
@@ -453,10 +464,11 @@ async function dispatchHostedAgentCli(
       invariant(response, 'NOT_FOUND', 'The selected operation has no hosted progress.');
       if (backgroundSave && 'successful' in response.result && response.result.successful === true)
         response = await restackObservedSave(transport, response, controller.signal);
+      type WaitProgress = Parameters<typeof landingWaitProgress>[0];
       const { submissions, status, run, pendingProgress } = response.result as {
         submissions?: {
           submission: { id: string; operationId: string; phase?: string } & NonNullable<
-            Parameters<typeof landingHold>[0]
+            Parameters<typeof landingHold>[0] & WaitProgress
           >;
           recovery?: unknown;
           conflict?: unknown;
@@ -467,7 +479,7 @@ async function dispatchHostedAgentCli(
           failureCause?: unknown;
         }[];
         status: string;
-        pendingProgress?: LandingRecord;
+        pendingProgress?: NonNullable<WaitProgress>;
         run?: { status?: string } | null;
       };
       const selected = submissions?.length === 1 ? submissions[0] : undefined;
@@ -478,6 +490,7 @@ async function dispatchHostedAgentCli(
       };
       const changed = pendingLandingPresentation(recorded, pendingProgress, laneId);
       const presentation = changed?.submission ?? recorded;
+      const progress = await landingWaitProgress(recorded, pendingProgress, presentation, laneId);
       const phase =
         'phase' in response.result && (response.result.phase === 'save' || response.result.phase === 'revert')
           ? response.result.phase
@@ -485,7 +498,7 @@ async function dispatchHostedAgentCli(
             ? (presentation?.phase ?? 'unknown')
             : 'pending';
       // A landing held for a person or a dependency says so on every unfinished return (5c59940b).
-      const hold = landingHold(presentation, laneId);
+      const hold = progress ? progress.hold : landingHold(presentation, laneId);
       // The same state word and next step people see (src/landing-state.ts); additive.
       const landing = presentation
         ? {
@@ -500,9 +513,9 @@ async function dispatchHostedAgentCli(
       const waitedOn = selectedWait.operationIds?.length === 1 ? selectedWait.operationIds[0]! : undefined;
       const retained = waitedOn ? retainedHostedOperation(root, waitedOn) : null;
       const stalled =
-        selected && !changed && status !== 'terminal'
+        selected && progress?.stall && status !== 'terminal'
           ? landingStallReport(
-              selected,
+              { ...selected, submission: { observation: { stall: progress.stall } } },
               retained && waitedOn ? { root, ...retained, operationId: waitedOn } : undefined,
             )
           : undefined;
@@ -571,7 +584,10 @@ async function dispatchHostedAgentCli(
       }
       if (status === 'timeout' || status === 'cancelled') {
         const interrupted = status === 'cancelled' ? interruptedWait(signalled) : undefined;
+        const budget =
+          status === 'timeout' && progress ? landingWaitBudgetReply(progress, waitCommand) : undefined;
         process.exitCode = interrupted?.exitCode ?? 3;
+        if (budget) process.stderr.write(`${budget.message}\n`);
         if (interrupted?.note) process.stderr.write(`${interrupted.note}\n${waitCommand}\n`);
         recordTurnWait(root, continuation.next, null);
         return {
@@ -586,6 +602,7 @@ async function dispatchHostedAgentCli(
               : {
                   operationIds: selectedWait.operationIds,
                   phase,
+                  ...budget,
                   ...held,
                 }),
             ...resume,

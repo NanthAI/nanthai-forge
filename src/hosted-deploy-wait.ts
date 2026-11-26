@@ -7,6 +7,8 @@ import { hostedActionError } from './hosted-action-error.js';
 import { parseHostedResponse } from './hosted-response.js';
 import { hostedRunSubscription, type HostedRunSubscription } from './hosted-agent-observe.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
+import { landingWaitBudgetReply } from './agent-operation-wait.js';
+import { latestLandingProgress } from './landing-stall.js';
 
 const deployEntrySchema = z
   .looseObject({
@@ -29,6 +31,7 @@ const deploySchema = z.object({
     receiptId: z.string().optional(),
     target: z.string().min(1),
     state: z.enum(['deployed', 'failed', 'pending']),
+    lastProgressAt: z.iso.datetime().optional(),
     deploys: z.record(z.string(), deployEntrySchema),
   }),
 });
@@ -100,10 +103,17 @@ export async function observeDeploy(
         queryArgs,
         value => {
           try {
-            latest = parseHostedResponse(
+            const observed = parseHostedResponse(
               deploySchema,
               typeof value === 'string' ? JSON.parse(value) : value,
             ).deploy;
+            // A claim can remove a queued record before the workflow posts its result.
+            const lastProgressAt = latestLandingProgress([
+              latest?.sequence === observed.sequence ? latest?.lastProgressAt : undefined,
+              observed.lastProgressAt,
+              ...Object.values(observed.deploys).map(entry => entry?.at),
+            ]);
+            latest = lastProgressAt ? { ...observed, lastProgressAt } : observed;
             if (latest.state === 'deployed' || latest.state === 'failed')
               settle({ status: latest.state, deploy: latest });
           } catch (error) {
@@ -135,7 +145,11 @@ export async function observeDeploy(
 }
 
 /** The wait's reply body for each outcome; shared by CLI and MCP. */
-export function deployWaitResult(outcome: DeployWaitOutcome, budgetSeconds: number, resume: object) {
+export function deployWaitResult(
+  outcome: DeployWaitOutcome,
+  budgetSeconds: number,
+  resume: { waitCommand: string },
+) {
   if (outcome.status === 'deployed')
     return {
       status: 'terminal',
@@ -153,6 +167,17 @@ export function deployWaitResult(outcome: DeployWaitOutcome, budgetSeconds: numb
   return {
     status: 'IN_PROGRESS',
     reason: outcome.status === 'timeout' ? 'budget' : outcome.status,
+    ...(outcome.status === 'timeout'
+      ? landingWaitBudgetReply(
+          {
+            stage: 'deploying',
+            lastProgressAt:
+              outcome.deploy?.lastProgressAt ??
+              latestLandingProgress(Object.values(outcome.deploy?.deploys ?? {}).map(entry => entry?.at)),
+          },
+          resume.waitCommand,
+        )
+      : {}),
     budgetSeconds,
     deploy: outcome.deploy,
     ...resume,

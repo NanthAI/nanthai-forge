@@ -14,7 +14,8 @@ import {
 } from './hosted-agent-reads.js';
 import { slimReceipt } from './receipt-slim.js';
 import { withCliBuildProvenance } from './cli-installation.js';
-import { waitEventLine } from './hosted-wait-line.js';
+import { orderWaitOf, waitEventLine } from './hosted-wait-line.js';
+import { landingWaitProgress, pendingLandingPresentation } from './hosted-agent-finish-result.js';
 import { installCompactToolList, toolHelp, type ToolHelp } from './mcp-tool-list.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
@@ -39,7 +40,7 @@ import { approvalNext, observeApproval } from './hosted-agent-approval.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import { ForgeError, invariant } from './errors.js';
 import { hostedActionError } from './hosted-action-error.js';
-import { AGENT_WAIT_SECONDS, operationWait } from './agent-operation-wait.js';
+import { AGENT_WAIT_SECONDS, landingWaitBudgetReply, operationWait } from './agent-operation-wait.js';
 import {
   hostedSourceSelectionSchema,
   hostedSourceShowSchema,
@@ -550,16 +551,23 @@ export function registerHostedAgentWorkflow(
           if (['timeout', 'cancelled'].includes(observed.result.status)) {
             const resume = resumeOf();
             const run = 'run' in observed.result ? (observed.result.run as { status?: string } | null) : null;
+            const recorded = single && { ...single.submission, orderWait: orderWaitOf(single.orderWait) };
+            const live = 'pendingProgress' in observed.result ? observed.result.pendingProgress : undefined;
+            const presentation = pendingLandingPresentation(recorded, live)?.submission ?? recorded;
+            const progress = await landingWaitProgress(recorded, live, presentation);
+            const budget =
+              observed.result.status === 'timeout' && progress
+                ? landingWaitBudgetReply(progress, resume.waitCommand)
+                : undefined;
             return {
               ...observed,
               result: {
                 status: 'IN_PROGRESS',
                 reason: observed.result.status === 'timeout' ? 'budget' : 'cancelled',
                 budgetSeconds,
-                phase: input.runId
-                  ? (run?.status ?? 'unknown')
-                  : ((single?.submission as { phase?: string } | undefined)?.phase ?? 'pending'),
+                phase: input.runId ? (run?.status ?? 'unknown') : (presentation?.phase ?? 'pending'),
                 ...('cursor' in observed.result ? { cursor: observed.result.cursor } : {}),
+                ...budget,
                 ...resume,
               },
             };

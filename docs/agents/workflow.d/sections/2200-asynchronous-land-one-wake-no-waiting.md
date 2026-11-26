@@ -20,9 +20,10 @@ background limit (Claude Code's default is 1,800 s) stops the wait with SIGTERM;
 A closed shell (SIGHUP) does the same. A wait never exits 0 with unfinished work: an exit before its
 reply (a drained event loop, a stray exit) prints `nforge wait ended before the work settled` with the
 command to run again and exits non-zero, and a reply that says unfinished exits 3. An exit
-that is not a terminal landing receipt is never "landed": exit 3 or `IN_PROGRESS` means run the same
-command again; exit 2 (a failed landing, `SYNC_REQUIRED`) follows its printed recovery. Run that command again with the longer
-timeout. Do not run `status` or `wait` in between. Then:
+with exit 3 or `IN_PROGRESS` means run the printed `waitCommand` again. On a budget
+timeout, keep the current turn active and rerun it until you have a receipt or a
+refusal. Exit 2 (a failed landing, `SYNC_REQUIRED`) follows its printed recovery.
+Use the longer harness timeout for a background wait. Then:
 
 - If ending your turn ends your task (a delegated builder or sub-agent run), block on
   that background command with your harness's wait tool (for example T3 Code's

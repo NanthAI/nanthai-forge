@@ -233,6 +233,7 @@ export const deploy = query({
           ...(receiptId ? { receiptId } : {}),
           target,
           state: status.state,
+          ...(status.lastProgressAt ? { lastProgressAt: status.lastProgressAt } : {}),
           deploys: status.deploys,
         },
       });

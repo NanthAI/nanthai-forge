@@ -2,6 +2,7 @@
 // Copyright 2026 Ferdinando Valsecchi
 import { makeFunctionReference } from 'convex/server';
 import { z } from 'zod';
+import { landingStallSchema } from './landing-stall-schema.js';
 import { ForgeError, invariant } from './errors.js';
 import { feedAttentionReasons, feedKinds } from './feed-event.js';
 import type { HostedRunSubscription } from './hosted-agent-observe.js';
@@ -60,6 +61,8 @@ const feedPageSchema = z.object({
             reason: landingObservationSchema.shape.pendingReason,
             holdCode: z.enum(['MAIN_RED', 'CI_DOWN']).optional(),
             orderWait: z.uuid().optional(),
+            lastProgressAt: z.iso.datetime().optional(),
+            stall: landingStallSchema.optional(),
           })
           .optional(),
       }),

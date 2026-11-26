@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import { checkTerminal, checkUnsuccessful } from './check-run-state.js';
-import { landingStateField, type LandingRecord } from './landing-state.js';
+import { landingStateField, landingStateOf, type LandingRecord } from './landing-state.js';
+import type { HostedLandingState } from './hosted-landing.js';
+import type { LandingStall } from './landing-stall.js';
 import { orderWaitOf } from './hosted-wait-line.js';
 import { shellQuote } from './shell-quote.js';
 import { operationWait } from './agent-operation-wait.js';
@@ -9,6 +11,53 @@ import { landingHold, type LandingReview } from './hosted-landing-hold.js';
 import { syncRequiredAdvice, syncRequiredContinuation } from './hosted-would-conflict.js';
 
 type Reply = Record<string, unknown>;
+
+type WaitProgress = LandingRecord & {
+  at?: string;
+  timing?: HostedLandingState['timing'];
+  lastProgressAt?: string;
+  observation?: (NonNullable<LandingRecord['observation']> & { stall?: LandingStall | undefined }) | null;
+};
+
+/** Use the existing observation and the same-attempt feed snapshot. Older servers omit feed timing. */
+export async function landingWaitProgress(
+  recorded: WaitProgress | undefined,
+  live: WaitProgress | undefined,
+  presentation: LandingRecord | undefined = recorded,
+  laneId?: string,
+) {
+  if (recorded?.observation?.state !== 'pending' || !presentation) return undefined;
+  const { state, hold } = landingStateOf(presentation, laneId);
+  const stage =
+    hold || state === 'waiting-for-runner'
+      ? state
+      : presentation.phase === 'composing'
+        ? 'composing'
+        : presentation.phase === 'checking'
+          ? 'checking'
+          : state === 'landing'
+            ? 'accepting'
+            : 'queued';
+  const lastProgressAt =
+    live?.lastProgressAt ??
+    (presentation.phase === recorded.phase
+      ? (await import('./landing-stall.js')).latestLandingProgress([
+          recorded.at,
+          ...Object.values(recorded.timing ?? {}).filter(
+            (value): value is string => typeof value === 'string',
+          ),
+        ])
+      : undefined);
+  // A new feed snapshot carries both the timestamp and the current stall (whose absence clears it).
+  const reportedStall = live?.lastProgressAt
+    ? live.observation?.stall
+    : presentation.phase === recorded.phase
+      ? recorded.observation.stall
+      : undefined;
+  // Cohort repair evidence can retain an old stall after progress resumes.
+  const stall = reportedStall?.lastProgressAt === lastProgressAt ? reportedStall : undefined;
+  return { stage, lastProgressAt, stall, hold };
+}
 
 /** A reply that explains a failed check (`failureCause`, src/check-failure-cause.ts) gives one next
  * step: the cause's own, so a landing that failed only on main's red never also says "fix your code"

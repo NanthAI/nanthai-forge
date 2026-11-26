@@ -7,11 +7,11 @@ import { suppliedLandingMessage } from './landing-message.js';
 import { clientCacheRoot } from './root-paths.js';
 import { isNetworkPending } from './network-continuation.js';
 import {
+  landingWaitProgress,
   normalizeHostedFinishResult,
   pendingLandingPresentation,
   retryableFinishSource,
 } from './hosted-agent-finish-result.js';
-import type { LandingRecord } from './landing-state.js';
 import { closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -36,16 +36,11 @@ import {
   landTerminal,
 } from './hosted-land-summary.js';
 import { learnFromLanding } from './preflight-learned.js';
-import {
-  landAnnouncement,
-  landResumeCommand,
-  landWaitCommand,
-  landWaitContinuation,
-} from './hosted-land-wait.js';
+import { landAnnouncement, landResumeCommand, landWaitContinuation } from './hosted-land-wait.js';
 import { recordTurnWait, settleTurnWork } from './agent-turn-work.js';
 import { exactConflictBannerOnce, type ExactConflictNotice } from './hosted-conflict-notice.js';
 import { LAND_INVOKED_ENV, landTiming, landTimingLine, startLandTiming } from './land-timing.js';
-import { AGENT_WAIT_SECONDS } from './agent-operation-wait.js';
+import { AGENT_WAIT_SECONDS, landingWaitBudgetReply } from './agent-operation-wait.js';
 import { waitFailure } from './wait-failure.js';
 import { withLandWaitMetrics } from './land-wait-metrics.js';
 import { backgroundWake, wakeContinuation } from './agent-wake.js';
@@ -422,18 +417,19 @@ export async function hostedLandCli(
   );
   // The authoritative read already contains the outcome. Replaying finish here
   // could fail after acceptance or at the deadline, misreporting the landing.
+  type WaitProgress = NonNullable<Parameters<typeof landingWaitProgress>[0]>;
   const observation = finished?.result as
     | {
         status?: string;
         run?: unknown;
         submissions?: {
-          submission: LandingRecord & { id: string; operationId: string };
+          submission: WaitProgress & { id: string; operationId: string };
           recovery?: unknown;
           conflict?: unknown;
           orderWait?: unknown;
           changedPaths?: number | null;
         }[];
-        pendingProgress?: LandingRecord;
+        pendingProgress?: WaitProgress;
       }
     | undefined;
   const selected = observation?.submissions?.[0];
@@ -444,17 +440,14 @@ export async function hostedLandCli(
   const laneId = typeof selection.laneId === 'string' ? selection.laneId : undefined;
   const pending =
     observation?.status === 'timeout' && selected
-      ? pendingLandingPresentation(
-          { ...selected.submission, orderWait: orderWaitOf(selected.orderWait) },
-          observation.pendingProgress,
-          laneId,
-        )
+      ? { ...selected.submission, orderWait: orderWaitOf(selected.orderWait) }
       : undefined;
+  const current = pendingLandingPresentation(pending, observation?.pendingProgress, laneId);
   const result = normalizeHostedFinishResult(transport.root ?? root, selection, {
     ...(submitted.result as Record<string, unknown>),
     ...(observation?.run ? { run: observation.run } : {}),
     ...selected,
-    ...(pending ? { orderWait: selected?.orderWait } : {}),
+    ...(current ? { orderWait: selected?.orderWait } : {}),
     ...(observation?.status && observation.status !== 'terminal'
       ? { waitStatus: observation.status, inProgress: true }
       : {}),
@@ -462,10 +455,10 @@ export async function hostedLandCli(
   // An older observer can omit the accepted count. Drop any estimate inherited from submission.
   if (selected?.submission.phase === 'landed' && selected.changedPaths === undefined)
     delete result.changedPaths;
-  if (pending) {
+  if (current) {
     result.pendingProgress = observation?.pendingProgress;
-    result.landingState = pending.landingState;
-    const hold = landingHold(pending.submission, laneId);
+    result.landingState = current.landingState;
+    const hold = landingHold(current.submission, laneId);
     if (hold) result.hold = hold;
     else delete result.hold;
   }
@@ -477,7 +470,16 @@ export async function hostedLandCli(
     result,
   };
   if (final.budget && Date.parse(final.budget.resetAt) <= Date.now()) delete final.budget;
-  const lines = landSummary(final, pending?.submission);
+  const progress = await landingWaitProgress(
+    pending,
+    observation?.pendingProgress,
+    current?.submission ?? pending,
+    laneId,
+  );
+  const resume = landWaitContinuation(transport.root ?? root, final);
+  const budget = progress && resume ? landingWaitBudgetReply(progress, resume.waitCommand) : undefined;
+  if (budget) Object.assign(result, budget);
+  const lines = landSummary(final, current?.submission ?? (budget ? pending : undefined));
   for (const line of lines) process.stderr.write(`${line}\n`);
   if (typeof submitted.operationId === 'string')
     recordLaneHold(
@@ -488,7 +490,7 @@ export async function hostedLandCli(
       landTerminal(final) ? null : landingHold(resultOf(final).submission),
     );
   learnFromLanding(hostedAgentRoot(transport.root ?? root), resultOf(final), command.laneId);
-  const resumeWith = landWaitContinuation(transport.root ?? root, final)?.next;
+  const resumeWith = resume?.next;
   if (resumeWith) recordTurnWait(transport.root ?? root, resumeWith, null);
   else
     settleTurnWork(
@@ -500,9 +502,10 @@ export async function hostedLandCli(
   if (landExitsFailed(final)) process.exitCode = 2;
   else if (!landTerminal(final)) {
     if (!(resultOf(final).phase === 'check' && resultOf(final).run?.status === 'passed')) {
-      const resume = landWaitCommand(transport.root ?? root, final);
       process.stderr.write(
-        `land: IN PROGRESS; ${observation?.status === 'timeout' ? 'wait deadline reached; ' : ''}${resume ? `keep waiting with: ${resume}` : 'run the same command again to keep waiting.'}\n`,
+        budget
+          ? `land: ${budget.message}\n`
+          : `land: IN PROGRESS; ${observation?.status === 'timeout' ? 'wait deadline reached; ' : ''}${resume ? `keep waiting with: ${resume.waitCommand}` : 'run the same command again to keep waiting.'}\n`,
       );
       process.exitCode = 3;
     }

@@ -667,7 +667,7 @@ export async function deployWaitStatus(
         ] as const;
       const unchanged = await unchangedPriorDeploy(ctx, projectId, target, sequence);
       if (unchanged) return [target.name, { state: 'deployed' as const, deploy: unchanged }] as const;
-      return [target.name, { state: 'pending' as const, deploy: null }] as const;
+      return [target.name, { state: 'pending' as const, deploy: null, queuedAt: recent[0]?.at }] as const;
     }),
   );
   const byTarget = Object.fromEntries(entries.map(([name, info]) => [name, info.deploy]));
@@ -678,5 +678,10 @@ export async function deployWaitStatus(
       : states.some(s => s === 'failed')
         ? 'failed'
         : 'pending';
-  return { state, deploys: byTarget } as const;
+  const lastProgressAt = entries
+    .map(([, info]) => ('queuedAt' in info ? info.queuedAt : info.deploy?.at))
+    .filter((at): at is string => Boolean(at))
+    .sort()
+    .at(-1);
+  return { state, deploys: byTarget, lastProgressAt } as const;
 }

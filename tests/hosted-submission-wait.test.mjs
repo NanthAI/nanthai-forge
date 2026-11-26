@@ -13,6 +13,8 @@ import { hostedAgentCli } from '../dist/hosted-agent-cli.js';
 import { HostedAgentJournal } from '../dist/hosted-agent-journal.js';
 import { observationWaitHooks } from '../dist/hosted-agent-observe.js';
 import { landingStateField } from '../dist/landing-state.js';
+import { LANDING_STALL_MS, landingStall } from '../dist/landing-stall.js';
+import { hostedLandingProgressAt } from '../dist/hosted-landing-stall.js';
 import { assertAgentResponseShape } from './agent-response-shape.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -546,6 +548,37 @@ test('historical failed/conflicted attempts retain their own evidence after a la
   );
   assert.equal(legacy.page[0].progress, null, 'unrecorded old evidence stays explicitly unknown');
   assert.equal(legacy.page[0].observation, null);
+});
+
+test('an MCP landing budget reply names an owner approval hold', async () => {
+  const s = await fixture();
+  const { request, state } = await s.start();
+  const tools = new Map();
+  const reason = 'Owner approval required for protected paths: .github/workflows/check.yml';
+  await s.update(state.id, 'ready', {
+    observation: { state: 'pending', pendingReason: 'waiting-for-review', cause: null },
+    error: { code: 'OWNER_REVIEW_REQUIRED', message: reason },
+  });
+  registerHostedAgentWorkflow(
+    {
+      registerTool(name, _config, call) {
+        tools.set(name, call);
+      },
+    },
+    s.transport,
+    s.subscribe,
+  );
+  const reply = await tools.get('forge_wait')(
+    { operationIds: [request.operationId], maxWaitMs: 0 },
+    { signal: new AbortController().signal, _meta: {} },
+  );
+  assert.equal(reply.isError, undefined);
+  const { result } = JSON.parse(reply.content[0].text);
+  assert.equal(result.waitOutcome, 'still-landing');
+  assert.equal(result.stage, 'held-review');
+  assert.equal(result.hold.reason, reason);
+  assert.match(result.message, /Owner approval required/);
+  assert.equal(s.counts().reads, 1);
 });
 
 test('any-change observes an initial baseline, and resumed cursors report only new observations', async () => {
@@ -1276,7 +1309,8 @@ test('a foreground land at budget shows the observed check and resumes the origi
   await s.deliver();
   desired.delete('desired');
   requests.set(rowId, row);
-  await s.update(state.id, 'checking');
+  const lastProgressAt = new Date(Date.parse(state.at) + 60_000).toISOString();
+  await s.update(state.id, 'checking', { timing: { submittedAt: state.at, ciObservedAt: lastProgressAt } });
   await s.deliver();
   await turn();
   const { submission } = await s.transport.query('projectHostedFinishObserve:page', {
@@ -1298,7 +1332,11 @@ test('a foreground land at budget shows the observed check and resumes the origi
   assert.equal(result.submission.version, state.version, 'retain the canonical snapshot at its own version');
   assert.match(output.join(''), /^CHECKING; not landed yet$/m);
   assert.doesNotMatch(output.join(''), /^QUEUED;/m);
-  assert.match(output.join(''), /IN PROGRESS; wait deadline reached/);
+  assert.equal(result.waitOutcome, 'still-landing');
+  assert.equal(result.stage, 'checking');
+  assert.equal(result.lastProgressAt, lastProgressAt);
+  assert.match(output.join(''), /Still landing \(checking\)/);
+  assert(output.join('').includes(result.waitCommand));
   assert.equal(s.f.metrics.calls, beforeBudget, 'formatting adds no Convex call');
   assert.equal(submissions, 1);
 
@@ -1331,7 +1369,8 @@ test('a bounded acceptance wait reports the observed check and resumes the origi
   await s.deliver();
   assert.equal(s.counts().reads, 1);
 
-  await s.update(state.id, 'checking');
+  const lastProgressAt = new Date(Date.parse(state.at) + 60_000).toISOString();
+  await s.update(state.id, 'checking', { timing: { submittedAt: state.at, ciObservedAt: lastProgressAt } });
   const [feedPage] = await s.deliver();
   await turn();
   const { submission, ...page } = await s.transport.query('projectHostedFinishObserve:page', {
@@ -1352,6 +1391,11 @@ test('a bounded acceptance wait reports the observed check and resumes the origi
   assert.equal(process.exitCode, 3);
   assert.equal(bounded.status, 'IN_PROGRESS');
   assert.equal(bounded.reason, 'budget');
+  assert.equal(bounded.waitOutcome, 'still-landing');
+  assert.equal(bounded.stage, 'checking');
+  assert.equal(bounded.lastProgressAt, lastProgressAt);
+  assert.match(bounded.message, /Still landing \(checking\)/);
+  assert(bounded.message.includes(bounded.waitCommand));
   assert.equal(bounded.phase, submission.phase);
   assert.equal(bounded.landingState.state, 'checking');
   assert.deepEqual(bounded.next.operationIds, [operationId]);
@@ -1379,6 +1423,42 @@ test('a bounded acceptance wait reports the observed check and resumes the origi
   assert.deepEqual(settled.submission.acceptance, acceptance);
   assert.equal(settled.waitCommand, undefined);
   assert.equal(s.counts().reads, 4, 'the resumed wait reads its own baseline and terminal receipt');
+  assert.equal(s.counts().opens, s.counts().closes);
+});
+
+test('a stall recorded while waiting is reported at the budget without a fresh read', async t => {
+  const s = await fixture(true);
+  const { request, state } = await s.start();
+  const { input, wait, expireBudget } = feedBackedCliWait(t, s, request.operationId);
+  const pendingReason = 'checking';
+  const observation = { state: 'pending', pendingReason, cause: null };
+  await s.update(state.id, 'checking', { observation });
+  const pending = wait(input);
+  await turn();
+  await s.deliver();
+
+  const lastProgressAt = hostedLandingProgressAt((await s.f.status(state.id)).request);
+  const stall = landingStall(
+    'checking',
+    'check runner',
+    lastProgressAt,
+    Date.parse(lastProgressAt) + LANDING_STALL_MS,
+  );
+  await s.update(state.id, 'checking', { observation: { ...observation, stall } });
+  await s.deliver();
+  const calls = s.f.metrics.calls;
+  expireBudget();
+
+  const { result } = await pending;
+  assert.equal(process.exitCode, 3);
+  assert.equal(result.waitOutcome, 'stalled');
+  assert.equal(result.stage, 'checking');
+  assert.equal(result.lastProgressAt, lastProgressAt);
+  assert.deepEqual(result.stall, stall);
+  assert.match(result.message, /Landing is stalled \(checking\)/);
+  assert(result.message.includes(result.waitCommand));
+  assert.equal(s.counts().reads, 1);
+  assert.equal(s.f.metrics.calls, calls);
   assert.equal(s.counts().opens, s.counts().closes);
 });
 

@@ -1,12 +1,42 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import { shellQuote } from './shell-quote.js';
+import type { LandingHold } from './hosted-landing-hold.js';
+import type { LandingStall } from './landing-stall.js';
 
 /** Agent-mode wait budget: under the 10-minute ceiling of common agent shells
  * (for example a 600 s tool timeout), so a wait returns IN_PROGRESS with its resume
  * command before the caller kills or backgrounds it. Callers raise or lower it
  * with --budget / timeoutSeconds (CLI) or maxWaitMs (MCP). */
 export const AGENT_WAIT_SECONDS = 540;
+
+export function landingWaitBudgetReply(
+  progress: {
+    stage: string;
+    lastProgressAt?: string | undefined;
+    stall?: LandingStall | undefined;
+    hold?: LandingHold | null;
+  },
+  waitCommand: string,
+) {
+  const { stage, stall, hold } = progress,
+    lastProgressAt = progress.lastProgressAt ?? null;
+  const waitOutcome = stall ? ('stalled' as const) : ('still-landing' as const);
+  const headline = stall
+    ? `Landing is stalled (${stage}). ${stall.message}`
+    : `Wait budget reached. Still landing (${stage}).`;
+  const reason = hold ? ` ${hold.reason.replace(/\.$/, '')}.` : '';
+  const when = lastProgressAt ? `Last progress at ${lastProgressAt}.` : 'Last progress time is unknown.';
+  const message = `${headline}${reason} ${when} Keep waiting with ${waitCommand}`;
+  return {
+    waitOutcome,
+    stage,
+    lastProgressAt,
+    message,
+    ...(stall ? { stall } : {}),
+    ...(hold ? { hold } : {}),
+  };
+}
 
 /** Accept a positive budget in seconds, or with an s/m/ms suffix (`540`, `90s`, `9m`). */
 export function parseWaitBudget(value: string | undefined): number | undefined {

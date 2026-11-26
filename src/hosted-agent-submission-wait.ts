@@ -36,6 +36,7 @@ import { syncRequiredAdvice, syncRequiredContinuation } from './hosted-would-con
 import { feedCommitOrder } from './hosted-contract-features.js';
 import { finishCommandLaneIds, retainedHostedOperation } from './hosted-agent-journal.js';
 import { markerIdentity } from './hosted-lane-directory.js';
+import type { LandingStall } from './landing-stall.js';
 
 export const hostedSubmissionWaitSchema = z
   .object({
@@ -95,7 +96,9 @@ type PendingProgress = {
   observation: {
     state: 'pending';
     pendingReason: z.infer<typeof hostedLandingStateSchema.shape.observation.shape.pendingReason>;
+    stall?: LandingStall;
   };
+  lastProgressAt?: string;
   error?: { code: 'MAIN_RED' | 'CI_DOWN' };
   orderWait?: { submissionId: string };
 };
@@ -723,7 +726,12 @@ async function observeHostedSubmissionsOnce(
                     attemptId: pending.attemptId,
                     version,
                     phase,
-                    observation: { state: 'pending', pendingReason: pending.reason },
+                    observation: {
+                      state: 'pending',
+                      pendingReason: pending.reason,
+                      ...(pending.stall ? { stall: pending.stall } : {}),
+                    },
+                    ...(pending.lastProgressAt ? { lastProgressAt: pending.lastProgressAt } : {}),
                     ...(pending.holdCode ? { error: { code: pending.holdCode } } : {}),
                     ...(pending.orderWait ? { orderWait: { submissionId: pending.orderWait } } : {}),
                   });

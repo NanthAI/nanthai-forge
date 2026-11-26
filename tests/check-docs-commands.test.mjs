@@ -2,6 +2,9 @@
 // Copyright 2026 Ferdinando Valsecchi
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
+import { helpTopicText } from '../dist/help-topics.js';
+import { readDocument } from '../scripts/package-documents.mjs';
 import { docsCommandFindings, docsCommandsFindings } from '../scripts/check-docs-commands.mjs';
 
 const known = {
@@ -60,4 +63,14 @@ test('docs commands: a setup flag must belong to the command that uses it', () =
   );
   assert.equal(findings.length, 1);
   assert.match(findings[0], /--resume, which host does not accept/);
+});
+
+test('the agent workflow and CLI wait help tell agents to continue a budget timeout until settlement', () => {
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  const workflow = readDocument(root, 'docs/agents/workflow.md').split('### Foreground wait')[1];
+  for (const text of [workflow, helpTopicText('wait')]) {
+    assert.match(text, /never end (?:your|the) turn on a wait timeout/i);
+    assert.match(text, /waitCommand.*again until you have a receipt or a refusal/s);
+    assert.match(text, /waitOutcome.*still-landing.*stalled/s);
+  }
 });

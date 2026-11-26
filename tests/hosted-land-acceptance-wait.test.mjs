@@ -390,7 +390,8 @@ test('land observation deadline returns IN PROGRESS with the exact wait command 
   assert.equal(process.exitCode, 3);
   assert.equal(s.calls.length, 1);
   const stderr = s.err.join('');
-  assert(stderr.includes('IN PROGRESS; wait deadline reached'));
+  assert.equal(result.result.waitOutcome, 'still-landing');
+  assert.match(stderr, /Still landing/);
   assert(stderr.includes(landWaitCommand('/synthetic', result)));
   assert(!stderr.includes('FAILED'));
   // Issue 0fe39d02: the default budget is the agent wait's 540 s from command start (not 5400 s),

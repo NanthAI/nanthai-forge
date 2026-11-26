@@ -9,6 +9,7 @@ import {
   type HostedLandingState,
 } from '../src/hosted-landing';
 import { syncRequiredAdvice } from '../src/hosted-would-conflict';
+import { hostedLandingProgressAt } from '../src/hosted-landing-stall';
 
 const phases = hostedLandingStateSchema.shape.phase;
 export const feedWaitingValidator = v.array(
@@ -26,6 +27,17 @@ export const feedWaitingValidator = v.array(
         ),
         holdCode: v.optional(v.union(v.literal('MAIN_RED'), v.literal('CI_DOWN'))),
         orderWait: v.optional(v.string()),
+        lastProgressAt: v.optional(v.string()),
+        stall: v.optional(
+          v.object({
+            code: v.literal('LANDING_STALLED'),
+            step: v.string(),
+            missingOwner: v.string(),
+            lastProgressAt: v.string(),
+            alarmAt: v.string(),
+            message: v.string(),
+          }),
+        ),
       }),
     ),
   }),
@@ -67,11 +79,9 @@ export async function feedWaitObservations(
             .take(2);
       if (selected.length !== 1) return null;
       const row = selected[0]!;
-      const state = JSON.parse(row.value) as Pick<
-        HostedLandingState,
-        'attemptId' | 'phase' | 'version' | 'observation' | 'error'
-      >;
+      const state = JSON.parse(row.value) as HostedLandingState;
       const holdCode = state.error?.code;
+      const stall = state.observation.stall;
       return {
         submissionId: row.submissionId,
         phase: state.phase,
@@ -82,6 +92,19 @@ export async function feedWaitObservations(
               pending: {
                 attemptId: state.attemptId,
                 reason: state.observation.pendingReason,
+                lastProgressAt: hostedLandingProgressAt(state),
+                ...(stall
+                  ? {
+                      stall: {
+                        code: stall.code,
+                        step: stall.step,
+                        missingOwner: stall.missingOwner,
+                        lastProgressAt: stall.lastProgressAt,
+                        alarmAt: stall.alarmAt,
+                        message: stall.message,
+                      },
+                    }
+                  : {}),
                 ...(holdCode === 'MAIN_RED' || holdCode === 'CI_DOWN' ? { holdCode } : {}),
                 ...(state.phase === 'ready' && row.orderWait ? { orderWait: row.orderWait } : {}),
               },

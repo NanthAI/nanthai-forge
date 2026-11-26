@@ -31,8 +31,8 @@ processes, not yet in a live Codex session: nobody has observed `CODEX_THREAD_ID
 reaching the shell commands a Codex agent runs, or Codex's `Stop` hook honouring
 `decision: "block"`. Without the variable the CLI records no turn work, and the hook
 allows the stop. So Codex agents must not rely on the guard: after `land --save`, run
-the printed `waitCommand` in the foreground (it blocks up to 540 s; run it again on
-IN PROGRESS) and end the turn only once the landing is terminal. Claude Code sets
+the printed `waitCommand` in the foreground. Never end the turn on a wait timeout.
+Run the command again until you have a receipt or a refusal. Claude Code sets
 `CLAUDE_CODE_SESSION_ID` in the shells its agents run, so the guard covers them.
 
 Native waits can also select latest Lane work or several operations:
@@ -54,7 +54,8 @@ that original request. A passed Lane check alone never establishes landing.
 
 Exit 0 means terminal (including failure), or an observed `any-change`; native
 timeout is 2, cancellation 130. Hosted timeout is 3 / IN PROGRESS with its exact
-continuation; transient observation failures retry until that deadline. Invalid
+continuation and, for an observed single landing, the `waitOutcome` described in
+[Foreground wait](#foreground-wait). Transient observation failures retry until that deadline. Invalid
 input/unreadable metadata exits nonzero. Inspect summary `successful` and target
 `ok` for success. Failures retain reasons, infrastructure/check classification and
 available log paths. Composition conflicts return exact `sync`/`resolve` recovery,

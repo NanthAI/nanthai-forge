@@ -8,21 +8,31 @@ name one blocking continuation on the original operation:
 nforge agent ROOT wait '{"operationIds":["ORIGINAL_UUID"],"until":"acceptance"}'
 ```
 
-`wait` blocks for its budget, then returns one line. A landing that ends failed
-exits 2 (the same as `land`); landed or superseded exits 0; a plain budget timeout keeps
-exit 3. In agent mode the budget is
+`wait` blocks for its budget, then returns a reply. A landing that ends failed
+exits 2 (the same as `land`), and a landed or superseded result exits 0. An unfinished
+wait returns `status:"IN_PROGRESS"` with exit 3. In agent mode the budget is
 540 s, under the 10-minute tool limit of common agent shells; `--budget 90s` (CLI)
-or `maxWaitMs` (MCP `forge_wait`) sets another. Unfinished work returns
-`IN_PROGRESS` (exit 3) with the same resume command: run it again in the
-foreground. Never resubmit, sleep between checks or end the turn on a background
-wait. MCP sends progress notifications while it waits.
+or `maxWaitMs` (MCP `forge_wait`) sets another. **Never end the turn on a wait timeout.
+Run the exact `waitCommand` again until you have a receipt or a refusal.** Keep the
+same operation and wait in the foreground without sleeping between waits. MCP
+sends progress notifications while it waits.
+
+For a single pending landing, a budget reply says `waitOutcome:"still-landing"`,
+with a readable message, `stage` (`composing`, `queued`, `checking`, `accepting` or
+`deploying` for a deploy wait), `lastProgressAt` (UTC or `null` when unavailable)
+and the exact `waitCommand`. A recorded 15-minute stall says
+`waitOutcome:"stalled"` and carries the stall details. Both replies report
+unfinished work. The budget expiry uses the observation it already has.
+Landings held for approval, dependency, main recovery or check infrastructure
+name the hold in `stage` and include its reason.
 For a single landing, the `wait` and foreground `land --save` budget replies use the
 latest pending phase delivered for the observed attempt by the existing subscription.
 When that progress updates the foreground display, `pendingProgress` carries its
 phase and version alongside the observed submission. The continuation still selects
 the original operation, and settlement still comes from its canonical landing record.
 `land --save` uses the same 540 s budget for its whole run (submission and wait,
-`--budget` sets another) and ends `IN_PROGRESS` (exit 3) with its exact resume command.
+`--budget` sets another), reports the pending landing in the same way, and exits
+3 with its exact resume command.
 If a hosted `save` replies `settling`, follow its wait command or check its outcome
 on the next command in that checkout. Waiting uses the save's progress subscription
 and advances the local Lane binding from a completed receipt. A wait that reaches
