@@ -29,6 +29,8 @@ export const create = accountMutation('write')({
         'BAD_ARGUMENT',
         'Use an original hosting operation UUID and project name.',
       );
+      const web = process.env.FORGE_WEB_URL ?? process.env.SITE_URL;
+      invariant(web, 'HOST_CONFIGURATION', 'Configure FORGE_WEB_URL for hosted project links.');
       const request = JSON.stringify([input.name.trim(), input.visibility]);
       const project = await createProject(ctx, {
         owner: user.subject,
@@ -42,8 +44,6 @@ export const create = accountMutation('write')({
         'Retry hosting with its original name and visibility.',
       );
       await ctx.db.patch(project._id, { hostingRequest: request });
-      const web = process.env.FORGE_WEB_URL ?? process.env.SITE_URL;
-      invariant(web, 'HOST_CONFIGURATION', 'Configure FORGE_WEB_URL for hosted project links.');
       const url = new URL(web);
       const account = await accountFor(ctx, project.owner);
       url.pathname = hostedProjectRoot(account!.handle, project.slug!);

@@ -27,6 +27,11 @@ const { createProject } = await import(moduleUrl('../convex/projectCreation.ts')
 const operator = await import(moduleUrl('../convex/projectBoardOperator.ts'));
 const mail = await import(moduleUrl('../convex/projectInviteMail.ts'));
 const teamInvitationWrites = await import(moduleUrl('../convex/teamInvitationWrites.ts'));
+const hosting = await import(moduleUrl('../convex/projectHosting.ts'));
+const bootstrapStore = await import(moduleUrl('../convex/projectBootstrapStore.ts'));
+const savesApi = await import(moduleUrl('../convex/projectHostedSaves.ts'));
+const { r2Key } = await import(moduleUrl('../convex/r2.ts'));
+const { emptyHostedProject } = await import('../dist/hosted-bootstrap.js');
 const { ACCOUNT_LIMITS } = limits;
 
 const day = 86_400_000;
@@ -850,4 +855,282 @@ test('dogfood burst: 10 agents on one account saving and commenting at once are 
     s.counts.every(count => count.retries < 3),
     'no write retried more than twice',
   );
+});
+
+function countWrites(db) {
+  let writes = 0;
+  for (const name of ['insert', 'patch', 'replace', 'delete']) {
+    const fn = db[name];
+    db[name] = async (...args) => {
+      writes++;
+      return fn(...args);
+    };
+  }
+  return () => writes;
+}
+
+// --- Friction 8e03404e: refused requests never charge or write any account-limit shard ---
+
+test('friction 8e03404e: refused projectWork append writes nothing on any account-limit shard', async t => {
+  let pick = 0;
+  t.mock.method(Math, 'random', () => pick);
+  const s = await planningSetup(t);
+  s.tables.deviceAttempts.clear();
+  const writes = countWrites(s.ctx.db);
+  await s.send(s.item());
+  const revisionAfterItem = (await s.read()).data.revision;
+  const seeded = await s.transaction(() =>
+    work.append._handler(s.ctx, {
+      projectId: s.projectId,
+      owner: 'owner',
+      operationId: randomUUID(),
+      request: '{}',
+      previousRevision: revisionAfterItem,
+      command: JSON.stringify({
+        action: 'intent',
+        outcome: 'Seed shard 0',
+        constraints: '',
+        base: 'a'.repeat(64),
+      }),
+    }),
+  );
+  const currentRevision = seeded.revision;
+  const before = writes();
+  // Shard 0 exists for both planning and start; higher shards do not. Refused appends must touch neither.
+  for (const nextPick of [0.9, 0]) {
+    pick = nextPick;
+    await assert.rejects(
+      s.transaction(() =>
+        work.append._handler(s.ctx, {
+          projectId: s.projectId,
+          owner: 'owner',
+          operationId: randomUUID(),
+          request: '{}',
+          previousRevision: currentRevision + 10,
+          command: JSON.stringify({
+            action: 'intent',
+            outcome: 'Stale intent',
+            constraints: '',
+            base: 'a'.repeat(64),
+          }),
+        }),
+      ),
+      code('WORK_STALE'),
+    );
+    const staleItem = s.item();
+    await assert.rejects(
+      s.transaction(() =>
+        work.append._handler(s.ctx, {
+          projectId: s.projectId,
+          owner: 'owner',
+          operationId: staleItem.operationId,
+          request: '{}',
+          previousRevision: currentRevision + 10,
+          command: JSON.stringify(staleItem),
+        }),
+      ),
+      code('WORK_STALE'),
+    );
+    const staleProjectionItem = s.item();
+    await assert.rejects(
+      s.transaction(() =>
+        work.append._handler(s.ctx, {
+          projectId: s.projectId,
+          owner: 'owner',
+          operationId: staleProjectionItem.operationId,
+          request: '{}',
+          previousRevision: currentRevision,
+          command: JSON.stringify(staleProjectionItem),
+          projection: {
+            generationId: 'projectWorkGenerations-stale',
+            metadata: '{}',
+            entries: [],
+            at: new Date(NOW).toISOString(),
+          },
+        }),
+      ),
+      code('WORK_STALE'),
+    );
+  }
+  assert.equal(writes(), before, 'refused projectWork appends perform no database writes');
+  assert.equal(charged(s.tables, 'planning'), 1);
+  assert.equal(charged(s.tables, 'start'), 1);
+});
+
+test('friction 8e03404e: refused hosted start writes nothing on any account-limit shard', async t => {
+  let pick = 0;
+  t.mock.method(Math, 'random', () => pick);
+  const s = await startSetup();
+  await s.begin(s.input());
+  // Shard 0 exists; shard 3 does not. Refused starts must touch neither shard nor insert an operation.
+  for (const nextPick of [0.9, 0]) {
+    pick = nextPick;
+    await assert.rejects(
+      s.begin({ ...s.input(), expectedMain: { head: 'b'.repeat(64), receiptId: 'stale-receipt' } }),
+      code('CHANNEL_CHANGED'),
+    );
+    assert.equal(s.counts.at(-1).writes, 0, 'CHANNEL_CHANGED writes nothing');
+    await assert.rejects(s.begin({ ...s.input(), initialHead: 'b'.repeat(64) }), code('SOURCE_UNAVAILABLE'));
+    assert.equal(s.counts.at(-1).writes, 0, 'SOURCE_UNAVAILABLE writes nothing');
+    await assert.rejects(s.begin({ ...s.input(), stackOn: randomUUID() }), code('NOT_FOUND'));
+    assert.equal(s.counts.at(-1).writes, 0, 'missing stackOn writes nothing');
+  }
+  assert.equal(charged(s.tables, 'start'), 1);
+});
+
+test('friction 8e03404e: refused hosted save prepare writes nothing on any account-limit shard', async t => {
+  let pick = 0;
+  t.mock.method(Math, 'random', () => pick);
+  const s = await saveFixture();
+  await s.prepare([s.change()]);
+  // Shard 0 exists; shard 14 does not. Refused save prepares must touch neither shard nor insert an operation.
+  for (const nextPick of [0.9, 0]) {
+    pick = nextPick;
+    await assert.rejects(
+      s.prepare([s.change()], { expected: { ...s.expected, version: 99 } }),
+      code('WORK_STALE'),
+    );
+    assert.equal(s.counts.at(-1).writes, 0, 'WORK_STALE save prepare writes nothing');
+    await assert.rejects(
+      s.prepare([], { laneId: randomUUID(), pages: null, pageCount: 0, changeCount: 0 }),
+      code('NOT_FOUND'),
+    );
+    assert.equal(s.counts.at(-1).writes, 0, 'NOT_FOUND lane save prepare writes nothing');
+    await assert.rejects(
+      s.call('prepare', savesApi.prepare, {
+        projectId: s.projectId,
+        request: JSON.stringify({
+          operationId: randomUUID(),
+          laneId: s.laneId,
+          authorityEpoch: 1,
+          expected: s.expected,
+          message: 'too many uploads',
+          pages: null,
+          pageCount: 0,
+          changeCount: 0,
+        }),
+        uploads: Array.from({ length: 100 }, (_, i) => ({
+          digest: i.toString(16).padStart(64, '0'),
+          size: 1,
+        })),
+      }),
+      code('BAD_ARGUMENT'),
+    );
+    assert.equal(s.counts.at(-1).writes, 0, 'BAD_ARGUMENT uploads > 99 writes nothing');
+  }
+  assert.equal(charged(s.tables, 'save'), 1);
+});
+
+test('friction 8e03404e: refused friction import writes nothing on any account-limit shard', async t => {
+  let pick = 0;
+  t.mock.method(Math, 'random', () => pick);
+  const s = recordsFixture();
+  asContributor(s);
+  await s.request('projectHostedFrictionImport:apply', { friction: [importRecord(0)] });
+  const before = s.counts().writes;
+  // Shard 0 exists; shard 1 does not. A conflicting duplicate inside one import page must touch neither.
+  for (const nextPick of [0.9, 0]) {
+    pick = nextPick;
+    const first = importRecord(1);
+    const conflict = { ...first, title: 'Conflicting duplicate' };
+    await assert.rejects(
+      s.request('projectHostedFrictionImport:apply', { friction: [first, conflict] }),
+      code('WORK_OPERATION_CHANGED'),
+    );
+  }
+  assert.equal(s.counts().writes, before, 'refused friction import performs no database writes');
+  assert.equal(charged(s.tables, 'friction', 'contributor'), 1);
+});
+
+test('friction 8e03404e: refused projectHosting create writes nothing on any account-limit shard', async t => {
+  let pick = 0;
+  t.mock.method(Math, 'random', () => pick);
+  const s = state([]);
+  const credentialId = randomUUID();
+  s.tables.cliCredentials.set('device', {
+    _id: 'device',
+    _creationTime: 1,
+    owner: 'owner',
+    credentialId,
+    name: 'laptop',
+    tokenHash: 'hash',
+    scope: 'cli',
+    revoked: false,
+    issuedAt: 1,
+    expiresAt: NOW + day,
+  });
+  s.ctx.auth.getUserIdentity = async () => ({ subject: 'owner', forgeCredential: credentialId });
+  const writes = countWrites(s.ctx.db);
+  const savedWeb = process.env.FORGE_WEB_URL;
+  const savedSite = process.env.SITE_URL;
+  const create = () =>
+    s.transaction(() =>
+      hosting.create._handler(s.ctx, {
+        operationId: randomUUID(),
+        name: 'Synthetic hosted',
+        visibility: 'private',
+      }),
+    );
+  try {
+    delete process.env.FORGE_WEB_URL;
+    delete process.env.SITE_URL;
+    // Absent shard (insert path).
+    await assert.rejects(create(), code('HOST_CONFIGURATION'));
+    assert.equal(writes(), 0, 'HOST_CONFIGURATION before shard exists writes nothing');
+    // Seed shard 0 (patch path).
+    process.env.FORGE_WEB_URL = 'https://forge.test';
+    await create();
+    delete process.env.FORGE_WEB_URL;
+    const before = writes();
+    for (const nextPick of [0.9, 0]) {
+      pick = nextPick;
+      await assert.rejects(create(), code('HOST_CONFIGURATION'));
+    }
+    assert.equal(writes(), before, 'HOST_CONFIGURATION after shard exists writes nothing');
+    assert.equal(charged(s.tables, 'project'), 1);
+  } finally {
+    if (savedWeb === undefined) delete process.env.FORGE_WEB_URL;
+    else process.env.FORGE_WEB_URL = savedWeb;
+    if (savedSite === undefined) delete process.env.SITE_URL;
+    else process.env.SITE_URL = savedSite;
+  }
+});
+
+test('friction 8e03404e: refused projectBootstrapStore publish writes nothing on any account-limit shard', async t => {
+  let pick = 0;
+  t.mock.method(Math, 'random', () => pick);
+  const s = state([]);
+  const writes = countWrites(s.ctx.db);
+  const badPublish = () => {
+    const operationId = randomUUID();
+    const at = new Date(NOW).toISOString();
+    const bogusId = 'hostedProjects-bogus';
+    const bootstrap = emptyHostedProject(operationId, at);
+    return s.transaction(() =>
+      bootstrapStore.publish._handler(s.ctx, {
+        operationId,
+        name: 'Synthetic bootstrap',
+        at,
+        projectId: bogusId,
+        objects: bootstrap.objects.map(object => ({
+          r2Key: r2Key(bogusId, object.sha256),
+          nonce: operationId,
+        })),
+      }),
+    );
+  };
+  // Absent shard (insert path).
+  await assert.rejects(badPublish(), code('INVALID_WORK_BACKUP'));
+  assert.equal(writes(), 0, 'INVALID_WORK_BACKUP before shard exists writes nothing');
+  // Seed shard 0 via prepare (patch path).
+  await s.transaction(() =>
+    bootstrapStore.prepare._handler(s.ctx, { operationId: randomUUID(), name: 'Seed project' }),
+  );
+  const before = writes();
+  for (const nextPick of [0.9, 0]) {
+    pick = nextPick;
+    await assert.rejects(badPublish(), code('INVALID_WORK_BACKUP'));
+  }
+  assert.equal(writes(), before, 'INVALID_WORK_BACKUP after shard exists writes nothing');
+  assert.equal(charged(s.tables, 'project'), 1);
 });

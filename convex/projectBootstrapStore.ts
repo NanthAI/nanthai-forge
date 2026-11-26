@@ -15,7 +15,7 @@ import { storeCatalogObjects } from './projectObjectCatalogStore';
 
 export const bootstrapInput = { operationId: v.string(), name: v.string() };
 const requestFor = (name: string) => JSON.stringify(['empty-hosted-project', name.trim()]);
-async function findProject(ctx: QueryCtx, input: { operationId: string; name: string }) {
+async function lookupProject(ctx: QueryCtx, input: { operationId: string; name: string }) {
   await guard(ctx, 'cli');
   const user = await ctx.auth.getUserIdentity();
   invariant(user, 'AUTH_REQUIRED', 'Sign in to create a project.');
@@ -28,14 +28,17 @@ async function findProject(ctx: QueryCtx, input: { operationId: string; name: st
     .query('hostedProjects')
     .withIndex('by_owner_and_key', q => q.eq('owner', user.subject).eq('key', input.operationId))
     .unique();
-  if (!project) return null;
+  if (!project) return { existing: null, project: null };
   await activeOwnedProject(ctx, project._id, user.subject);
   invariant(
     project.hostingRequest === requestFor(input.name),
     'WORK_OPERATION_CHANGED',
     'Retry project creation with its original name.',
   );
-  return project.currentBackup ? project._id : null;
+  return { existing: project.currentBackup ? project._id : null, project };
+}
+async function findProject(ctx: QueryCtx, input: { operationId: string; name: string }) {
+  return (await lookupProject(ctx, input)).existing;
 }
 export const find = internalQuery({
   args: bootstrapInput,
@@ -75,7 +78,7 @@ export const publish = internalMutation({
   returns: v.object({ projectId: v.id('hostedProjects'), created: v.boolean() }),
   handler: async (ctx, input) => {
     try {
-      const existing = await findProject(ctx, input);
+      const { existing, project: reserved } = await lookupProject(ctx, input);
       if (existing) return { projectId: existing, created: false };
       const user = (await ctx.auth.getUserIdentity())!;
       const bootstrap = emptyHostedProject(input.operationId, input.at);
@@ -92,16 +95,16 @@ export const publish = internalMutation({
           'Bootstrap R2 project binding changed.',
         );
       }
+      invariant(
+        !input.projectId || reserved?._id === input.projectId,
+        'INVALID_WORK_BACKUP',
+        'Bootstrap project changed.',
+      );
       const project = await createProject(ctx, {
         owner: user.subject,
         key: input.operationId,
         name: input.name.trim(),
       });
-      invariant(
-        !input.projectId || input.projectId === project._id,
-        'INVALID_WORK_BACKUP',
-        'Bootstrap project changed.',
-      );
       const root = bootstrap.objects[2]!;
       const backupId = await ctx.db.insert('projectBackups', {
         projectId: project._id,

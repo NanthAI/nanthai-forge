@@ -84,7 +84,7 @@ export async function pruneExpiredHostedOperations(
 
 /** Persist original IDs/time before any external work. Authorization precedes
  * even a completed replay; callers must resolve actor from their trusted boundary. */
-export async function beginHostedOperation(
+export async function beginHostedOperation<T = void>(
   ctx: MutationCtx,
   input: {
     projectId: Id<'hostedProjects'>;
@@ -99,6 +99,8 @@ export async function beginHostedOperation(
     /** Message-carrying writes (Lane starts and names, save messages): the account limiter and
      * suspend switch, charged with the member budget only for a fresh operation. */
     accountChannel?: 'start' | 'save';
+    /** Read-only validation for a fresh (non-replay) operation before charging or inserting. */
+    beforeWrite?: () => Promise<T>;
   },
 ) {
   const project = await activeProject(ctx, input.projectId, input.actor);
@@ -123,7 +125,9 @@ export async function beginHostedOperation(
       await activeProject(ctx, input.projectId, input.actor);
     },
   );
+  let validated: T | undefined;
   if (!old) {
+    if (input.beforeWrite) validated = await input.beforeWrite();
     if (input.accountChannel) await chargeAccountChannel(ctx, input.actor, input.accountChannel);
     if (input.workKind) await chargeMemberWork(ctx, project, input.actor, input.workKind);
     const metricAction =
@@ -144,7 +148,7 @@ export async function beginHostedOperation(
     await pruneExpiredHostedOperations(ctx, input.projectId, Date.now());
   }
   // Reuse this authorized snapshot within the current transaction.
-  return { ...prepared, project };
+  return { ...prepared, project, validated };
 }
 export async function finishHostedOperation(
   ctx: MutationCtx,

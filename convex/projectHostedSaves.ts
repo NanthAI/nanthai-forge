@@ -23,7 +23,6 @@ import {
   saveLaneRecord,
   saveLane,
   sameSaveLane,
-  saveObject,
   saveObjects,
   saveRow,
   writeSaveState,
@@ -31,6 +30,7 @@ import {
 } from './projectHostedSaveStore';
 import { refuseLiveLaneFinish } from './projectHostedLaneFinish';
 import { requireLaneSourceAuthorityById } from './projectLaneAuthority';
+import { assertSourceStateSize } from '../src/source-state-size';
 import { invariant } from '../src/errors';
 import { sanitizeOutside } from '../src/run-evidence';
 import { requireLaneHolder, laneSession } from './projectLaneHolder';
@@ -38,7 +38,7 @@ import { report } from './errors';
 import { chainProgress } from './projectHostedResolveChainProgress';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
-import { findObject } from './projectObjectFind';
+import { findObject, findStoredObject } from './projectObjectFind';
 import { isR2Object, isStored } from './projectObjectFields';
 import { prepareObjectTargets, type KnownObjects } from './projectObjects';
 import { uploadPackProposal } from './projectObjectPacks';
@@ -139,11 +139,38 @@ export const prepare = mutation({
             headWrittenAt: current.at,
           });
       }
+      invariant(
+        !input.uploads || input.uploads.length <= 99,
+        'BAD_ARGUMENT',
+        'Prepare at most 99 save uploads at once.',
+      );
       const { hooks, ...semantic } = withoutAuthorship(request);
       void hooks;
       const prepared = await beginHostedOperation(ctx, {
         ...auth,
         accountChannel: 'save',
+        beforeWrite: async () => {
+          const known = input.uploads
+            ? await refuseRecipeUploads(ctx, input.projectId, input.uploads)
+            : undefined;
+          const { lane, saveFailure } = await saveLaneRecord(ctx, { ...auth, laneId: request.laneId });
+          requireLaneHolder(lane, auth.actor, holderSessionId);
+          // Only the Lane author or the project owner saves over a Lane (Issue 8809fba5).
+          await requireLaneSourceAuthorityById(ctx, input.projectId, lane, auth.actor);
+          invariant(
+            sameSaveLane(lane, request.expected),
+            'WORK_STALE',
+            'Hosted Lane changed from the expected save baseline.',
+          );
+          const baselineRow = await findStoredObject(ctx, input.projectId, lane.head);
+          invariant(
+            baselineRow && !baselineRow.removed && isStored(baselineRow),
+            'SOURCE_UNAVAILABLE',
+            'Commit the exact project source object before staging it.',
+          );
+          assertSourceStateSize('save', baselineRow.stateSize);
+          return { known, lane, saveFailure, baselineRow };
+        },
         payload: semantic,
         request: { schema: 1, ...auth, expected, payloadHash: hostedPayloadHash(semantic, expected) },
         firstAttempt: {
@@ -156,11 +183,6 @@ export const prepare = mutation({
           ids: { save: crypto.randomUUID(), job: crypto.randomUUID(), jobOperation: crypto.randomUUID() },
         },
       });
-      invariant(
-        !input.uploads || input.uploads.length <= 99,
-        'BAD_ARGUMENT',
-        'Prepare at most 99 save uploads at once.',
-      );
       if (prepared.replayed) {
         const old = await saveRow(ctx, auth);
         invariant(old, 'SOURCE_UNAVAILABLE', 'The original save preparation is unavailable.');
@@ -189,20 +211,10 @@ export const prepare = mutation({
             : {}),
         });
       }
-      // A refusal throws, and the whole transaction (this operation included) rolls back.
-      const known = input.uploads
-        ? await refuseRecipeUploads(ctx, input.projectId, input.uploads)
-        : undefined;
-      const { lane, saveFailure } = await saveLaneRecord(ctx, { ...auth, laneId: request.laneId });
-      requireLaneHolder(lane, auth.actor, holderSessionId);
-      // Only the Lane author or the project owner saves over a Lane (Issue 8809fba5).
-      await requireLaneSourceAuthorityById(ctx, input.projectId, lane, auth.actor);
-      invariant(
-        sameSaveLane(lane, request.expected),
-        'WORK_STALE',
-        'Hosted Lane changed from the expected save baseline.',
-      );
-      const baseline = await saveObject(ctx, input.projectId, { sha256: lane.head }, 'save');
+      const { known, lane, saveFailure, baselineRow } = prepared.validated!;
+      const baseline = (
+        await saveObjects(ctx, input.projectId, [{ sha256: lane.head }], [baselineRow], 'save')
+      )[0]!;
       const state = {
         ...(holderSessionId && lane.holder
           ? {

@@ -21,14 +21,24 @@ async function inspect(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProject
   const page = parsed.data;
   const { actor, project } = await recordCaller(ctx, projectId, true, page.decisions.length > 0);
   let existing = 0;
+  const seen = new Map<string, string>();
   for (const record of [...page.friction, ...page.decisions]) {
+    const key = `${record.kind === 'decision' ? 'decision' : 'friction'}:${record.id}`;
+    const payload = canonicalPayload(record);
+    const prior = seen.get(key);
+    if (prior !== undefined) {
+      invariant(prior === payload, 'WORK_OPERATION_CHANGED', 'An imported ID already has different bytes.');
+      existing++;
+      continue;
+    }
+    seen.set(key, payload);
     const old =
       record.kind === 'decision'
         ? await decisionRow(ctx, projectId, record.id)
         : await frictionRow(ctx, projectId, record.id);
     if (old) {
       invariant(
-        canonicalPayload(JSON.parse(old.value)) === canonicalPayload(record),
+        canonicalPayload(JSON.parse(old.value)) === payload,
         'WORK_OPERATION_CHANGED',
         'An imported ID already has different bytes.',
       );

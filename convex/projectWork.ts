@@ -340,14 +340,6 @@ export async function appendWork(
       );
       return original;
     }
-    // Comments, puts, notes and new Intents carry messages: one shared per-account daily limit and the
-    // suspend switch, charged only for a fresh operation (a replay returned above).
-    if (parsed.success && !input.server) {
-      const own = project.owner === input.owner;
-      if (parsed.data.action === 'intent') await chargeAccountChannel(ctx, input.owner, 'start');
-      else if (['put-planning-item', 'comment-planning-item', 'note'].includes(parsed.data.action))
-        await chargeAccountChannel(ctx, input.owner, own ? 'planning' : 'contributed');
-    }
     if (channelCommand.success) {
       const actor = await acceptanceActor(ctx, channelCommand.data.agent),
         policy = effectivePolicy(project),
@@ -403,6 +395,28 @@ export async function appendWork(
       'WORK_STALE',
       'Hosted Work changed. Your request and existing work remain available.',
     );
+    const generation = input.projection
+      ? (planning?.selected ?? (await selectedGeneration(ctx, project)))
+      : null;
+    if (input.projection)
+      invariant(
+        generation?._id === input.projection.generationId,
+        'WORK_STALE',
+        'Hosted source or Work changed.',
+      );
+    invariant(
+      !frozen || input.projection,
+      'SOURCE_UNAVAILABLE',
+      'Retain the primary Work version before acknowledging its command.',
+    );
+    // Comments, puts, notes and new Intents carry messages: one shared per-account daily limit and the
+    // suspend switch, charged only for a fresh, validated operation (replays and stale requests are free).
+    if (parsed.success && !input.server) {
+      const own = project.owner === input.owner;
+      if (parsed.data.action === 'intent') await chargeAccountChannel(ctx, input.owner, 'start');
+      else if (['put-planning-item', 'comment-planning-item', 'note'].includes(parsed.data.action))
+        await chargeAccountChannel(ctx, input.owner, own ? 'planning' : 'contributed');
+    }
     const event = {
       projectId: input.projectId,
       operationId: input.operationId,
@@ -419,15 +433,9 @@ export async function appendWork(
     };
     let retained: StoredWorkEvent | null = null;
     if (input.projection) {
-      const generation = planning?.selected ?? (await selectedGeneration(ctx, project));
-      invariant(
-        generation?._id === input.projection.generationId,
-        'WORK_STALE',
-        'Hosted source or Work changed.',
-      );
       for (const entry of input.projection.entries) {
         const old = await (planning?.record(entry.collection, entry.key) ??
-          record(ctx, recordPartition(generation), entry.collection, entry.key));
+          record(ctx, recordPartition(generation!), entry.collection, entry.key));
         planning?.invalidate(entry.collection, entry.key);
         if (
           entry.collection === 'planningItems' &&
@@ -447,7 +455,7 @@ export async function appendWork(
             if (payloadKey && JSON.parse(entry.value).payloadKey !== payloadKey)
               await ctx.scheduler.runAfter(0, internal.projectWorkIndexStore.retirePayload, {
                 projectId: project._id,
-                generationId: recordPartition(generation),
+                generationId: recordPartition(generation!),
                 collection: entry.collection,
                 key: entry.key,
                 payloadKey,
@@ -468,7 +476,7 @@ export async function appendWork(
             ...indexActivity(entry),
             ...(restoresLink ? { planningRestored: input.planningRestore } : {}),
             projectId: project._id,
-            generationId: recordPartition(generation),
+            generationId: recordPartition(generation!),
           });
       }
       if (project.workStore || frozen)
@@ -476,7 +484,7 @@ export async function appendWork(
           ctx,
           project,
           input.projection.entries,
-          workStoreMigrationActive(project) ? recordPartition(generation) : undefined,
+          workStoreMigrationActive(project) ? recordPartition(generation!) : undefined,
           frozen
             ? {
                 projectId: event.projectId,
@@ -497,7 +505,7 @@ export async function appendWork(
           .query('projectWorkRecords')
           .withIndex('by_generation_and_collection_and_status_and_position', q =>
             q
-              .eq('generationId', recordPartition(generation))
+              .eq('generationId', recordPartition(generation!))
               .eq('collection', 'intents')
               .eq('status', 'active'),
           )
@@ -509,7 +517,7 @@ export async function appendWork(
             await ctx.db
               .query('projectWorkRecords')
               .withIndex('by_generation_and_collection_and_position', q =>
-                q.eq('generationId', recordPartition(generation)).eq('collection', 'intents'),
+                q.eq('generationId', recordPartition(generation!)).eq('collection', 'intents'),
               )
               .order('desc')
               .take(1)

@@ -248,10 +248,69 @@ async function execute(
   const expected = { authorityEpoch: payload.authorityEpoch, ...payload.expectedMain },
     at = new Date().toISOString(),
     operationId = payload.operationId;
+  const holderEnabled = effectivePolicy(project).accessIdentities?.laneHolders === true;
+  const sessionIdentity =
+    holderSessionId ??
+    (typeof user.forgeAuthSession === 'string'
+      ? digest(`forge-browser:${user.forgeAuthSession}`)
+      : undefined);
+  const validateStart = async () => {
+    const main = await hostedStartMain(ctx, projectId);
+    invariant(
+      main.authority.mode === project.sourceAuthority?.mode &&
+        main.authority.epoch === expected.authorityEpoch,
+      'SOURCE_AUTHORITY_CHANGED',
+      'Hosted main and project authority differ.',
+    );
+    invariant(
+      main.head === expected.head && main.receipt.id === expected.receiptId,
+      'CHANNEL_CHANGED',
+      'Hosted main changed from the expected head and receipt.',
+    );
+    if (payload.initialHead) {
+      const object = await findObject(ctx, projectId, payload.initialHead!);
+      invariant(
+        object && !object.removed && isStored(object),
+        'SOURCE_UNAVAILABLE',
+        'Commit the selected initial State before starting its hosted Lane.',
+      );
+    }
+    // Only a reverted change restarts from its own head over its old base (restoreBase). A fix-forward
+    // notice's change is still on main, so its fix starts from main: reopening the culprit's head would add
+    // its files a second time and conflict with main (friction 4a0b5e35).
+    const reverted = recovery?.state === 'reverted' ? recovery : undefined;
+    let initialHead = payload.initialHead ?? reverted?.head ?? main.head;
+    let ownerOnly = initialHead === main.head;
+    let stack: import('../src/hosted-lane').HostedLaneSelection['stack'];
+    if (payload.stackOn) {
+      const row = await readHostedRecord(ctx, { projectId, actor, kind: 'lane', key: payload.stackOn });
+      invariant(row, 'NOT_FOUND', 'Stack parent Lane not found.');
+      const parent = hostedLaneSchema.parse(JSON.parse(row.value));
+      invariant(
+        !payload.initialHead || payload.initialHead === parent.head,
+        'WORK_STALE',
+        'The saved stack parent changed.',
+      );
+      initialHead = parent.head;
+      ownerOnly = row.ownerOnly === true;
+      stack = {
+        laneId: parent.id,
+        head: parent.head,
+        ...(payload.stackEntry ? { entryId: payload.stackEntry } : {}),
+      };
+    }
+    invariant(
+      !holderEnabled || sessionIdentity,
+      'CLI_UPGRADE_REQUIRED',
+      'Update Forge before starting a session-bound Lane.',
+    );
+    return { main, reverted, initialHead, ownerOnly, stack };
+  };
   const prepared = await beginHostedOperation(ctx, {
     projectId,
     actor,
     accountChannel: 'start',
+    beforeWrite: validateStart,
     payload,
     request: {
       schema: 1,
@@ -285,49 +344,7 @@ async function execute(
       startReply(terminal.result, noticeVersion, openLanesVersion, guardSet, overlapIntent),
     );
   }
-  const main = await hostedStartMain(ctx, projectId);
-  invariant(
-    main.authority.mode === project.sourceAuthority?.mode && main.authority.epoch === expected.authorityEpoch,
-    'SOURCE_AUTHORITY_CHANGED',
-    'Hosted main and project authority differ.',
-  );
-  invariant(
-    main.head === expected.head && main.receipt.id === expected.receiptId,
-    'CHANNEL_CHANGED',
-    'Hosted main changed from the expected head and receipt.',
-  );
-  if (payload.initialHead) {
-    const object = await findObject(ctx, projectId, payload.initialHead!);
-    invariant(
-      object && !object.removed && isStored(object),
-      'SOURCE_UNAVAILABLE',
-      'Commit the selected initial State before starting its hosted Lane.',
-    );
-  }
-  // Only a reverted change restarts from its own head over its old base (restoreBase). A fix-forward
-  // notice's change is still on main, so its fix starts from main: reopening the culprit's head would add
-  // its files a second time and conflict with main (friction 4a0b5e35).
-  const reverted = recovery?.state === 'reverted' ? recovery : undefined;
-  let initialHead = payload.initialHead ?? reverted?.head ?? main.head;
-  let ownerOnly = initialHead === main.head;
-  let stack: import('../src/hosted-lane').HostedLaneSelection['stack'];
-  if (payload.stackOn) {
-    const row = await readHostedRecord(ctx, { projectId, actor, kind: 'lane', key: payload.stackOn });
-    invariant(row, 'NOT_FOUND', 'Stack parent Lane not found.');
-    const parent = hostedLaneSchema.parse(JSON.parse(row.value));
-    invariant(
-      !payload.initialHead || payload.initialHead === parent.head,
-      'WORK_STALE',
-      'The saved stack parent changed.',
-    );
-    initialHead = parent.head;
-    ownerOnly = row.ownerOnly === true;
-    stack = {
-      laneId: parent.id,
-      head: parent.head,
-      ...(payload.stackEntry ? { entryId: payload.stackEntry } : {}),
-    };
-  }
+  const { main, reverted, initialHead, ownerOnly, stack } = prepared.validated ?? (await validateStart());
   const restoreBase =
     reverted && initialHead === reverted.head && !payload.stackOn ? reverted.previousHead : undefined;
   const first = prepared.operation.firstAttempt,
@@ -383,17 +400,6 @@ async function execute(
         status: 'active',
       },
     });
-  const holderEnabled = effectivePolicy(project).accessIdentities?.laneHolders === true;
-  const sessionIdentity =
-    holderSessionId ??
-    (typeof user.forgeAuthSession === 'string'
-      ? digest(`forge-browser:${user.forgeAuthSession}`)
-      : undefined);
-  invariant(
-    !holderEnabled || sessionIdentity,
-    'CLI_UPGRADE_REQUIRED',
-    'Update Forge before starting a session-bound Lane.',
-  );
   const holder = holderEnabled
     ? {
         actor,
