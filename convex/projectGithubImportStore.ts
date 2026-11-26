@@ -8,16 +8,11 @@ import { githubImportDocument, githubRequests, migrationCounts } from './project
 import { activeOwnedProject } from './projectAuthority';
 import { readJob, readJobState } from './projectGithubImportRead';
 import { createProject } from './projectCreation';
-import { githubHostedProject } from '../src/hosted-github-bootstrap';
-import { HOSTED_WORK_INDEX_FORMAT } from '../src/work-hosted-summary';
-import { isStored } from './projectObjectFields';
-import { findObject } from './projectObjectFind';
 import { invariant } from '../src/errors';
 import { archiveCursorSchema, initialImportProgress, initialArchiveCursor } from '../src/github-import-pages';
 import { completion, recipePin, completeObjects } from './projectGithubImportBatch';
 import { retain, retainBlob, inventoryEntry } from './projectGithubImportInventory';
 import { catalogEntry, recordWindow } from './projectGithubImportCatalog';
-import { beginHistory } from './projectHistoryStore';
 import { cancelPendingTask } from './schedulerCancel';
 
 const key = { actor: v.string(), operationId: v.string(), request: v.string() };
@@ -371,79 +366,5 @@ export const resume = internalMutation({
       phase: row.total > 0 ? 'importing' : 'discovering',
     });
     return null;
-  },
-});
-const file = v.object({
-  path: v.string(),
-  blob: v.string(),
-  size: v.number(),
-  mode: v.union(v.literal('file'), v.literal('executable'), v.literal('symlink'), v.literal('gitlink')),
-});
-export const publish = internalMutation({
-  args: { ...identity, files: v.array(file) },
-  returns: v.boolean(),
-  handler: async (ctx, input) => {
-    const row = await readJob(ctx, input);
-    if (row.phase === 'ready') return true;
-    if (row.step !== input.step) return false;
-    invariant(
-      row.completed === row.total && input.files.length === row.total,
-      'IMPORT_INCOMPLETE',
-      'Source import is incomplete.',
-    );
-    const project = await activeOwnedProject(ctx, row.projectId, row.owner);
-    invariant(
-      !project.currentBackup,
-      'PROJECT_CHANGED',
-      'Project source changed during import; original main is preserved.',
-    );
-    const bootstrap = githubHostedProject(row.operationId, row.at, row.commit, input.files);
-    // Each source binding was committed in an earlier bounded import step. Only
-    // metadata and the final selected-main pointer publish here.
-    for (const object of bootstrap.objects) {
-      const bound = await findObject(ctx, row.projectId, object.sha256);
-      invariant(
-        bound && !bound.removed && bound.size === object.size && isStored(bound),
-        'INVALID_WORK_BACKUP',
-        'Import metadata is not retained.',
-      );
-    }
-    const root = bootstrap.objects[2]!;
-    const backupId = await ctx.db.insert('projectBackups', {
-      projectId: row.projectId,
-      operationId: row.operationId,
-      request: row.request,
-      nonce: row.operationId,
-      previous: null,
-      digest: root.sha256,
-      size: root.size,
-      objectManifest: { digest: root.sha256, size: root.size },
-      transport: 'objects',
-      validatedClosure: 1,
-      preview: bootstrap.preview,
-      status: 'stored',
-    });
-    const generationId = await ctx.db.insert('projectWorkGenerations', {
-      recordTables: 'split',
-      projectId: row.projectId,
-      backupId,
-      revision: 0,
-      initialRevision: 0,
-      format: HOSTED_WORK_INDEX_FORMAT,
-      status: 'ready',
-      nextBatch: 1,
-      metadata: JSON.stringify(bootstrap.projection.metadata),
-    });
-    for (const entry of bootstrap.projection.entries)
-      await ctx.db.insert('projectWorkRecords', { projectId: row.projectId, generationId, ...entry });
-    await ctx.db.patch(row.projectId, {
-      currentBackup: backupId,
-      revision: 1,
-      work: { backupId, generationId, operationId: row.operationId, initialRevision: 0, revision: 0 },
-    });
-    await ctx.db.patch(row._id, { phase: 'ready', error: undefined });
-    // Git history (log, blame, old versions) follows in its own bounded run.
-    await beginHistory(ctx, row, bootstrap.head);
-    return true;
   },
 });
