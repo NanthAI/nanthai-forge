@@ -58,7 +58,7 @@ export async function batchesFixture(
   {
     const policy = policyPreset('trusted');
     f.patch('hostedProjects', f.projectId, {
-      // Fake time jumps to each scheduled task; alerts have their own tests (hosted-stall-alerts.test.mjs).
+      // Alerts have their own tests (hosted-stall-alerts.test.mjs).
       autonomyPolicy: {
         ...policy,
         acceptance: {
@@ -215,7 +215,7 @@ export async function batchesFixture(
     if (task.name === 'projectHostedMainAudit:start') {
       auditWakes.push(task.args[0]);
       if (runAudits) {
-        f.advanceClock(Math.max(0, task.scheduledTime - Date.now()));
+        await f.advanceToTask(task);
         f.patch('_scheduled_functions', task._id, { state: { kind: 'inProgress' } });
         await f.transaction('replay-audit-start', mainAudit.start, task.args[0]);
         f.patch('_scheduled_functions', task._id, { state: { kind: 'success' } });
@@ -229,7 +229,7 @@ export async function batchesFixture(
       return;
     }
     if (task.name === 'projectHostedBatchAbandon:reselect') {
-      f.advanceClock(Math.max(0, task.scheduledTime - Date.now()));
+      await f.advanceToTask(task);
       f.patch('_scheduled_functions', task._id, { state: { kind: 'inProgress' } });
       await f.transaction('batch-abandon-reselection', batchAbandon.reselect, task.args[0]);
       f.patch('_scheduled_functions', task._id, { state: { kind: 'success' } });
@@ -252,7 +252,7 @@ export async function batchesFixture(
       return value;
     }
     if (task.name !== 'projectHostedFinishDriver:drive') return f.execute(task, stop);
-    f.advanceClock(Math.max(0, task.scheduledTime - Date.now()));
+    await f.advanceToTask(task);
     f.patch('_scheduled_functions', task._id, { state: { kind: 'inProgress' } });
     try {
       await driver.drive._handler(

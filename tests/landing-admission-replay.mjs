@@ -22,10 +22,10 @@ export async function replayAdmission(
 ) {
   // A relative workload must not inherit the launcher's position inside an activity-hour bucket.
   // Boundary cases choose their own epoch; the fixture owns all subsequent clock advancement.
-  t.mock.method(Date, 'now', () => startAt);
   const paths = [...new Set(cell.entries.flatMap(e => e.files))];
   const lines = Array.from({ length: cell.entries.length * 3 }, (_, i) => `line ${i}\n`);
   const f = await batchesFixture(t, {
+    startAt,
     count: 0,
     admissionCheck,
     batchMaxSize: null,
@@ -37,10 +37,10 @@ export async function replayAdmission(
       lines.map((line, n) => (n === i * 3 ? `change ${i}\n` : line)).join(''),
     ),
   });
-  // The shared fixture advances Date.now. Audit cadence and acceptance records
+  // The shared fixture advances its clock. Audit cadence and acceptance records
   // also construct Date objects: both APIs must observe the same fake clock.
   const OriginalDate = Date;
-  const clock = Date.now;
+  const clock = f.now;
   globalThis.Date = class extends OriginalDate {
     constructor(...args) {
       super(...(args.length ? args : [clock()]));
@@ -62,7 +62,7 @@ export async function replayAdmission(
       sequence: i + 100,
       value: '{"unrelated":"retained history"}',
     });
-  const started = Date.now(),
+  const started = clock(),
     due = new Map(),
     ledger = new Map(),
     landed = new Map(),
@@ -78,7 +78,7 @@ export async function replayAdmission(
   let next = 0,
     deferredAudits = 0;
   for (let step = 0; step < 10000; step++) {
-    const now = Date.now() - started;
+    const now = clock() - started;
     for (const run of f.runs()) {
       const item = ledger.get(run.id);
       if (item && !['queued', 'running'].includes(run.status) && item.endMs === undefined) item.endMs = now;
@@ -93,7 +93,7 @@ export async function replayAdmission(
         : Math.max(...indexes.map(i => cell.entries[i].checkMs));
       ledger.set(run.id, {
         id: run.id,
-        startMs: Date.now() - started,
+        startMs: clock() - started,
         duration,
         audit,
         members: indexes,
@@ -101,10 +101,10 @@ export async function replayAdmission(
           row => row.admission?.runId === run.id,
         ),
       });
-      due.set(run.id, Date.now() + duration);
+      due.set(run.id, clock() + duration);
       await f.rawChecks.activate(run.id);
     }
-    for (const run of f.runs().filter(r => r.status === 'running' && due.get(r.id) <= Date.now())) {
+    for (const run of f.runs().filter(r => r.status === 'running' && due.get(r.id) <= clock())) {
       const culprit = red.find(i => contains(run.request.expectedHead, i));
       if (culprit !== undefined) {
         await f.rawChecks.callback(f.rawChecks.shard(run, 0, 'failed'));
@@ -126,12 +126,12 @@ export async function replayAdmission(
       const index = f.entries.findIndex(e => e.state.id === state.id);
       if (state.phase === 'landed' && !landed.has(index)) {
         assert(!failed.has(index), 'red source never accepts');
-        landed.set(index, Date.now() - started);
+        landed.set(index, clock() - started);
       }
       if (state.phase === 'terminal-failed') {
         assert(failed.has(index), `only injected red may fail: ${JSON.stringify(state.error)}`);
         assert.equal(state.error.code, 'CHECK_FAILED');
-        if (!isolated.has(index)) isolated.set(index, Date.now() - started);
+        if (!isolated.has(index)) isolated.set(index, clock() - started);
       }
     }
     const tasks = activeTasks();
@@ -147,7 +147,7 @@ export async function replayAdmission(
       next === cell.entries.length &&
       landed.size + isolated.size === cell.entries.length &&
       !running.length &&
-      tasks.every(task => task.name === 'projectHostedMainAudit:start' && task.scheduledTime > Date.now())
+      tasks.every(task => task.name === 'projectHostedMainAudit:start' && task.scheduledTime > clock())
     ) {
       deferredAudits = tasks.length;
       break; // Retain future cadence work, rather than charging tomorrow's audit to this wave.
@@ -158,8 +158,8 @@ export async function replayAdmission(
       ...running.map(run => due.get(run.id) ?? Infinity),
     );
     assert(Number.isFinite(time), 'pending landing has an owned scheduled event');
-    f.advanceClock(Math.max(0, time - Date.now()));
-    if (tasks[0] && tasks[0].scheduledTime <= Date.now()) await f.execute(tasks[0]);
+    f.advanceClock(Math.max(0, time - clock()));
+    if (tasks[0] && tasks[0].scheduledTime <= clock()) await f.execute(tasks[0]);
     assert(step < 9999, 'bounded replay, no polling');
   }
   const runs = f.runs();
@@ -168,7 +168,7 @@ export async function replayAdmission(
     // A canceled run is billed only until its cancellation, not its planned service end.
     const elapsed =
       run.status === 'cancelled'
-        ? Math.max(0, Math.min(item.duration, (item.endMs ?? Date.now() - started) - item.startMs))
+        ? Math.max(0, Math.min(item.duration, (item.endMs ?? clock() - started) - item.startMs))
         : item.duration;
     return { ...item, id: undefined, elapsed, status: run.status };
   });
@@ -183,8 +183,15 @@ export async function replayAdmission(
     audits: charged.filter(r => r.audit).length,
     auditWakes: f.auditWakes.length,
     deferredAudits,
+    deferredHourlyCloses: [...f.tables._scheduled_functions.values()].filter(
+      task =>
+        task.state.kind === 'pending' &&
+        task.name === 'projectStats:closeDay' &&
+        task.args[0].provisional &&
+        task.scheduledTime > clock(),
+    ).length,
     wallMs: Math.max(...landed.values()),
-    allSettledMs: Date.now() - started,
+    allSettledMs: clock() - started,
     ttmMedianMs: median(ttm),
     ttmMaxMs: Math.max(...ttm),
     submitMedianMs: median(latencies),

@@ -51,6 +51,39 @@ async function complete(f) {
   await f.drain();
 }
 
+test('finish fixture leaves a future hourly close pending until the clock reaches it', async t => {
+  const startAt = Date.UTC(2026, 10, 10, 12, 59, 59, 999);
+  const f = await finishFixture(t, { startAt });
+  const task = (scheduledTime, provisional) =>
+    f.insert('_scheduled_functions', {
+      name: 'projectStats:closeDay',
+      args: [{ projectId: f.projectId, day: '2026-11-10', ...(provisional ? { provisional } : {}) }],
+      scheduledTime,
+      state: { kind: 'pending' },
+    });
+  const closeAt = startAt + 5_001;
+  const hourly = task(closeAt, true);
+  assert.equal(await f.drain(), 0, 'an hourly timer alone does not advance the finish clock');
+  assert.equal(f.now(), startAt);
+  assert.equal(f.tables._scheduled_functions.get(hourly).state.kind, 'pending');
+
+  const final = task(closeAt + 2, false);
+  assert.deepEqual(
+    f.pending().map(row => row._id),
+    [hourly, final],
+  );
+  await f.execute();
+  assert.equal(f.now(), closeAt, 'the provisional close observes its due time');
+  assert.equal(f.tables._scheduled_functions.get(hourly).state.kind, 'success');
+  assert.equal(f.tables._scheduled_functions.get(final).state.kind, 'pending');
+
+  const earlier = task(closeAt + 1, true);
+  await f.execute(f.tables._scheduled_functions.get(final));
+  assert.equal(f.now(), closeAt + 2);
+  assert.equal(f.tables._scheduled_functions.get(earlier).state.kind, 'success');
+  assert.equal(f.tables._scheduled_functions.get(final).state.kind, 'success');
+});
+
 for (const firstSeconds of [undefined, 0, 120])
   test(`a main-race recheck preserves ${firstSeconds === undefined ? 'unreported' : String(firstSeconds) + '-second'} discarded execution`, async t => {
     compactDiscardedChecks(t);

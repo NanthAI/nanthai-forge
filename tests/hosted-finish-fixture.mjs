@@ -55,6 +55,7 @@ const reuseStore = await import(moduleUrl('../convex/projectHostedReuseStore.ts'
 const schema = (await import(moduleUrl('../convex/schema.ts'))).default;
 // Resolve each registered task once; mutations remain pending until they commit.
 const taskMutations = new Map();
+const isHourlyClose = task => task.name === 'projectStats:closeDay' && task.args[0]?.provisional;
 function isTaskMutation(name) {
   if (!taskMutations.has(name)) {
     const [file, method] = name.split(':');
@@ -183,7 +184,7 @@ export async function finishFixture(
       size: c.objects.get(candidate.result.head).length,
     },
   });
-  // Fake time jumps to each scheduled task, so a check waiting for passChecks() would reach both
+  // Draining finish work also advances through its retries, so a check waiting for passChecks() would reach both
   // stall-alert tiers; alert behaviour has its own tests (hosted-stall-alerts.test.mjs).
   f.patch('hostedProjects', f.projectId, {
     // Finish mechanics run without pre-queue Lane checks (covered by hosted-landing-prequeue.test.mjs).
@@ -344,7 +345,7 @@ export async function finishFixture(
       priorityInfo: 1,
     }).then(JSON.parse);
   const row = id => [...f.tables.projectHostedFinishes.values()].find(x => x.submissionId === id);
-  const pending = () =>
+  const scheduled = () =>
     [...f.tables._scheduled_functions.values()]
       // Retention runs weeks after this landing; expiry has its own time-controlled tests.
       .filter(
@@ -354,6 +355,14 @@ export async function finishFixture(
           !x.name.startsWith('projectLandingCapsule'),
       )
       .sort((a, b) => a.scheduledTime - b.scheduledTime);
+  const pending = () => {
+    const tasks = scheduled();
+    // An hourly close is background work. Run it in order if it is due already or the next
+    // finish task reaches its time. It never moves the clock on its own after a finish settles.
+    const next = tasks.find(task => !isHourlyClose(task));
+    const through = Math.max(clock.now, next?.scheduledTime ?? clock.now);
+    return tasks.filter(task => !isHourlyClose(task) || task.scheduledTime <= through);
+  };
   const reuseDecisions = [];
   const runReuseAction = async (ref, args) => {
     assert.equal(getFunctionName(ref), 'projectHostedReuse:prove');
@@ -388,18 +397,28 @@ export async function finishFixture(
       ...(decision.reason ? { reason: decision.reason } : {}),
     });
   };
-  const execute = (task = pending()[0], stop = null) => {
+  const runScheduled = (task, stop) =>
+    executingTasks.run([...(executingTasks.getStore() ?? []), task._id], () => executeTask(task, stop));
+  const advanceToTask = async task => {
+    // A test may select a particular wake to simulate a race. Its clock still passes any
+    // earlier hourly closes, including when a batch overrides the selected task's handler.
+    const earlierCloses = [...f.tables._scheduled_functions.values()]
+      .filter(
+        close =>
+          close.state.kind === 'pending' && close.scheduledTime < task.scheduledTime && isHourlyClose(close),
+      )
+      .sort((a, b) => a.scheduledTime - b.scheduledTime);
+    for (const close of earlierCloses) await runScheduled(close, null);
+    clock.now = Math.max(clock.now, task.scheduledTime);
+  };
+  const execute = async (task = pending()[0], stop = null) => {
     assert(task, 'pending task');
-    return executingTasks.run([...(executingTasks.getStore() ?? []), task._id], () =>
-      executeTask(task, stop),
-    );
+    await advanceToTask(task);
+    return runScheduled(task, stop);
   };
   const executeTask = async (task, stop) => {
     assert(task, 'pending task');
-    // Today so far (Item 8d21cc9e) is a wall-clock timer for the end of the hour that writes only the Stats day
-    // row: it runs at the fixture's time instead of leaping it up to an hour past every queue deadline.
-    if (!(task.name === 'projectStats:closeDay' && task.args[0]?.provisional))
-      clock.now = Math.max(clock.now, task.scheduledTime);
+    clock.now = Math.max(clock.now, task.scheduledTime);
     f.patch('_scheduled_functions', task._id, {
       // Convex mutations execute atomically while their row is still pending.
       state: { kind: (await isTaskMutation(task.name)) ? 'pending' : 'inProgress' },
@@ -727,6 +746,7 @@ export async function finishFixture(
     row,
     pending,
     execute,
+    advanceToTask,
     drain,
     passChecks,
     runReuseAction,

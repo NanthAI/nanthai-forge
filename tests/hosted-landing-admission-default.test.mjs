@@ -81,11 +81,14 @@ test('the same queue wave crossing an hour adds only its declared account-order 
   const { accountOrderTouch: nextTouches, statsClose: nextStats = 0, ...nextCalls } = acrossHour.callCounts;
   assert.equal(firstTouches, 1);
   assert.equal(nextTouches, 2);
-  // Stats today so far (Item 8d21cc9e): one close for the hour the wave crossed out of, none within an hour.
+  // A rollover schedules one Stats close at the end of the new hour (Item 8d21cc9e).
+  // The wave settles before then, so meter the queue wave and verify the retained timer.
   assert.equal(firstStats, 0);
-  assert.equal(nextStats, 1);
+  assert.equal(nextStats, 0);
+  assert.equal(withinHour.deferredHourlyCloses, 0);
+  assert.equal(acrossHour.deferredHourlyCloses, 1);
   assert.deepEqual(nextCalls, firstCalls, 'clock phase changes no queue, source or check call');
-  assert.equal(acrossHour.calls - withinHour.calls, nextTouches - firstTouches + nextStats - firstStats);
+  assert.equal(acrossHour.calls - withinHour.calls, nextTouches - firstTouches);
   assert.equal(acrossHour.checks, withinHour.checks);
   assert.equal(acrossHour.ciMinutes, withinHour.ciMinutes);
   assert.equal(acrossHour.idle, 0);

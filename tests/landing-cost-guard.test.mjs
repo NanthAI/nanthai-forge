@@ -622,6 +622,18 @@ async function resubmissionJourney(t, mode, failedSeconds) {
     'pre-midnight failures are charged only once, to the successor accepted day',
   );
   assert.deepEqual(closed.firstTry, { counted: 1, first: 0 });
+  // Finish the one hour close armed by the next-day landing before measuring a day without work.
+  const hourly = [...f.tables._scheduled_functions.values()].filter(
+    task =>
+      task.state.kind === 'pending' && task.name === 'projectStats:closeDay' && task.args[0].provisional,
+  );
+  assert.equal(hourly.length, 1);
+  const beforeHourly = f.counts.length;
+  await f.execute(hourly[0]);
+  assert.deepEqual(
+    f.counts.slice(beforeHourly).map(call => call.name),
+    ['statsClose'],
+  );
   const idle = f.counts.length;
   f.advanceClock(86_400_000);
   await drain(f, m);
