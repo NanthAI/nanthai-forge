@@ -8,6 +8,7 @@ import { guideHostedSync, resolveHostedAgent } from './hosted-agent-resolution.j
 import { syncTiming, type StepTimer } from './sync-timing.js';
 import { hostedRecordSchema, parkResultSchema } from './hosted-records.js';
 import { executeHostedFinish } from './hosted-agent-finish.js';
+import { stoppedLanding, stoppedLandingResubmit } from './hosted-agent-finish-result.js';
 import { executeHostedWithdraw } from './hosted-agent-withdraw.js';
 import { settleTurnWork } from './agent-turn-work.js';
 import { executeHostedMetrics } from './hosted-agent-metrics.js';
@@ -503,8 +504,7 @@ function checkLocalLane(session: HostedAgentSession, laneId?: string) {
     'Saving or changing this Lane needs its own folder as ROOT, not the project folder: use the Lane folder printed by start.',
   );
 }
-const CANCEL_COST =
-  "Cancelling discards this submission's queue place, its checks and the retry link. To recover from a failed check, fix the same Lane and land again (it resubmits with retry); a new Lane starts from zero.";
+const CANCEL_COST = 'Cancelling ends this submission and releases its queue place.';
 export async function executeHostedAgent(
   session: HostedAgentSession,
   action: HostedAgentAction,
@@ -1268,8 +1268,13 @@ export async function executeHostedAgent(
     // The landing is ended: this turn has nothing left to wait for (SM-C M1).
     const ended = cancelled?.operationId;
     if (typeof ended === 'string') settleTurnWork([ended]);
-    // Item 4 of the agent defaults: the cheap path after a failure is the same Lane, not a new one.
-    return typeof cancelled === 'object' && cancelled ? { ...cancelled, cost: CANCEL_COST } : cancelled;
+    if (!cancelled) return cancelled;
+    const code = (cancelled.error as { code?: unknown } | undefined)?.code;
+    return {
+      ...cancelled,
+      cost: CANCEL_COST,
+      ...(stoppedLanding(code) ? { recovery: { instruction: stoppedLandingResubmit } } : {}),
+    };
   }
   if (action === 'withdraw') return executeHostedWithdraw(session, input);
   invariant(action === 'finish', 'HOSTED_ACTION_UNSUPPORTED', 'Unsupported hosted action.');

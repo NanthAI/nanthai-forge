@@ -19,7 +19,7 @@ import { sendAuthorityPinned } from './hosted-main-pin.js';
 import { landingCancelReason } from './hosted-contract-features.js';
 
 export const WITHDRAW_COST =
-  'Withdraw ends only this submission: its queue place and its unfinished check (stopped once no other landing needs it). The Lane, its saves, Candidates and the recorded check results stay. Undo by landing again: land --save resubmits the same Lane under a new operation.';
+  'Withdraw ends only this submission: its queue place and its unfinished check (stopped once no other landing needs it). The Lane, its saves, Candidates and the recorded check results stay.';
 
 /**
  * `land --withdraw` (Issue 78a97771): end this Lane's live landing so a known failing check stops
@@ -121,7 +121,7 @@ export function withdrawReceipt(
     confirm: { next, waitCommand: command },
     recovery: landed
       ? 'The landing was already accepted before the withdraw; main keeps it. Nothing was cancelled.'
-      : `Run confirm.waitCommand: it returns the terminal ${landing.error?.code ?? 'LANDING_CANCELLED'} at once. Then fix the Lane, save, and land --save again (a new operation on the same Lane).`,
+      : `Run confirm.waitCommand: it returns the terminal ${landing.error?.code ?? 'LANDING_CANCELLED'} at once. Then follow the resubmission guidance from that wait.`,
     cost: WITHDRAW_COST,
   };
 }

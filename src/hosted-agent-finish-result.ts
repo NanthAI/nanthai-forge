@@ -122,22 +122,7 @@ export function preparingFinishSource(result: Reply) {
   return (result.status ?? (result.command ? undefined : progress?.status)) === 'submitted';
 }
 
-/** A new attempt retains the complete selection, never the failed operation identity. */
-export function finishRetryContinuation(root: string, selection: Reply) {
-  const retry = {
-    ...Object.fromEntries(
-      Object.entries(selection).filter(([key]) => !['operationId', 'action'].includes(key)),
-    ),
-    retry: true,
-    reason: 'other',
-  };
-  const command = `nforge agent ${shellQuote(root)} land --save ${shellQuote(JSON.stringify(retry))}`;
-  return { next: { action: 'finish', ...retry }, command, retry, retryCommand: command };
-}
-
-/** A withdrawn landing (LANDING_CANCELLED) is not a failed check: its operationId is spent, so a
- * replay returns the same cancelled state. The next step is land --save as new work: `retry` makes the
- * shorthand select a new operation instead of the cancelled one for the same source (593fc2d7). */
+/** Retry selects a new attempt even on identical source and reconciles an unfinished retry. */
 export function finishResubmitContinuation(root: string, selection: Reply) {
   const again = {
     ...Object.fromEntries(
@@ -152,13 +137,39 @@ export function finishResubmitContinuation(root: string, selection: Reply) {
   return { next: { action: 'finish', ...again }, command, retryCommand: command };
 }
 
+export function finishRetryContinuation(root: string, selection: Reply) {
+  const continuation = finishResubmitContinuation(root, selection);
+  const { action, ...retry } = continuation.next;
+  void action;
+  return { ...continuation, retry };
+}
+
+export const stoppedLanding = (code: unknown) => code === 'LANDING_CANCELLED' || code === 'REVIEW_DECLINED';
+
+export const stoppedLandingResubmit =
+  'To resubmit from this landing’s Lane checkout, use the original land --save parameters. Keep the inputs and dependencies, remove operationId, and set "retry":true and "reason":"other".';
+
+function observedFinishState(submission: { phase?: string; observation?: { state?: string } } | undefined) {
+  const state = submission?.observation?.state;
+  if (state === 'superseded') return state;
+  if (submission?.phase === 'terminal-failed' || submission?.phase === 'landed') return submission.phase;
+  return state ?? submission?.phase;
+}
+
 /** Pending admitted work waits for its canonical parent outcome.
  * Preparation before admission and retryable source children retain their recovery. */
 export function hostedObservationContinuation(root: string, result: Reply, operationId?: string): Reply {
-  if (retryableFinishSource(result)) return result;
   const submission = result.submission as
     | { operationId?: string; error?: { code?: string }; observation?: { state?: string }; phase?: string }
     | undefined;
+  const state = observedFinishState(submission);
+  if (
+    state === 'landed' ||
+    state === 'terminal-failed' ||
+    state === 'superseded' ||
+    retryableFinishSource(result)
+  )
+    return result;
   const run = result.run as { id?: string; status?: string } | undefined;
   if (result.phase === 'check' && run?.id && !checkTerminal(run.status ?? ''))
     return { ...result, ...operationWait(root, { runId: run.id }) };
@@ -176,14 +187,10 @@ export function hostedObservationContinuation(root: string, result: Reply, opera
       }),
     };
   }
-  const state = submission?.observation?.state ?? submission?.phase;
-  // Only unfinished work waits. A terminal conflict follows its sync/resolve recovery,
-  // never a wait on an operation that already ended.
-  const pending = submission && !['landed', 'terminal-failed', 'superseded'].includes(state ?? '');
   const replayOperation = (result.replayParameters as Reply | undefined)?.operationId;
   const original =
     operationId ?? (typeof replayOperation === 'string' ? replayOperation : submission?.operationId);
-  if (!pending || !original) return result;
+  if (!submission || !original) return result;
   const continuation = operationWait(root, { operationIds: [original], until: 'acceptance' });
   // A held landing names who releases it beside the wait (5c59940b); derived, no read.
   const selected = submission as Parameters<typeof landingHold>[0];
@@ -207,12 +214,12 @@ export function normalizeHostedFinishResult(root: string, selection: Reply, resu
   const normalized = normalizeObservedFinish(root, selection, result);
   // A reply left untouched (a source step still being retried) keeps its identity: callers use it
   // to tell source recovery from wait advice, and add the field themselves.
-  return normalized === result ? result : withFinishLandingState(selection, result, normalized);
+  return normalized === result ? result : withFinishLandingState(selection, normalized);
 }
-/** Add `landingState` from `result.submission` to `reply` (default `result`); unchanged without one. */
-export function withFinishLandingState(selection: Reply, result: Reply, reply: Reply = result): Reply {
+/** Add `landingState` from `result.submission` when present. */
+export function withFinishLandingState(selection: Reply, result: Reply): Reply {
   const submission = result.submission as LandingRecord | undefined;
-  if (!submission || typeof submission !== 'object') return reply;
+  if (!submission || typeof submission !== 'object') return result;
   const replay = result.replayParameters as { laneId?: unknown } | undefined;
   const laneId =
     typeof replay?.laneId === 'string'
@@ -221,7 +228,7 @@ export function withFinishLandingState(selection: Reply, result: Reply, reply: R
         ? selection.laneId
         : undefined;
   return {
-    ...reply,
+    ...result,
     landingState: causeNextStep(
       landingStateField(
         {
@@ -242,7 +249,7 @@ export function normalizeObservedFinish(root: string, selection: Reply, result: 
     | undefined;
   const progress = result.progress as { status?: string; outcome?: { status?: string } } | undefined;
   const run = result.run as { status?: string } | undefined;
-  const state = submission?.observation?.state ?? submission?.phase;
+  const state = observedFinishState(submission);
   const failed = submission
     ? state === 'terminal-failed'
     : run
@@ -275,6 +282,7 @@ export function normalizeObservedFinish(root: string, selection: Reply, result: 
           'nextCommand',
           'waitStatus',
           'inProgress',
+          'wake',
           'hold',
           'instruction',
           'retry',
@@ -285,6 +293,16 @@ export function normalizeObservedFinish(root: string, selection: Reply, result: 
   if (!submission && progress && (progress.status === 'failed' || progress.outcome?.status === 'failed'))
     clean.progress = progress;
   if (submission) {
+    // A replay can carry earlier pending metadata alongside its terminal phase.
+    if (submission.observation?.state === 'pending' && (state === 'terminal-failed' || state === 'landed'))
+      clean.submission = {
+        ...submission,
+        observation: {
+          state,
+          pendingReason: null,
+          cause: stoppedLanding(submission.error?.code) ? 'rejected' : null,
+        },
+      };
     delete clean.source;
     delete clean.error;
     delete clean.failedPhase;
@@ -307,7 +325,7 @@ export function normalizeObservedFinish(root: string, selection: Reply, result: 
     (progress as { outcome?: { error?: unknown } } | undefined)?.outcome?.error;
   if ((error as { code?: string } | undefined)?.code === 'SOURCE_STATE_TOO_LARGE')
     return { ...clean, status: 'failed', terminal: true };
-  if ((error as { code?: string } | undefined)?.code === 'LANDING_CANCELLED')
+  if (stoppedLanding((error as { code?: string } | undefined)?.code))
     return { ...clean, status: 'failed', terminal: true, ...finishResubmitContinuation(root, selection) };
   const retry = finishRetryContinuation(root, selection);
   // Failed only on main's red, and a land now would not wait (review of friction f27065f7): the command

@@ -18,8 +18,11 @@ import { holdLines, landingHold } from './hosted-landing-hold.js';
 import { landingStateField } from './landing-state.js';
 import {
   causeNextStep,
+  finishResubmitContinuation,
   landingWaitProgress,
   pendingLandingPresentation,
+  stoppedLanding,
+  stoppedLandingResubmit,
 } from './hosted-agent-finish-result.js';
 import { orderWaitOf } from './hosted-wait-line.js';
 import { learnFromLanding } from './preflight-learned.js';
@@ -619,16 +622,37 @@ async function dispatchHostedAgentCli(
       // A single-target wait exposes the same observed outcome as finish, while
       // retaining the complete selection below. Continuation consumers can follow
       // finish -> wait -> outcome without another read or a finish replay.
-      if (!selectedWait.runId && status === 'terminal')
-        for (const entry of submissions ?? []) {
-          // A failed landing exits 2, the same as `land` (SM-C M7); landed and superseded stay 0.
-          if (landExitsFailed({ result: { phase: 'finish', ...entry } } as never)) process.exitCode = 2;
-          for (const line of landSummary({ result: { phase: 'finish', ...entry } } as never))
-            process.stderr.write(`${line}\n`);
-          // A failed check of this checkout's landing teaches the next preflight its failing tests.
-          if (submissions?.length === 1) learnFromLanding(root, entry);
-        }
-      return { ...response, result: { ...response.result, ...selected, ...landing } };
+      const settled =
+        !selectedWait.runId && status === 'terminal'
+          ? submissions?.map((entry, index) => {
+              const operationId = selectedWait.operationIds?.[index] ?? entry.submission.operationId;
+              const stopped =
+                entry.submission.observation?.state === 'terminal-failed' &&
+                stoppedLanding(entry.submission.error?.code);
+              const original = stopped && (waitedOn ? retained : retainedHostedOperation(root, operationId));
+              const retry =
+                original && original.action === 'finish'
+                  ? finishResubmitContinuation(root, original.command)
+                  : stopped
+                    ? { recovery: { instruction: stoppedLandingResubmit } }
+                    : undefined;
+              const outcome = { ...response, operationId, result: { phase: 'finish', ...entry, ...retry } };
+              // A failed landing exits 2, the same as `land` (SM-C M7); landed and superseded stay 0.
+              if (landExitsFailed(outcome)) process.exitCode = 2;
+              for (const line of landSummary(outcome)) process.stderr.write(`${line}\n`);
+              if (submissions.length === 1) learnFromLanding(root, entry);
+              return { ...entry, ...retry };
+            })
+          : undefined;
+      return {
+        ...response,
+        result: {
+          ...response.result,
+          ...(settled ? { submissions: settled } : {}),
+          ...(settled?.length === 1 ? settled[0] : selected),
+          ...landing,
+        },
+      };
     } finally {
       process.removeListener('SIGINT', stop);
       process.removeListener('SIGTERM', stop);

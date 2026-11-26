@@ -30,7 +30,7 @@ export async function withSourceRecovery(
   const finish = action === 'finish' && !!value && typeof value === 'object';
   // Additive `landingState` on every finish reply that carries a submission (Issue 68361cd5).
   const landing = (reply: unknown) =>
-    finish ? withFinishLandingState(command as Reply, value as Reply, reply as Reply) : reply;
+    finish ? withFinishLandingState(command as Reply, reply as Reply) : reply;
   if (finish) {
     const normalized = normalizeObservedFinish(session.root, command as Reply, value as Reply);
     if (normalized !== value) return landing(normalized);

@@ -33,7 +33,7 @@ export const teachingByCode: Record<string, Entry> = {
   LANDING_STALLED: { learn: 'queue', next: `nforge agent <root> queue '{}'` },
   HOSTED_ACTION_UNSUPPORTED: { learn: 'hosted', next: 'nforge agent <root> help' },
   WORK_STALE: { learn: 'retry', next: '<replay>' },
-  LANDING_CANCELLED: { learn: 'queue', next: land },
+  LANDING_CANCELLED: { learn: 'queue' },
   NOT_FOUND: { learn: 'arguments' },
   WORK_CONFLICT: { learn: 'conflict' },
   CHECK_FAILED: { learn: 'check', next: `nforge agent <root> log '{"runId":"<runId>"}'` },

@@ -7,7 +7,11 @@ import type { HostedAgentResponse } from './hosted-agent-transport.js';
 import { CHECK_FAILED_NEXT, scrubText } from './client-error-text.js';
 import { shellQuote } from './shell-quote.js';
 import { failedErrorChars, failedErrors } from './check-file-summary.js';
-import { retryableFinishSource } from './hosted-agent-finish-result.js';
+import {
+  retryableFinishSource,
+  stoppedLanding,
+  stoppedLandingResubmit,
+} from './hosted-agent-finish-result.js';
 import type { LandingRecord } from './landing-state.js';
 import { holdLines, landingHold } from './hosted-landing-hold.js';
 import { syncRequiredSummary } from './hosted-would-conflict.js';
@@ -198,11 +202,14 @@ function classifyLand(
   const lines: string[] = [];
   let failed = false;
   const error = submission?.error;
+  const resubmit = result.retryCommand
+    ? `Submit again as a new operation: ${result.retryCommand}`
+    : stoppedLandingResubmit;
   // A withdrawn landing: replaying its operationId only returns this state again (593fc2d7).
   if (phase === 'terminal-failed' && error?.code === 'LANDING_CANCELLED')
     return out('failed', [
       `CANCELLED: this landing was withdrawn; nothing landed${response.operationId ? `. Its operationId ${response.operationId} is spent: replaying it returns this cancelled state` : ''}`,
-      `Submit again as a new operation: ${result.retryCommand ?? "nforge agent ROOT land --save '{}' with no operationId"}`,
+      resubmit,
     ]);
   const recovery =
     result.recovery?.conflict?.instruction ??
@@ -249,6 +256,7 @@ function classifyLand(
   const workIn = result.recovery?.conflict?.workIn ?? result.conflict?.workIn;
   if (workIn) lines.push(workIn);
   if (recovery) lines.push(`Continue recovery: ${recovery}`);
+  else if (phase === 'terminal-failed' && stoppedLanding(error?.code)) lines.push(resubmit);
   else if (result.retryCommand) lines.push(`Retry: ${result.retryCommand}`);
   if (!lines.length && ['save', 'compose', 'sync'].includes(result.phase ?? ''))
     return out('source-pending', [
@@ -303,8 +311,10 @@ export function landTerminal(response: HostedAgentResponse) {
   const result = resultOf(response);
   if (result.terminal === true) return true;
   if (result.phase === 'check') return checkTerminal(result.run?.status ?? '');
-  if (result.submission?.observation) return result.submission.observation.state !== 'pending';
-  return terminalPhases.has(landPhase(response) ?? '');
+  return (
+    terminalPhases.has(landPhase(response) ?? '') ||
+    (!!result.submission?.observation && result.submission.observation.state !== 'pending')
+  );
 }
 
 type SourceFailure = {

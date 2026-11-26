@@ -13,6 +13,8 @@ import { recordLane } from '../dist/lane-registry.js';
 import { clientCacheRoot } from '../dist/root-paths.js';
 import { landSummary } from '../dist/hosted-land-summary.js';
 import { finishResubmitContinuation } from '../dist/hosted-agent-finish-result.js';
+import { hostedAgentCli } from '../dist/hosted-agent-cli.js';
+import { submitHostedLand } from '../dist/hosted-land-cli.js';
 import { synthetic } from './hosted-revert-fixture.mjs';
 import { ConvexError } from 'convex/values';
 
@@ -218,6 +220,89 @@ test('593fc2d7: land --save after a pre-submit WORK_STALE and a refreshed folder
   // Re-running the same source again replays that new operation.
   assert.equal((await run()).operationId, landed.operationId);
 });
+
+for (const code of ['LANDING_CANCELLED', 'REVIEW_DECLINED'])
+  test(`48720573: wait after ${code} resubmits unchanged source and replay stays terminal`, async t => {
+    const s = agentFixture(t);
+    process.env.XDG_STATE_HOME = temporaryDirectory(t, 'forge-stop-resubmit-');
+    const exitCode = process.exitCode;
+    t.after(() => {
+      process.exitCode = exitCode;
+    });
+    let stderr = '';
+    t.mock.method(process.stderr, 'write', text => {
+      stderr += String(text);
+      return true;
+    });
+    await s.transport().dispatch('open', { laneId: s.lane.laneId });
+    const objects = join(clientCacheRoot(s.root), 'objects');
+    mkdirSync(objects, { recursive: true });
+    writeFileSync(join(objects, s.lane.base.head), s.objects.get(s.lane.base.head));
+    const land = command => submitHostedLand(s.root, command, s.address, s.transport(), 0, true);
+    const message = 'Fix landing guidance';
+    // Begin with retry already set so following the same command must distinguish terminal from live.
+    const selection = { message, retry: true, reason: 'other' };
+    const first = await land(selection);
+    const operationId = first.operationId;
+    const state = s.operations.get(operationId);
+    const stopped = {
+      ...state,
+      version: state.version + 1,
+      phase: 'terminal-failed',
+      observation: { state: 'terminal-failed', pendingReason: null, cause: 'rejected' },
+      error: { code, message: 'The submission ended.' },
+    };
+    s.operations.set(operationId, { ...stopped, observation: state.observation });
+
+    stderr = '';
+    const replayed = await land({ ...selection, operationId });
+    assert.equal(replayed.operationId, operationId);
+    assert.equal(replayed.result.terminal, true);
+    assert.equal(replayed.result.submission.error.code, code);
+    assert.equal(replayed.result.submission.observation.state, 'terminal-failed');
+    assert.equal(replayed.result.landingState.state, code === 'LANDING_CANCELLED' ? 'cancelled' : 'rejected');
+    assert.equal(replayed.result.inProgress, undefined);
+    assert.equal(replayed.result.waitCommand, undefined);
+    assert.doesNotMatch(stderr, /work is unfinished|submitting, then it continues/);
+
+    s.operations.set(operationId, stopped);
+    stderr = '';
+    const waited = await hostedAgentCli(
+      s.root,
+      'wait',
+      { operationIds: [operationId], until: 'acceptance' },
+      s.address,
+      s.transport(),
+    );
+    assert.equal(process.exitCode, 2);
+    assert.equal(waited.result.status, 'terminal');
+    assert.equal(waited.result.submission.error.code, code);
+    const printed = / land --save '(.*)'$/m.exec(stderr);
+    assert(printed, 'the terminal wait prints a runnable resubmission command');
+    const next = JSON.parse(printed[1]);
+    assert.deepEqual(next, { after: null, dependencies: [], ...selection });
+    assert.deepEqual(waited.result.next, { action: 'finish', ...next });
+
+    const otherRoot = temporaryDirectory(t, 'forge-stop-remote-');
+    const elsewhere = await hostedAgentCli(
+      otherRoot,
+      'wait',
+      { operationIds: [operationId], until: 'acceptance' },
+      s.address,
+      new HostedAgentTransport(otherRoot, s.address, s.exchange),
+    );
+    assert.equal(elsewhere.result.status, 'terminal');
+    assert.equal(elsewhere.result.command, undefined);
+    assert.match(
+      elsewhere.result.recovery.instruction,
+      /Keep the inputs and dependencies, remove operationId/,
+    );
+
+    const later = await land(next);
+    assert.notEqual(later.operationId, operationId);
+    assert.notEqual(later.result.submission.id, first.result.submission.id);
+    assert.equal((await land(next)).operationId, later.operationId, 'a live retry reconciles');
+  });
 
 // Review of Lane 66778884: the submit-again command after a withdrawn landing must be new work. The
 // plain shorthand replays the same operation for unchanged source, so the command keeps retry.

@@ -108,7 +108,7 @@ test('withdraw by Lane cancels the live landing, keeps the Lane and fences the l
     operationIds: [state.operationId],
     until: 'acceptance',
   });
-  assert.match(receipt.recovery, /LANDING_CANCELLED.*save, and land --save again/);
+  assert.match(receipt.recovery, /LANDING_CANCELLED.*resubmission guidance from that wait/);
   // Re-land the same Lane with a new operation: a fresh submission checks and lands.
   const again = await begin(f);
   assert.notEqual(again.state.id, state.id);

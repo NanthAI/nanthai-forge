@@ -139,8 +139,13 @@ test('593fc2d7: a withdrawn landing says its operationId is spent and gives a la
   const operationId = randomUUID(),
     laneId = randomUUID();
   const selection = { laneId, message: 'fix', operationId };
+  const waitCommand = `nforge agent /repo wait '{"operationIds":["${operationId}"]}'`;
   const result = normalizeHostedFinishResult('/repo', selection, {
     phase: 'finish',
+    inProgress: true,
+    command: waitCommand,
+    waitCommand,
+    wake: { command: waitCommand },
     submission: {
       id: randomUUID(),
       operationId,
@@ -149,6 +154,10 @@ test('593fc2d7: a withdrawn landing says its operationId is spent and gives a la
       error: { code: 'LANDING_CANCELLED', message: 'The hosted landing request was cancelled.' },
     },
   });
+  assert.equal(result.terminal, true);
+  assert.equal(result.inProgress, undefined);
+  assert.equal(result.waitCommand, undefined);
+  assert.equal(result.wake, undefined, 'the terminal receipt replaces its earlier background wake');
   assert.equal(result.retry, undefined, 'a withdraw is not a failed check to retry');
   // retry:true selects a new operation for the same source (the shorthand would replay the cancelled one).
   assert.equal(

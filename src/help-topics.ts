@@ -34,7 +34,7 @@ NOT_FOUND names what was looked up: run from the Lane root start printed, or pas
 - To save without submitting: nforge agent . save '{}' (an agent action, not top-level).
 - Review what will land: diff '{"summary":true}' lists changed paths, diff '{}' the hunks.
 - It waits by default; --no-wait returns after submission. Clients that wake on background exit (Claude Code; FORGE_AGENT_WAKE=background-exit|off) get result.wake.command: run it once in the background. --wait keeps the foreground wait; --check-only checks without landing.
-- land --withdraw {laneId?,reason?} ends the Lane's live landing; confirm.waitCommand returns LANDING_CANCELLED. Fix, save and land again. cancel {submissionId} stops one named submission.
+- land --withdraw {laneId?,reason?} ends the Lane's live landing; confirm.waitCommand returns LANDING_CANCELLED and names how to resubmit. cancel {submissionId} stops one named submission.
 - NOTHING_TO_LAND: the Lane equals its base; save first.
 - After a failed check: land --save with "retry":true,"reason":"flake"|"main-moved"|"infra"|"other" (next.retryReason).
 - LANDED is acceptance; CHECK PASSED is not. Fix in the same Lane and land again; never abandon and re-create it.
@@ -133,7 +133,7 @@ SECRET_FOUND: a save (or land --save) held a credential and stored nothing. Remo
 - queue {batchId} shows retained phase and members. queue {submissionId,attemptId,afterLaneId?} shows Candidate pins, Lane inputs and retained check reuse evidence. Continue with nextAfterLaneId.
 - SYNC_REQUIRED while queued: main landed a file your entry changes; run the one land --save it names instead of waiting.
 - cancel {submissionId} stops one named submission. land --withdraw selects the Lane's own live landing by default.
-- LANDING_CANCELLED: the landing was withdrawn or cancelled; the Lane and its saves stay. Fix if needed and land --save again.
+- LANDING_CANCELLED / REVIEW_DECLINED: use the wait receipt’s resubmit guidance.
 - LANDING_STALLED: run the receipt's exact repair command; do not resubmit a live landing. If none is present, read queue '{}' and observe {operationId}. A terminal-failed receipt may explicitly direct a retry in the same Lane.
 - REVIEW_REQUIRED: wait {approval:LANE_ID} after request-approval, or ask the owner.
 - landings {limit?:N≤30} lists the newest landings; {from,to,kind?,limit?,cursor?} a UTC window, oldest first (kind agent|person filters builtBy; continue with nextCursor). For a file, use history {op:"log"|"blame",path:"FILE"}.`,
