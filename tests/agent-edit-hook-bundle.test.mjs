@@ -27,6 +27,11 @@ const text = name => readFileSync(chunk(name), 'utf8');
 /** Static `import ... from "./x.js"` edges only: `import("./x.js")` is lazy and stays out. */
 const staticImports = source =>
   [...source.matchAll(/^import\s[^;]*?from\s+["'](\.\/[^"']+)["']/gm)].map(match => match[1].slice(2));
+/** Non-node static imports that leave the bundled `agent-edit-hook*.js` closure (e.g. `../scripts/main-module.mjs` when plain tsc overwrites dist/). */
+const unbundledImports = source =>
+  [...source.matchAll(/^import\s[^;]*?from\s+["']([^"']+)["']/gm)]
+    .map(match => match[1])
+    .filter(spec => !spec.startsWith('node:') && !/^\.\/agent-edit-hook-.+\.js$/.test(spec));
 function eagerClosure(entry) {
   const seen = new Set();
   const queue = [entry];
@@ -35,7 +40,13 @@ function eagerClosure(entry) {
     if (seen.has(name)) continue;
     seen.add(name);
     assert.ok(existsSync(chunk(name)), `hook chunk ${name} is imported but missing from dist`);
-    queue.push(...staticImports(text(name)));
+    const source = text(name);
+    assert.deepEqual(
+      unbundledImports(source),
+      [],
+      `${name} imports modules outside the bundled agent-edit-hook*.js closure (plain tsc overwrote dist/?); run npm run build:core`,
+    );
+    queue.push(...staticImports(source));
   }
   return [...seen];
 }
@@ -83,6 +94,24 @@ test('the guard sees a static zod or Convex import and ignores a lazy one', () =
     'x-1.js',
   ]);
   assert.deepEqual(staticImports('import "node:fs";\nimport { b as c } from "./z.js";'), ['z.js']);
+});
+
+test('33ed19ae: the bundle guard rejects unbundled ../scripts/main-module.mjs or non-hook relative imports', () => {
+  assert.deepEqual(
+    unbundledImports(
+      [
+        'import { isMainModule } from "../scripts/main-module.mjs";',
+        'import { retainCliRuntime } from "./cli-installation.js";',
+        'import { x } from "./agent-edit-hook-errors-12345678.js";',
+        'import { readFileSync } from "node:fs";',
+      ].join('\n'),
+    ),
+    ['../scripts/main-module.mjs', './cli-installation.js'],
+  );
+  assert.deepEqual(
+    unbundledImports('import { a } from "./agent-edit-hook-root-paths-pEUa55I8.js";\nimport "node:path";'),
+    [],
+  );
 });
 
 test('rebuilding the hook retires its old hashed chunks and preserves unrelated build output', t => {

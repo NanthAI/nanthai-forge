@@ -133,10 +133,11 @@ test('project pages stay reachable by sidebar, flyout and phone sheets, with sta
   }
 
   // An open modal makes the page behind it inert, so page-level rules (one main, one h1) cannot hold there and differ by
-  // browser build; check the dialog itself. A page check first proves no sheet is left open.
+  // browser build; check the dialog itself. A page check first proves no sheet is left open and the page landmarks exist.
   async function axe(page, { modal = false } = {}) {
     await settleBrowserPage(page);
-    await page.addScriptTag({ path: require.resolve('axe-core/axe.min.js') });
+    if (!(await page.evaluate(() => Boolean(window.axe))))
+      await page.addScriptTag({ path: require.resolve('axe-core/axe.min.js') });
     if (!modal) {
       assert.equal(await page.locator('[role=dialog]').count(), 0, 'no sheet is open');
       assert.equal(
@@ -145,9 +146,17 @@ test('project pages stay reachable by sidebar, flyout and phone sheets, with sta
         'page scroll is restored',
       );
       assert.equal(
-        await page.evaluate(() => document.getElementById('root')?.hasAttribute('inert')),
+        await page.evaluate(() => {
+          const root = document.getElementById('root');
+          return Boolean(root?.hasAttribute('inert') || root?.getAttribute('aria-hidden') === 'true');
+        }),
         false,
-        'page is not inert',
+        'page is not inert or hidden',
+      );
+      assert.equal(
+        await page.evaluate(() => Boolean(document.querySelector('main') && document.querySelector('h1'))),
+        true,
+        'page landmarks rendered before axe',
       );
     }
     assert.deepEqual(
@@ -457,6 +466,9 @@ test('project pages stay reachable by sidebar, flyout and phone sheets, with sta
           release();
           await pages.getByRole('link', { name: 'History' }).tap();
           await page.waitForURL(origin + base + '/lanes/history');
+          // Friction 718607e0: wait for the modal sheet to detach and the new heading to commit before axe.
+          await pages.waitFor({ state: 'hidden' });
+          await page.getByRole('button', { name: 'Lanes: History. Choose a page' }).waitFor();
           await page.locator('main:focus').waitFor();
           assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 390);
           await axe(page);

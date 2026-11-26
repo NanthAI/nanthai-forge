@@ -6,6 +6,8 @@
 // per landing fails here, a saving asks the author to ratchet the ledger down.
 import { assertCommandWeight } from '../scripts/agent-weight.mjs';
 import test from 'node:test';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { compactDiscardedChecks } from './landing-ticket-fixture.mjs';
 import { randomUUID } from 'node:crypto';
 import {
@@ -878,11 +880,17 @@ test('one cohort uploads its exact metadata in a single drive and resumes before
 });
 
 let baseline;
+async function ensureBaseline(t) {
+  if (!baseline) {
+    fixedClock(t, { elapsed: true });
+    baseline = await measureLandingCosts(t, { indexExports: true, traceWrites: true });
+  }
+  return baseline;
+}
 test('cost guard: the scripted landing mix stays within its per-landing cost ledger', async t => {
   const wallTime = performance.now.bind(performance);
   const started = wallTime();
-  fixedClock(t, { elapsed: true });
-  baseline = await measureLandingCosts(t, { indexExports: true, traceWrites: true });
+  baseline = await ensureBaseline(t);
   const verdicts = judgeCosts(costs, costGuard, 'landing-fixture', baseline.measured);
   const ledgerChanged = verdicts.some(v => v.status !== 'pass');
   const scenarioTotals = Object.fromEntries(
@@ -1058,6 +1066,7 @@ test('cost guard: the scripted landing mix stays within its per-landing cost led
 });
 
 test('ca19aec0: one additional executed R2 GET fails the exact six-landing request ceiling', async t => {
+  const baseline = await ensureBaseline(t);
   const seeded = await measureLandingCosts(t, { extraR2Read: true });
   const before = Object.values(baseline.scenarios).reduce((sum, s) => sum + s.r2ClassB, 0);
   const after = Object.values(seeded.scenarios).reduce((sum, s) => sum + s.r2ClassB, 0);
@@ -1070,6 +1079,7 @@ test('ca19aec0: one additional executed R2 GET fails the exact six-landing reque
 });
 
 test('ca19aec0: checksum-acknowledged PUTs remove fallback HEADs without changing landing work', async t => {
+  const baseline = await ensureBaseline(t);
   const acknowledged = await measureLandingCosts(t, { checksumEcho: true });
   for (const metric of [
     'queries',
@@ -1092,7 +1102,8 @@ test('ca19aec0: checksum-acknowledged PUTs remove fallback HEADs without changin
   );
 });
 
-test('unconditional Candidate listings keep the landing call ledger and zero legacy data-table access', () => {
+test('unconditional Candidate listings keep the landing call ledger and zero legacy data-table access', async t => {
+  const baseline = await ensureBaseline(t);
   const unchangedCalls = {
     // Item 9a04d916 (compose settle; owner-approved +$0.02/1,000): a settled solo plan's drive
     // re-reads its bytes in one indexed query (2 in the mix), and every finish wake with no IO in
@@ -1122,6 +1133,7 @@ test('unconditional Candidate listings keep the landing call ledger and zero leg
 });
 
 test('runner-minute ledger rejects extra shard setup without an increase in check runs', async t => {
+  const baseline = await ensureBaseline(t);
   for (const options of [{ extraShard: true }, { extraSetupSeconds: 60 }]) {
     const seeded = await measureLandingCosts(t, options);
     assert.equal(seeded.measured.checkRuns, baseline.measured.checkRuns);
@@ -1147,8 +1159,8 @@ test('seeded regression: one extra query per landing fails the guard, naming the
   assert.match(queries.message, /fix the change, or update this entry in src\/speed-budgets\.json/);
 });
 
-test('a saving of 10% or more asks the author to lower the ledger value, so it ratchets in', () => {
-  assert(baseline, 'runs after the guard measurement');
+test('a saving of 10% or more asks the author to lower the ledger value, so it ratchets in', async t => {
+  const baseline = await ensureBaseline(t);
   const entry = costs.find(c => c.metric === 'mutations');
   // The ledger as it stood before a change that saved a fifth of the landing mutations.
   const verdict = judgeCost(
@@ -1217,8 +1229,8 @@ for (const mainRace of [false, true])
     );
   });
 
-test('live R2 stamp: a recomposed landing carries the requests its compose signed, never more than the meter saw; a landing with no compose of its own stays unknown', () => {
-  assert(baseline, 'runs after the guard measurement');
+test('live R2 stamp: a recomposed landing carries the requests its compose signed, never more than the meter saw; a landing with no compose of its own stays unknown', async t => {
+  const baseline = await ensureBaseline(t);
   const { solo, mainMoved, batchOfFour } = baseline.scenarios;
   // The solo landing took its Candidate as given (the fixture composes nothing for it).
   assert.deepEqual(solo.stamped, [null]);
@@ -1236,6 +1248,37 @@ test('live R2 stamp: a recomposed landing carries the requests its compose signe
     'batch members have no compose of their own',
   );
 });
+
+// Friction 20e4d273: filtering a single cost-guard test via --test-name-pattern must still configure
+// synthetic callback credentials (no RUNNER_UNAVAILABLE) and initialize the shared baseline on demand.
+test(
+  '20e4d273: filtering a baseline-dependent cost test with --test-name-pattern initializes synthetic callbacks and baseline on demand',
+  { skip: process.env.FORGE_COST_GUARD_FILTER_SUBTEST === '1' },
+  () => {
+    const env = { ...process.env, FORGE_COST_GUARD_FILTER_SUBTEST: '1' };
+    delete env.NODE_TEST_CONTEXT;
+    for (const key of Object.keys(synthetic)) delete env[key];
+    const result = spawnSync(
+      process.execPath,
+      [
+        '--import',
+        './tests/check-runtime.mjs',
+        '--test',
+        '--test-name-pattern',
+        '^live R2 stamp:',
+        fileURLToPath(import.meta.url),
+      ],
+      {
+        cwd: fileURLToPath(new URL('../', import.meta.url)),
+        env,
+        encoding: 'utf8',
+        maxBuffer: 32 << 20,
+      },
+    );
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    assert.match(result.stdout, /pass 1/);
+  },
+);
 
 // Dogfood-sized control path: 1,000 retained test reports, ten completed shards. The runner
 // callbacks finish before we enlarge the retained row, so this isolates the landing drivers.

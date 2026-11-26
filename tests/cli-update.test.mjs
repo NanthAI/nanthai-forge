@@ -1236,6 +1236,18 @@ test('a newer concurrent current is preserved rather than replaced from an earli
 test('busy runtime bookkeeping makes installed first-write hooks fail open', t => {
   const f = fixture(t);
   const dist = fileURLToPath(new URL('../dist/', import.meta.url));
+  const hookEntry = readFileSync(join(dist, 'agent-edit-hook.js'), 'utf8');
+  // Friction 33ed19ae: installed hooks use the Vite-bundled dist/agent-edit-hook*.js closure. Plain `tsc`
+  // overwrites dist/agent-edit-hook.js with unbundled imports like `../scripts/main-module.mjs`, which fails
+  // inside a standalone installation dir even though the landing check (running build:core) passes.
+  const external = [...hookEntry.matchAll(/^import\s[^;]*?from\s+["']([^"']+)["']/gm)]
+    .map(match => match[1])
+    .filter(spec => !spec.startsWith('node:') && !/^\.\/agent-edit-hook-.+\.js$/.test(spec));
+  assert.deepEqual(
+    external,
+    [],
+    `dist/agent-edit-hook.js is not the bundled hook (plain tsc overwrote it?); run npm run build:core`,
+  );
   for (const file of readdirSync(dist).filter(
     name => name.startsWith('agent-edit-hook') && name.endsWith('.js'),
   ))

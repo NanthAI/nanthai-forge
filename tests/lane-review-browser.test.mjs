@@ -202,6 +202,7 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
         assert.match(await section.locator('article').last().textContent(), /Legacy board note/);
         assert.equal(await page.evaluate(() => location.pathname), lane + '/thread');
         assert.equal(await page.getByRole('region', { name: 'The change' }).count(), 0);
+        await page.emulateMedia({ reducedMotion: 'reduce' });
         await page.addScriptTag({ path: axePath });
         for (const theme of ['dark', 'light']) {
           await page.evaluate(value => (document.documentElement.dataset.theme = value), theme);
@@ -221,6 +222,7 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
     });
 
     async function checkHistoryThemes(page, viewport, scenario) {
+      await page.emulateMedia({ reducedMotion: 'reduce' });
       await page.addScriptTag({ path: axePath });
       for (const theme of ['dark', 'light']) {
         await page.evaluate(value => (document.documentElement.dataset.theme = value), theme);
@@ -780,6 +782,7 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
         const decision = page.getByRole('region', { name: 'Your decision' });
         await decision.getByRole('button', { name: 'Decline', exact: true }).click();
         await decision.getByRole('textbox', { name: /^Why/ }).fill('Wait for the schema review.');
+        await page.emulateMedia({ reducedMotion: 'reduce' });
         await page.addScriptTag({ path: axePath });
         for (const theme of ['dark', 'light']) {
           await page.evaluate(value => (document.documentElement.dataset.theme = value), theme);
@@ -823,6 +826,7 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
           const page = await open(t, viewport, `s=${s}`);
           await page.locator('.lr-file').first().locator('summary').click();
           await page.locator('.lr-file').first().locator('.code').first().waitFor();
+          await page.emulateMedia({ reducedMotion: 'reduce' });
           await page.addScriptTag({ path: axePath });
           for (const theme of ['dark', 'light']) {
             await page.evaluate(value => (document.documentElement.dataset.theme = value), theme);
@@ -897,14 +901,26 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
     });
 
     await t.test('phone width holds with a wider fallback font (Linux CI metrics)', async t => {
-      // 1dd4e095: Linux's fallback glyphs are wider than macOS's; the recommendation header once overflowed to 398 px.
-      const page = await open(t, PHONE, 's=review');
-      await page.addStyleTag({ content: '* { font-family: Verdana, monospace !important; }' });
-      const [scroll, inner] = await page.evaluate(() => [document.documentElement.scrollWidth, innerWidth]);
-      assert.ok(
-        scroll <= inner,
-        `no sideways scroll at ${PHONE.width} with a wide font: ${scroll} > ${inner}`,
-      );
+      // 1dd4e095 / friction f747f424: Linux's fallback glyphs are wider than macOS's; the recommendation
+      // header once overflowed to 398 px. Guard every phone lead-card state under the wide fallback font.
+      for (const s of [
+        'review',
+        'main-conflict',
+        'combined',
+        'parked',
+        'asked',
+        'declined',
+        'granted',
+        'landed',
+      ]) {
+        const page = await open(t, PHONE, `s=${s}`);
+        await page.addStyleTag({ content: '* { font-family: Verdana, monospace !important; }' });
+        const [scroll, inner] = await page.evaluate(() => [document.documentElement.scrollWidth, innerWidth]);
+        assert.ok(
+          scroll <= inner,
+          `no sideways scroll at ${PHONE.width} ${s} with a wide font: ${scroll} > ${inner}`,
+        );
+      }
     });
   } finally {
     await browser.close();

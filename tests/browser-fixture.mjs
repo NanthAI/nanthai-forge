@@ -79,10 +79,13 @@ export async function buildBrowserFixture(
     resolve: resolveConfig,
     define,
     plugins,
+    build: runBuild,
   },
 ) {
   assert(Boolean(entry) !== Boolean(entries), 'Pass exactly one of `entry` or `entries`.');
-  const { build } = await import(pathToFileURL(join(repoRoot, 'node_modules/vite/dist/node/index.js')).href);
+  const build =
+    runBuild ??
+    (await import(pathToFileURL(join(repoRoot, 'node_modules/vite/dist/node/index.js')).href)).build;
   const input = entries
     ? Object.fromEntries(
         Object.entries(entries).map(([url, file]) => [

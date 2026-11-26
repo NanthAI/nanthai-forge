@@ -1,43 +1,166 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 // Contract tests for the shared Vite fixture build and static server/router helper (Item 09961b44, friction 87e5d6c7).
+// Tests buildBrowserFixture's Vite config wiring and CSS walk with a synthetic bundler stub, and serve/route on a tiny
+// static temp fixture, so this contract test never pays ~25 s for its own Vite builds (real Vite builds run in the browser shard).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import {
   buildBrowserFixture,
   fixtureContentType,
+  fixturePageHtml,
+  readFixtureAsset,
+  repoRoot,
   routeBrowserFixture,
   serveBrowserFixture,
 } from './browser-fixture.mjs';
 
-test('09961b44: buildBrowserFixture emits entry JS, walks only entry CSS and serves assets over loopback HTTP', async t => {
+test('09961b44: buildBrowserFixture wires Vite config, walks entry CSS and builds page HTML without running Vite', async t => {
   const out = mkdtempSync(join(tmpdir(), 'forge-browser-fixture-'));
   t.after(() => rmSync(out, { recursive: true, force: true }));
+
+  const seenConfigs = [];
+  const stubBuild = async config => {
+    seenConfigs.push(config);
+    return {
+      output: [
+        {
+          isEntry: true,
+          fileName: 'assets/fixture-1.js',
+          facadeModuleId: resolve(repoRoot, 'tests/browser/setting-change.tsx'),
+          viteMetadata: { importedCss: new Set(['assets/entry.css']) },
+          imports: ['assets/shared.js'],
+          dynamicImports: ['assets/lazy.js'],
+        },
+        {
+          isEntry: false,
+          fileName: 'assets/shared.js',
+          viteMetadata: { importedCss: new Set(['assets/shared.css']) },
+          // Cycle back to entry must terminate cleanly.
+          imports: ['assets/fixture-1.js'],
+          dynamicImports: [],
+        },
+        {
+          isEntry: false,
+          fileName: 'assets/lazy.js',
+          viteMetadata: { importedCss: new Set(['assets/lazy.css']) },
+          imports: [],
+          dynamicImports: [],
+        },
+        {
+          isEntry: false,
+          fileName: 'assets/unrelated.css',
+        },
+      ],
+    };
+  };
 
   const built = await buildBrowserFixture(out, {
     entry: 'tests/browser/setting-change.tsx',
     title: 'Settings change fixture',
     bodyStyle: 'margin:0',
+    build: stubBuild,
   });
-  assert.match(built.entry, /\.js$/);
-  assert.ok(existsSync(join(out, built.entry)), 'entry script exists in outDir');
-  assert.ok(built.css.length >= 1, 'entry CSS chunks are collected');
-  for (const file of built.css) {
-    assert.ok(existsSync(join(out, file)), `linked CSS ${file} exists in outDir`);
-    assert.match(built.html, new RegExp(`href="/${file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`));
-  }
+  assert.equal(seenConfigs.length, 1);
+  assert.equal(seenConfigs[0].configFile, join(repoRoot, 'web/vite.config.ts'));
+  assert.equal(seenConfigs[0].root, join(repoRoot, 'web'));
+  assert.equal(seenConfigs[0].mode, 'hosted');
+  assert.equal(seenConfigs[0].build.outDir, out);
+  assert.deepEqual(seenConfigs[0].build.rolldownOptions.input, {
+    fixture: resolve(repoRoot, 'tests/browser/setting-change.tsx'),
+  });
+  assert.equal(built.entry, 'assets/fixture-1.js');
+  assert.deepEqual(built.css, ['assets/entry.css', 'assets/shared.css', 'assets/lazy.css']);
   assert.match(built.html, /<title>Settings change fixture<\/title>/);
   assert.match(built.html, /<body style="margin:0">/);
+  assert.match(built.html, /href="\/assets\/entry\.css"/);
+  assert.match(built.html, /href="\/assets\/lazy\.css"/);
+  assert.doesNotMatch(built.html, /unrelated\.css/);
   const noDs = built.page({ htmlAttrs: 'lang="en" data-theme="dark"' });
   assert.doesNotMatch(noDs, /\bdata-ds\b/);
   assert.match(built.html, /\bdata-ds\b/);
 
+  // dynamicImports: false skips lazy CSS; css: 'all' includes every emitted stylesheet.
+  const noDynamic = await buildBrowserFixture(out, {
+    entry: 'tests/browser/setting-change.tsx',
+    dynamicImports: false,
+    build: stubBuild,
+  });
+  assert.deepEqual(noDynamic.css, ['assets/entry.css', 'assets/shared.css']);
+
+  const allCss = await buildBrowserFixture(out, {
+    entry: 'tests/browser/setting-change.tsx',
+    css: 'all',
+    build: stubBuild,
+  });
+  assert.deepEqual(allCss.css, ['assets/unrelated.css']);
+
+  // Multi-entry map with css disabled and define passthrough.
+  const multiConfigs = [];
+  const multi = await buildBrowserFixture(out, {
+    entries: { '/keys.html': 'tests/browser/lane-duplicate-keys.tsx' },
+    extraInputs: { extra: resolve(repoRoot, 'web/src/ds/behaviour/index.ts') },
+    title: 'Duplicate keys',
+    htmlAttrs: 'lang="en"',
+    css: false,
+    define: { 'process.env.NODE_ENV': '"development"' },
+    build: async config => {
+      multiConfigs.push(config);
+      return [
+        {
+          output: [
+            {
+              isEntry: true,
+              fileName: 'assets/keys.js',
+              facadeModuleId: resolve(repoRoot, 'tests/browser/lane-duplicate-keys.tsx'),
+              viteMetadata: { importedCss: new Set(['assets/ignored.css']) },
+              imports: [],
+              dynamicImports: [],
+            },
+          ],
+        },
+      ];
+    },
+  });
+  assert.deepEqual(multiConfigs[0].define, { 'process.env.NODE_ENV': '"development"' });
+  assert.deepEqual(Object.keys(multiConfigs[0].build.rolldownOptions.input).sort(), ['extra', 'keys']);
+  assert.deepEqual(multi.entries['/keys.html'].css, []);
+  assert.doesNotMatch(multi.pages['/keys.html'], /<link rel="stylesheet"/);
+  assert.match(multi.pages['/keys.html'], /<html lang="en">/);
+  assert.match(multi.pages['/keys.html'], /src="\/assets\/keys\.js"/);
+
+  await assert.rejects(
+    buildBrowserFixture(out, {
+      entry: 'a.tsx',
+      entries: { '/b.html': 'b.tsx' },
+      build: stubBuild,
+    }),
+    /Pass exactly one/,
+  );
+  await assert.rejects(
+    buildBrowserFixture(out, {
+      entry: 'tests/browser/missing.tsx',
+      build: async () => ({ output: [] }),
+    }),
+    /produced no entry chunk/,
+  );
+});
+
+test('09961b44: serveBrowserFixture serves dynamic HTML and static assets over loopback HTTP and blocks traversal', async t => {
+  const out = mkdtempSync(join(tmpdir(), 'forge-browser-serve-'));
+  t.after(() => rmSync(out, { recursive: true, force: true }));
+  writeFileSync(join(out, 'app.js'), 'export const ok = true;');
+  writeFileSync(join(out, 'app.css'), 'body{margin:0}');
+
   const server = await serveBrowserFixture(out, url =>
     url.pathname === '/'
-      ? built.page({
+      ? fixturePageHtml({
+          entry: 'app.js',
+          css: ['app.css'],
+          title: 'Static fixture',
           htmlAttrs: url.searchParams.has('ds')
             ? 'lang="en" data-ds data-theme="dark"'
             : 'lang="en" data-theme="dark"',
@@ -55,12 +178,12 @@ test('09961b44: buildBrowserFixture emits entry JS, walks only entry CSS and ser
   assert.equal(plain.status, 200);
   assert.doesNotMatch(await plain.text(), /\bdata-ds\b/);
 
-  const script = await fetch(`${server.url}/${built.entry}`);
+  const script = await fetch(`${server.url}/app.js`);
   assert.equal(script.status, 200);
   assert.equal(script.headers.get('content-type'), 'text/javascript');
-  assert.ok((await script.text()).length > 0);
+  assert.equal(await script.text(), 'export const ok = true;');
 
-  const style = await fetch(`${server.url}/${built.css[0]}`);
+  const style = await fetch(`${server.url}/app.css`);
   assert.equal(style.status, 200);
   assert.equal(style.headers.get('content-type'), 'text/css');
 
@@ -69,21 +192,6 @@ test('09961b44: buildBrowserFixture emits entry JS, walks only entry CSS and ser
 
   const traversal = await fetch(`${server.url}/..%2Fpackage.json`);
   assert.equal(traversal.status, 404);
-
-  // Multi-entry map with css disabled (as used by multi-page and development-React browser tests).
-  const multiOut = mkdtempSync(join(tmpdir(), 'forge-browser-multi-'));
-  t.after(() => rmSync(multiOut, { recursive: true, force: true }));
-  const multi = await buildBrowserFixture(multiOut, {
-    entries: { '/keys.html': 'tests/browser/lane-duplicate-keys.tsx' },
-    title: 'Duplicate keys',
-    htmlAttrs: 'lang="en"',
-    css: false,
-    define: { 'process.env.NODE_ENV': '"development"' },
-  });
-  assert.deepEqual(multi.entries['/keys.html'].css, []);
-  assert.doesNotMatch(multi.pages['/keys.html'], /<link rel="stylesheet"/);
-  assert.match(multi.pages['/keys.html'], /<html lang="en">/);
-  assert.ok(existsSync(join(multiOut, multi.entries['/keys.html'].entry)));
 });
 
 test('09961b44: routeBrowserFixture serves mapped HTML and static assets, blocks outside hosts and rejects traversal', async t => {
@@ -142,6 +250,7 @@ test('09961b44: routeBrowserFixture serves mapped HTML and static assets, blocks
   const traversal = await invoke('https://forge.test/../../package.json');
   assert.equal(traversal.response.status, 404);
 
+  assert.equal(readFixtureAsset(out, '/../../package.json'), null);
   assert.equal(fixtureContentType('a.css'), 'text/css');
   assert.equal(fixtureContentType('a.wasm'), 'application/wasm');
 });
