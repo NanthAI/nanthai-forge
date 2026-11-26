@@ -29,8 +29,9 @@ import {
   agentSurfaceFindings,
   installedWeight,
   webOnlyPackages,
-  baselineHash,
+  readWeightInput,
   readWeightBaseline,
+  recordWeightEvidence,
   weightFindings,
 } from './agent-weight.mjs';
 
@@ -228,23 +229,29 @@ export function checkAgentWeight(prefix, { measure = measureAgentWeight, log = c
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [prefix, mode, ...reasonWords] = process.argv.slice(2);
-  if (!prefix || (mode && !['--measure', '--record'].includes(mode)))
-    throw new Error('Use check-agent-weight.mjs PREFIX [--measure | --record REASON including Issue id].');
-  if (mode === '--record') {
-    const reason = reasonWords.join(' '),
-      issue = /\b[0-9a-f]{8}\b/.exec(reason)?.[0];
-    if (!issue || reason.length < 20)
-      throw new Error('A baseline change needs measurements, a reason and an Issue.');
-    const report = measureAgentWeight(resolve(prefix));
-    const old = readWeightBaseline(root);
-    // Recording preserves ceilings. Raising any one is an explicit, reviewed baseline edit, not an automatic ratchet reset.
-    const baseline = { ...old, report };
-    writeFileSync(join(root, 'tests/agent-weight-baseline.json'), `${JSON.stringify(baseline, null, 2)}\n`);
-    mkdirSync(join(root, 'tests/agent-weight-ledger'), { recursive: true });
-    writeFileSync(
-      join(root, 'tests/agent-weight-ledger', `${baselineHash(baseline)}.json`),
-      `${JSON.stringify({ issue, reason }, null, 2)}\n`,
+  if (prefix === '--record-ledger') {
+    const [baseFile, ...words] = mode === '--base' ? reasonWords : [undefined, mode, ...reasonWords];
+    const base = baseFile === undefined ? undefined : JSON.parse(readFileSync(baseFile, 'utf8'));
+    console.log(recordWeightEvidence(root, readWeightInput(root), words.join(' '), base));
+  } else if (!prefix || (mode && !['--measure', '--record'].includes(mode))) {
+    throw new Error(
+      'Use check-agent-weight.mjs PREFIX [--measure | --record REASON] or --record-ledger [--base FILE] REASON. Include the Issue id in the reason.',
     );
+  } else if (mode === '--record') {
+    const report = measureAgentWeight(resolve(prefix));
+    const old = readWeightInput(root);
+    let base;
+    try {
+      base = readWeightBaseline(root);
+    } catch (error) {
+      // A measured hand-edited draft can be recorded exactly. Only a previously
+      // recorded baseline supplies a parent for future clean merges.
+      if (error.code !== 'ENOENT') throw error;
+    }
+    // Recording preserves ceilings. Raising any one is an explicit, reviewed baseline edit, not an automatic ratchet reset.
+    const baseline = { ...old, agentActions: report.agentActions, report };
+    recordWeightEvidence(root, baseline, reasonWords.join(' '), base);
+    writeFileSync(join(root, 'tests/agent-weight-baseline.json'), `${JSON.stringify(baseline, null, 2)}\n`);
     console.log(JSON.stringify(report));
   } else if (mode === '--measure') console.log(JSON.stringify(measureAgentWeight(resolve(prefix), 5, false)));
   else checkAgentWeight(resolve(prefix));

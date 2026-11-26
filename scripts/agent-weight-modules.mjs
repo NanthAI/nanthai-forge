@@ -30,6 +30,7 @@ export function moduleInventory(urls, root) {
 
 export function moduleFindings(report, baseline) {
   const added = new Map(),
+    removed = new Map(),
     unknown = [];
   for (const [path, modules] of Object.entries(report.moduleInventory ?? {})) {
     const reference = baseline.report?.moduleInventory?.[path];
@@ -40,18 +41,21 @@ export function moduleFindings(report, baseline) {
         );
       continue;
     }
-    for (const name of modules)
-      if (!reference.includes(name)) added.set(name, [...(added.get(name) ?? []), path]);
+    const previous = new Set(reference),
+      current = new Set(modules);
+    for (const name of current) if (!previous.has(name)) added.set(name, [...(added.get(name) ?? []), path]);
+    for (const name of previous)
+      if (!current.has(name)) removed.set(name, [...(removed.get(name) ?? []), path]);
   }
   // Each added module is named once, with every command that loads it, so a receipt excerpt keeps the whole
   // list even when one new import reaches all of them (ad80e037).
-  const byPaths = new Map();
-  for (const [name, paths] of added)
-    byPaths.set(paths.join(', '), [...(byPaths.get(paths.join(', ')) ?? []), name]);
-  return [
-    ...[...byPaths].map(([paths, names]) => `${paths}: added modules/chunks: ${names.join(', ')}`),
-    ...unknown,
-  ];
+  const describe = (changes, verb) => {
+    const byPaths = new Map();
+    for (const [name, paths] of changes)
+      byPaths.set(paths.join(', '), [...(byPaths.get(paths.join(', ')) ?? []), name]);
+    return [...byPaths].map(([paths, names]) => `${paths}: ${verb} modules/chunks: ${names.join(', ')}`);
+  };
+  return [...describe(added, 'added'), ...describe(removed, 'removed'), ...unknown];
 }
 
 /** Samples from the same startup preload in package smoke and the preflight probes. */

@@ -24,6 +24,7 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { packageNpm } from './package-npm.mjs';
+import { unboundProbeDirectory } from './perf/cli-first-network.mjs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { componentManifestSha256 } from './selfhost-notices.mjs';
 import { packageDocuments, packageDocumentData, packageDocumentFragments } from './package-documents.mjs';
@@ -384,17 +385,26 @@ try {
   assert.equal(command('plugin-config', owner, plugin.directory).reused, true);
   const pluginSkill = readFileSync(join(plugin.plugin, 'skills/forge-agent/SKILL.md'), 'utf8');
   assert.ok(readFileSync(new URL(pluginSkill.match(/\[hosted parity\]\(([^)]+)\)/)[1])).length > 0);
-  // One client mode: a folder without a hosted marker is refused with the nforge host next step.
-  const plain = join(directory, 'plain');
-  mkdirSync(plain);
-  const refused = spawnSync(process.execPath, [cli, 'agent', plain, 'status', '{}'], {
-    env,
-    encoding: 'utf8',
-  });
-  assert.equal(refused.status, 1);
-  const refusal = JSON.parse(refused.stderr).error;
-  assert.equal(refusal.code, 'FORGE_ROOT_UNAVAILABLE');
-  assert.match(refusal.message, /nforge host/);
+  // A retained artifact directory can sit inside a hosted Lane. Keep the plain fixture outside
+  // that ancestry, so agent status exercises root validation with a signed-out client.
+  const plain = unboundProbeDirectory('forge-package-plain-');
+  try {
+    const signedOut = { ...env };
+    delete signedOut.FORGE_AUTH_TOKEN;
+    const beforeRefusal = Atomics.load(releaseCalls, 0);
+    const refused = spawnSync(process.execPath, [cli, 'agent', plain, 'status', '{}'], {
+      cwd: plain,
+      env: signedOut,
+      encoding: 'utf8',
+    });
+    assert.equal(refused.status, 1);
+    const refusal = JSON.parse(refused.stderr).error;
+    assert.equal(refusal.code, 'FORGE_ROOT_UNAVAILABLE');
+    assert.match(refusal.message, /nforge host/);
+    assert.equal(Atomics.load(releaseCalls, 0), beforeRefusal, 'Root validation precedes release discovery.');
+  } finally {
+    rmSync(plain, { recursive: true, force: true });
+  }
   assert.match(readFileSync(join(installed, 'skills/forge-agent/SKILL.md'), 'utf8'), /name: forge-agent/);
   assert.equal(existsSync(gitCalled), false, 'Installed source workflow invoked Git.');
   const result = {

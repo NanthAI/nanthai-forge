@@ -12,6 +12,7 @@ import {
   baselineHash,
   weightFindings,
   readWeightBaseline,
+  recordWeightEvidence,
   assertCommandWeight,
 } from '../scripts/agent-weight.mjs';
 import { composeFixture } from './hosted-compose-fixture.mjs';
@@ -74,6 +75,45 @@ test('a changed weight baseline without a hashed reason cannot pass review evide
   baseline.ceilings.installedBytes++;
   writeFileSync(join(directory, 'tests/agent-weight-baseline.json'), JSON.stringify(baseline));
   assert.throws(() => readWeightBaseline(directory), /ENOENT/);
+});
+
+test('a clean merge keeps complete weight evidence from two independently recorded baseline edits', t => {
+  const directory = mkdtempSync(join(tmpdir(), 'forge-weight-merge-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const baselinePath = join(directory, 'tests/agent-weight-baseline.json');
+  const actions = (baseline, agentActions) => ({ ...baseline, agentActions, report: { agentActions } });
+  const ceilings = (baseline, limits) => ({ ...baseline, ceilings: { ...baseline.ceilings, ...limits } });
+  const base = actions({ ceilings: { installedBytes: 1000, toolListBytes: 100 } }, ['start']);
+  const installed = ceilings(base, { installedBytes: 950, toolListBytes: 105 });
+  const record = (baseline, parent) =>
+    recordWeightEvidence(directory, baseline, '09961b44: Synthetic baseline evidence record.', parent);
+  const read = baseline => {
+    writeFileSync(baselinePath, JSON.stringify(baseline));
+    return readWeightBaseline(directory);
+  };
+  record(base);
+  record(installed, base);
+  record(actions(base, ['inspect', 'start']), base);
+  record(actions(base, ['start', 'status']), base);
+  const merged = actions(installed, ['inspect', 'start', 'status']);
+  assert.deepEqual(read(merged), merged);
+
+  // An unrecorded ceiling, or a partial subset of a recorded change, still has no evidence.
+  for (const toolListBytes of [106, 100])
+    assert.throws(() => read(ceilings(merged, { toolListBytes })), /ENOENT/);
+
+  // Later Lanes can branch from this merge even though it has no ledger file of its own.
+  record(ceilings(merged, { installedBytes: 930 }), merged);
+  record(ceilings(merged, { toolListBytes: 103 }), merged);
+  const successor = ceilings(merged, { installedBytes: 930, toolListBytes: 103 });
+  assert.deepEqual(read(successor), successor);
+
+  // Sequential decisions do not authorize reviving a superseded ceiling as a clean merge.
+  const raised = ceilings(successor, { installedBytes: 1100 });
+  const superseded = ceilings(successor, { toolListBytes: 94 });
+  record(raised, successor);
+  record(superseded, raised);
+  assert.throws(() => read(ceilings(superseded, { installedBytes: 1100 })), /ENOENT/);
 });
 
 test('CLI entry importing web code or a UI package fails the actual bundle boundary, including dynamic imports', async t => {

@@ -334,8 +334,7 @@ export function registerHostedAgentWorkflow(
   server.registerTool(
     'forge_wait',
     {
-      description:
-        'Block on runId, operationIds, peer or approval up to maxWaitMs. IN_PROGRESS gives a resume command: call it until terminal.',
+      description: 'Wait for a run, operation, peer or approval. Follow IN_PROGRESS resume commands.',
       inputSchema: {
         ...hostedWaitSchema.shape,
         replyDetail: z.boolean().optional(),

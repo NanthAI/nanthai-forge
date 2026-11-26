@@ -3,7 +3,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -84,16 +93,23 @@ test('381c62df: --version, --help and an idle turn-end hook stay on a minimal im
   }
 });
 
-test('package smoke ceilings and before-network import boundaries apply to the core build used by preflight', () => {
+test('package preflight measures the real CLI even when its temp directory is inside a Lane', t => {
   const root = fileURLToPath(new URL('..', import.meta.url));
   assert.match(
     readFileSync(join(root, 'dist', 'cli-entry.js'), 'utf8'),
     /^#![^\r\n]*\bnode\r?\n/,
     'npm launches the bundled CLI directly and needs its Node interpreter line',
   );
+  const lane = mkdtempSync(join(tmpdir(), 'forge-weight-lane-'));
+  t.after(() => rmSync(lane, { recursive: true, force: true }));
+  mkdirSync(join(lane, '.forge'));
+  writeFileSync(join(lane, '.forge', 'hosted-lane.json'), '{}');
+  const temp = join(lane, 'scratch');
+  mkdirSync(temp);
   const run = spawnSync(process.execPath, ['scripts/package-ceilings.mjs', '--runtime', '--inventory'], {
     cwd: root,
     encoding: 'utf8',
+    env: { ...process.env, TMPDIR: temp, TEMP: temp, TMP: temp },
   });
   assert.equal(run.status, 0, run.stderr || run.stdout);
   const inventory = JSON.parse(/^Package module inventory: (.+)$/m.exec(run.stdout)[1]);

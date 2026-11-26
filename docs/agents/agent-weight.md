@@ -26,12 +26,25 @@ and chunk names against the recorded inventory. Paths are relative and chunk
 content hashes are normalized, so a rebuilt chunk is not reported as a new one.
 The added names come first in the failure, each named once with every command
 that loads it, so a landing receipt's cut excerpt still lists them all (ad80e037).
+Removed names follow so a split chunk can be distinguished from a newly loaded module.
 An older baseline without an inventory prints the loaded graph and labels the
 missing reference; `--record` includes inventories for later comparisons. The MCP fixture boots the installed
 ESM SDK server and real hosted agent registration, connects an in-memory client
 and calls `tools/list`; its startup includes that synthetic client. UTF-8 bytes
 are guarded here; per-harness token/schema budgets remain owned by Issue
 47558a99 and `tests/mcp-tool-list.test.mjs`.
+The shorter wait summary leaves 43 UTF-8 bytes between the 5,771-byte listing
+and the 5,814-byte installed ceiling (09961b44). A previous optional field
+addition took 24 bytes, so that size now fits within the existing ceiling.
+The same offline package smoke measured 141,293,832 installed bytes against
+the 151,289,995-byte ceiling, and loaded 170 modules for status, planning and save,
+and 175 for land.
+
+When adding a dependency to a lazily loaded CLI module, check the chunk report
+for shared helpers split out of the eager bundle (de03613f). An eager caller can
+pass a helper it already loads as a function argument to the lazy operation.
+See [the weakened-test preflight reader](../../src/preflight-weakened-tests.ts),
+which uses this pattern for the object store, digest and State parser.
 
 The runtime boundary retains TypeScript (source analysis/public SDK), Lezer
 parsers/common/highlight (syntax analysis and merge), Convex and its helpers,
@@ -84,13 +97,31 @@ adds seconds inside existing package smoke, targets under 60 s, and adds no
 Convex calls, DB I/O, timers, production or idle work. Source and Work placement
 are unchanged.
 
-A changed baseline must have a new SHA-256-named entry in
-`tests/agent-weight-ledger/` with its reason and Issue, reviewed with the change.
-A hand-edited baseline without that matching record fails. Run the reproducible
-measurements before proposing a ceiling change. `check-agent-weight.mjs PREFIX
---record REASON_WITH_ISSUE_ID` records fresh samples and a hashed reason but
-preserves ceilings; raising a ceiling is a separate explicit diff for review.
-Never refresh ceilings just to make a failing check pass.
+A changed baseline needs an Issue and a measurement reason in
+`tests/agent-weight-ledger/`, reviewed with the change. Each record is named by
+the baseline's SHA-256 and pins its fields. A clean merge of independent baseline
+edits can use their existing evidence when it includes the complete edits from
+the same recorded parent. Sequential edits retain their own parents, so a
+superseded ceiling cannot be revived by composing unrelated records.
+
+For a new action, add its synthetic call/read fixture and run package smoke
+with a retained installation. Then update the pinned action list and regenerate
+the ledger record with the measured action inventory and samples:
+
+```sh
+node scripts/check-agent-weight.mjs NEW_DIRECTORY/installed --record 'ISSUE_ID: measurements and reason'
+```
+
+This preserves ceilings and uses the baseline before recording as its parent
+when that baseline has evidence. For a separately reviewed, hand-edited pin,
+keep the original baseline in a scratch file before editing. Gather the
+measurements and record the edit against that file:
+
+```sh
+node scripts/check-agent-weight.mjs --record-ledger --base ORIGINAL_BASELINE 'ISSUE_ID: measurements and reason'
+```
+
+Keep the baseline edit and its new SHA-256 ledger entry together in the Lane.
 
 ## Command calls and database reads
 

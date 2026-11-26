@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import { createHash } from 'node:crypto';
-import { lstatSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
+import { lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -55,19 +55,95 @@ export function installedWeight(prefix) {
   return { bytes, packages: [...new Set(packages)].sort() };
 }
 export const baselineHash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-export function readWeightBaseline(root) {
-  const baseline = JSON.parse(readFileSync(join(root, 'tests/agent-weight-baseline.json'), 'utf8'));
-  const reason = JSON.parse(
-    readFileSync(join(root, 'tests/agent-weight-ledger', `${baselineHash(baseline)}.json`), 'utf8'),
+const ledgerPath = root => join(root, 'tests/agent-weight-ledger');
+const reasonRequired =
+  'Agent weight baseline needs a hashed reason and Issue; review the new measurements before landing.';
+const hasReason = record =>
+  /\b[0-9a-f]{8}\b/.test(record?.issue) &&
+  typeof record?.reason === 'string' &&
+  record.reason.trim().length >= 20;
+
+function baselinePins(baseline) {
+  const pins = {};
+  function visit(value, path) {
+    // Both inventories are sorted. Pin each action so independent entries can merge.
+    if (path.at(-1) === 'agentActions' && Array.isArray(value))
+      value = Object.fromEntries(value.map(action => [action, true]));
+    if (value !== null && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length) {
+      for (const [key, field] of Object.entries(value)) visit(field, [...path, key]);
+    } else pins[JSON.stringify(path)] = baselineHash(value);
+  }
+  visit(baseline, []);
+  return pins;
+}
+
+function changedPins(base, next) {
+  return new Map(
+    [...new Set([...Object.keys(base), ...Object.keys(next)])]
+      .filter(path => base[path] !== next[path])
+      .map(path => [path, next[path]]),
   );
-  if (
-    !/\b[0-9a-f]{8}\b/.test(reason.issue) ||
-    typeof reason.reason !== 'string' ||
-    reason.reason.trim().length < 20
-  )
-    throw new Error(
-      'Agent weight baseline needs a hashed reason and Issue; review the new measurements before landing.',
-    );
+}
+
+function recordedMerge(baseline, directory) {
+  const merged = baselinePins(baseline);
+  const groups = new Map();
+  for (const name of readdirSync(directory)) {
+    if (!/^[0-9a-f]{64}\.json$/.test(name)) continue;
+    const entry = JSON.parse(readFileSync(join(directory, name), 'utf8'));
+    if (!hasReason(entry) || !entry.base || !entry.basePins || !entry.pins) continue;
+    const key = `${entry.base}:${baselineHash(entry.basePins)}`;
+    if (!groups.has(key)) groups.set(key, { base: entry.basePins, branches: [] });
+    groups.get(key).branches.push(entry.pins);
+  }
+  for (const { base, branches } of groups.values()) {
+    if (branches.length < 2) continue;
+    const combined = changedPins(base, merged);
+    if (combined.size < 2) continue;
+    const uncovered = new Set(combined.keys());
+    for (const branch of branches) {
+      const edits = changedPins(base, branch);
+      if (edits.size >= combined.size) continue;
+      if ([...edits].every(([path, hash]) => combined.has(path) && combined.get(path) === hash))
+        for (const path of edits.keys()) uncovered.delete(path);
+    }
+    if (!uncovered.size) return true;
+  }
+  return false;
+}
+
+export function recordWeightEvidence(root, baseline, reason, base) {
+  const issue = /\b[0-9a-f]{8}\b/.exec(reason)?.[0];
+  if (!hasReason({ issue, reason })) throw new Error(reasonRequired);
+  const directory = ledgerPath(root);
+  mkdirSync(directory, { recursive: true });
+  const name = `${baselineHash(baseline)}.json`;
+  // Validate the actual parent while we have its full bytes. Keep its pins so a
+  // previously merged baseline can be a parent without needing its own ledger file.
+  if (base !== undefined) assertWeightEvidence(base, directory);
+  const parent = base === undefined ? {} : { base: baselineHash(base), basePins: baselinePins(base) };
+  writeFileSync(
+    join(directory, name),
+    `${JSON.stringify({ issue, reason, pins: baselinePins(baseline), ...parent }, null, 2)}\n`,
+  );
+  return name;
+}
+
+export const readWeightInput = root =>
+  JSON.parse(readFileSync(join(root, 'tests/agent-weight-baseline.json'), 'utf8'));
+function assertWeightEvidence(baseline, directory) {
+  try {
+    const reason = JSON.parse(readFileSync(join(directory, `${baselineHash(baseline)}.json`), 'utf8'));
+    if (!hasReason(reason)) throw new Error(reasonRequired);
+  } catch (error) {
+    // A clean composition can have a hash no individual writer saw. Accept only a union of
+    // complete recorded changes to one recorded base. Missing/partial edits still fail.
+    if (error.code !== 'ENOENT' || !recordedMerge(baseline, directory)) throw error;
+  }
+}
+export function readWeightBaseline(root) {
+  const baseline = readWeightInput(root);
+  assertWeightEvidence(baseline, ledgerPath(root));
   return baseline;
 }
 export function weightFindings(actual, baseline) {

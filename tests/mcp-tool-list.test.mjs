@@ -15,7 +15,7 @@ import { agentFixture } from './hosted-agent-fixture.mjs';
 const LIST_CHARS = 5_815; // 657d63ee: measured pre-parity tools/list, including array punctuation. 5,758 -> 5,775 (66667155): forge_planning lists tick-planning-item(line,evidence). 5,775 -> 5,782 (6b7d5a79): flat tools name nested object keys again (expected:o(head,sourceVersion,version)), +56 B, 49 B of it paid by shorter text. 5,782 -> 5,790 (9a3d6f5f): comment-planning-item lists `files:a`, the local paths the CLI uploads (+8 bytes). 5,790 -> 5,815 (2fa36bb2): forge_planning lists put `doneWhen:o(line,text)` (edit one Done-when line without the body) and `commentLimit:n` (+24 bytes).
 const CLAUDE_CHARS = 5_802; // 5,770 -> 5,778 (9a3d6f5f, `files:a`); 5,746 -> 5,763 (66667155); 5,763 -> 5,770 (6b7d5a79, nested keys).
 const CODEX_CHARS = 5_930; // 5,898 -> 5,906 (9a3d6f5f, `files:a`); Same baseline as server-prefixed Codex function definitions; 5,874 -> 5,891 (66667155); 5,891 -> 5,898 (6b7d5a79, nested keys).
-const DESCRIPTION_CHARS = 920;
+const DESCRIPTION_BYTES = 340;
 const body = response => JSON.parse(response.content[0].text);
 // The listing names fields in a description ("Fields: a b:n c=x|y ...") and required fields per action.
 function listing(tool) {
@@ -70,7 +70,6 @@ test('the hosted tool list stays inside its context budget', async t => {
   );
   const chars = JSON.stringify(tools).length;
   const listBytes = Buffer.byteLength(JSON.stringify(tools), 'utf8');
-  const descriptions = tools.reduce((n, tool) => n + tool.description.length, 0);
   const descriptionBytes = tools.reduce((n, tool) => n + Buffer.byteLength(tool.description, 'utf8'), 0);
   t.diagnostic(`MCP UTF-8 bytes: tools/list ${listBytes}, descriptions ${descriptionBytes}`);
   // Byte weight is enforced once, on the installed tools/list in package smoke (92dbde9d).
@@ -98,9 +97,8 @@ test('the hosted tool list stays inside its context budget', async t => {
   // wait's new `main=green` field (friction 1e94d000).
   // 365 -> 353 (Item 843dc73a): the shorter overview description pays for the selection field.
   // 353 -> 340 (Item 3abaec5e): the shorter check description pays for observe's report selector.
-  assert.equal(descriptionBytes, 340, 'short descriptions keep the report selector within budget');
-  assert(listBytes <= LIST_CHARS, 'tool list UTF-8 byte budget');
-  t.diagnostic(`tools/list ${chars} chars (~${Math.ceil(chars / 4)} tokens); descriptions ${descriptions}`);
+  assert(descriptionBytes <= DESCRIPTION_BYTES, `description UTF-8 bytes: ${descriptionBytes}`);
+  t.diagnostic(`tools/list ${chars} chars (~${Math.ceil(chars / 4)} tokens)`);
   assert(chars <= LIST_CHARS, `tool list characters: ${chars}`);
   assert(listBytes <= LIST_CHARS, `tool list UTF-8 bytes: ${listBytes}`);
   // Codex sends each tool as a function definition under a server-prefixed name: same budget.
@@ -123,7 +121,6 @@ test('the hosted tool list stays inside its context budget', async t => {
   ).length;
   t.diagnostic(`Claude definitions ${claude} chars`);
   assert(claude <= CLAUDE_CHARS, `Claude tool definitions: ${claude}`);
-  assert(descriptions <= DESCRIPTION_CHARS, `description characters: ${descriptions}`);
 });
 
 test('every action stays reachable: listed, with its exact schema and fields behind help', async t => {

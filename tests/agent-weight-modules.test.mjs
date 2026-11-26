@@ -6,10 +6,13 @@ import { moduleInventory, moduleFindings } from '../scripts/agent-weight-modules
 import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-test('weight diagnostics identify added chunks and packages without private roots or hash churn', () => {
+test('weight diagnostics show added and retired chunks without private roots or hash churn', () => {
   const root = resolve('synthetic'),
     url = path => pathToFileURL(join(root, path)).href;
-  const prior = moduleInventory([url('dist/cli-bundle-read-abc12345.js'), 'node:fs'], root);
+  const prior = moduleInventory(
+    [url('dist/cli-bundle-read-abc12345.js'), url('dist/cli-bundle-retired-abc12345.js'), 'node:fs'],
+    root,
+  );
   const current = moduleInventory(
     [
       url('dist/cli-bundle-read-def67890.js'),
@@ -18,13 +21,16 @@ test('weight diagnostics identify added chunks and packages without private root
     ],
     root,
   );
-  assert.deepEqual(prior, ['dist/cli-bundle-read-HASH.js']);
+  assert.deepEqual(prior, ['dist/cli-bundle-read-HASH.js', 'dist/cli-bundle-retired-HASH.js']);
   assert.deepEqual(
     moduleFindings(
       { moduleInventory: { status: current } },
       { report: { moduleInventory: { status: prior } } },
     ),
-    ['status: added modules/chunks: dist/cli-bundle-extra-HASH.js, node_modules/pkg/index.js'],
+    [
+      'status: added modules/chunks: dist/cli-bundle-extra-HASH.js, node_modules/pkg/index.js',
+      'status: removed modules/chunks: dist/cli-bundle-retired-HASH.js',
+    ],
   );
   assert.deepEqual(
     moduleFindings(

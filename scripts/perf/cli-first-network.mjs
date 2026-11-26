@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { childEnv } from '../child-env.mjs';
 
@@ -22,9 +22,18 @@ export const agentCommands = {
 const preload = fileURLToPath(new URL('./first-network-preload.mjs', import.meta.url));
 const root = fileURLToPath(new URL('../..', import.meta.url));
 
+/** An inherited temp path can itself sit under a Lane. CLI probes need an independent root,
+ * since agent commands intentionally discover an ancestor Lane. */
+export function unboundProbeDirectory(prefix) {
+  let parent = realpathSync(tmpdir());
+  for (let ancestor = parent; dirname(ancestor) !== ancestor; ancestor = dirname(ancestor))
+    if (existsSync(join(ancestor, '.forge', 'hosted-lane.json'))) parent = dirname(ancestor);
+  return mkdtempSync(join(parent, prefix));
+}
+
 function firstNetworkProbe(name, cli, modules, warm) {
   const command = agentCommands[name];
-  const state = mkdtempSync(join(tmpdir(), 'forge-first-network-'));
+  const state = unboundProbeDirectory('forge-first-network-');
   return {
     args: [
       '--import',
