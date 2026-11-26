@@ -64,14 +64,19 @@ async function fixture(t, policy = 'require', reader = common['tests/docs.test.m
   return s;
 }
 
-test('7008ff18: preflight refuses an edit made while it queued before any typecheck runs', async t => {
-  const s = await fixture(t, 'require', undefined, {
-    'forge.json': JSON.stringify({
-      preflight: { static: [{ name: 'typecheck', command: ['node', 'check-type.mjs'] }] },
-    }),
-    'check-type.mjs':
-      "import { writeFileSync } from 'node:fs'; writeFileSync('../typecheck-started', 'ran');",
-  });
+test('30c48b36: standalone preflight tests the edited workspace after queuing and leaves saved evidence alone', async t => {
+  const s = await fixture(
+    t,
+    'require',
+    "import test from 'node:test'; import assert from 'node:assert/strict'; import fs from 'node:fs'; test('read slot-time edit', () => assert.equal(fs.readFileSync(new URL('../README.md', import.meta.url), 'utf8'), 'edited while queued\\n'));",
+    {
+      'forge.json': JSON.stringify({
+        preflight: { static: [{ name: 'typecheck', command: ['node', 'check-type.mjs'] }] },
+      }),
+      'check-type.mjs':
+        "import { writeFileSync } from 'node:fs'; writeFileSync('../typecheck-started', 'ran');",
+    },
+  );
   const slots = `${s.root}-slots`;
   const settings = `${s.root}-settings.json`;
   writeFileSync(settings, JSON.stringify({ localHeavySlots: 1 }));
@@ -107,13 +112,12 @@ test('7008ff18: preflight refuses an edit made while it queued before any typech
   t.after(() => editor.kill());
   const exited = once(editor, 'exit');
   await once(editor.stdout, 'data');
-  await assert.rejects(s.transport().dispatch('preflight', { laneId: s.lane.laneId, run: true }), error => {
-    assert.equal(error.code, 'LANE_DIRTY');
-    assert.match(error.message, /changed while preflight waited for a heavy slot/);
-    return true;
-  });
+  const { result } = await s.transport().dispatch('preflight', { laneId: s.lane.laneId, run: true });
+  assert.equal(result.workingTree, true);
+  assert.equal(result.outcome, 'passed');
+  assert.equal(result.receipt.tests, 1);
   assert.deepEqual(await exited, [0, null]);
-  assert.equal(existsSync(join(s.root, '..', 'typecheck-started')), false);
+  assert.equal(existsSync(join(s.root, '..', 'typecheck-started')), true);
   assert.equal(readPreflightReceipt(s.root, s.lane.laneId), null);
   assert.deepEqual(
     readdirSync(slots).filter(name => /^\d+$/.test(name)),

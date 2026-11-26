@@ -698,8 +698,11 @@ async function dispatchHostedAgentCli(
     if (!receiptMatches(receipt, body)) durableReplace(receipt, body);
   }
   // A passed preflight names the self-review of what will land (593fc2d7).
-  if (action === 'preflight' && (result.result as { outcome?: unknown } | undefined)?.outcome === 'passed')
-    process.stderr.write(`${selfReviewLine(root)}\n`);
+  if (action === 'preflight') {
+    const preflight = result.result as { outcome?: unknown; workingTree?: boolean } | undefined;
+    if (preflight?.outcome === 'passed' && !preflight.workingTree)
+      process.stderr.write(`${selfReviewLine(root)}\n`);
+  }
   // MCP also dispatches here. Only the installed CLI opts in to private machine-local evidence.
   if (localLooseEnds && action === 'lanes' && command.view === 'loose-ends') {
     // Load the unbundled sibling so other CLI commands and MCP keep their startup graph.

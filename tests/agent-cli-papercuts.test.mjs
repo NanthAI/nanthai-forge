@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 // Issue ad80e037 (CLI papercuts): the retry reason has one name across the failure reply and land,
-// and a preflight refused for edits made during its `nforge heavy` wait says so. Issue 593fc2d7: refusals
+// and preflight recognizes older `nforge heavy` wait metadata. Issue 593fc2d7: refusals
 // name the field and what to send first, a withdrawn landing says its id is spent, agent verbs typed at
 // the top level name the agent command.
 import test from 'node:test';
@@ -47,7 +47,7 @@ test('ad80e037: land takes the retry reason as reason or retryReason; two differ
   assert.match(refused.error.issues[0].message, /add "reason".*next\.retryReason/);
 });
 
-test('ad80e037: a preflight refused for edits made during its heavy wait says so and names save and the same preflight', async t => {
+test('30c48b36: preflight uses working edits when an older heavy wrapper reports a queue wait', async t => {
   const s = agentFixture(t);
   await s.transport().dispatch('open', { laneId: s.lane.laneId });
   // Edited while the preflight waited: a runnable Node project the plan can read, not yet saved.
@@ -66,18 +66,12 @@ test('ad80e037: a preflight refused for edits made during its heavy wait says so
   t.after(() =>
     prior === undefined ? delete process.env.FORGE_HEAVY_PARENT : (process.env.FORGE_HEAVY_PARENT = prior),
   );
-  await assert.rejects(s.transport().dispatch('preflight', { laneId: s.lane.laneId }), error => {
-    assert.equal(error.code, 'LANE_DIRTY');
-    assert.match(error.message, /waited 3 min for a heavy slot; the edits came during that wait/);
-    assert.match(error.message, /Save, then run the same preflight again/);
-    assert.match(
-      error.message,
-      new RegExp(
-        ` save '\\{\\}', then nforge agent .* preflight '\\{"laneId":"${s.lane.laneId}","run":true\\}'`,
-      ),
-    );
-    return true;
-  });
+  const { result } = await s.transport().dispatch('preflight', { laneId: s.lane.laneId });
+  assert.equal(result.workingTree, true);
+  assert.equal(result.outcome, 'passed');
+  assert.equal(result.receipt.tests, 1);
+  assert.deepEqual(result.plan.tests, ['a.test.mjs']);
+  assert.equal(result.receipt.tree, undefined);
 });
 
 test('ad80e037: nforge heavy tells the command it runs how long it queued for its slot', t => {

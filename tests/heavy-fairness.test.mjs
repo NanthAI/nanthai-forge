@@ -322,16 +322,26 @@ test('nforge heavy: a killed waiter leaves the queue and a killed holder frees i
   assert.match(next.stdout, /S\d+/, next.stderr);
 });
 
-test('incident b30c3e35: nested heavy reuses one live parent slot and leaves its release to the parent', async t => {
+test('nested heavy reuses the parent slot and preserves whether the parent queued', async t => {
   const directory = isolated(t),
     settings = join(directory, 'settings.json');
   writeFileSync(settings, JSON.stringify({ localHeavySlots: 1 }));
+  const held = tryHeavySlot(directory, 1);
+  assert(held);
+  const showQueued =
+    "if (JSON.parse(process.env.FORGE_HEAVY_PARENT).waited !== true) throw Error('lost outer queue wait'); process.stdout.write('nested')";
   const nested = `const {spawnSync}=require('node:child_process'); const fs=require('node:fs');
-    const r=spawnSync(process.execPath,[${JSON.stringify(cli)},'heavy',process.execPath,'-e','process.stdout.write("nested")'],{encoding:'utf8',timeout:10000});
+    const r=spawnSync(process.execPath,[${JSON.stringify(cli)},'heavy',process.execPath,'-e',${JSON.stringify(showQueued)}],{encoding:'utf8',timeout:10000});
     if(r.status!==0)throw Error(r.stderr||r.error?.code); process.stdout.write(r.stdout);
     if(!fs.existsSync(${JSON.stringify(join(directory, '1'))}))throw Error('parent lease removed');`;
-  const run = heavyProcess(directory, [process.execPath, '-e', nested], settings);
+  const run = heavyProcess(
+    directory,
+    ['--cores', String(availableParallelism()), process.execPath, '-e', nested],
+    settings,
+  );
   t.after(() => run.child.kill());
+  await until(() => queuedNames(directory).length === 1, 30_000);
+  rmSync(held, { recursive: true });
   assert.equal(await run.exited, 0, run.stderr);
   assert.equal(run.stdout, 'nested');
   assert.deepEqual(slotFiles(directory), [], 'parent releases its lease');

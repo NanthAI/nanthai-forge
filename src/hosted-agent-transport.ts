@@ -100,7 +100,7 @@ import { preflightResult } from './hosted-land-gates.js';
 import type { LandGateEntry } from './hosted-land-gates.js';
 import { liveLanding, ownsLiveLanding } from './landing-freeze.js';
 import { rememberLandingPaths } from './preflight-learned.js';
-import { hostedLaneDirty } from './hosted-lane-dirty.js';
+import { hostedLaneDirty, inspectUnsavedLane } from './hosted-lane-dirty.js';
 import { deltaApplyPending, finishPendingCheckoutDelta } from './hosted-checkout-delta-pending.js';
 import { agentDefaultLines, type EffectiveAgentDefaults } from './agent-parallel-defaults.js';
 import { dirname, basename, resolve } from 'node:path';
@@ -162,6 +162,7 @@ import {
   mainFilteredNotice,
   type SavedChangedPaths,
 } from './hosted-changed-paths.js';
+import { reviewPaths } from './source-review-format.js';
 import { publishClientSourcePack } from './source-pack-client.js';
 import {
   agentHooksFeature,
@@ -2624,7 +2625,8 @@ export class HostedAgentTransport {
         'Run preflight with the Lane folder printed by start as ROOT (not the project folder): it tests the saved files there.',
       );
     await this.protectedNotice(marker);
-    const { preflightPlan, readPreflightReceipt, runPreflight } = await import('./agent-preflight.js');
+    const { preflightPlan, readPreflightReceipt, runPreflight, withPreflightSlot } =
+      await import('./agent-preflight.js');
     // retry reruns what the last run left: the files it stopped for time, else the test files it
     // failed when it names every one and started every planned file (its passes are reused), so a
     // flake reruns alone (Item 29b2d1ca). Only a receipt of the saved source here: another save's
@@ -2692,54 +2694,97 @@ export class HostedAgentTransport {
         ...weakenedTests,
         ...(plan.status === 'unavailable' ? landNext : planNext),
       });
-    // The Lane state is read when the run starts, after any `nforge heavy` queue wait; edits made
-    // during that wait are named as such, with the save and the same preflight to run (ad80e037).
-    const rerun = `Save, then run the same preflight again${heavyWaitWords()}: ${hostedRecoveryCommand(root, 'save', {})}, then ${hostedRecoveryCommand(root, 'preflight', { ...command, laneId })}.`;
+    const rerun = `Save, then run the same preflight again: ${hostedRecoveryCommand(root, 'save', {})}, then ${hostedRecoveryCommand(root, 'preflight', { ...command, laneId })}.`;
+    const alreadyWaited = inheritedPreflightWait();
     const minutes = unsavedMinutes(root);
     invariant(
-      minutes === null,
+      alreadyWaited || minutes === null,
       'LANE_DIRTY',
       `Save first: preflight records a result for the saved head, and these files have unsaved edits. ${rerun}`,
     );
     // File times can miss an edit made while a save was uploading (the marker is rewritten after it).
     // The receipt must name the bytes under test, so confirm them against the saved baseline: a local
     // digest pass that skips files the stat index vouches for (and refreshes its racy entries).
-    const checkSource = (afterWait = false) =>
-      invariant(
-        !hostedLaneDirty(root, { refresh: true, selection: { laneId, head } }),
-        'LANE_DIRTY',
-        afterWait
-          ? `The Lane changed while preflight waited for a heavy slot. ${rerun}`
-          : `Save first: preflight records a result for the saved head, and the files here differ from it. ${rerun}`,
-      );
-    checkSource();
+    invariant(
+      alreadyWaited || !hostedLaneDirty(root, { refresh: true, selection: { laneId, head } }),
+      'LANE_DIRTY',
+      `Save first: preflight records a result for the saved head, and the files here differ from it. ${rerun}`,
+    );
     const context = this.operationContext.getStore();
     if (context) context.localRun = true;
-    const receipt = runPreflight(
+    return withPreflightSlot(
       root,
-      laneId,
-      head,
-      plan,
-      marker.tree ?? sourceTree(marker.state.files),
-      false,
-      changed?.complete ? changed.paths : null,
-      // Preflight takes its own `nforge heavy` slot; wrapped in `nforge heavy`, it reuses that one.
-      { heavySlot: true, comparisonBase: base, afterHeavyWait: () => checkSource(true) },
+      !!(plan.tests.length || plan.static?.selected.length || alreadyWaited),
+      slot => {
+        let runPlan = plan;
+        let workingTree = false;
+        if (slot?.waited || alreadyWaited) {
+          const current = readHostedLaneCheckout(root);
+          const edits = inspectUnsavedLane(root, { refresh: true, limit: Infinity });
+          invariant(
+            current?.selection.laneId === laneId && (!edits.dirty || edits.kind === 'changes'),
+            'WORK_STALE',
+            'The Lane checkout was replaced or could not be read while preflight waited. Run preflight again.',
+          );
+          workingTree = edits.dirty || current.selection.head !== head;
+          if (workingTree) {
+            const paths = new Set(changed?.paths);
+            if (edits.dirty) for (const edit of edits.paths ?? []) paths.add(edit.path);
+            if (current.selection.head !== head)
+              for (const file of reviewPaths(marker.state.files, current.state.files))
+                if (file.status !== 'unchanged') paths.add(file.path);
+            process.stderr.write(
+              'preflight: the Lane changed while queued. Testing the current working files.\n',
+            );
+            // Replan from disk, without source caches or a retry pinned to the earlier saved bytes.
+            const fresh = preflightPlan(
+              root,
+              { paths: [...paths], complete: changed?.complete === true },
+              undefined,
+              {
+                budgetSeconds: command.budgetSeconds,
+                trim: command.trim,
+              },
+            );
+            if (fresh.status !== 'planned') {
+              process.stderr.write(`preflight: NOT COMPLETE; no checks ran. ${fresh.reason}.\n`);
+              return this.response(action, null, {
+                laneId,
+                head,
+                workingTree,
+                plan: fresh,
+                outcome: 'incomplete',
+                failed: 0,
+                ...landNext,
+              });
+            }
+            runPlan = fresh;
+          }
+        }
+        const receipt = runPreflight(
+          root,
+          laneId,
+          head,
+          runPlan,
+          workingTree ? undefined : (marker.tree ?? sourceTree(marker.state.files)),
+          false,
+          // An unsaved run has no pinned base comparison.
+          workingTree ? undefined : changed?.complete ? changed.paths : null,
+          { heavySlot: slot ?? false, comparisonBase: base, workingTree },
+        );
+        const outcome = receipt.outcome ?? 'failed';
+        return this.response(action, null, {
+          laneId,
+          head,
+          outcome,
+          failed: receipt.failed ?? 0,
+          plan: runPlan,
+          receipt,
+          ...(workingTree ? { workingTree: true } : { ...hostedChecks, ...weakenedTests }),
+          ...(outcome === 'failed' ? (workingTree ? {} : planNext) : landNext),
+        });
+      },
     );
-    // Nothing failed (passed, NOT COMPLETE, or this machine's environment): the next step is to land,
-    // since the landing check runs every test; only a failure sends the agent back to fix and rerun.
-    const outcome = receipt.outcome ?? 'failed';
-    return this.response(action, null, {
-      laneId,
-      head,
-      outcome,
-      failed: receipt.failed ?? 0,
-      plan,
-      receipt,
-      ...hostedChecks,
-      ...weakenedTests,
-      ...(outcome === 'failed' ? planNext : landNext),
-    });
   }
   private async preflightHostedChecks(
     root: string,
@@ -3152,17 +3197,19 @@ export type HostedAgentSession = {
   landGates?: (composeOperationId: string) => string | undefined;
 };
 
-/** How long the enclosing `nforge heavy` queued for its slot, as words for a LANE_DIRTY refusal:
- * edits made during that wait are why the saved head no longer matches (ad80e037). Env read only. */
-function heavyWaitWords() {
+/** An enclosing `nforge heavy` may have queued before this command had a chance to read the Lane. */
+function inheritedPreflightWait() {
   try {
-    const waitedMs = (JSON.parse(process.env.FORGE_HEAVY_PARENT || 'null') as { waitedMs?: unknown } | null)
-      ?.waitedMs;
-    if (typeof waitedMs !== 'number' || waitedMs < 1000) return '';
-    const seconds = Math.round(waitedMs / 1000);
-    return ` (this preflight waited ${seconds < 120 ? `${seconds} s` : `${Math.round(seconds / 60)} min`} for a heavy slot; the edits came during that wait, and the new run waits again)`;
+    const lease = JSON.parse(process.env.FORGE_HEAVY_PARENT || 'null') as {
+      waited?: unknown;
+      waitedMs?: unknown;
+    } | null;
+    return (
+      lease?.waited === true ||
+      (lease?.waited === undefined && typeof lease?.waitedMs === 'number' && lease.waitedMs >= 1000)
+    );
   } catch {
-    return '';
+    return false;
   }
 }
 

@@ -6,3 +6,4 @@
   ([agent workflow](../../agents/workflow.d/sections/3150-preflight-typechecks-and-browser-tests.md)).
 - Local preflight shares one [heavy slot](../../parallel-work-defaults.md#localheavyslots) across
   static checks, build and tests, including runs that only execute static checks.
+  Standalone preflight replans against working files edited during a slot wait.

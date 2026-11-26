@@ -658,6 +658,7 @@ export async function heavyCli(
   const { stopLeftovers, stopProcessTree } = await loadStop();
   const inherited = inheritedHeavySlot(heavySlotDirectory());
   const queuedAt = Date.now();
+  let waited = false;
   const ownSlot = slotsItself(args);
   if (ownSlot && slots !== 0 && !inherited)
     process.stderr.write(
@@ -674,6 +675,9 @@ export async function heavyCli(
             command: args[0]!,
             cwd: process.cwd(),
             admission: await measuredHeavyAdmission(cores),
+            onQueue: () => {
+              waited = true;
+            },
           },
         );
   const heldSince = Date.now();
@@ -764,16 +768,18 @@ export async function heavyCli(
               ? 'strict'
               : '1',
           ...(moduleCache ? { FORGE_TEST_MODULE_DIRECTORY: moduleCache } : {}),
-          FORGE_HEAVY_PARENT: held
-            ? JSON.stringify({
-                directory: canonicalRoot(heavySlotDirectory()),
-                slot: basename(held),
-                pid: Number(readFileSync(join(held, 'pid'), 'utf8')),
-                // How long this command queued for its slot: a preflight refused for edits made
-                // meanwhile says so (ad80e037). A nested heavy reuses the slot and adds no wait.
-                ...(slot ? { waitedMs: heldSince - queuedAt } : {}),
-              })
-            : '',
+          FORGE_HEAVY_PARENT: inherited
+            ? process.env.FORGE_HEAVY_PARENT
+            : held
+              ? JSON.stringify({
+                  directory: canonicalRoot(heavySlotDirectory()),
+                  slot: basename(held),
+                  pid: Number(readFileSync(join(held, 'pid'), 'utf8')),
+                  // Preserve whether this command queued so nested preflight can select current files.
+                  waited,
+                  waitedMs: heldSince - queuedAt,
+                })
+              : '',
         },
       });
       // A command that ignores the stop signal is killed after the grace, so the slot is freed

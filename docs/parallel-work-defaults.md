@@ -474,6 +474,9 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   `package.json`; a key set in both files is an error, never a silent pick, and a `forge.json` that
   is not a JSON object makes the plan unavailable. Forge reads it as data and never runs it; keys
   it does not know are ignored.
+- **Edits while queued.** If a standalone preflight waits for a heavy slot and the Lane changes
+  before it gets one, it replans and tests the working files when the slot opens. The result
+  describes that workspace run. Landing uses saved-head evidence and runs its own gate after saving.
 - **Clean environment.** Every command preflight runs (static checks, the build step, package
   commands and the test runner) runs in one [clean check environment](security.md#clean-check-environments)
   built for the run and removed when it ends: a private HOME, XDG and temp directories and npm

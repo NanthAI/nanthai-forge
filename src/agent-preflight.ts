@@ -1511,14 +1511,14 @@ const observationSchema = z.union([
  * run mandatory first in groups sized from the speed already observed; an earlier failure or the
  * spent time budget stops later groups and names them. */
 type HeldHeavySlot = {
-  env: Record<string, string>;
+  apply(env: NodeJS.ProcessEnv): void;
   waited: boolean;
   release(kind: HeavyKind): void;
 };
 /** One `nforge heavy` slot for this preflight's static checks, build and tests, held for this process. The
  * synchronous run waits for it in a child (FIFO with every other heavy command); a preflight inside
  * `nforge heavy` reuses that slot. Null when slots are off or the claim fails (the run goes on, said once). */
-function holdHeavySlot(cwd: string, base: NodeJS.ProcessEnv): HeldHeavySlot | null {
+function holdHeavySlot(cwd: string): HeldHeavySlot | null {
   const claim = spawnSync(
     process.execPath,
     [fileURLToPath(new URL('./preflight-heavy-claim.js', import.meta.url)), String(process.pid), cwd],
@@ -1539,16 +1539,22 @@ function holdHeavySlot(cwd: string, base: NodeJS.ProcessEnv): HeldHeavySlot | nu
   const { slot, waitedMs } = held;
   // The build's checker and any nested test runner get the slot's core share (7008ff18); its own
   // test groups already run --test-concurrency=1.
-  const cap = slotCapEnv(base, availableParallelism(), held.slots ?? 0);
+  const { parent, slots, waited } = held;
+  let cap: ReturnType<typeof slotCapEnv> | undefined;
+  let released = false;
   return {
-    waited: held.waited === true,
-    env: {
-      ...cap.env,
-      FORGE_HEAVY_PARENT: held.parent,
-      ...(process.env.FORGE_HEAVY_DIR ? { FORGE_HEAVY_DIR: process.env.FORGE_HEAVY_DIR } : {}),
+    waited: waited === true,
+    apply(env) {
+      cap ??= slotCapEnv(env, availableParallelism(), slots ?? 0);
+      Object.assign(env, cap.env, {
+        FORGE_HEAVY_PARENT: parent,
+        ...(process.env.FORGE_HEAVY_DIR ? { FORGE_HEAVY_DIR: process.env.FORGE_HEAVY_DIR } : {}),
+      });
     },
     release(kind) {
-      cap.dispose();
+      if (released) return;
+      released = true;
+      cap?.dispose();
       if (!slot) return;
       rmSync(slot, { recursive: true, force: true });
       // A synchronous run cannot sample its tree; the load when it ends is the one reading.
@@ -1564,6 +1570,20 @@ function holdHeavySlot(cwd: string, base: NodeJS.ProcessEnv): HeldHeavySlot | nu
   };
 }
 
+/** Standalone preflight can reselect its input after a queue wait, before any check runs. */
+export function withPreflightSlot<T>(
+  root: string,
+  needed: boolean,
+  run: (held: HeldHeavySlot | null) => T,
+): T {
+  const held = needed ? holdHeavySlot(root) : null;
+  try {
+    return run(held);
+  } finally {
+    held?.release('other');
+  }
+}
+
 export function runPreflight(
   root: string,
   laneId: string,
@@ -1577,11 +1597,13 @@ export function runPreflight(
   /** Hold one `nforge heavy` slot for the static checks, build and tests. The preflight action and the
    * land gate's inline run set it; a fixture run inside a test (already in its runner's slot) does not. */
   options: {
-    heavySlot?: boolean;
+    heavySlot?: boolean | HeldHeavySlot;
     /** Static failure comparison uses the same base as selection, including after conflict resolution. */
     comparisonBase?: string;
     /** The saved source pin must still match after this run waited for its slot. */
     afterHeavyWait?: () => void;
+    /** Report the workspace run without writing or reusing a saved-head receipt. */
+    workingTree?: boolean;
     quick?: boolean;
     /** This head's static results from the run just before: kept, not run again (land's quick run). */
     staticDone?: NonNullable<PreflightReceipt['static']>;
@@ -1631,14 +1653,17 @@ export function runPreflight(
   };
   // Browser test files that did not run their browser (not installed here, or a skip): NOT COMPLETE.
   const needsBrowser: string[] = [];
-  let heavy: HeldHeavySlot | null | undefined;
+  let heavy: HeldHeavySlot | null | undefined =
+    typeof options.heavySlot === 'object' ? options.heavySlot : undefined;
+  let heavyConfigured = false;
   let heavyKind: HeavyKind = 'other';
   const heavyEnv = (kind: HeavyKind) => {
     const env = cleanEnv();
-    if (options.heavySlot && heavy === undefined) {
-      heavy = holdHeavySlot(root, env);
+    if (options.heavySlot && !heavyConfigured) {
+      heavy ??= holdHeavySlot(root);
       if (heavy?.waited) options.afterHeavyWait?.();
-      if (heavy) Object.assign(env, heavy.env);
+      heavy?.apply(env);
+      heavyConfigured = true;
     }
     heavyKind = kind;
     return env;
@@ -1647,7 +1672,7 @@ export function runPreflight(
   const staticNames = plan.static?.selected.map(check => check.name) ?? [];
   const keptScope = staticScopeKey(changed);
   const kept =
-    options.staticDone || staticOnly || !staticNames.length
+    options.staticDone || staticOnly || options.workingTree || !staticNames.length
       ? undefined
       : keptPassedStatic<StaticCheckResult>(root, laneId, head, keptScope, staticNames);
   if (kept)
@@ -1698,7 +1723,7 @@ export function runPreflight(
         staticResults.push(...runStaticChecks(root, narrowed.selected, compilerEnv, undefined, scope));
       }
       if (staticResults.some(result => result.outcome === 'failed')) exitCode = 1;
-      else if (!staticOnly && !typecheckUntouched.length)
+      else if (!staticOnly && !options.workingTree && !typecheckUntouched.length)
         keepPassedStatic(root, laneId, head, keptScope, staticNames, staticResults);
     }
     if (!staticOnly && plan.tests.length && exitCode === 0) {
@@ -2017,7 +2042,7 @@ export function runPreflight(
   const skipped = notRun.length + stopped.length + environmentUnits.length + needsBrowser.length;
   const skippedFiles = [...(plan.local?.trimmedTests ?? []), ...notRun].sort();
   const rerun = skippedFiles.length ? rerunCommand(root, skippedFiles) : undefined;
-  const stoppedRerun = notRun.length ? stoppedCommand(root, laneId) : undefined;
+  const stoppedRerun = notRun.length && !options.workingTree ? stoppedCommand(root, laneId) : undefined;
   const emptyAtCeiling =
     !staticOnly && !plan.tests.length && !plan.reusedTests?.length ? plan.ceilingDeferred : undefined;
   // A clean run that left must-run files unstarted proved nothing about them: NOT COMPLETE.
@@ -2042,6 +2067,7 @@ export function runPreflight(
             ...(needsBrowser.length ? { needs: { ...NEEDS_CHROMIUM, files: [...needsBrowser].sort() } } : {}),
           })
       : undefined;
+  if (options.workingTree && incomplete) delete incomplete.finish;
   // When a quick landing stops at its static gate, retain the static-only failure receipt.
   const receiptStaticOnly =
     staticOnly || (options.quick === true && staticResults.some(result => result.outcome === 'failed'));
@@ -2130,8 +2156,10 @@ export function runPreflight(
             (failedFiles.length || failingGroup.length),
         )
       : 0;
-  writePreflightReceipt(root, receipt);
-  dropKeptStatic(root, laneId);
+  if (!options.workingTree) {
+    writePreflightReceipt(root, receipt);
+    dropKeptStatic(root, laneId);
+  }
   process.stderr.write(`${runSummary(receipt, plan, typecheckUntouched)}\n`);
   recordPreflightTiming(root, receipt);
   return quickTimedOut ? { ...receipt, quickTimedOut: true } : receipt;
