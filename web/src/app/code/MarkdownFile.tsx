@@ -2,7 +2,7 @@
 // Copyright 2026 Ferdinando Valsecchi
 // A Markdown file read as a document (Item 8e847a17): the text drawn by the same safe renderer comments use (raw HTML
 // is dropped, links open only to http(s), mailto, or another file of this State), fenced code coloured by the
-// highlight worker, and images that name a file of the same State loaded from storage when they scroll into view:
+// highlight worker, and raster images that name a file of the same State loaded from storage when they scroll into view:
 // one read of the image's entry (no bytes) and one signed download, only for a member, only up to the drawing limit. A signed-out
 // visitor's images, and any that cannot load, stay the plain "[Image: …]" words. Loaded only when a Markdown file opens.
 import { useConvex } from 'convex/react';
@@ -23,7 +23,6 @@ const IMAGE_TYPES: Record<string, string> = {
   gif: 'image/gif',
   webp: 'image/webp',
   avif: 'image/avif',
-  svg: 'image/svg+xml',
 };
 
 export type MarkdownSource = {
@@ -64,7 +63,8 @@ function RepoImage({ source, path, alt }: { source: MarkdownSource; path: string
   const holder = useRef<HTMLSpanElement>(null);
   const [near, setNear] = useState(typeof IntersectionObserver === 'undefined');
   const [shown, setShown] = useState<{ url: string } | 'failed' | null>(null);
-  const type = IMAGE_TYPES[path.split('.').at(-1)?.toLowerCase() ?? ''];
+  const extension = path.split('.').at(-1)?.toLowerCase() ?? '';
+  const type = Object.hasOwn(IMAGE_TYPES, extension) ? IMAGE_TYPES[extension] : undefined;
   useEffect(() => {
     const node = holder.current;
     if (near || !node) return;

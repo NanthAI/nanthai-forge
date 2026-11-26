@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import type { ReactNode } from 'react';
+import { shownDeviceName } from '../device/code';
 import { Row } from '../ds';
 import { DeviceSettings } from './DeviceSettings';
 import type { DeviceSettings as Settings } from './access-contract';
@@ -55,7 +56,7 @@ export function DeviceFacts({
         device.known || !setName ? (
           <>
             <q dir="auto" translate="no">
-              {request.name}
+              {shownDeviceName(request.name)}
             </q>
             <span className="sub">Only you see the name. It grants nothing.</span>
           </>
@@ -67,7 +68,7 @@ export function DeviceFacts({
               autoComplete="off"
               spellCheck={false}
               maxLength={80}
-              value={name ?? request.name}
+              value={name ?? shownDeviceName(request.name)}
               onChange={event => setName(event.target.value)}
             />
             <span className="sub">

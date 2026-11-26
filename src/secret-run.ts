@@ -144,9 +144,7 @@ export async function runWithSecrets(
         selected.env[secret.name] = folder.write(secret.name, secret.value);
       } else selected.env[secret.name] = secret.value.toString('utf8');
     }
-    const mask =
-      result.machine ||
-      (!input.show && (!terminal || agent || (options.entryPoint && options.entryPoint !== 'cli')));
+    const mask = set === 'checks' || result.machine || !input.show;
     child = spawn(input.command[0]!, [...input.command.slice(1)], {
       cwd: input.root,
       env: selected.env,

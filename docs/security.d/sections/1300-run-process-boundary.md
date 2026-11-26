@@ -36,16 +36,15 @@ The process boundary enforces these rules:
 - Checks machine delivery requires `--only` or a supervisor declaration. This
   limits what is handed over. A same-user child can still read its parent's
   startup environment; this process boundary is not OS isolation.
-- Piped stdout and stderr mask injected values of at least eight characters as
+- By default, stdout and stderr mask injected values of at least eight characters as
   `[secret:NAME]`: raw, URL-encoded, JSON-escaped, hex, base64 and base64url at all
   three alignments. A value under eight characters is masked raw where it stands
   as its own word (no letter, digit or underscore touching it); its encoded forms
   pass. Multiline values are masked whole and line by line (lines shorter than
   eight characters pass). Each stream keeps at most the longest encoded form
-  minus one byte across chunks, plus one byte for a short value's right edge. An
-  agent marker, agent entry point or MCP keeps masking enabled even with a
-  terminal, and a Checks machine run always masks. A person can use `--show` on
-  Development; an agent cannot, and nobody can on Checks. Masking stops
+  minus one byte across chunks, plus one byte for a short value's right edge.
+  Checks, machine runs, and agent runs always mask output. A person can use
+  `--show` for Development when both streams are attached to a terminal. Masking stops
   accidents, can test a guess, and cannot prevent code deliberately disclosing a
   value.
 - File values use a private folder outside the tree and declared kept-output

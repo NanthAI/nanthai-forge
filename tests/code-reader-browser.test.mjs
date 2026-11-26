@@ -28,7 +28,10 @@ async function fixture(out) {
     const client = {
       watchQuery: () => ({ onUpdate: () => noop, localQueryResult: () => undefined, localQueryLogs: () => undefined, journal: noop }),
       query: () => Promise.reject(new Error('no reads')),
-      action: () => Promise.reject(Object.assign(new Error('refused'), { data: { message: 'refused' } })),
+      action: (_ref, { path }) => {
+        window.imageReads.push(path);
+        return Promise.reject(Object.assign(new Error('refused'), { data: { message: 'refused' } }));
+      },
       mutation: () => Promise.reject(new Error('no writes')),
       logger: { warn: noop, log: noop, error: noop, logVerbose: noop },
       connectionState: () => ({ isWebSocketConnected: true, hasInflightRequests: false }),
@@ -41,7 +44,8 @@ async function fixture(out) {
       { kind: 'added', text: 'const next: string = "y";' },
       { kind: 'context', text: '// tail' },
     ] }];
-    const md = ['# Title', '', '<script>window.pwned = 1</script>', '', 'See [the guide](docs/guide.md) and [out](https://example.com).', '', '![logo](assets/logo.png)', '', '| a | b |', '| - | - |', '| 1 | 2 |', '', '\`\`\`ts', 'const a: number = 1;', '\`\`\`'].join('\\n');
+    window.imageReads = [];
+    const md = ['# Title', '', '<script>window.pwned = 1</script>', '', 'See [the guide](docs/guide.md) and [out](https://example.com).', '', '![diagram](assets/diagram.SVG) ![unsupported](assets/diagram.constructor) ![logo](assets/logo.png)', '', '| a | b |', '| - | - |', '| 1 | 2 |', '', '\`\`\`ts', 'const a: number = 1;', '\`\`\`'].join('\\n');
     function Root() {
       const [mode, setMode] = useState('unified');
       return h('div', null,
@@ -135,7 +139,15 @@ test('a diff and a Markdown file are coloured by the worker highlighter, unified
     await doc.getByRole('link', { name: 'out' }).getAttribute('rel'),
     'noreferrer noopener nofollow ugc',
   );
-  await doc.getByText('could not load').waitFor();
+  await doc.getByText('[Image: logo could not load.]', { exact: true }).waitFor();
+  await t.test(
+    'P4.1 SVG and unsupported formats stay text placeholders when the neighbouring raster image is read',
+    async () => {
+      assert.equal(await doc.getByText('[Image: diagram.]', { exact: true }).count(), 1);
+      assert.equal(await doc.getByText('[Image: unsupported.]', { exact: true }).count(), 1);
+      assert.deepEqual(await view.evaluate(() => window.imageReads), ['assets/logo.png']);
+    },
+  );
   assert.equal(await doc.locator('img').count(), 0);
   assert.equal(await doc.getByRole('cell', { name: '2' }).count(), 1, 'a GFM table draws');
   await doc.locator('pre .kw').first().waitFor();

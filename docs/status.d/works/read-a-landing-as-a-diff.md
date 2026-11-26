@@ -10,5 +10,6 @@ YAML, TOML, HTML, CSS, SCSS, shell, Python, Go, Rust, Java, Kotlin, Swift, C, C+
 every other language Pierre's tables name. An unknown name, or a file over 1,000,000 characters, stays plain text.
 
 A Markdown file opens as a document with a Source toggle. Raw HTML is dropped, links open only to http(s), mailto or
-another file of the same State, fenced code is coloured, and images that name a file of the same State load from
-storage for a signed-in member as they scroll into view (a visitor sees the image's words).
+another file of the same State, and fenced code is coloured. Raster images from the same State load from storage
+for a signed-in member as they scroll into view. SVGs and other unsupported images stay as text placeholders,
+as do all images for signed-out visitors.

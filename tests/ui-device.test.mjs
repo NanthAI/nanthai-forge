@@ -117,6 +117,24 @@ const pages = { device: renderNew };
 const approveButton = html => /<button[^>]*>Approve<\/button>/.exec(html)?.[0] ?? '';
 const denyButton = html => /<button[^>]*>Deny<\/button>/.exec(html)?.[0] ?? '';
 
+test('P4.2 modern device approval cleans and caps the terminal name in the quote and the initial draft', () => {
+  const request = pending({ device: { code: 'fixture', known: false } });
+  const expected = `Forge evil ${'x'.repeat(28)}…`;
+  const draft = code.draftFor(request, undefined);
+  const known = renderNew({
+    kind: 'review',
+    request: { ...request, device: { ...request.device, known: true } },
+  });
+  const review = { kind: 'review', request };
+  const edit = { setName() {} };
+  const inputName = html => /<input[^>]*aria-label="Device name"[^>]*value="([^"]*)"/.exec(html)?.[1];
+  assert.deepEqual(
+    [draft.name, /<q[^>]*>([^<]*)<\/q>/.exec(known)?.[1], inputName(renderNew(review, edit))],
+    [expected, expected, expected],
+  );
+  assert.equal(inputName(renderNew(review, { ...edit, name: 'My chosen device' })), 'My chosen device');
+});
+
 test('B-02: the approval page shows the terminal-chosen name last, quoted, cleaned, capped and marked not verified', () => {
   const shown = code.shownDeviceName(hostileName);
   for (const [page, draw] of Object.entries(pages)) {

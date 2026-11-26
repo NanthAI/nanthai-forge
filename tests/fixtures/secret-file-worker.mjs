@@ -14,7 +14,8 @@ if (mode === 'killed') {
     if (chunk.toString().includes('ready')) process.send({ ready: true });
     done();
   } });
-  process.exitCode = await runWithSecrets({ root, command: [process.execPath, '-e', 'process.stdin.resume(); process.stdout.write("ready")'] },
+  // Leave enough output after the marker for the streaming mask's carry buffer.
+  process.exitCode = await runWithSecrets({ root, command: [process.execPath, '-e', 'process.stdin.resume(); process.stdout.write("ready".padEnd(128))'] },
     async () => ({ secrets: [{ name: 'FILE', kind: 'file', value: Buffer.from('synthetic-file-material') }] }),
     { source: {}, tempRoot, stdout: sink, stderr: sink, terminal: true });
 }

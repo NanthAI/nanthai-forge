@@ -39,6 +39,7 @@ import { boardWaitOption, boardWakeEnvelope, observePeerLane } from './hosted-bo
 import { approvalNext, observeApproval } from './hosted-agent-approval.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import { ForgeError, invariant } from './errors.js';
+import { memberDataNotice } from './member-data-notice.js';
 import { hostedActionError } from './hosted-action-error.js';
 import { AGENT_WAIT_SECONDS, landingWaitBudgetReply, operationWait } from './agent-operation-wait.js';
 import {
@@ -292,7 +293,7 @@ export function registerHostedAgentWorkflow(
   server.registerTool(
     'forge_review',
     {
-      description: 'History, blame, changes.',
+      description: memberDataNotice,
       inputSchema: {
         command: z.union([
           hostedSourceShowSchema,
@@ -330,8 +331,7 @@ export function registerHostedAgentWorkflow(
         () => toolCall('forge_review', { command }),
       ),
   );
-  prose.forge_review =
-    'history: op status/log/blame/show, commit?,path?,limit?,skip?,cursor?,start?,end?; exact commit history, line authors and old file bytes; with no imported Git history, log with path lists the landings that changed the file (continue with cursor). provenance: candidateId,file?,lines?,cursor?; one file/20 Lane versions, explicit partial coverage and pinned continuations; source and executor identities never guessed. show: exact Lane/main/state/candidateId file; force permits binary/large bytes. diff: pinned Lane base to saved head, paths/byteBudget/format/cursor; format:"unified" returns a patch -p1 unified diff; summary:true returns per path equal|absent|different against current main with no hunks. peers: laneId/path/detail saved overlap evidence; incomplete coverage never proves independence. queue: list entries, submissionId and beforeAttempt? for attempt history, batchId for a retained batch, or submissionId, attemptId and afterLaneId? for exact Candidate inputs. Unsaved bytes excluded.';
+  prose.forge_review = `${memberDataNotice} history: op status/log/blame/show, commit?,path?,limit?,skip?,cursor?,start?,end?; exact commit history, line authors and old file bytes; with no imported Git history, log with path lists the landings that changed the file (continue with cursor). provenance: candidateId,file?,lines?,cursor?; one file/20 Lane versions, explicit partial coverage and pinned continuations; source and executor identities never guessed. show: exact Lane/main/state/candidateId file; force permits binary/large bytes. diff: pinned Lane base to saved head, paths/byteBudget/format/cursor; format:"unified" returns a patch -p1 unified diff; summary:true returns per path equal|absent|different against current main with no hunks. peers: laneId/path/detail saved overlap evidence; incomplete coverage never proves independence. queue: list entries, submissionId and beforeAttempt? for attempt history, batchId for a retained batch, or submissionId, attemptId and afterLaneId? for exact Candidate inputs. Unsaved bytes excluded.`;
   server.registerTool(
     'forge_wait',
     {

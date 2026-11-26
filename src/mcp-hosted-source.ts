@@ -13,6 +13,7 @@ import { parseNativeState } from './state/format.js';
 import { reviewTextPage, SHOW_MAX_BYTES } from './source-review-format.js';
 import { safeRelative } from './safe-relative.js';
 import { ForgeError, invariant } from './errors.js';
+import { memberDataNotice } from './member-data-notice.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
 
 function sourceProtocol<T>(read: () => T): T {
@@ -208,6 +209,7 @@ export async function showHostedSource(transport: HostedAgentTransport, input: u
     'File is binary or invalid UTF-8; use force:true to read exact bytes.',
   );
   return {
+    notice: memberDataNotice,
     sourceContext: pins,
     result: {
       state: pins.head,
@@ -233,6 +235,7 @@ export async function readHostedSourceLines(transport: HostedAgentTransport, inp
   );
   const lines = bytes.toString('utf8').split('\n');
   return {
+    notice: memberDataNotice,
     sourceContext: pins,
     sourceId: pins.head,
     results: [

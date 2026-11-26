@@ -37,7 +37,7 @@ export function draftFor<S>(
   request: { name: string; device?: { settings?: S } },
   kept: { name: string; settings: S | undefined } | undefined,
 ) {
-  return recheckedDraft(kept, { name: request.name, settings: request.device?.settings });
+  return recheckedDraft(kept, { name: shownDeviceName(request.name), settings: request.device?.settings });
 }
 
 /** The passkey (or GitHub) re-check that enables Approve: the check first, then the server is asked again with the

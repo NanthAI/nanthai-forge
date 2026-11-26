@@ -229,6 +229,41 @@ test('T16 CLI detects an inherited agent marker before stripping it, even with a
   assert.equal(result.stderr, '[secret:TOKEN]');
 });
 
+for (const set of ['checks', 'development']) {
+  test(`P5.3 ${set} output on a human CLI terminal stays masked by default, and only Development accepts --show`, async t => {
+    const { root, tempRoot } = setup(t);
+    writeFileSync(join(root, '.env.example'), 'TOKEN');
+    const value = 'synthetic-credential';
+    const command = [
+      process.execPath,
+      '-e',
+      'process.stdout.write(process.env.TOKEN); process.stderr.write(process.env.TOKEN)',
+    ];
+    const run = (show, out, err) =>
+      runWithSecrets({ root, set, command, show }, supplied({ TOKEN: value }), {
+        source: {},
+        tempRoot,
+        stdout: out.stream,
+        stderr: err.stream,
+        terminal: true,
+        entryPoint: 'cli',
+      });
+    const out = sink(),
+      err = sink();
+    assert.equal(await run(undefined, out, err), 0);
+    assert.ok(out.text() === '[secret:TOKEN]' && err.text() === '[secret:TOKEN]', 'both streams are masked');
+    const shownOut = sink(),
+      shownErr = sink();
+    if (set === 'checks') {
+      await assert.rejects(run(true, shownOut, shownErr), { code: 'PERSON_REQUIRED' });
+      assert.equal(shownOut.text() + shownErr.text(), '');
+    } else {
+      assert.equal(await run(true, shownOut, shownErr), 0);
+      assert.ok(shownOut.text() === value && shownErr.text() === value, 'explicit --show opens both streams');
+    }
+  });
+}
+
 test('file delivery has private modes outside the tree, masks contents, cleans on exit and zeros provider buffers', async t => {
   const { root, tempRoot } = setup(t);
   writeFileSync(join(root, '.env.example'), 'FILE');

@@ -304,6 +304,7 @@ export async function diffHostedSource(transport: HostedAgentTransport, input: u
           }
         : null;
     return {
+      notice: memberDataNotice,
       sourceContext: { laneId: lane.laneId, base, head, scope: 'saved' },
       result: {
         summary: true,
@@ -353,6 +354,7 @@ export async function diffHostedSource(transport: HostedAgentTransport, input: u
           }
         : null;
     return {
+      notice: memberDataNotice,
       sourceContext: { laneId: lane.laneId, base, head, scope: 'saved' },
       result: {
         format: 'unified' as const,
@@ -390,6 +392,7 @@ export async function diffHostedSource(transport: HostedAgentTransport, input: u
       ? { base, head, offset: end, laneId: lane.laneId, ...(command.paths ? { paths: command.paths } : {}) }
       : null;
   return {
+    notice: memberDataNotice,
     sourceContext: { laneId: lane.laneId, base, head, scope: 'saved' },
     result: {
       base,
