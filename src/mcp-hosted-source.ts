@@ -62,11 +62,15 @@ export const hostedSourceLinesSchema = hostedSourceSelectionSchema
   .strict();
 
 /** Select only the requested Lane; never hydrate Work, history or a source graph. */
-export async function selectHostedSource(transport: HostedAgentTransport, input: unknown) {
+export async function selectHostedSource(
+  transport: HostedAgentTransport,
+  input: unknown,
+  checkout?: ReturnType<typeof readHostedLaneCheckout>,
+) {
   const command = hostedSourceSelectionSchema.parse(input);
   let laneId = command.laneId;
   if (!laneId) {
-    const marker = readHostedLaneCheckout(transport.root);
+    const marker = checkout === undefined ? readHostedLaneCheckout(transport.root) : checkout;
     invariant(
       !marker ||
         (marker.url === transport.address.url && marker.selection.projectId === transport.address.projectId),

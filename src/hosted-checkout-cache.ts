@@ -100,11 +100,19 @@ export class HostedCheckoutCache {
   /** `installVerifies`: the caller clones each object and checks its digest before
    * use (Lane install), so a direct machine hit needs only a safe-file check here,
    * not a second read and hash. Damage found at install goes through `repair`. */
-  async ensure(ids: string[], options: { installVerifies?: boolean } = {}) {
+  async ensure(
+    ids: string[],
+    options: {
+      installVerifies?: boolean;
+      /** Let the caller consume verified local bytes outside the object store. Return the ids still missing. */
+      reuseLocal?: (missing: string[]) => string[];
+    } = {},
+  ) {
     const unique = [...new Set(ids)];
     const deferred = options.installVerifies === true && this.objects === this.machine;
     let missing = await this.present(unique, deferred);
     if (missing.length && this.fallbackObjects) missing = await this.fromCache(missing);
+    if (missing.length && options.reuseLocal) missing = options.reuseLocal(missing);
     if (missing.length >= checkoutPackMinimum && this.transport.sourcePack && this.sourcePack === null)
       missing = await this.fromPack(missing);
     await this.fetchMissing(missing);

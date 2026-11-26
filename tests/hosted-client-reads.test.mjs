@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { agentFixture } from './hosted-agent-fixture.mjs';
 import { digest } from '../dist/hash.js';
@@ -12,6 +12,8 @@ import { hostedAgentHelpEntries } from '../dist/hosted-agent-help.js';
 import { validateHostedCliCommand } from '../dist/hosted-cli-validation.js';
 import { showHostedSource } from '../dist/mcp-hosted-source.js';
 import { hostedDoctor } from '../dist/hosted-doctor.js';
+import { checkoutHostedLane } from '../dist/hosted-lane-checkout.js';
+import { clientCacheRoot } from '../dist/root-paths.js';
 
 const minimal = {
   provenance: { candidateId: randomUUID() },
@@ -227,6 +229,49 @@ test('diff summary:true says equal/absent/different against main from manifests 
     f.transport().dispatch('diff', { laneId: f.lane.laneId, summary: true }),
     e => e.code === 'PROJECT_UNAVAILABLE',
   );
+});
+
+test('the first diff summary on a cached Lane downloads zero bytes with unchanged main (9f6ae114)', async t => {
+  const f = agentFixture(t, { base: { 'a.ts': 'before\n' }, lane: { 'a.ts': 'after\n' } });
+  const objects = join(clientCacheRoot(f.root), 'objects');
+  mkdirSync(objects, { recursive: true, mode: 0o700 });
+  // The base and file bytes are cached. Like save or one-trip sync, a prepared
+  // checkout puts the exact saved State in the marker without caching a second copy.
+  for (const id of [f.lane.base.head, f.laneFiles[0].blob])
+    writeFileSync(join(objects, id), f.objects.get(id), { mode: 0o600 });
+  const operationId = randomUUID();
+  const savedState = { id: f.lane.head, bytes: f.objects.get(f.lane.head) };
+  const opened = await checkoutHostedLane(
+    f.root,
+    { ...f.address, laneId: f.lane.laneId, operationId },
+    { ...f.exchange, select: async () => f.lane },
+    undefined,
+    { state: savedState },
+  );
+  assert.equal(opened.downloadedBytes, 0);
+  const transport = f.transport();
+  const { result: first } = await transport.dispatch('diff', { summary: true });
+  assert.equal(first.cost.downloadedBytes, 0);
+  assert.equal(first.cost.manifestBytes, f.objects.get(f.lane.base.head).length + savedState.bytes.length);
+  assert.deepEqual(
+    first.items.map(({ path, status, main }) => ({ path, status, main })),
+    [{ path: 'a.ts', status: 'modified', main: 'different' }],
+  );
+  assert.deepEqual(
+    f.calls.map(call => call.name),
+    ['projectHostedLanes:select', 'projectHostedChannels:current', 'projectHostedLanes:select'],
+  );
+
+  // An edited marker does not change the selected source or the summary output.
+  const markerPath = join(f.root, '.forge/hosted-lane.json');
+  const marker = JSON.parse(readFileSync(markerPath, 'utf8'));
+  marker.state.files[0].blob = digest('changed marker');
+  writeFileSync(markerPath, JSON.stringify(marker));
+  const { result: remote } = await transport.dispatch('diff', { summary: true });
+  assert.deepEqual(remote, {
+    ...first,
+    cost: { ...first.cost, downloadedBytes: savedState.bytes.length },
+  });
 });
 
 // c3e6ce8b: doctor refused every Forge clone and Lane with a Git error.

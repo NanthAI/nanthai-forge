@@ -87,6 +87,8 @@ MCP `forge_review` exposes hosted `show`, `diff`, `peers` and `queue`.
   never a score), with whole-set `groups` counts. No hunks, no blob reads: it reads the
   base, saved-head and current-main State manifests (`cost.manifestBytes`) and
   pages by the same `nextCursor` (up to 500 paths or `byteBudget` bytes a page).
+  It checks current hosted access and reuses a local checkout manifest when its
+  digest matches the selected State. Missing manifests are fetched by digest.
 - `lane-history {laneId?}` is one query from stored rows for an open, landed or
   abandoned Lane: `openedAt`, `startBase` (the main it started from),
   `lastSyncedBase` (the main its base is now), `synced`, `state`, `head`,

@@ -10,7 +10,8 @@ import { z } from 'zod';
 import { clientCacheRoot } from './root-paths.js';
 import { HostedCheckoutCache } from './hosted-checkout-cache.js';
 import { ConvexLaneTransport } from './hosted-lane-transport.js';
-import { parseNativeState } from './state/format.js';
+import { parseNativeState, type NativeFile } from './state/format.js';
+import { digest } from './state/hash.js';
 import { reviewPaths } from './source-review-format.js';
 import { safeRelative } from './safe-relative.js';
 import { invariant } from './errors.js';
@@ -236,7 +237,8 @@ export async function diffHostedSource(transport: HostedAgentTransport, input: u
     'BAD_ARGUMENT',
     'summary:true returns path standings without hunks; drop summary or format:"unified".',
   );
-  const lane = await selectHostedSource(transport, { laneId: command.laneId });
+  let checkout = command.laneId ? undefined : readHostedLaneCheckout(transport.root);
+  const lane = await selectHostedSource(transport, { laneId: command.laneId }, checkout);
   const cursor = command.cursor;
   invariant(
     !cursor ||
@@ -266,10 +268,44 @@ export async function diffHostedSource(transport: HostedAgentTransport, input: u
   }
   const objects = new ConvexLaneTransport(transport.exchange);
   const cache = new HostedCheckoutCache(clientCacheRoot(transport.root), objects);
-  await cache.ensure([base, head]);
-  const read = (id: string) => readFileSync(join(cache.objects, id));
+  const manifests = new Map<string, { files: NativeFile[]; bytes: number }>();
+  const reuseLocal = (missing: string[]) => {
+    if (checkout === undefined) {
+      try {
+        checkout = readHostedLaneCheckout(transport.root);
+      } catch {
+        // An explicit Lane is reviewable even when the local marker cannot be read.
+        checkout = null;
+      }
+    }
+    if (
+      checkout?.selection.laneId !== lane.laneId ||
+      checkout.selection.projectId !== lane.projectId ||
+      checkout.url !== transport.address.url ||
+      !missing.includes(checkout.selection.head)
+    )
+      return missing;
+    // Save and prepared checkout can leave the State only in the marker.
+    // Legacy encodings and locally edited markers fall back to exact object reads.
+    const bytes = Buffer.from(JSON.stringify(checkout.state));
+    const id = checkout.selection.head;
+    if (digest(bytes) !== id) return missing;
+    manifests.set(id, { files: checkout.state.files, bytes: bytes.length });
+    return missing.filter(candidate => candidate !== id);
+  };
+  const loadManifests = async (ids: string[]) => {
+    const missing = [...new Set(ids)].filter(id => !manifests.has(id));
+    await cache.ensure(missing, { reuseLocal });
+    for (const id of missing) {
+      if (manifests.has(id)) continue;
+      const bytes = readFileSync(join(cache.objects, id));
+      manifests.set(id, { files: parseNativeState(bytes).files, bytes: bytes.length });
+    }
+  };
+  await loadManifests([base, head]);
+  const manifestBytes = () => [...manifests.values()].reduce((sum, state) => sum + state.bytes, 0);
   const requested = command.paths ? new Set(command.paths) : null;
-  const changes = reviewPaths(parseNativeState(read(base)).files, parseNativeState(read(head)).files).filter(
+  const changes = reviewPaths(manifests.get(base)!.files, manifests.get(head)!.files).filter(
     item => item.status !== 'unchanged' && (!requested || requested.has(item.path)),
   );
   const offset = cursor?.offset ?? 0;
@@ -281,12 +317,12 @@ export async function diffHostedSource(transport: HostedAgentTransport, input: u
   if (command.summary) {
     // One more manifest (current main's State); every standing is decided from manifest entries.
     const main = await selectHostedMain(transport);
-    await cache.ensure([main.head]);
+    await loadManifests([main.head]);
     // Loaded only for a summary, so the review order and docs rule add nothing to CLI/MCP startup.
     const { summarizeAgainstMain } = await import('./hosted-diff-summary.js');
     const page = summarizeAgainstMain(
       changes,
-      parseNativeState(read(main.head)).files,
+      manifests.get(main.head)!.files,
       offset,
       command.byteBudget,
       documentationPath,
@@ -323,9 +359,7 @@ export async function diffHostedSource(transport: HostedAgentTransport, input: u
           outputBytes: page.outputBytes,
           downloadedBytes: cache.downloadedBytes,
           metadataPages: 0,
-          manifestBytes: [base, head, main.head]
-            .filter((id, index, ids) => ids.indexOf(id) === index)
-            .reduce((sum, id) => sum + read(id).length, 0),
+          manifestBytes: manifestBytes(),
         },
       },
     };
@@ -373,7 +407,7 @@ export async function diffHostedSource(transport: HostedAgentTransport, input: u
         cost: {
           ...page.cost,
           downloadedBytes: cache.downloadedBytes + page.cost.downloadedBytes,
-          manifestBytes: read(base).length + (head === base ? 0 : read(head).length),
+          manifestBytes: manifestBytes(),
         },
       },
     };
@@ -406,7 +440,7 @@ export async function diffHostedSource(transport: HostedAgentTransport, input: u
       cost: {
         ...cost,
         downloadedBytes: cache.downloadedBytes + cost.downloadedBytes,
-        manifestBytes: read(base).length + (head === base ? 0 : read(head).length),
+        manifestBytes: manifestBytes(),
       },
     },
   };
