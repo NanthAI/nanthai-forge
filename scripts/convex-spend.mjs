@@ -10,6 +10,7 @@ import { spendEvent, pendingAlerts, utcDay, spendRates } from './convex-spend-mo
 import { driftAlerts } from './convex-spend-drift.mjs';
 import { spendPlan, planAlerts } from './convex-spend-plan.mjs';
 import { SpendJournal, journalLock, privateConfig } from './convex-spend-journal.mjs';
+import { deploymentSwitchReceipts } from './deployment-switch.mjs';
 
 export async function notifySpend(hook, alert) {
   if (!hook) return;
@@ -56,6 +57,12 @@ export async function printSpend(journal, now = Date.now(), plan = null, deploym
       {
         ...(plan ? { billing: await journal.billing(plan, now, deployments) } : {}),
         landingDrift: await journal.drift(now, deployments),
+        deploymentSwitches: deploymentSwitchReceipts(
+          journal.directory,
+          Date.parse(days.at(-1).day),
+          now,
+          deployments,
+        ),
         rates: spendRates,
         units: { calls: 'calls', io: 'bytes', search: 'query-bytes', compute: 'GB-hours', egress: 'bytes' },
         today: days[0],

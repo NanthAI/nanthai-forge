@@ -85,6 +85,32 @@ class's captured month-to-date use against its allowance, daily pace, observed a
 projected overage, and a period-wide function list with both dollar columns. Empty days have
 no coverage and unknown completeness; their observed zero is not a zero bill.
 
+## Deployment switch receipts
+
+Operators can flip a Forge deployment flag and record it in the same private
+spend directory with one command. Use the exact named deployment in the
+meter configuration and keep the operation UUID for a retry:
+
+```sh
+node scripts/deployment-switch.mjs PRIVATE_SPEND_DIRECTORY DEV_DEPLOYMENT FORGE_JOURNAL_SEGMENTS on OPERATION_UUID
+```
+
+Use `off` to disable a switch. The command uses the existing Convex CLI login.
+The switch update also stores its operation UUID in the deployment's
+`FORGE_SWITCH_STATE_<switch>` marker in the same configuration update. Convex
+records the operator and timestamp in deployment history. The local receipt
+records the requested on/off state, deployment, operator account, and
+timestamps. `--print` shows these receipts beside the seven-day cost trend.
+Direct Convex edits remain visible in Convex deployment history.
+
+`applied` records an acknowledged change, and `unchanged` records a request
+whose state already matched. An interrupted write leaves a `pending` receipt.
+Retrying the same command reads the exact operation marker. A match becomes
+`observed` and its timestamps bound the attempt and later observation.
+Otherwise the receipt stays pending. Each change performs two configuration
+reads and one configuration update. Landings and idle deployments incur zero
+additional Convex calls and no database I/O.
+
 ## Plan, allowances and billing alerts
 
 Private config is the billing source of truth; a plan name never fetches or selects
