@@ -17,6 +17,7 @@ import {
   type LoadedLandingNote,
 } from './projectIntentLandingNoteArchive';
 import { historyViewVersion } from './projectLandingCapsuleContext';
+import { itemNoteKey } from './projectItemNotePage';
 import { digest } from '../src/state/hash';
 
 type RecordRow = { id: string; position: number; value: string };
@@ -35,19 +36,18 @@ type Input = {
   newestFirst?: boolean;
   paginationOpts: PaginationOptions;
 };
-type Item = Pick<PlanningItem, 'id' | 'kind' | 'intentIds'>;
+type Item = Pick<PlanningItem, 'id' | 'kind' | 'intentIds' | 'purged'>;
 const linkedCursorPrefix = 'forge-linked-landing-notes:';
-// At most eight Intent chains, each with up to 17 steps and 50 notes per step.
+// At most eight Item or explicit Intent ranges per discussion page.
 const linksPerPage = 8;
 const linkedCursor = z.object({
+  version: z.literal(2),
   itemId: z.string(),
   newestFirst: z.boolean(),
   offset: z.number().int().nonnegative().multipleOf(linksPerPage),
   recordsCursor: z.string(),
   recordsDone: z.boolean(),
-  noteBefore: z
-    .object({ at: z.string().min(1).max(40), intentId: z.string(), skip: z.number().int().min(1).max(512) })
-    .optional(),
+  noteBefore: itemNoteKey.optional(),
 });
 type LinkedCursor = z.infer<typeof linkedCursor>;
 
@@ -94,6 +94,7 @@ export async function withLandingNotes(
     return page;
   const itemId = input.parentId;
   const item = (await readItem(itemId)) as Item | null;
+  if (item?.purged) return page;
   const links = item?.kind === 'issue' && Array.isArray(item.intentIds) ? plannedLinkIds(item) : [itemId];
   const offset = continuation?.offset ?? 0;
   let pageLinks = links.slice(offset, offset + linksPerPage);
@@ -134,6 +135,7 @@ export async function withLandingNotes(
     continueCursor: more
       ? linkedCursorPrefix +
         JSON.stringify({
+          version: 2,
           itemId,
           newestFirst: Boolean(input.newestFirst),
           offset: next,

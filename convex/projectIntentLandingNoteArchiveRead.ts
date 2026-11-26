@@ -5,7 +5,6 @@ import { getLandingCapsule } from './projectLandingCapsuleObject';
 import {
   landingNoteOrder,
   type ArchivedNotePin,
-  type HotLandingNote,
   type LoadedLandingNote,
 } from './projectIntentLandingNoteArchive';
 import { invariant } from '../src/errors';
@@ -43,7 +42,7 @@ export async function loadArchivedLandingNotes(projectId: Id<'hostedProjects'>, 
         const capsule = await getLandingCapsule(projectId, submissionId, pointer);
         const notes = new Map(
           (capsule?.tables.projectIntentLandingNotes ?? []).map(text => {
-            const row = JSON.parse(text) as HotLandingNote;
+            const row = JSON.parse(text) as LoadedLandingNote['row'];
             return [landingNoteOrder(row), row];
           }),
         );

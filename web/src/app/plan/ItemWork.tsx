@@ -590,14 +590,14 @@ export function ItemWork({
       </Part>
       <Part
         name="Landings"
-        count={landings.length}
+        count={work.moreLandings && landings.length === 0 ? undefined : landings.length}
         atLeast={Boolean(work.moreLandings)}
         fold={`${fold}:landings`}
       >
         <TopRows
           rows={landings}
           reveal={revealed.landings}
-          empty="No landings shown."
+          empty={work.moreLandings ? 'This page has no landings.' : 'No landings shown.'}
           error={
             pageFailed === 'landings' ? 'More landing details could not be loaded. Try again.' : undefined
           }

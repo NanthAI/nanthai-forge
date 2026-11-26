@@ -76,12 +76,13 @@ async function publishPlanWork(s, itemId, status, source = 'plan') {
     const old = [...s.tables.projectHostedRecordHeads.values()].find(
       row => row.kind === 'intent' && row.key === itemId,
     );
-    if (old) await s.ctx.db.patch(old._id, { status, version: old.version + 1 });
+    if (old) await s.ctx.db.patch(old._id, { status, version: old.version + 1, planningItemId: itemId });
     else
       await s.ctx.db.insert('projectHostedRecordHeads', {
         projectId: s.projectId,
         key: itemId,
         kind: 'intent',
+        planningItemId: itemId,
         status,
         version: 1,
         parent: '',
@@ -96,6 +97,7 @@ async function publishPlanWork(s, itemId, status, source = 'plan') {
         projectId: s.projectId,
         key: randomUUID(),
         kind: 'lane',
+        planningItemId: itemId,
         status,
         version: 1,
         parent: itemId,

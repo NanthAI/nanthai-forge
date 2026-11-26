@@ -693,7 +693,7 @@ function readsFixture() {
       value: JSON.stringify({ id, kind: 'issue', title, status: 'open' }),
     });
   /** An Intent record with its goal inline (a follow-up of a reopened Item, or unplanned work). */
-  const intent = (key, outcome) => {
+  const intent = (key, outcome, planningItemId) => {
     const inline = JSON.stringify({ id: key, outcome });
     const recordId = s.insert('projectHostedRecords', {
       projectId,
@@ -715,6 +715,7 @@ function readsFixture() {
       parent: 'owner',
       status: 'active',
       recordId,
+      ...(planningItemId ? { planningItemId } : {}),
     });
   };
   const list = (actor, view, extra = {}) =>
@@ -820,6 +821,8 @@ test("History filters by person, by agent run and by Item, including the Item's 
   const itemId = randomUUID();
   const followUp = successorIntentId(itemId);
   f.plan(itemId, 'History replaces To read');
+  f.intent(itemId, 'History replaces To read', itemId);
+  f.intent(followUp, 'History follow-up', itemId);
   const agent = (run, model) => ({
     actor: { id: 'mara', kind: 'agent' },
     agentRun: run,
@@ -1217,10 +1220,10 @@ test("a landing from a reopened Item's follow-up Intent is titled with the goal 
   const itemId = randomUUID();
   const followUp = successorIntentId(itemId);
   f.plan(itemId, 'History replaces To read');
-  f.intent(followUp, 'History replaces To read');
+  f.intent(followUp, 'History replaces To read', itemId);
   f.accept(1, 'Follow-up: phone rows', { intentId: followUp });
   const [row] = (await f.list('owner', 'recent')).rows;
-  assert.equal(row.item, null, 'a follow-up Intent has no stored link back to its Item');
+  assert.equal(row.item, null, 'a follow-up displays its Intent goal alongside indexed Item filtering');
   assert.equal(row.goal, 'History replaces To read');
   assert.match(
     renderHistory(historyPage([historyRow(1, { goal: row.goal, title: row.title })])),

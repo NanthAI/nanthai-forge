@@ -117,6 +117,63 @@ test('FYI lists landings newest first and messages that ask nothing; a question 
   );
 });
 
+test('846c635b: History filters by bound Intent once per distinct Intent and pages on receipt sequence', async () => {
+  const f = fixture();
+  const item = randomUUID(),
+    target = randomUUID(),
+    unrelated = randomUUID();
+  for (const [key, planningItemId] of [
+    [target, item],
+    [unrelated, randomUUID()],
+  ])
+    f.s.insert('projectHostedRecordHeads', {
+      projectId: f.projectId,
+      kind: 'intent',
+      key,
+      planningItemId,
+      status: 'completed',
+      parent: '',
+      version: 1,
+      recordId: 'synthetic-intent',
+    });
+  const receiptIds = new Map();
+  for (let sequence = 1; sequence <= 65; sequence++) {
+    const receiptId = f.accept(sequence, 'Recorded landing');
+    receiptIds.set(sequence, receiptId);
+    const receipt = [...f.s.tables.projectHostedAcceptances.values()].find(
+      row => row.receiptId === receiptId,
+    );
+    f.s.insert('projectHostedFinishes', {
+      projectId: f.projectId,
+      submissionId: receipt.submissionId,
+      composeOperationId: null,
+      parentSubmissionId: null,
+      waiting: false,
+      wake: null,
+      value: JSON.stringify({ source: { intentId: sequence % 2 ? target : unrelated } }),
+    });
+  }
+  const page = async before =>
+    JSON.parse(
+      await f.s.call(
+        'itemHistory',
+        toRead.list,
+        { projectId: f.projectId, item, view: 'recent', before },
+        'owner',
+      ),
+    );
+  const first = await page();
+  assert.equal(first.rows.length, 30);
+  assert.equal(first.next, 7);
+  assert.equal(f.s.counts.at(-1).readRangesByTable.projectHostedRecordHeads, 2 + 2 * 30);
+  const next = await page(first.next);
+  assert.deepEqual(
+    [...first.rows, ...next.rows].map(row => row.receiptId),
+    Array.from({ length: 33 }, (_, i) => receiptIds.get(65 - 2 * i)),
+  );
+  assert.equal(next.next, null);
+});
+
 test('personal setup survives hide and restore on the existing FYI row with one write and no added lookup', async () => {
   const f = fixture();
   const write = (change, expectedRevision, operationId = randomUUID(), actor = 'owner') =>

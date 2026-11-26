@@ -4,21 +4,23 @@
 // the agent stopped. The landing writes one small row per Item-started Intent using the Item binding
 // already held on the Intent head. The Item's comment read returns the rows as `system` comments.
 import type { MutationCtx, QueryCtx } from './_generated/server';
-import type { Id } from './_generated/dataModel';
+import type { Doc, Id } from './_generated/dataModel';
 import { v } from 'convex/values';
 import { internalQuery } from './server';
 import { ownedProject } from './projectAuthority';
+import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
+import { storeItem } from './projectWorkStoreReads';
 import { recordHead } from './projectHostedRecords';
-import { itemIntents } from './projectItemIntentPages';
+import { itemLandingNotesPurging } from './projectItemPurgeFence';
 import {
   archiveNoteReference,
   landingNoteOrder,
-  landingNoteWindow,
   pinArchivedNotes,
   type ArchivedNote,
   type LoadedLandingNote,
 } from './projectIntentLandingNoteArchive';
-import { newerNote } from './projectLandingNotePosition';
+import { itemNotePage, newestItemNote, noteKey, type itemNoteKey } from './projectItemNotePage';
+import type { z } from 'zod';
 import { invariant } from '../src/errors';
 import {
   LANDING_NOTE_LANES,
@@ -27,6 +29,19 @@ import {
   landingNoteExport,
   type LandingNote,
 } from '../src/intent-landing-note';
+
+/** The Item tombstone survives the bounded receipt window, including for new landings after a purge. */
+export async function itemLandingNoteTombstone(
+  ctx: QueryCtx,
+  project: Doc<'hostedProjects'>,
+  itemId: string,
+) {
+  if (project.workStore === 'records') return Boolean((await storeItem(ctx, project._id, itemId))?.purged);
+  const generation = await selectedGeneration(ctx, project);
+  if (!generation) return false;
+  const item = await record(ctx, recordPartition(generation), 'planningItems', itemId);
+  return Boolean(item && JSON.parse(item.value).purged);
+}
 
 /** Who published a landing and whether a person accepted it, from the publishing call path (no read):
  * the queue's driver and the internal publish are `queue`; the explicit accept is the accepting agent or
@@ -83,23 +98,31 @@ export async function postIntentLandingNote(
   return true;
 }
 
-/** A revert was accepted: its original landing note names it, so the landing history and Item Work show the
- * link from the note alone, on any page (Item c0af6cfa). One indexed read, only when a revert lands. */
+/** Link the original note to its revert and return the Item that can receive the revert note.
+ * A recovered landing can supply the Item when the legacy Intent has no binding. */
 export async function markNoteReverted(
   ctx: MutationCtx,
-  projectId: Id<'hostedProjects'>,
+  project: Doc<'hostedProjects'>,
   intentId: string,
+  boundItem: string | undefined,
   revertOf: string,
   revertedBy: string,
 ) {
   const original = await ctx.db
     .query('projectIntentLandingNotes')
     .withIndex('by_project_and_receipt_and_intent_and_kind', q =>
-      q.eq('projectId', projectId).eq('receiptId', revertOf).eq('intentId', intentId).eq('kind', 'landed'),
+      q.eq('projectId', project._id).eq('receiptId', revertOf).eq('intentId', intentId).eq('kind', 'landed'),
     )
     .unique();
+  const itemId = boundItem ?? original?.itemId;
+  if (
+    !itemId ||
+    itemLandingNotesPurging(project, itemId) ||
+    (await itemLandingNoteTombstone(ctx, project, itemId))
+  )
+    return undefined;
   if (original && !original.revertedBy) await ctx.db.patch(original._id, { revertedBy });
-  return original?.itemId;
+  return itemId;
 }
 
 /** A note sits at its landing time, the key it was selected and paged by (never its creation time: a
@@ -108,43 +131,26 @@ function commentAt<T extends { at: string }>(note: { _creationTime: number }, va
   return { position: Date.parse(value.at) || note._creationTime, value };
 }
 
-/** System landing comments from the Item's own Intent chain and its linked chains, newest first. */
-export type DiscussionNoteCursor = { at: string; intentId: string; skip: number };
+/** System landing comments from the Item and its explicit links. Each link contributes one range. */
 export async function intentLandingComments(
   ctx: QueryCtx,
   projectId: Id<'hostedProjects'>,
   itemId: string,
   limit = LANDING_NOTES_PER_ITEM,
   links: readonly string[] = [itemId],
-  before?: DiscussionNoteCursor,
+  before?: z.infer<typeof itemNoteKey>,
 ) {
-  const intents = new Set<string>();
-  for (const link of links) {
-    if (intents.has(link)) continue;
-    // A link names an Item or one Intent: the exact Intent is read, then every Intent bound to the id.
-    if (await recordHead(ctx, projectId, 'intent', link)) intents.add(link);
-    for (const intentId of await itemIntents(ctx, projectId, link)) intents.add(intentId);
-  }
-  const notes: Awaited<ReturnType<typeof landingNoteWindow>> = [];
-  let includeThrough = before === undefined || !intents.has(before.intentId);
-  for (const intentId of intents) {
-    const sameIntent = before?.intentId === intentId;
-    const alreadyShown = sameIntent ? (before?.skip ?? 0) : 0;
-    includeThrough ||= sameIntent;
-    const window = await landingNoteWindow(
-      ctx,
-      projectId,
-      intentId,
-      limit + 1 + alreadyShown,
-      before?.at,
-      includeThrough,
-    );
-    let offset = 0;
-    while (offset < alreadyShown && window[offset]?.at === before?.at) offset++;
-    notes.push(...window.slice(offset));
-    notes.sort(newerNote);
-    if (notes.length > limit + 1) notes.length = limit + 1;
-  }
+  const pages = await Promise.all(
+    links.map(async id => {
+      const exact = id === itemId ? null : await recordHead(ctx, projectId, 'intent', id);
+      // An explicit Intent link outside the Item keeps that Intent's own notes.
+      const scope = exact && exact.planningItemId !== id ? { intentId: id } : { itemId: id };
+      return itemNotePage(ctx, projectId, scope, before, limit);
+    }),
+  );
+  const notes = [...new Map(pages.flatMap(page => page.page).map(note => [note._id, note])).values()].sort(
+    newestItemNote,
+  );
   const selected = notes.slice(0, limit);
   const loaded = (ctx as QueryCtx & { landingNotesLoaded?: LoadedLandingNote[] }).landingNotesLoaded;
   const byKey = new Map(loaded?.map(entry => [entry.key, entry]));
@@ -174,13 +180,9 @@ export async function intentLandingComments(
     }
     return [commentAt(note, landingNoteComment(itemId, note))];
   });
-  const last = notes.length > limit ? selected.at(-1) : undefined;
-  if (!last) return { comments, pending };
-  const { at } = last;
-  const { intentId } = last;
-  const previous = before?.at === at && before.intentId === intentId ? before.skip : 0;
-  const skip = previous + selected.filter(note => note.at === at && note.intentId === intentId).length;
-  return { comments, pending, before: { at, intentId, skip } };
+  const last = selected.at(-1);
+  const more = notes.length > limit || pages.some(page => page.hasMore);
+  return { comments, pending, ...(last && more ? { before: noteKey(last) } : {}) };
 }
 
 /** The owner-only planning export scans the existing project index in pages. */

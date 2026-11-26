@@ -93,7 +93,7 @@ discussion and Lane rows use the same identity mark as the rest of Forge.
 
 Work opens with one call to the same bounded reader as the agent CLI. Each request for
 more work reads one cursor page. The web details are optional and Work makes no idle
-calls. Lanes, Landings, Related and History start open with up to three visible rows each. The first Work read loads details for at most three Lanes; expanding Lanes reads the full first Work page only when needed. History starts with a three-event read; **Show more history** reads the full first page of up to 25 events, and **Show older changes** follows its cursor. Expanding Landings and Related reveals already loaded rows. Folds remember the reader’s choice and reopening them reuses loaded pages. Landings pages retained receipt notes by recorded time, then older Lane stamps. Check or file evidence unavailable in the retained records stays unknown.
+calls. Lanes, Landings, Related and History start open with up to three visible rows each. The first Work read loads details for at most three Lanes; expanding Lanes reads the full first Work page only when needed. History starts with a three-event read; **Show more history** reads the full first page of up to 25 events, and **Show older changes** follows its cursor. Expanding Landings and Related reveals already loaded rows. Folds remember the reader’s choice and reopening them reuses loaded pages. Landings page retained receipt notes by recorded time. Each page scans up to twice its size for distinct receipts. If a window only contains reverts, **Show more work** continues to older notes. Check or file evidence unavailable in the retained records stays unknown.
 Related resolves both directions from the current Plan records, including Done and
 Dropped Items. Reverse links use bounded pages of planning rows, so a later page may
 contain a link from an older Item.
@@ -405,6 +405,9 @@ artifact binding removed, including unfinished reservations. Each new artifact t
 starts its tracked R2 delete ([removed artifact bytes](r2-storage-plan.md#removed-artifact-bytes)): retried until
 it succeeds, and not done before any upload signed for the binding has run out, while a late commit deletes its own
 bytes. Completion checks the bindings; R2 deletion runs through those cleanup actions.
+Item purge removes the hot landing notes and capsule references on the Item-time index in bounded
+pages. The sequence History retains their acceptance receipts. Landing notes inside shared capsules
+carry receipt facts and remain in the verified capsule bytes.
 A purged Intent or lifecycle version, read by version, answers `PLANNING_ITEM_PURGED` naming the Item. A note or
 status change on the Item's Intent is still accepted after the first step (refusing it would cost every note write a
 read); the last step refuses to finish while such a note exists, so the purge never reports done over it. A purged decision
@@ -557,6 +560,12 @@ as a new version (`reason: "Restored version N"`), with Undo. A restore at a sta
 text: Keep both saves it as the next version over theirs (theirs stays in Versions), Take theirs drops it.
 
 ### Audit trail
+
+Item Work, Discussion and the audit trail show landing notes newest first across all of an Item’s Intents.
+Discussion reads up to eight Item or explicitly linked Intent ranges per page. A landing-time tie uses
+the note’s creation time and row ID for a stable continuation. If a page has an older cursor, restart
+the read and continue with the returned cursor. The History Item filter follows receipt sequence and
+checks each distinct Intent’s stored Item binding.
 
 Every planning version, comment, Lane and landing stays in the existing hosted journal (no extra table or index).
 Planning puts, ticks, start moves and comments from device credentials record the writing agent session slug (`agent`)

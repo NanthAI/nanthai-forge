@@ -5,7 +5,7 @@ import { invariant } from '../src/errors';
 import { internal } from './_generated/api';
 import type { Id } from './_generated/dataModel';
 import type { ActionCtx } from './_generated/server';
-import { purgeSteps, type ItemPurge } from './projectPlanningPurgeRedact';
+import { landingNotesCursor, purgeSteps, type ItemPurge } from './projectPlanningPurgeRedact';
 
 export const purgeWalk = v.object({
   phase: v.union(v.literal('redact'), v.literal('sweep'), v.literal('check')),
@@ -16,6 +16,7 @@ export const purgeWalk = v.object({
   generationId: v.optional(v.string()),
   partitions: v.optional(v.string()),
   discussionChecked: v.optional(v.literal(true)),
+  landingNotesChecked: v.optional(v.literal(true)),
 });
 type Walk = typeof purgeWalk.type;
 
@@ -38,9 +39,10 @@ export async function walkPurge(
 ): Promise<{ done: true } | { done: false; walk: Walk }> {
   const ref = internal.projectPlanningPurge;
   let walk = saved ?? start(0, purge.segmentSweep?.after ? 'sweep' : 'redact');
-  // A checkpoint written before attachment cleanup may already have passed the heads check.
-  if (walk.phase === 'check' && walk.step === purgeSteps.length && !walk.discussionChecked)
-    walk = { ...walk, step: purgeSteps.length - 1 };
+  // Older checkpoints may have completed the heads check before one of its stores was added.
+  const discussionStep = purgeSteps.indexOf('storeHeads');
+  if (walk.phase === 'check' && walk.step > discussionStep && !walk.landingNotesChecked)
+    walk = { ...walk, step: discussionStep, after: walk.discussionChecked ? landingNotesCursor : null };
   while (walk.round < 3) {
     if (Date.now() >= deadline) return { done: false, walk };
     if (walk.phase === 'sweep') {
@@ -76,7 +78,10 @@ export async function walkPurge(
       walk.generationId = page.generationId;
       walk.partitions = page.partitions;
       advance(walk, page.after);
-      if (walk.step === purgeSteps.length) walk.discussionChecked = true;
+      if (step === 'storeHeads' && walk.step > discussionStep) {
+        walk.discussionChecked = true;
+        walk.landingNotesChecked = true;
+      }
       continue;
     }
     if (walk.dirty === 0) {

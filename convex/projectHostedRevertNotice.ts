@@ -109,10 +109,9 @@ export async function noticeRevert(ctx: MutationCtx, input: Revert) {
   });
   // Issue 3a733ee8: the reverted Intent's Item gets a system note matching its landing note, and the landing
   // note names the revert (Item c0af6cfa).
-  const originalItem = itemNote
-    ? await markNoteReverted(ctx, input.projectId, itemNote.intentId, original.id, revert.id)
+  const itemId = itemNote
+    ? await markNoteReverted(ctx, project, itemNote.intentId, itemNote.itemId, original.id, revert.id)
     : undefined;
-  const itemId = itemNote?.itemId ?? originalItem;
   if (itemNote && itemId) {
     await postIntentLandingNote(ctx, input.projectId, {
       intentId: itemNote.intentId,
@@ -155,9 +154,9 @@ async function markIntent(
   const row = await readHostedRecord(ctx, { ...key, kind: 'intent', key: intentId });
   if (!row) return { needsFix: false, itemNote: null };
   // A legacy head can use the original note's recovered Item binding from the revert-link lookup.
+  const intent = hostedRecordSchema.options[0].parse(JSON.parse(row.value));
   const itemNote =
     row.planningItemId === independentIntentItem ? null : { intentId, itemId: row.planningItemId };
-  const intent = hostedRecordSchema.options[0].parse(JSON.parse(row.value));
   // Main-audit recovery already wrote its richer notice for this receipt; an abandoned Intent stays closed.
   if (intent.status === 'abandoned' || intent.needsFix?.receiptId === original.id)
     return { needsFix: false, itemNote };

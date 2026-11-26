@@ -744,6 +744,82 @@ async function oldSuccessor(s, itemId) {
   return successor;
 }
 
+test('a pre-Deploy-B check resumes after Discussion and catches retained Item landing notes', async t => {
+  const { s, itemId } = await deletedItem(t, { records: true });
+  const operationId = randomUUID();
+  let checked;
+  const stopped = executor(s, Infinity, (module, name, args) => {
+    if (module === 'projectPlanningPurge' && name === 'finish') {
+      checked = args;
+      throw new Error('old check stopped before finish');
+    }
+  });
+  await assert.rejects(stopped.run(itemId, operationId), /old check stopped before finish/);
+  await s.ctx.db.insert('projectIntentLandingNotes', {
+    projectId: s.projectId,
+    itemId,
+    intentId: randomUUID(),
+    receiptId: randomUUID(),
+    kind: 'landed',
+    at: '2026-01-01T00:00:00.000Z',
+    laneIds: [],
+    capsule: randomUUID(),
+  });
+  const result = await modules.projectPlanningPurge.run._handler(executor(s).ctx, {
+    projectId: s.projectId,
+    itemId,
+    operationId,
+    walk: {
+      phase: 'check',
+      round: 0,
+      step: purgeSteps.length,
+      after: null,
+      dirty: 0,
+      discussionChecked: true,
+      generationId: checked.generationId,
+      partitions: checked.partitions,
+    },
+  });
+  assert.ok(result.purgedAt);
+  assert.equal(s.tables.projectIntentLandingNotes.size, 0);
+});
+
+test('846c635b: Item purge resumes a tied-time page of hot and archived note references by Item binding', async t => {
+  const { s, itemId } = await deletedItem(t, { records: true });
+  const unrelated = randomUUID();
+  const keep = randomUUID();
+  const base = {
+    projectId: s.projectId,
+    intentId: unrelated,
+    kind: 'landed',
+    at: '2026-01-01T12:00:00Z',
+    laneIds: [],
+  };
+  const keepId = await s.ctx.db.insert('projectIntentLandingNotes', {
+    ...base,
+    itemId: unrelated,
+    receiptId: keep,
+    capsule: randomUUID(),
+  });
+  for (let i = 0; i < 34; i++)
+    await s.ctx.db.insert('projectIntentLandingNotes', {
+      ...base,
+      itemId,
+      receiptId: randomUUID(),
+      ...(i % 2 ? { capsule: randomUUID() } : { actor: 'owner', commit: 'c'.repeat(64), sequence: i + 1 }),
+    });
+  const operationId = randomUUID();
+  const interrupted = executor(s, Infinity, (module, name, args) => {
+    if (module === 'projectPlanningPurge' && name === 'redact' && args.after?.startsWith('landing-notes:'))
+      throw new Error('stopped after the first landing-note page');
+  });
+  await assert.rejects(interrupted.run(itemId, operationId), /stopped after the first landing-note page/);
+  assert.equal(s.tables.projectIntentLandingNotes.size, 3);
+  const done = await executor(s).run(itemId, operationId);
+  assert.ok(done.purgedAt);
+  assert.deepEqual([...s.tables.projectIntentLandingNotes.keys()], [keepId]);
+});
+
 test('incident 846c635b: purge leaves no words in 25 Intent histories (including a repaired markerless successor), overlaps, or handoffs', async t => {
   const { s, itemId } = await deletedItem(t, { records: true });
   const successor = await pinAndContinue(s, itemId);

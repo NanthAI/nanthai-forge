@@ -46,6 +46,7 @@ import {
 } from './projectPlanningPurgeArchiveSelection';
 import { itemRetentionOperation } from './projectItemRetentionStore';
 import { purgeWalk, walkPurge } from './projectPlanningPurgeWalk';
+import { itemNotePage } from './projectItemNotePage';
 import { noStagedMigration } from './projectWorkDetailMigration';
 
 const LATE_ROW_BLOCK =
@@ -333,6 +334,18 @@ export const finish = internalMutation({
         if (tail.done) break;
         after = tail.after;
       }
+    const { page: landingNotes } = await itemNotePage(
+      ctx,
+      input.projectId,
+      { itemId: purge.itemId },
+      undefined,
+      1,
+    );
+    invariant(
+      !landingNotes.length,
+      'WORK_STALE',
+      'The Item’s landing notes changed. Run the same purge to resume.',
+    );
     const purgedAt = Date.now();
     await ctx.db.patch(input.projectId, {
       planningPurgeRevision: (project.planningPurgeRevision ?? 0) + 1,

@@ -139,9 +139,9 @@ test('verified roll-up uses the open-Lane tally across earlier Intents and lates
   const mark = await addPlanLane(s.ctx, s.projectId, { id: 'a', kind: 'issue', status: 'open', position: 0 });
   await s.put('b', { intentIds: ['a'] });
   await s.put('c', { intentIds: [earlier] });
-  const legacy = await s.read();
-  assert.equal(legacy.rows[0].work, 'active');
-  const legacyCost = s.counts.at(-1);
+  const beforeVerification = await s.read();
+  assert.equal(beforeVerification.rows[0].work, 'active');
+  const beforeCost = s.counts.at(-1);
 
   await s.ctx.db.patch(s.projectId, {
     planLaneMarkCoverage: { generationId: s.generationId, cursor: null },
@@ -157,10 +157,10 @@ test('verified roll-up uses the open-Lane tally across earlier Intents and lates
     ],
   );
   assert.equal(indexed.intentKeys, 4);
-  assert(indexedCost.documents < legacyCost.documents);
-  assert(indexedCost.readBytes < legacyCost.readBytes);
+  assert.equal(indexedCost.documents, beforeCost.documents);
+  assert(indexedCost.documents < 32, JSON.stringify(indexedCost));
   t.diagnostic(
-    `legacy ${legacyCost.documents} docs/${legacyCost.readBytes} bytes; verified ${indexedCost.documents} docs/${indexedCost.readBytes} bytes`,
+    `before verification ${beforeCost.documents} docs/${beforeCost.readBytes} bytes; verified ${indexedCost.documents} docs/${indexedCost.readBytes} bytes`,
   );
 
   await removePlanLanes(s.ctx, mark, [undefined]);
@@ -232,9 +232,9 @@ test('dry-run pages are read only, fence the Work head, and omit bodies and pin 
   });
   await s.put('b', { kind: 'initiative', body: '## Done when\n- [ ] initiative gate' });
   await s.put('c', { payload: true, body: '' });
-  await s.intent('a', 'completed');
+  await s.intent('a', 'completed', 'a');
   const successorId = successorIntentId('a');
-  const successor = await s.intent(successorId, 'active');
+  const successor = await s.intent(successorId, 'active', 'a');
   await s.ctx.db.insert('projectHostedRecordHeads', {
     projectId: s.projectId,
     kind: 'lane',

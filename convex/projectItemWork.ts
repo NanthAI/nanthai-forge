@@ -14,7 +14,6 @@ import {
   visibleItemWork,
 } from './projectItemWorkDetails';
 import { readHostedRecord } from './projectHostedRecords';
-import { itemIntents } from './projectItemIntentPages';
 import { itemLanePage, itemLanePosition } from './projectItemLanePage';
 import { latestItemIntentHead } from './projectItemIntentHeads';
 import {
@@ -126,8 +125,6 @@ export const read = query({
         ? Math.min(Math.max(Math.trunc(limit ?? 10), 1), 10)
         : Math.min(Math.max(Math.trunc(limit ?? WORK_PAGE), 1), WORK_PAGE_MAX);
       const position = work.lane;
-      const historyRequested = readLandings && Boolean(visible && work.history !== null);
-      const intents = historyRequested ? await itemIntents(ctx, projectId, itemId) : [];
       const page =
         readLanes && position !== null
           ? await itemLanePage(ctx, projectId, itemId, position === 'first' ? null : position, shown)
@@ -227,7 +224,7 @@ export const read = query({
             lanes.length ? itemWorkLaneDetails(ctx, identity, lanes) : undefined,
             !readLandings || !visible || work.history === null
               ? undefined
-              : itemLandingHistory(ctx, projectId, intents, work.history ?? {}),
+              : itemLandingHistory(ctx, projectId, itemId, work.history),
             !readRelated || !visible || work.related === null
               ? undefined
               : itemWorkRelated(ctx, visible, work.related ?? null),
@@ -293,7 +290,6 @@ export const read = query({
       return canonicalPayload({
         role: true,
         intent: state,
-        ...(historyRequested ? { intents: intents.length } : {}),
         lanes: rows,
         ...(landings
           ? {

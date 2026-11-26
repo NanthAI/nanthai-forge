@@ -4,7 +4,6 @@ import { closingChecklist } from '../src/planning-search';
 import type { PlanningItem } from '../src/work-planning-types';
 import type { RollupWork } from '../src/planning-rollup';
 import { digest } from '../src/state/hash';
-import { planningIntentHeads } from './projectPlanningIntentState';
 import { openIntentLane } from './projectHostedOpenLaneEvidence';
 import { recordHead } from './projectHostedRecords';
 import { latestItemIntentHead } from './projectItemIntentHeads';
@@ -19,7 +18,7 @@ export function rollupChecklist(body: string) {
   return { checked, unchecked: open.length };
 }
 
-type Chain = Awaited<ReturnType<typeof planningIntentHeads>>;
+type Intent = Doc<'projectHostedRecordHeads'> | null;
 type Lane = Awaited<ReturnType<typeof openIntentLane>>;
 /** Only a finished mark pass proves the running-work tally. */
 export const verifiedRollupMembership = (
@@ -28,10 +27,9 @@ export const verifiedRollupMembership = (
 ) =>
   project.planLaneMarkCoverage?.generationId === generationId && project.planLaneMarkCoverage.cursor === null;
 
-const pin = (head: Chain[number] | Lane) =>
-  head ? [head.key, head.recordId, head.version, head.status] : null;
+const pin = (head: Intent | Lane) => (head ? [head.key, head.recordId, head.version, head.status] : null);
 
-type Fact = { chain: Chain; mark: Awaited<ReturnType<typeof planItemOpenLaneMark>> };
+type Fact = { head: Intent; mark: Awaited<ReturnType<typeof planItemOpenLaneMark>> };
 type Item = Pick<PlanningItem, 'id' | 'kind' | 'status' | 'intentIds' | 'version' | 'statusPin'>;
 
 /** A shared bounded reader per transaction; many Item links can name the same Item or Intent. */
@@ -42,11 +40,9 @@ export function rollupWorkReader(
   maxKeys: number,
 ) {
   const projectId = project._id;
-  const verified = verifiedRollupMembership(project, generation._id);
   const partition = recordPartition(generation);
   const pending = new Map<string, Promise<Fact>>();
   const select = async (item: Item, id: string): Promise<Fact> => {
-    if (!verified) return { chain: await planningIntentHeads(ctx, projectId, id), mark: null };
     const root = id === item.id ? item : await planLaneItem(ctx, project, id, false, partition);
     // The planning status writer moves the tally key atomically with the Item status.
     const [head, mark] = root
@@ -55,7 +51,7 @@ export function rollupWorkReader(
           planItemOpenLaneMark(ctx, projectId, root),
         ])
       : [await recordHead(ctx, projectId, 'intent', id), null];
-    return { chain: head ? [head] : [], mark };
+    return { head, mark };
   };
   const openByIntent = new Map<string, Promise<Lane>>();
   const completions = new Map<string, ReturnType<typeof intentCompletionTime>>();
@@ -74,18 +70,12 @@ export function rollupWorkReader(
           return read;
         }),
       );
-      const chains = facts.map(fact => fact.chain);
+      const heads = facts.map(fact => fact.head);
       const marks = facts.map(fact => fact.mark);
-      const live = chains.flatMap(chain => {
-        const head = chain.at(-1);
-        return head && !head.status.startsWith('journal:') ? [head.status] : [];
-      });
-      const keys = new Set(
-        chains
-          .flat()
-          .filter(head => !head.status.startsWith('journal:'))
-          .map(head => head.key),
+      const live = heads.filter(
+        (head): head is NonNullable<Intent> => head !== null && !head.status.startsWith('journal:'),
       );
+      const keys = new Set(live.map(head => head.key));
       const lanes = await Promise.all(
         [...keys].map(key => {
           let read = openByIntent.get(key);
@@ -94,17 +84,15 @@ export function rollupWorkReader(
           return read;
         }),
       );
-      const work: RollupWork = chains.some(
-        (chain, i) => !chain.length && (i > 0 || item.intentIds?.includes(item.id)),
-      )
+      const work: RollupWork = heads.some((head, i) => !head && (i > 0 || item.intentIds?.includes(item.id)))
         ? 'unknown'
         : marks.some(mark => (mark?.open ?? 0) > 0) || lanes.some(Boolean)
           ? 'active'
           : lanes.includes(undefined)
             ? 'unknown'
-            : live.includes('active')
+            : live.some(head => head?.status === 'active')
               ? 'abandoned' // No open Lane; do not infer successful work or auto-close from stale active state.
-              : live.includes('completed')
+              : live.some(head => head?.status === 'completed')
                 ? 'completed'
                 : live.length
                   ? 'abandoned'
@@ -117,8 +105,7 @@ export function rollupWorkReader(
         (item.status === 'open' || item.status === 'in-progress')
       ) {
         const dates = await Promise.all(
-          chains.flatMap(chain => {
-            const head = chain.at(-1);
+          heads.flatMap(head => {
             if (head?.status !== 'completed') return [];
             let read = completions.get(head.key);
             if (!read) completions.set(head.key, (read = intentCompletionTime(ctx, head)));
@@ -132,12 +119,7 @@ export function rollupWorkReader(
         work,
         completedAt,
         workStamp: digest(
-          JSON.stringify([
-            chains.map(chain => chain.map(pin)),
-            lanes.map(pin),
-            ...(verified ? [marks] : []),
-            completedAt,
-          ]),
+          JSON.stringify([heads.map(head => (head ? [pin(head)] : [])), lanes.map(pin), marks, completedAt]),
         ),
       };
     },

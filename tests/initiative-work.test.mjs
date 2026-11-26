@@ -55,6 +55,46 @@ async function emptyInitiative() {
 
 const view = async (s, args) => JSON.parse(await s.readInitiativeRaw(args));
 
+test('an Initiative rebuild replays an Item from a pre-Deploy-B stream cursor without folding stale buffered notes', async () => {
+  const s = await emptyInitiative();
+  const rebuild = await import(moduleUrl('../convex/projectInitiativeWorkRebuild.ts'));
+  const newest = await addLanding(s, 46, ['src/current.ts']);
+  const oldest = await addLanding(s, 44, ['src/older.ts']);
+  const removed = await addLanding(s, 45, ['src/stale.ts']);
+  const note = [...s.tables.projectIntentLandingNotes.values()].find(
+    row => row.receiptId === removed.receiptId,
+  );
+
+  const scope = { projectId: s.auth.projectId, initiativeId: s.initiativeId };
+  await s.call('backfill', rebuild.backfill, scope);
+  await s.call('clear', rebuild.advance, s.workTasks.shift().args);
+  await s.foldInitiative(newest);
+  await s.ctx.db.delete(note._id);
+  const scan = s.workTasks.shift().args;
+  const item = [...s.tables.projectPlanningRecords.values()].find(
+    row => row.collection === 'planningSearch' && row.key === s.itemId,
+  );
+  scan.cursor = JSON.stringify({
+    partition: item.generationId,
+    position: item.position,
+    history: { notes: [false] },
+    pending: [{ receiptId: removed.receiptId, commit: removed.commit, at, sequence: 45 }],
+  });
+  await s.call('resume', rebuild.advance, scan);
+  await s.call('replay same step', rebuild.advance, scan);
+  await s.drainWork();
+  const result = await view(s);
+  assert.equal(result.landings, 2);
+  assert.equal(result.files, 2);
+  assert.deepEqual(
+    [...s.tables.projectInitiativeWorkMembers.values()]
+      .filter(row => row.kind === 'receipt')
+      .map(row => row.key)
+      .sort(),
+    [newest.receiptId, oldest.receiptId].sort(),
+  );
+});
+
 test('the Initiative reads exact counts in one bounded query at 80 and at 10,000 retained landing notes', async t => {
   const s = await emptyInitiative();
   for (let i = 0; i < 80; i++)

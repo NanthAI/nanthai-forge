@@ -84,6 +84,7 @@ export async function itemWorkFixture({
   await s.ctx.db.insert('projectIntentLandingNotes', {
     projectId: auth.projectId,
     intentId: itemId,
+    itemId,
     receiptId: noteReceipt,
     kind: 'landed',
     at,
@@ -97,6 +98,7 @@ export async function itemWorkFixture({
   await s.ctx.db.insert('projectIntentLandingNotes', {
     projectId: auth.projectId,
     intentId: itemId,
+    itemId,
     receiptId: stampReceipt,
     kind: 'landed',
     at,
@@ -141,6 +143,7 @@ export async function itemWorkFixture({
     s.ctx.db.insert('projectIntentLandingNotes', {
       projectId: auth.projectId,
       intentId: itemId,
+      itemId,
       receiptId: randomUUID(),
       kind: 'landed',
       // A landing sits at its own time: later sequences land later (the notes are selected and paged by it).

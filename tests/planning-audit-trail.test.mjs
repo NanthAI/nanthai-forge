@@ -249,6 +249,7 @@ test('Item audit timeline records who, when and what changed across versions, co
     actor: 'owner',
     authorityEpoch: 1,
     expectedVersion: null,
+    planningItemId: itemId,
     record: {
       kind: 'lane',
       id: laneId,
@@ -268,6 +269,7 @@ test('Item audit timeline records who, when and what changed across versions, co
   });
   await notes.postIntentLandingNote(s.ctx, s.projectId, {
     intentId: itemId,
+    itemId,
     receiptId,
     kind: 'landed',
     at: '2026-11-18T14:30:00.000Z',
@@ -281,6 +283,7 @@ test('Item audit timeline records who, when and what changed across versions, co
   });
   await notes.postIntentLandingNote(s.ctx, s.projectId, {
     intentId: itemId,
+    itemId,
     receiptId: revertReceiptId,
     kind: 'reverted',
     at: '2026-11-18T14:45:00.000Z',
@@ -1306,6 +1309,7 @@ test('Lead 2026-11-22: every agent-made Item change (tick, put, comment, decisio
   });
   await notes.postIntentLandingNote(s.ctx, s.projectId, {
     intentId: itemId,
+    itemId,
     receiptId: randomUUID(),
     kind: 'landed',
     at: '2026-11-22T12:46:00.000Z',
@@ -1320,6 +1324,7 @@ test('Lead 2026-11-22: every agent-made Item change (tick, put, comment, decisio
   const sluglessLandingId = randomUUID();
   await notes.postIntentLandingNote(s.ctx, s.projectId, {
     intentId: itemId,
+    itemId,
     receiptId: sluglessLandingId,
     kind: 'landed',
     at: '2026-11-22T12:47:00.000Z',
@@ -1429,6 +1434,7 @@ test('the Item audit pages landing notes by landing time: landings written late 
   const post = (day, label) =>
     notes.postIntentLandingNote(s.ctx, s.projectId, {
       intentId: itemId,
+      itemId,
       receiptId: `${label}-${randomUUID()}`,
       kind: 'landed',
       at: `2026-11-${day}T12:00:00.000Z`,

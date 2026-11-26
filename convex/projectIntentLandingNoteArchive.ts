@@ -11,13 +11,13 @@ type NoteRow = Doc<'projectIntentLandingNotes'>;
 export type HotLandingNote = Extract<NoteRow, { commit: string }>;
 export type ArchivedNote = { key: string; submissionId: string; intentId: string };
 export type ArchivedNotePin = ArchivedNote & { pointer: LandingCapsulePointer };
-export type LoadedLandingNote = ArchivedNote & { sha256: string; row: HotLandingNote };
+export type LoadedLandingNote = ArchivedNote & { sha256: string; row: Omit<HotLandingNote, 'itemId'> };
 
 export function landingNoteOrder(row: Pick<NoteRow, '_creationTime' | 'intentId' | 'receiptId' | 'kind'>) {
   return `${row._creationTime.toFixed(6).padStart(22, '0')}:${landingNoteId(row)}`;
 }
 
-/** Item membership is an indexed projection. Capsule bytes have the original body on both sides of the fill. */
+/** Item membership is an indexed projection. Capsule bytes have the original body on both stored shapes. */
 export function landingNoteCapsuleBody<Row extends { _id: string; itemId?: unknown }>(
   row: Row,
 ): Omit<Row, 'itemId'> {
@@ -35,7 +35,7 @@ export async function retainLandingNoteReference(
   await ctx.db.replace(row._id, {
     projectId: row.projectId,
     intentId: row.intentId,
-    ...(row.itemId === undefined ? {} : { itemId: row.itemId }),
+    itemId: row.itemId,
     receiptId: row.receiptId,
     kind: row.kind,
     at: row.at,
@@ -53,16 +53,10 @@ export async function landingNoteWindow(
   projectId: Id<'hostedProjects'>,
   intentId: string,
   limit: number,
-  through?: string,
-  includeThrough = true,
 ) {
   return await ctx.db
     .query('projectIntentLandingNotes')
-    .withIndex('by_project_and_intent_and_at', q => {
-      const range = q.eq('projectId', projectId).eq('intentId', intentId);
-      if (through === undefined) return range;
-      return includeThrough ? range.lte('at', through) : range.lt('at', through);
-    })
+    .withIndex('by_project_and_intent_and_at', q => q.eq('projectId', projectId).eq('intentId', intentId))
     .order('desc')
     .take(limit);
 }

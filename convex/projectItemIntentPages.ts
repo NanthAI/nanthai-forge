@@ -3,7 +3,6 @@
 import { getPage } from 'convex-helpers/server/pagination';
 import type { Id } from './_generated/dataModel';
 import type { QueryCtx } from './_generated/server';
-import { maxIntentChain } from '../src/hosted-intent-chain';
 import schema from './schema';
 
 export type ItemIntentPosition = 'indexed' | [number, string];
@@ -35,15 +34,4 @@ export async function itemIntentPage(
   const last = result.indexKeys.at(-1);
   const next = result.hasMore && last ? (last.slice(3) as [number, string]) : null;
   return { heads: result.page, next };
-}
-
-/** An Item's own Intent chain, oldest first: the Intents bound to it (the first plus every follow-up). */
-export async function itemIntents(ctx: QueryCtx, projectId: Id<'hostedProjects'>, itemId: string) {
-  const heads = await ctx.db
-    .query('projectHostedRecordHeads')
-    .withIndex('by_project_and_kind_and_item', q =>
-      q.eq('projectId', projectId).eq('kind', 'intent').eq('planningItemId', itemId),
-    )
-    .take(maxIntentChain + 1);
-  return heads.map(head => head.key);
 }

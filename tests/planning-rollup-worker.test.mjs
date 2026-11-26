@@ -66,6 +66,7 @@ async function plan(t) {
       version: 1,
       parent: '',
       recordId: 'synthetic-work-pointer',
+      planningItemId: itemId,
     });
     const lane =
       laneStatus &&
@@ -77,6 +78,7 @@ async function plan(t) {
         version: 1,
         parent: itemId,
         recordId: 'synthetic-lane-pointer',
+        planningItemId: itemId,
       }));
     return { intent, lane };
   };

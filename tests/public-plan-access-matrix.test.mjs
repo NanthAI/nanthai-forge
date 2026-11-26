@@ -174,6 +174,7 @@ async function world(t, policy) {
     });
     await notes.postIntentLandingNote(s.ctx, s.projectId, {
       intentId: items[row].itemId,
+      itemId: items[row].itemId,
       receiptId: randomUUID(),
       kind: 'landed',
       at: new Date(NOW).toISOString(),

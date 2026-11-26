@@ -249,6 +249,95 @@ test('an Item reopened onto a successor Intent shows the notes of every Intent i
   );
 });
 
+/** The Item's retained records-store tombstone and the receipt window after twenty further purges. */
+async function evictedPurge(f, itemId) {
+  const intent = [...f.tables.projectHostedRecordHeads.values()].find(
+    row => row.kind === 'intent' && row.key === itemId,
+  );
+  await f.c.run(
+    'evictedPurge',
+    async ctx => {
+      await ctx.db.insert('projectHostedRecordHeads', {
+        projectId: f.projectId,
+        kind: 'issue',
+        key: itemId,
+        parent: '',
+        status: 'deleted',
+        version: 2,
+        recordId: intent.recordId,
+        value: JSON.stringify({ id: itemId, title: 'Deleted Item', status: 'deleted', purged: true }),
+      });
+    },
+    {},
+  );
+  f.patch('hostedProjects', f.projectId, {
+    workStore: 'records',
+    itemPurges: Array.from({ length: 20 }, (_, i) => ({
+      operationId: randomUUID(),
+      itemId: randomUUID(),
+      ids: [],
+      version: 2,
+      decisions: [],
+      rows: 0,
+      startedAt: Date.parse('2025-11-30T00:00:00.000Z') + i,
+      purgedAt: Date.parse('2025-12-01T00:00:00.000Z') + i,
+    })),
+  });
+}
+
+test('a pre-existing Lane can land after its Item purge receipt was evicted without recreating a hot note', async t => {
+  const f = await revertFixture(t);
+  const itemId = f.c.intentId;
+  markLinked(f);
+  await evictedPurge(f, itemId);
+  const intent = [...f.tables.projectHostedRecordHeads.values()].find(row => row.key === itemId);
+  const version = f.tables.projectHostedRecords.get(intent.recordId);
+  const body = f.tables.projectHostedRecordBodies.get(version.bodyId);
+  await f.c.run('redactedIntentHead', records.writeHostedRecord, {
+    projectId: f.projectId,
+    actor: 'owner',
+    authorityEpoch: 1,
+    expectedVersion: intent.version,
+    record: {
+      ...JSON.parse(body.value),
+      version: intent.version + 1,
+      outcome: 'Deleted Item',
+      constraints: '',
+    },
+  });
+
+  const receipt = await f.landOriginal();
+  assert(Date.parse(receipt.at) > f.tables.hostedProjects.get(f.projectId).itemPurges[19].purgedAt);
+  assert(f.receipt(receipt.id), 'canonical acceptance is still available');
+  assert.deepEqual(notesOf(f, itemId), []);
+});
+
+test('a revert after purge-receipt eviction follows the Item tombstone even if the Intent title changed', async t => {
+  const f = await revertFixture(t);
+  markLinked(f);
+  const original = await f.landOriginal();
+  const note = [...f.tables.projectIntentLandingNotes.values()].find(row => row.receiptId === original.id);
+  assert(note);
+  await evictedPurge(f, note.itemId);
+  await f.c.run('removePurgedNote', ctx => ctx.db.delete(note._id), {});
+
+  const reverse = await f.reverse(f.revertRequest({ kind: 'receipt', receiptId: original.id }));
+  const selection = f.selectRevert([reverse.entry], reverse.lane.intentId);
+  const state = await f.finishRevert(await f.composeRevert(selection), selection);
+  let final = await f.settleRevert(state.id);
+  for (let i = 0; final.phase !== 'landed' && i < 5; i++) final = await f.settleRevert(state.id);
+  assert.equal(final.phase, 'landed');
+  await f.c.run('delayedRevertNotice', revertNotice.noticeRevert, {
+    projectId: f.projectId,
+    receiptId: final.acceptance.receiptId,
+    revertOf: original.id,
+    actor: 'owner',
+  });
+  assert.deepEqual(notesOf(f, note.intentId), []);
+  assert(f.receipt(original.id));
+  assert(f.receipt(final.acceptance.receiptId));
+});
+
 test('the first revert of a recovered landing records its Item even with an unmarked Intent', async t => {
   const f = await revertFixture(t);
   markLinked(f);
@@ -384,6 +473,7 @@ test('the Item comment read shows its landing notes once, at the newest end, bet
   await tick();
   const note = {
     intentId: item.itemId,
+    itemId: item.itemId,
     receiptId: randomUUID(),
     kind: 'landed',
     at: new Date().toISOString(),
@@ -548,6 +638,7 @@ test('a link that names one Intent shows that Intent’s landing notes even when
   });
   await notes.postIntentLandingNote(s.ctx, s.projectId, {
     intentId: followUp,
+    itemId: owner.itemId,
     receiptId: randomUUID(),
     kind: 'landed',
     at: '2026-01-01T00:00:00.000Z',

@@ -13,7 +13,6 @@ import { invariant } from '../src/errors';
 import { planningCommentPurgeSchema, planningPurgeSchema } from '../src/work-planning-types';
 import { purgedFactsDigest, purgedPlanningRowSchema, type PurgedPlanningRow } from '../src/work-intent-types';
 import { metadataRequest } from '../src/work-metadata';
-import { purgedIntentKeys } from '../src/work-planning-purge';
 import { recordHead } from './projectHostedRecords';
 import { intentBelongsToItem } from './projectItemIntentHeads';
 
@@ -129,7 +128,7 @@ export async function verifyPurgedEvents(
 
 /** A purged issue, comment, Intent or lifecycle version keeps its header and digest. It reads as purged only when the
  * purge it names exists and is for the Item the version belongs to (an Intent or lifecycle version: the Item's Intent or
- * a successor of it, purgedIntentKeys); a comment's purge vouches for that comment's versions only. Otherwise it stays
+ * an Intent bound to it); a comment's purge vouches for that comment's versions only. Otherwise it stays
  * the integrity failure it is. Returns the purged Item's id and, for a comment's purge, the comment's. */
 export async function verifiedPurgedRecord(
   ctx: QueryCtx | MutationCtx,
@@ -145,12 +144,12 @@ export async function verifiedPurgedRecord(
     const key = row.kind === 'intent' ? row.key : row.parent;
     if (key === purge.itemId) return { itemId: purge.itemId };
     const head = await recordHead(ctx, row.projectId, 'intent', key);
-    // Earlier purge writers removed the metadata with the old head, so retained purged
-    // versions from that layout still prove their bounded legacy successor identity.
-    return (head && intentBelongsToItem(head, purge.itemId)) ||
-      (head?.planningItemId === undefined && purgedIntentKeys(purge.itemId).includes(key))
-      ? { itemId: purge.itemId }
-      : null;
+    if (head?.planningItemId !== undefined)
+      return intentBelongsToItem(head, purge.itemId) ? { itemId: purge.itemId } : null;
+    // A retained pre-cutover purge pins its original membership across interrupted redaction.
+    const project = await ctx.db.get(row.projectId);
+    const saved = project?.itemPurges?.find(p => p.operationId === row.purged && p.itemId === purge.itemId);
+    return saved?.intentKeys?.includes(key) ? { itemId: purge.itemId } : null;
   }
   const itemId = row.kind === 'comment' ? row.parent : row.key;
   return ['issue', 'comment'].includes(row.kind) && purge.itemId === itemId ? { itemId } : null;

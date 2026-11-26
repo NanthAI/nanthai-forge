@@ -47,12 +47,16 @@ export async function acceptanceFixture(source = null) {
             [
               'projectWorkRecords',
               'projectBackups',
-              'projectWorkGenerations',
               'projectWorkEvents',
               'projectHostedCheckShards',
             ].includes(t),
           ),
         );
+        if (name !== 'acceptanceComplete')
+          assert(
+            !c.touched.includes('projectWorkGenerations'),
+            'only the completion note fence reads legacy Work',
+          );
         if (final) assert(!c.touched.includes('projectHostedAcceptancePages'), 'no final fan-in reads');
         const max = (maxima[name] ??= { ranges: 0, documents: 0, readBytes: 0, writes: 0, writeBytes: 0 });
         for (const k of Object.keys(max)) max[k] = Math.max(max[k], c[k]);

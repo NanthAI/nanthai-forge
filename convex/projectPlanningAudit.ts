@@ -8,15 +8,13 @@ import type { Doc, Id } from './_generated/dataModel';
 import type { QueryCtx } from './_generated/server';
 import { invariant } from '../src/errors';
 import { agentActor, isAgentSlug } from '../src/agent-slug';
-import { maxIntentChain } from '../src/hosted-intent-chain';
 import { diffPlanningVersion, modelFromAgentClient, type AuditChange } from '../src/planning-audit';
 import { decisionOperationId } from '../src/work-planning-put';
 import type { PlanningItem } from '../src/work-planning-types';
 import { hostedRecordBody } from './projectHostedRecords';
 import { hostedRecordValue } from './hostedRecordValue';
-import { itemIntents } from './projectItemIntentPages';
-import { landingNoteWindow } from './projectIntentLandingNoteArchive';
-import { notePosition, notePositionAfter, skipNoteTies } from './projectLandingNotePosition';
+import { itemLanePage, itemLanePosition, type ItemLanePosition } from './projectItemLanePage';
+import { itemNoteKey, itemNotePage, noteKey } from './projectItemNotePage';
 import { cursorJson, itemLandingFromNote } from './projectItemLandingHistory';
 import { legacyVersions, legacyVersionValue, planningHistoryBudget } from './projectPlanningHistory';
 import { record } from './projectWorkIndexStore';
@@ -31,21 +29,16 @@ const MAX_COMMENT_PREVIEW = 500;
 const PAGE_BYTES = 2 * 1024 * 1024;
 
 const timePosition = z.object({ at: z.number().min(0), skip: z.number().int().min(1).max(512) });
-const streamPos = z.union([timePosition, z.literal(false), z.null()]);
-// Landing notes page by landing time, not by row creation time (Item c0af6cfa).
-const noteStreamPos = z.union([notePosition, z.literal(false), z.null()]);
 const auditCursorSchema = z
   .object({
     v: z.number().int().min(1).nullable(),
     c: z.union([timePosition, z.number().int().min(0), z.literal(false), z.null()]),
-    l: z.array(streamPos).max(maxIntentChain + 1),
-    n: z.array(noteStreamPos).max(maxIntentChain + 1),
+    l: z.union([itemLanePosition, z.literal(false), z.null()]),
+    n: z.union([itemNoteKey, z.literal(false), z.null()]),
   })
   .strict();
 
 type TimePosition = z.infer<typeof timePosition>;
-type StreamPos = z.infer<typeof streamPos>;
-type NoteStreamPos = z.infer<typeof noteStreamPos>;
 type AuditCursor = z.infer<typeof auditCursorSchema>;
 type Budget = ReturnType<typeof planningHistoryBudget>;
 
@@ -251,7 +244,7 @@ async function commentEvent(
 }
 
 const PRIORITY: Record<AuditEvent['kind'], number> = {
-  revert: 4,
+  revert: 3,
   landing: 3,
   lane: 2,
   version: 1,
@@ -266,16 +259,10 @@ function compareNewest(a: AuditEvent, b: AuditEvent) {
 
 function decodeCursor(
   cursor: string | null | undefined,
-  intentCount: number,
   currentVersion: number,
+  issue: boolean,
 ): AuditCursor {
-  if (!cursor)
-    return {
-      v: currentVersion,
-      c: false,
-      l: Array.from({ length: intentCount }, () => false),
-      n: Array.from({ length: intentCount }, () => false),
-    };
+  if (!cursor) return { v: currentVersion, c: false, l: issue ? false : null, n: issue ? false : null };
   invariant(
     cursor.startsWith(AUDIT_CURSOR),
     'BAD_ARGUMENT',
@@ -287,10 +274,7 @@ function decodeCursor(
     'BAD_ARGUMENT',
     'cursor: expected the nextCursor returned by planning Item history.',
   );
-  const data = parsed.data;
-  const pad = <T>(list: T[]) =>
-    Array.from({ length: intentCount }, (_, i) => (i < list.length ? list[i]! : null));
-  return { v: data.v, c: data.c, l: pad(data.l), n: pad(data.n) };
+  return parsed.data;
 }
 
 export async function readItemAuditHistory(
@@ -365,8 +349,8 @@ export async function readItemAuditHistory(
     }
   }
 
-  const intents = current.kind === 'issue' ? await itemIntents(ctx, project._id, input.itemId) : [];
-  const state = decodeCursor(input.cursor, intents.length, current.version);
+  const state = decodeCursor(input.cursor, current.version, current.kind === 'issue');
+  if (current.kind !== 'issue') state.l = state.n = null;
 
   // 1. Comments stream (read before versions so decision comments can attribute their derived body versions).
   type CommentStreamEntry = { event: AuditEvent; raw: CommentRow; examined: number };
@@ -603,45 +587,25 @@ export async function readItemAuditHistory(
     }
   }
 
-  // 3. Lanes per Intent in chain.
+  // 3. Lanes bound to the Item.
   type TimedStreamEntry = { event: AuditEvent; examined: number };
-  type TimedStream = {
-    entries: TimedStreamEntry[];
-    examined: { _creationTime: number }[];
-    hasMore: boolean;
-    incoming: StreamPos;
-  };
-  const laneStreams: TimedStream[] = [];
-  for (let i = 0; i < intents.length; i++) {
-    const incoming = state.l[i]!;
-    if (incoming === null || charge.exhausted) {
-      laneStreams.push({ entries: [], examined: [], hasMore: incoming !== null, incoming });
-      continue;
-    }
-    const time = incoming || undefined;
-    const heads = await ctx.db
-      .query('projectHostedRecordHeads')
-      .withIndex('by_project_and_kind_and_parent', q => {
-        const base = q.eq('projectId', project._id).eq('kind', 'lane').eq('parent', intents[i]!);
-        return time ? base.lte('_creationTime', time.at) : base;
-      })
-      .order('desc')
-      .take(workCap + 1 + (time?.skip ?? 0));
-    const trimmed = skipTies(heads, time);
-    let hasMore = trimmed.length > workCap;
-    const entries: TimedStreamEntry[] = [];
-    const examined: { _creationTime: number }[] = [];
-    for (const head of trimmed.slice(0, workCap)) {
+  const laneEntries: TimedStreamEntry[] = [];
+  const laneExamined: Pick<Doc<'projectHostedRecordHeads'>, '_id' | '_creationTime'>[] = [];
+  let laneHasMore = state.l !== null;
+  if (state.l !== null && !charge.exhausted) {
+    const { heads, atLeast } = await itemLanePage(ctx, project._id, input.itemId, state.l || null, workCap);
+    laneHasMore = atLeast;
+    for (const head of heads) {
       if (!charge.record(head)) {
-        hasMore = true;
+        laneHasMore = true;
         break;
       }
       const rec = await ctx.db.get(head.recordId);
       if (rec && rec.purged === undefined && !charge.record(rec)) {
-        hasMore = true;
+        laneHasMore = true;
         break;
       }
-      examined.push(head);
+      laneExamined.push(head);
       if (!rec || rec.purged !== undefined) continue;
       let lane: LaneRecord;
       try {
@@ -661,8 +625,8 @@ export async function readItemAuditHistory(
         ...(run ? { agent: run } : {}),
         model,
       };
-      entries.push({
-        examined: examined.length - 1,
+      laneEntries.push({
+        examined: laneExamined.length - 1,
         event: {
           kind: 'lane',
           id: lane.id,
@@ -676,42 +640,28 @@ export async function readItemAuditHistory(
         },
       });
     }
-    laneStreams.push({ entries, examined, hasMore, incoming });
   }
 
-  // 4. Landings and reverts per Intent in chain (hot + archived capsules).
-  type NoteStream = {
-    entries: TimedStreamEntry[];
-    examined: Awaited<ReturnType<typeof landingNoteWindow>>;
-    hasMore: boolean;
-    incoming: NoteStreamPos;
-  };
-  const landingStreams: NoteStream[] = [];
-  for (let i = 0; i < intents.length; i++) {
-    const incoming = state.n[i]!;
-    if (incoming === null || charge.exhausted) {
-      landingStreams.push({ entries: [], examined: [], hasMore: incoming !== null, incoming });
-      continue;
-    }
-    const time = incoming || undefined;
-    const rows = await landingNoteWindow(
+  // 4. Landings and reverts bound to the Item (hot and archived).
+  const noteEntries: TimedStreamEntry[] = [];
+  const noteExamined: Doc<'projectIntentLandingNotes'>[] = [];
+  let noteHasMore = state.n !== null;
+  if (state.n !== null && !charge.exhausted) {
+    const { page, hasMore } = await itemNotePage(
       ctx,
       project._id,
-      intents[i]!,
-      workCap + 1 + (time?.skip ?? 0),
-      time?.at,
+      { itemId: input.itemId },
+      state.n || undefined,
+      workCap,
     );
-    const trimmed = skipNoteTies(rows, time);
-    let hasMore = trimmed.length > workCap;
-    const entries: TimedStreamEntry[] = [];
-    const examined: NoteStream['examined'] = [];
-    for (const note of trimmed.slice(0, workCap)) {
+    noteHasMore = hasMore;
+    for (const note of page) {
       // The note plus its receipt lookup, charged at the note's size.
       if (!charge.spend(2 * JSON.stringify(note).length)) {
-        hasMore = true;
+        noteHasMore = true;
         break;
       }
-      examined.push(note);
+      noteExamined.push(note);
       let detail;
       try {
         detail = await itemLandingFromNote(ctx, project._id, note);
@@ -743,12 +693,12 @@ export async function readItemAuditHistory(
                     : 'unknown',
               model: null,
             };
-      entries.push({
-        examined: examined.length - 1,
+      noteEntries.push({
+        examined: noteExamined.length - 1,
         event: {
           kind,
           id: detail.receiptId,
-          intentId: intents[i]!,
+          intentId: note.intentId,
           at: detail.at,
           commit: detail.commit,
           ...(detail.sequence !== undefined ? { sequence: detail.sequence } : {}),
@@ -763,7 +713,6 @@ export async function readItemAuditHistory(
         },
       });
     }
-    landingStreams.push({ entries, examined, hasMore, incoming });
   }
 
   // k-way merge (newest first) over a strict prefix of each stream. A stream that has more than it loaded bounds
@@ -771,11 +720,8 @@ export async function readItemAuditHistory(
   const streams: { events: AuditEvent[]; index: number; hasMore: boolean }[] = [
     { events: versionEntries.map(e => e.event), index: 0, hasMore: versionHasMore },
     { events: commentEntries.map(e => e.event), index: 0, hasMore: commentHasMore },
-    ...[...laneStreams, ...landingStreams].map(s => ({
-      events: s.entries.map(e => e.event),
-      index: 0,
-      hasMore: s.hasMore,
-    })),
+    { events: laneEntries.map(e => e.event), index: 0, hasMore: laneHasMore },
+    { events: noteEntries.map(e => e.event), index: 0, hasMore: noteHasMore },
   ];
   const events: AuditEvent[] = [];
   while (events.length < pageLimit) {
@@ -858,27 +804,35 @@ export async function readItemAuditHistory(
     }
   }
 
-  const timed = (stream: TimedStream, consumed: number) =>
-    stream.incoming === null
-      ? null
-      : advanceTimed(stream, typeof stream.incoming === 'object' ? stream.incoming : false, consumed);
-  const nextL = laneStreams.map((stream, i) => timed(stream, streams[2 + i]!.index));
-  const nextN = landingStreams.map((stream, i) => {
-    if (stream.incoming === null) return null;
-    const consumed = streams[2 + intents.length + i]!.index;
-    const from = stream.incoming || undefined;
-    if (consumed < stream.entries.length)
-      return consumed === 0
-        ? stream.incoming
-        : notePositionAfter(stream.examined, stream.entries[consumed - 1]!.examined + 1, from);
-    if (!stream.hasMore) return null;
-    return stream.examined.length
-      ? notePositionAfter(stream.examined, stream.examined.length, from)
-      : stream.incoming;
-  });
-
-  const hasNext =
-    nextV !== null || nextC !== null || nextL.some(p => p !== null) || nextN.some(p => p !== null);
+  const advanceKey = <K, R>(
+    incoming: K | false | null,
+    streamIndex: number,
+    entries: TimedStreamEntry[],
+    examined: R[],
+    hasMore: boolean,
+    key: (row: R, consumed: number) => K,
+  ) => {
+    const shown = streams[streamIndex]!.index;
+    if (shown === entries.length && !hasMore) return null;
+    const consumed =
+      shown < entries.length ? (shown === 0 ? 0 : entries[shown - 1]!.examined + 1) : examined.length;
+    return consumed ? key(examined[consumed - 1]!, consumed) : incoming;
+  };
+  const nextL = advanceKey<ItemLanePosition, (typeof laneExamined)[number]>(
+    state.l,
+    2,
+    laneEntries,
+    laneExamined,
+    laneHasMore,
+    (row, consumed) => ({
+      projectId: project._id,
+      itemId: input.itemId,
+      key: [row._creationTime, row._id],
+      seen: (state.l ? state.l.seen : 0) + consumed,
+    }),
+  );
+  const nextN = advanceKey(state.n, 3, noteEntries, noteExamined, noteHasMore, noteKey);
+  const hasNext = nextV !== null || nextC !== null || nextL !== null || nextN !== null;
   const nextCursor = hasNext
     ? AUDIT_CURSOR + JSON.stringify({ v: nextV, c: nextC, l: nextL, n: nextN })
     : null;

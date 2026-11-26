@@ -27,7 +27,8 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { effectivePolicy } from '../src/autonomy-policy';
 import { effectiveAgentDefaults } from '../src/agent-parallel-defaults';
 import type { LandingNote } from '../src/intent-landing-note';
-import { postIntentLandingNote } from './projectIntentLandingNotes';
+import { itemLandingNotesPurging } from './projectItemPurgeFence';
+import { itemLandingNoteTombstone, postIntentLandingNote } from './projectIntentLandingNotes';
 import { acceptanceWorkItems } from './projectHostedAcceptanceFields';
 type CompletionInput = ReceiptIdentity & {
   precompose?: { receiptIds: string[]; paths?: string[] };
@@ -331,14 +332,20 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: CompletionI
       }
   const currentWorkItems = [];
   const currentSettledItems = [];
+  // A Lane can land or finish materializing after its Item's purge receipt has aged out.
+  const tombstones = new Map<string, boolean>();
   for (const [intentId, { laneIds, viaLaneId }] of noted) {
     const head = await recordHead(ctx, input.projectId, 'intent', intentId);
-    if (head?.planningItemId) currentWorkItems.push(head.planningItemId);
-    // Only an Intent marked with its Item posts a landing note; independent and unmarked legacy Intents have no Item.
-    if (head?.planningItemId)
+    const itemId = head?.planningItemId;
+    if (itemId) currentWorkItems.push(itemId);
+    const fenced = itemId && itemLandingNotesPurging(project, itemId);
+    if (itemId && !fenced && !tombstones.has(itemId))
+      tombstones.set(itemId, await itemLandingNoteTombstone(ctx, project, itemId));
+    // Independent and unmarked legacy Intents have no Item note. Canonical receipts survive a purge.
+    if (itemId && !fenced && !tombstones.get(itemId))
       await postIntentLandingNote(ctx, input.projectId, {
         intentId,
-        itemId: head.planningItemId,
+        itemId,
         receiptId: receipt.id,
         kind: 'landed',
         at: receipt.at,

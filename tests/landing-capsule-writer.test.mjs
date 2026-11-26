@@ -30,7 +30,7 @@ function capsuleNoteBody(note) {
   return body;
 }
 
-async function withLandingNote(h, binding = { itemId }) {
+async function withLandingNote(h) {
   const ticket = [...h.f.tables.projectHostedLandingRequests.values()].find(
     row => row.submissionId === h.state.id,
   );
@@ -38,7 +38,7 @@ async function withLandingNote(h, binding = { itemId }) {
   const note = {
     projectId: h.f.projectId,
     intentId: '00000000-0000-4000-8000-000000000002',
-    ...binding,
+    itemId,
     receiptId: acceptance.receiptId,
     kind: 'landed',
     at: '2026-01-01T00:00:00.000Z',
@@ -155,27 +155,22 @@ test('S1 verification failure preserves every canonical history row and publishe
   assert(![...h.f.tables.projectFinishReadRows.values()].some(row => row.kind === store.capsuleKind));
 });
 
-test('an Item binding filled after capsule publication survives removal without another PUT', async t => {
+test('an Item note removed by a purge is not recreated when capsule removal resumes', async t => {
   const h = await fixture(t);
-  const note = await withLandingNote(h, {});
+  const note = await withLandingNote(h);
   const notes = h.f.tables.projectIntentLandingNotes.size;
   h.losePublish();
   await assert.rejects(h.pack(), /Synthetic lost published response/);
   const pointer = JSON.parse(
     [...h.f.tables.projectFinishReadRows.values()].find(row => row.kind === store.capsuleKind).value,
   );
-  h.f.patch('projectIntentLandingNotes', note._id, { itemId });
+  await h.f.c.run('purge note', ctx => ctx.db.delete(note._id));
   const result = await h.pack();
   assert.equal(result.pointer.sha256, pointer.sha256);
   assert.equal(h.requests.filter(method => method === 'PUT').length, 1);
   assert.equal(h.f.tables.projectHostedLandingAttempts.size, 0);
-  assert.equal(h.f.tables.projectIntentLandingNotes.size, notes);
-  assert.equal(h.f.tables.projectIntentLandingNotes.get(note._id).itemId, itemId);
-  assert.equal(
-    h.f.tables.projectIntentLandingNotes.get(note._id).capsule,
-    h.state.id,
-    'retry preserves the original reference',
-  );
+  assert.equal(h.f.tables.projectIntentLandingNotes.size, notes - 1);
+  assert.equal(h.f.tables.projectIntentLandingNotes.get(note._id), undefined);
 });
 
 test('overlapping capsule packers keep one verified landing note reference', async t => {

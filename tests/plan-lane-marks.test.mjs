@@ -191,8 +191,14 @@ for (const { label, keepOpen, sibling } of [
     await f.materialize(accepted.receipt.id);
     assert.deepEqual(markRow(f, id), beforeReplay, 'replay preserves sibling and later contributions');
     const measured = f.counts.find(row => row.name === 'acceptanceComplete');
-    assert.equal(measured.readRangesByTable.projectWorkGenerations, undefined);
-    assert.equal(measured.readRangesByTable.projectPlanningRecords, undefined);
+    assert.equal(measured.readRangesByTable.projectWorkGenerations, 1, 'select the legacy Work generation');
+    assert.equal(measured.readRangesByTable.projectWorkDataRecords, 1, 'look up the durable Item tombstone');
+    assert.equal(measured.readRangesByTable.projectPlanningRecords, undefined, 'no planning search read');
+    assert.deepEqual(
+      measured.written.filter(table => table.startsWith('projectWork') || table === 'projectPlanningRecords'),
+      [],
+      'the note fence writes no Work records',
+    );
   });
 
 const itemWrite = (f, command, endpoint = work.command) => {

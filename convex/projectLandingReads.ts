@@ -18,7 +18,6 @@ import { hostedRecordBody, recordHead } from './projectHostedRecords';
 import { LANDING_READ_SET } from './projectLandingReadFields';
 import { report } from './errors';
 import { invariant } from '../src/errors';
-import { maxIntentChain, successorIntentId } from '../src/hosted-intent-chain';
 import { readAuthorship } from '../src/work-actor-types';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
@@ -75,13 +74,6 @@ function byMatches(by: string, who: ReturnType<typeof whoOf>) {
   return who.actor === by.slice(0, slash) && who.agentRun === by.slice(slash + 1);
 }
 
-/** Every Intent an Item can land through: its first (the Item id) and each follow-up (derived, no read). */
-function intentChain(itemId: string) {
-  const ids = new Set([itemId]);
-  for (let id = itemId, hop = 0; hop < maxIntentChain; hop++) ids.add((id = successorIntentId(id)));
-  return ids;
-}
-
 const intentOf = async (
   ctx: QueryCtx,
   projectId: Id<'hostedProjects'>,
@@ -104,9 +96,14 @@ async function itemOf(ctx: QueryCtx, projectId: Id<'hostedProjects'>, intentId: 
 
 /** The goal an Intent was started with: an Item's title when started from one. Read only for a landing whose Intent
  * is not an Item's first (a follow-up of a reopened Item, or unplanned work): head, record and, unless inline, body. */
-async function goalOf(ctx: QueryCtx, projectId: Id<'hostedProjects'>, intentId: string | null) {
+async function goalOf(
+  ctx: QueryCtx,
+  projectId: Id<'hostedProjects'>,
+  intentId: string | null,
+  selected?: Doc<'projectHostedRecordHeads'> | null,
+) {
   if (!intentId) return null;
-  const head = await recordHead(ctx, projectId, 'intent', intentId);
+  const head = selected === undefined ? await recordHead(ctx, projectId, 'intent', intentId) : selected;
   const record = head ? await ctx.db.get(head.recordId) : null;
   if (!record) return null;
   try {
@@ -158,7 +155,7 @@ export const list = query({
         })
         .order('desc')
         .take(budget);
-      const chain = item ? intentChain(item) : null;
+      const intentHeads = new Map<string, Doc<'projectHostedRecordHeads'> | null>();
       const rows = [];
       let last: number | null = null;
       for (const row of fetched) {
@@ -170,7 +167,14 @@ export const list = query({
         if (by && !byMatches(by, who)) continue;
         if (kind && (who.agent ? 'agent' : 'person') !== kind) continue;
         const intentId = await intentOf(ctx, projectId, row);
-        if (chain && !(intentId && chain.has(intentId))) continue;
+        let selected: Doc<'projectHostedRecordHeads'> | null | undefined;
+        if (item) {
+          if (!intentId) continue;
+          if (!intentHeads.has(intentId))
+            intentHeads.set(intentId, await recordHead(ctx, projectId, 'intent', intentId));
+          selected = intentHeads.get(intentId);
+          if (selected?.planningItemId !== item) continue;
+        }
         const lane = intentId
           ? await ctx.db
               .query('projectHostedRecordHeads')
@@ -180,15 +184,15 @@ export const list = query({
               .first()
           : null;
         const message = ((await landingMessageText(ctx, projectId, receipt)) ?? '').trim();
-        const item = await itemOf(ctx, projectId, intentId);
+        const displayItem = await itemOf(ctx, projectId, intentId);
         rows.push({
           sequence: row.sequence,
           receiptId: receipt.id,
           at: receipt.at,
           title: firstLine(message),
           message: message ? message.slice(0, HISTORY_MESSAGE_CHARS) : null,
-          item,
-          goal: item ? null : await goalOf(ctx, projectId, intentId),
+          item: displayItem,
+          goal: displayItem ? null : await goalOf(ctx, projectId, intentId, selected),
           ...who,
           automatic: receipt.automatic === true,
           laneId: lane?.key ?? null,

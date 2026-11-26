@@ -163,6 +163,50 @@ test('Item-page details link recorded saves, acceptance evidence and settled rel
   assert.equal(visitor.related, undefined, 'visitor never receives member-only related titles');
 });
 
+async function addReverts(s, count) {
+  for (let i = 0; i < count; i++)
+    await s.addLandingNote(70 + i, {
+      kind: 'reverted',
+      revertOf: s.noteReceipt,
+    });
+}
+
+test('Item Work fills its landing page past reverts and repeated receipts without skipping the next landing', async () => {
+  const s = await fixture({ details: true });
+  const receipts = Array.from({ length: 12 }, () => randomUUID());
+  for (const [index, receiptId] of receipts.entries()) await s.addLandingNote(50 + index, { receiptId });
+  await s.addLandingNote(61, { intentId: randomUUID(), receiptId: receipts.at(-1) });
+  await addReverts(s, 8);
+  const first = await s.read({ details: true, only: 'landings' });
+  assert.deepEqual(
+    first.landings.map(row => row.receiptId),
+    receipts.slice(2).reverse(),
+  );
+  assert.equal(first.moreLandings, true);
+
+  const second = await s.read({ details: true, only: 'landings', cursor: first.nextCursor });
+  assert.deepEqual(
+    second.landings.map(row => row.receiptId),
+    [...receipts.slice(0, 2).reverse(), s.noteReceipt, s.stampReceipt],
+  );
+  assert.equal(second.moreLandings, false);
+});
+
+test('an empty landing scan retains a cursor through a long run of reverts', async () => {
+  const s = await fixture({ details: true });
+  await addReverts(s, 22);
+  const first = await s.read({ details: true, only: 'landings' });
+  assert.deepEqual(first.landings, []);
+  assert.equal(first.moreLandings, true);
+  assert(first.nextCursor);
+  const second = await s.read({ details: true, only: 'landings', cursor: first.nextCursor });
+  assert.deepEqual(
+    second.landings.map(row => row.receiptId),
+    [s.noteReceipt, s.stampReceipt],
+  );
+  assert.equal(second.moreLandings, false);
+});
+
 test('Item Work preserves earlier landings of a Lane that was kept open and pages their receipts', async () => {
   const s = await fixture({ details: true });
   const receipts = Array.from({ length: 12 }, () => randomUUID());
@@ -170,6 +214,7 @@ test('Item Work preserves earlier landings of a Lane that was kept open and page
     await s.ctx.db.insert('projectIntentLandingNotes', {
       projectId: s.auth.projectId,
       intentId: s.itemId,
+      itemId: s.itemId,
       receiptId,
       kind: 'landed',
       at,
@@ -260,6 +305,56 @@ test('the discussion pages landing notes by landing time, so notes written late 
     [201, 200, 6, 5],
     [4, 3, 2, 1],
   ]);
+});
+
+test('846c635b: Item Work and Discussion page one history across more than 24 bound Intents', async () => {
+  const s = await fixture({ details: true });
+  const { intentLandingComments } = await import(moduleUrl('../convex/projectIntentLandingNotes.ts'));
+  for (const note of s.tables.projectIntentLandingNotes.values()) await s.ctx.db.delete(note._id);
+  const followed = Array.from({ length: 30 }, () => randomUUID());
+  for (const [i, intentId] of followed.entries()) {
+    await s.put({
+      kind: 'intent',
+      id: intentId,
+      version: 0,
+      at,
+      outcome: 'Completed fixture',
+      constraints: '',
+      creatorAccountId: 'owner',
+      assigneeAccountIds: [],
+      base: { head: other, receiptId: randomUUID() },
+      status: 'completed',
+    });
+    await s.addLandingNote(43 + i, { intentId, at });
+  }
+  const work = [];
+  let cursor;
+  do {
+    const page = await s.read({ details: true, only: 'landings', cursor });
+    work.push(...page.landings.map(landing => landing.sequence));
+    assert(s.counts.at(-1).documents < 40);
+    // Only the landing section advances. The other two sections retain their starting cursors.
+    cursor = page.moreLandings ? page.nextCursor : null;
+  } while (cursor);
+  const discussion = [];
+  let before;
+  do {
+    const page = await intentLandingComments(s.ctx, s.auth.projectId, s.itemId, 4, [s.itemId], before);
+    discussion.push(...page.comments.map(comment => comment.value.landing.intentId));
+    before = page.before;
+  } while (before);
+  assert.deepEqual(
+    work,
+    Array.from({ length: 30 }, (_, i) => 72 - i),
+  );
+  assert.deepEqual(discussion, followed.toReversed());
+  await assert.rejects(
+    s.read({
+      details: true,
+      cursor: 'forge-item-work-v2:' + JSON.stringify({ lane: null, history: { notes: [false] } }),
+    }),
+    /expected the nextCursor/,
+  );
 });
 
 test('Item Work keeps Lane attribution and receipt history after a landing note moves to its capsule', async () => {

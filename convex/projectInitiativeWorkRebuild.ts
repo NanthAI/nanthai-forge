@@ -20,8 +20,7 @@ import {
   WORK_PATHS_PAGE,
   type InitiativeWorkIdentity,
 } from './projectInitiativeWorkStore';
-import { itemLandingHistory } from './projectItemLandingHistory';
-import { itemIntents } from './projectItemIntentPages';
+import { itemLandingHistory, landingHistoryCursor } from './projectItemLandingHistory';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
 
 type History = Awaited<ReturnType<typeof itemLandingHistory>>;
@@ -88,15 +87,6 @@ async function nextItem(ctx: MutationCtx, scope: InitiativeWorkIdentity, cursor:
     .first();
 }
 
-async function rebuildHistory(
-  ctx: MutationCtx,
-  projectId: Id<'hostedProjects'>,
-  itemId: string,
-  cursor?: Cursor['history'],
-) {
-  return itemLandingHistory(ctx, projectId, await itemIntents(ctx, projectId, itemId), cursor ?? {});
-}
-
 export const advance = internalMutation({
   args: { ...initiativeWorkIdentity, id: v.string(), step: v.number(), cursor: v.optional(v.string()) },
   returns: v.null(),
@@ -140,9 +130,13 @@ export const advance = internalMutation({
     const after: Cursor = { partition, position: row.position + 1 };
     const counts = workCounts(summary);
     if (activeWorkRoot(row, 'issue')) {
-      const history = from.pending
-        ? { rows: from.pending, next: from.history }
-        : await rebuildHistory(ctx, projectId, row.key, from.history);
+      // A pre-Deploy-B stream cursor and its buffered rows must be replayed against the Item range.
+      // Receipt identity makes the replay safe for work folded before the deploy.
+      const cursor = landingHistoryCursor.safeParse(from.history);
+      const history =
+        from.pending && (from.history === undefined || cursor.success)
+          ? { rows: from.pending, next: cursor.data }
+          : await itemLandingHistory(ctx, projectId, row.key, cursor.data);
       let remaining = WORK_PATHS_PAGE;
       for (const [index, receipt] of history.rows.entries()) {
         const paths = () => initiativeLandingPaths(ctx, projectId, receipt.receiptId, receipt.commit);

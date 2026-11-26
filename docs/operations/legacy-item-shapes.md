@@ -23,9 +23,13 @@ The job `convex/legacyItemShapes.ts` is not on main. It lives in the pinned in-b
 
 Landing notes the conversion writes are new rows, but every reader selects, pages and shows a note by its landing time (`at`, indexed as `by_project_and_intent_and_at`), never by its row's creation time, so a converted landing sits among the comments and landings of its day, not at the newest end, and a page of the discussion, the landing history or the Item audit never fills with late-written old landings. A landing note names the revert that took it out (`revertedBy`, written when the revert is accepted), so the link shows on any page without a read per page.
 
-## Dev landing note Item links
+## Landing note Item links
 
-Stage A stores an optional Item id and an Item-time index on the existing hot and archived note rows.
+Current main requires an Item ID on every hot or archived note. Convex validates existing rows
+during deployment. On an unconverted deployment, use the optional-field Stage A source pinned
+at State `bd1b4e2f03fb12965905bc368937e7d7e7d8c1970ee879b7114082d47fa6593b`
+(receipt `69dc50e4`) for the one-off migration. Complete the markerless-Intent and orphan
+censuses before applying the fill. The migration is available in that pinned source.
 For the one-off dev fill, page `projectIntentLandingNoteFill:count` with `projectId` and `cursor` starting
 at null. Post each project's missing-note total and the recoverable and orphan counts with receipt samples
 before applying. Stop if any project has over 500 orphans or if orphans exceed 10% of its notes. The
@@ -39,7 +43,8 @@ orphan's note row, which also holds the archived reference when present. The acc
 shared capsule are retained. A census mismatch or ambiguous or unavailable evidence stops the page before
 writes. Both census and fill accept a smaller `maxRows` on the original cursor or first-row pin if
 provenance reads exceed the transaction budget. Verify `remaining` returns null for every project and
-record the provider-billed read and write bytes against the census.
+record the provider-billed read and write bytes against the census. Complete and verify Plan Lane-mark
+coverage for legacy Lane heads before switching the roll-up to indexed Item membership.
 
 ### Landing note links and times (second job)
 

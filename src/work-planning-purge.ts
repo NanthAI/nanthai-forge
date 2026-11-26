@@ -15,7 +15,6 @@ import type { HostedEvent, WorkData } from './work-types.js';
 import { purgeableCommandSchema, purgedFactsDigest, redactPlanningWrite } from './work-intent-types.js';
 import { isUnifiedWork } from './work-unified-types.js';
 import { planningTarget, type UnifiedPlanningData } from './work-planning-unified.js';
-import { maxIntentChain, successorIntentId } from './hosted-intent-chain.js';
 import type { HostedLifecycleRequest } from './hosted-lifecycle.js';
 
 /**
@@ -209,15 +208,6 @@ export function purgedIndexValue(
       };
   }
   return row;
-}
-
-/** The ids of every Intent a purged Item's words reach in the work store: its own Intent (an Issue's Intent shares its
- * id) and the successor chain later starts continue it on (src/hosted-intent-chain.ts), which copies its outcome. Pure,
- * so a reader checks a purged Intent or lifecycle version against its purge with no read. */
-export function purgedIntentKeys(itemId: string) {
-  const keys = [itemId];
-  while (keys.length <= maxIntentChain) keys.push(successorIntentId(keys.at(-1)!));
-  return keys;
 }
 
 /** The 'Deleted Item' Intent version a purge writes over a work-store Intent record (journal copy or hosted): the

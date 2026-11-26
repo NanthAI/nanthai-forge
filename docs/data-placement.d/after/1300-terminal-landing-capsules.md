@@ -50,29 +50,10 @@ request until the request is removed by existing cleanup or project deletion; th
 expiry or retention rule. It prevents exact-run reuse from being counted twice, adds no lookup or
 new table, and changes no source-byte or history placement.
 
-### Landing-note Item ID backfill
+### Landing-note Item membership
 
-Wait for the optional-field schema and Item index to deploy to Forge dev. For
-every dev project, call `projectIntentLandingNoteFill:count` with its `projectId`
-and `cursor: null`. Follow `next` until null. Sum the rows for the deployment and
-record the estimate of 1,500 billed DB I/O bytes per note before applying any page.
-
-For each project, call `projectIntentLandingNoteFill:remaining` and pass its first
-note ID as `first` to `projectIntentLandingNoteFill:fill` with the same project ID.
-Each mutation patches up to 64 rows, leaving their other fields intact. If a
-reply is lost, reconcile its execution in the spend ledger before continuing. A
-retry with the same first row cannot patch the following page. A note whose
-Intent head has no Item stops the transaction and goes to the lead for review
-before retry or cutover.
-
-Use the dev [spend ledger](../../operations/convex-spend.md) to account for the
-fill's actual billed I/O, including confirmation and any retries. Record the
-read-only count separately. Run one page at a time and reserve room for the page
-and its verification using the known billed page costs. Use `maxRows` to shorten
-the next page if needed. Proceed only when the page fits within the lower of
-twice the counted estimate and 100,000,000 bytes per deployment. Stop if
-completion usage is missing or the next call's cost cannot be bounded. Record the
-actual calls, bytes and wall time. Verify each project with a null result from
-`remaining`, which reads at most one row. Finish and verify the dev Plan
-Lane-mark pass on each remaining project within its own 1 MB budget before the
-reader cutover removes the legacy roll-up.
+Hot notes and capsule references both carry the Item ID. The Item-time index pages by landing time
+with creation time and row ID breaking ties. Capsule bodies keep their original bytes. Item purge
+deletes the indexed notes and references while retaining acceptance receipts and shared capsule bytes.
+Deploying the required field validates existing note rows. See the
+[one-off migration](../../operations/legacy-item-shapes.md#landing-note-item-links) for unconverted deployments.

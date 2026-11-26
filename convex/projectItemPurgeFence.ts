@@ -14,3 +14,8 @@ export function purgeOwnsIntent(purge: ItemPurge, intentId: string, itemId?: str
       : intentId === purge.itemId || purge.intentKeys?.includes(intentId) === true)
   );
 }
+
+/** The publication mutation has already selected the project. Its read fences a concurrent purge. */
+export function itemLandingNotesPurging(project: Doc<'hostedProjects'>, itemId: string) {
+  return project.itemPurges?.some(purge => !purge.commentId && purge.itemId === itemId) === true;
+}

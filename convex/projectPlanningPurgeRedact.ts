@@ -15,6 +15,7 @@ import {
   redactPlanningWrite,
 } from '../src/work-intent-types';
 import { purgedIndexValue, purgedIntentRecord } from '../src/work-planning-purge';
+import { itemNoteKey, itemNotePage, noteKey } from './projectItemNotePage';
 import { itemIntentPage, type ItemIntentPosition } from './projectItemIntentPages';
 import { hostedRecordIndex, hostedRecordValue } from '../src/hosted-records';
 import { PURGED_ITEM_TITLE } from '../src/work-planning-types';
@@ -49,6 +50,8 @@ export const planningPurgeStores = {
   projectHostedLifecycleEvents: 'redacted reason in the plan event and its cascaded child events',
   projectHostedOverlapLanes:
     "overlap rows of the Lanes on the Item's Intents: the outcome copy reads 'Deleted Item'",
+  projectIntentLandingNotes:
+    'delete the Item’s hot notes and archived references; retain canonical receipts and capsule bytes',
   artifactBlobs: 'tombstone discussion bindings under the Item namespace and schedule artifact byte cleanup',
 } as const;
 
@@ -78,6 +81,24 @@ export const purgeSteps = [
   'overlapLanes',
   'storeHeads',
 ] as const;
+export const landingNotesCursor = 'landing-notes:';
+
+async function purgeLandingNotes(
+  ctx: Ctx,
+  write: MutationCtx['db'] | undefined,
+  projectId: Id<'hostedProjects'>,
+  itemId: string,
+  cursor: string,
+) {
+  const after = cursor ? itemNoteKey.parse(JSON.parse(cursor)) : undefined;
+  const { page, hasMore } = await itemNotePage(ctx, projectId, { itemId }, after, PURGE_PAGE);
+  if (write) for (const note of page) await write.delete(note._id);
+  return {
+    changes: page.length,
+    after: hasMore ? landingNotesCursor + JSON.stringify(noteKey(page.at(-1)!)) : null,
+  };
+}
+
 export type PurgeStep = (typeof purgeSteps)[number];
 export const fingerprint = (collection: string) => `_workStoreDigests:${collection}`;
 
@@ -217,13 +238,24 @@ async function pageOf(
   if (input.step === 'payloads') return stalePayloads(ctx, write, partition!, purge, input.after);
   if (input.step === 'storeHeads') {
     const { projectId, after } = input;
-    if (after?.startsWith(discussionCursor))
-      return discussionArtifacts(ctx, apply, projectId, purge.itemId, after.slice(discussionCursor.length));
-    const heads = await storeHeads(ctx, write, projectId, purge, after);
+    if (after?.startsWith(landingNotesCursor))
+      return purgeLandingNotes(ctx, write, projectId, purge.itemId, after.slice(landingNotesCursor.length));
+    const heads = after?.startsWith(discussionCursor)
+      ? { changes: 0, after: null }
+      : await storeHeads(ctx, write, projectId, purge, after);
     if (heads.after !== null) return heads;
-    // Share the last heads transaction with the first artifact page, including the common empty range.
-    const artifacts = await discussionArtifacts(ctx, apply, projectId, purge.itemId, null);
-    return { changes: heads.changes + artifacts.changes, after: artifacts.after };
+    // The final heads, discussion artifacts and first landing-note page share a transaction.
+    const artifacts = await discussionArtifacts(
+      ctx,
+      apply,
+      projectId,
+      purge.itemId,
+      after?.startsWith(discussionCursor) ? after.slice(discussionCursor.length) : null,
+    );
+    changes = heads.changes + artifacts.changes;
+    if (artifacts.after !== null) return { changes, after: artifacts.after };
+    const notes = await purgeLandingNotes(ctx, write, projectId, purge.itemId, '');
+    return { changes: changes + notes.changes, after: notes.after };
   }
   if (input.step === 'lifecyclePlans')
     return purgeLifecyclePlans(ctx, write, input.projectId, purge, input.after);
@@ -528,6 +560,12 @@ async function storeIntents(
     const deleted = await deletedIntentVersion(ctx, write, projectId, purge, head);
     changes += deleted;
     if (deleted && write) head = (await recordHead(ctx, projectId, 'intent', key))!;
+    // A pre-cutover purge can still own a markerless head through its saved membership.
+    // Keep the binding on the redacted head before the purge drops that working snapshot.
+    if (head.planningItemId === undefined && purge.intentKeys?.includes(key)) {
+      changes++;
+      if (write) await write.patch(head._id, { planningItemId: purge.itemId });
+    }
   }
   const page = await ctx.db
     .query('projectHostedRecords')

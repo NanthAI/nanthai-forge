@@ -342,6 +342,7 @@ for (const workStore of ['journal', 'records'])
     await s.send(duplicate);
     const note = {
       intentId: duplicate.itemId,
+      itemId: duplicate.itemId,
       receiptId: randomUUID(),
       kind: 'landed',
       at: AT,
@@ -437,6 +438,7 @@ test('linked landing notes use bounded comment continuations without dropping no
     });
     await notes.postIntentLandingNote(s.ctx, s.projectId, {
       intentId: id,
+      itemId: id,
       receiptId: randomUUID(),
       kind: 'landed',
       at: AT,
@@ -449,6 +451,27 @@ test('linked landing notes use bounded comment continuations without dropping no
   await s.send(item);
   for (const text of ['First comment', 'Second comment'])
     await s.send({ action: 'comment-planning-item', operationId: randomUUID(), itemId: item.itemId, text });
+  await assert.rejects(
+    workIndex.records._handler(s.ctx, {
+      projectId: s.projectId,
+      collection: 'planningComments',
+      parentId: item.itemId,
+      newestFirst: true,
+      paginationOpts: {
+        cursor:
+          'forge-linked-landing-notes:' +
+          JSON.stringify({
+            itemId: item.itemId,
+            newestFirst: true,
+            offset: 8,
+            recordsCursor: '',
+            recordsDone: true,
+          }),
+        numItems: 1,
+      },
+    }),
+    /Use the returned cursor/,
+  );
   for (const newestFirst of [true, false]) {
     const values = [];
     let cursor = null;
@@ -496,6 +519,7 @@ test('the planning export carries every landing note, across export pages', asyn
   for (let i = 0; i < 201; i++) {
     const note = {
       intentId: item.itemId,
+      itemId: item.itemId,
       receiptId: randomUUID(),
       kind: 'landed',
       at: AT,
@@ -558,6 +582,7 @@ test('merged Item discussion and owner export retain hot, legacy and verified ca
   });
   const makeNote = (sequence, receiptId, kind = 'landed') => ({
     intentId: duplicate.itemId,
+    itemId: duplicate.itemId,
     receiptId,
     kind,
     at: AT,
@@ -691,6 +716,7 @@ test('merged Item discussion and owner export retain hot, legacy and verified ca
       await s.ctx.db.insert('projectIntentLandingNotes', {
         ...makeNote(historySize, id(20_000 + historySize)),
         intentId: id(30_000 + historySize),
+        itemId: id(30_000 + historySize),
         projectId: s.projectId,
       });
     }
