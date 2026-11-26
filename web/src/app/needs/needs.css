@@ -16,21 +16,20 @@
   @media (hover: hover) and (pointer: fine) { .needs-me .sumdec > summary:hover { background: var(--hover); } }
   .needs-me .needs-later .ttl { flex: 1 1 16ch; min-width: 0; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .needs-me .fyi-filter { padding: var(--s-2) var(--gut); border-bottom: var(--rule) solid var(--line); overflow-x: auto; }
-  .needs-me .fyi-row { align-items: start; }
-  .needs-me .fyi-row .fyi-at { padding-top: 2px; white-space: nowrap; }
-  .needs-me .fyi-row .ttl { overflow-wrap: anywhere; }
-  .needs-me .fyi-row .fyi-fact { display: block; font-weight: var(--w-regular); }
-  .needs-me .fyi-row .fyi-links { display: flex; gap: var(--s-3); white-space: nowrap; }
+  .needs-me .needs-card { display: grid; align-items: start; gap: var(--s-2); padding: var(--s-4) var(--gut); }
+  .needs-me .needs-card > :is(h3, p) { margin: 0; max-width: none; min-width: 0; overflow-wrap: anywhere; }
+  .needs-me .needs-card-top { display: flex; flex-wrap: wrap; gap: var(--s-2) var(--s-3); align-items: center; }
+  .needs-me .needs-card-status { display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-2); align-items: center; color: var(--text-2); font-size: var(--t-meta); }
+  .needs-me .needs-card-top .needs-card-actions { margin: 0 0 0 auto; max-width: 100%; justify-content: flex-end; }
+  .needs-me .needs-card-actions > .btn { flex: 0 1 auto; max-width: 100%; height: auto; min-height: var(--ctl-h); white-space: normal; padding-block: var(--s-1); }
+  @media (max-width: 560px) { .needs-me .needs-card-actions > .btn { min-height: var(--ctl-h-touch); } }
+  .needs-me .needs-card-actions > .decline-why { flex: 1 0 100%; min-width: 0; }
+  .needs-me .needs-card-actions > .lk { white-space: nowrap; }
+  .needs-me .fyi-at { white-space: nowrap; }
   .needs-me .fyi-x { display: inline-grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--r); background: transparent; color: var(--text-2); cursor: pointer; }
   .needs-me .fyi-x:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
   @media (hover: hover) and (pointer: fine) { .needs-me .fyi-x:hover { background: var(--hover); color: var(--text); } }
-  /* At phone width the design system wraps rows as flex: time and dismiss share the first line, then the row, then its links. */
-  @media (max-width: 560px) {
-    .needs-me .fyi-row .fyi-at { flex: 1 1 auto; }
-    .needs-me .fyi-row .ttl { order: 1; flex: 1 1 100%; }
-    .needs-me .fyi-row .fyi-links { order: 2; }
-  }
-  /* Loose ends page (forge-design-p7/flow/loose-ends.html): what, evidence, age, one action; at phone width the
+  /* Loose ends Select mode: what, evidence, age, one action; at narrow widths the
      evidence and age wrap under the name and the action stays on the first line. */
   /* Its own phone grid, like an access row: the shared phone rule would wrap it as flex (ds/parts.css). */
   .loose-ends .row.le { display: grid; grid-template-columns: 22px minmax(0, 1.5fr) minmax(0, 1.3fr) 176px 150px; }

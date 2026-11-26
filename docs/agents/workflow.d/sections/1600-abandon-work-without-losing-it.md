@@ -24,7 +24,7 @@ to set aside, review a fresh selection and submit that row with a new UUID. Each
 successful row carries its lifecycle receipt and the version to use with
 `nforge agent ROOT start --reopen '{"target":{"kind":"intent","intentId":"UUID","version":N}}'`.
 
-The Needs me › Loose ends page shows the same group as **Open Intents with no Item**: it reads the first page only when the reader presses Look for them, so opening the page costs no Intent read. The agent read lists it as not reported with this command.
+Needs me is one page. In its Loose ends region, **Select** opens the **Open Intents with no Item** group. Press **Look for them** to read the first page. The agent read lists it as not reported with this command.
 
 Run `nforge agent ROOT lanes '{"view":"loose-ends"}'` or the same command through MCP `forge_work_overview`
 for dormant Lanes, stopped Lanes, checked work, inactive projects and dated Issue checks in one read.

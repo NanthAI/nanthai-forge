@@ -1,15 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-// Needs me › Loose ends (Item fc1831eb), as the approved forge-design-p7/flow/loose-ends.html: what was started and
-// left, in five groups from one details read (projectLooseEnds:read, details: true) at route entry. Each group lists
+// Select mode in Loose ends: one details read on entry, with a cursor for each group that has more rows. Each group lists
 // its rows with their evidence, or says why it is not reported; a group with more asks for its next page with the
 // returned cursor, one call per press. The owner picks rows with a tick per row and per group: Lanes nobody holds are
 // set aside through the existing dormant sweep, Lanes are handed to an agent with one copied prompt (the existing
 // explicit takeover; nothing is sent), and the owner's leftover projects move to the existing trash (restorable for
 // 90 days). A row that changed meanwhile is skipped and named, retry replays only the exact requests that failed, and
-// Undo brings back what the last action changed. The project this page belongs to is not trashed from here (the page
-// would close with its Undo). Nothing here deletes. Loaded with its section only.
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+// Undo brings back what the last action changed. The current project and permanent-delete requests keep their existing handling.
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useConvex, useMutation } from 'convex/react';
 import { makeFunctionReference } from 'convex/server';
 import { ConvexError } from 'convex/values';
@@ -19,7 +17,6 @@ import { Avatar, Key, State } from '../../ds';
 import { Announcer, useAnnounce } from '../../ds/behaviour/announce';
 import { A } from '../frames';
 import { hrefFor } from '../paths';
-import { Head, crumbsFor } from '../Place';
 import type { PlaceProps } from '../screens';
 import {
   handText,
@@ -73,7 +70,8 @@ const transitionRef = makeFunctionReference<
 const SELECT_ALL_PAGES = 40;
 const AGENT_READ = `nforge agent . lanes '{"view":"loose-ends"}'`;
 
-export default function LooseEnds({ route, projectId, projectName, viewerHandle }: PlaceProps) {
+type SelectionProps = Pick<PlaceProps, 'route' | 'projectId' | 'projectName' | 'viewerHandle'>;
+export default function LooseSelection({ route, projectId, projectName, viewerHandle }: SelectionProps) {
   const convex = useConvex();
   // Try again drops the failed subscription for one render and subscribes again: the client keeps a failed
   // result while it is subscribed, so a one-shot read of the same arguments would return that same failure.
@@ -93,8 +91,7 @@ export default function LooseEnds({ route, projectId, projectName, viewerHandle 
   const reopen = useMutation(transitionRef);
   const asProject = (args: LifecycleArgs) => ({ ...args, projectId: args.projectId as Id<'hostedProjects'> });
   return (
-    <LooseEndsView
-      trail={crumbsFor(route, projectName)}
+    <LooseSelectionView
       read={read}
       failed={!!live.error}
       retry={() => setDropped(true)}
@@ -119,8 +116,7 @@ const restarts = (error: unknown) =>
 const count = (n: number, one: string, many = `${one}s`) =>
   `${n.toLocaleString('en')} ${n === 1 ? one : many}`;
 
-export function LooseEndsView({
-  trail,
+function LooseSelectionView({
   read,
   failed,
   retry,
@@ -135,7 +131,6 @@ export function LooseEndsView({
   viewer,
   project,
 }: {
-  trail: Parameters<typeof Head>[0]['trail'];
   read: LooseEndsRead | undefined;
   failed: boolean;
   retry: () => void;
@@ -221,8 +216,8 @@ export function LooseEndsView({
     setToast,
     remember,
   });
-  const head = (sentence: ReactNode) => (
-    <Head trail={trail} sentence={sentence}>
+  const command = (
+    <div className="pf">
       <button
         type="button"
         className="cli mono"
@@ -232,7 +227,7 @@ export function LooseEndsView({
       >
         <span>{AGENT_READ}</span>
       </button>
-    </Head>
+    </div>
   );
   const cliOut = cli ? (
     <pre className="cli-out mono" id="loose-cli" tabIndex={0}>
@@ -262,18 +257,18 @@ export function LooseEndsView({
   ) : null;
   if (!read)
     return (
-      <div className="needs-me loose-ends">
-        {head(failed ? 'Loose ends could not be read.' : 'Looking for loose ends…')}
+      <div className="loose-ends">
+        {command}
         {notice}
         {failed ? null : (
-          <section className="region" aria-busy="true" aria-label="Loading loose ends">
+          <div role="group" aria-busy="true" aria-label="Loading loose ends">
             {[38, 82, 64, 74, 52, 68].map(width => (
               <div key={width} className="skrow" style={{ ['--w' as string]: width }}>
                 <div className="sk" />
                 <div className="sk" />
               </div>
             ))}
-          </section>
+          </div>
         )}
       </div>
     );
@@ -609,14 +604,13 @@ export function LooseEndsView({
     return null;
   };
   return (
-    <div className="needs-me loose-ends">
-      {head(
-        <>
-          <b>{screen.sentence.bold}</b> {screen.sentence.rest}
-        </>,
-      )}
+    <div className="loose-ends">
+      {command}
       {cliOut}
       {notice}
+      <p className="pf loose-selection-summary">
+        <b>{screen.sentence.bold}</b> {screen.sentence.rest}
+      </p>
       {laneNotice ? (
         <ResultNotice
           left={laneNotice}
@@ -644,7 +638,7 @@ export function LooseEndsView({
           onUndo={intents.undo}
         />
       ) : null}
-      <section className="region" aria-label="Loose ends">
+      <div>
         {pickable.length ? (
           <div className="bulk" role="region" aria-label="Selected">
             <b className="num">{pickable.length.toLocaleString('en')} selected</b>
@@ -846,7 +840,7 @@ export function LooseEndsView({
           A loose end leaves this list when someone saves to it, lands it, sets it aside or moves it to the
           trash.
         </div>
-      </section>
+      </div>
       {toast ? <ResultToast toast={toast} onDone={endToast} /> : null}
       <Announcer message={message} />
     </div>

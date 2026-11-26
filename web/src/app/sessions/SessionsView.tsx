@@ -6,7 +6,7 @@ import { SESSION_QUIET_MS } from '../../../../src/session-presence';
 import { Avatar, Band, CodeBox, Key, Region, Who } from '../../ds';
 import { Head } from '../Place';
 import { A } from '../frames';
-import { hrefFor } from '../paths';
+import { hrefFor, needsSectionHref } from '../paths';
 import type { PlaceProps } from '../screens';
 import {
   seen,
@@ -160,9 +160,7 @@ export function SessionsView({
             <A
               className="lk"
               href={
-                activity
-                  ? hrefFor({ ...route, place: 'needs', section: 'held', rest: '' })
-                  : listHref(route, {}, true)
+                activity ? needsSectionHref(route.handle, route.project, 'fyi') : listHref(route, {}, true)
               }
             >
               {activity ? 'All activity' : 'Activity'}

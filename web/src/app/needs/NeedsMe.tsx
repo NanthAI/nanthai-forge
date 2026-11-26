@@ -15,10 +15,10 @@
 import { RecordedWho } from '../RecordedWho';
 import { declaredModel, recordedIdentity, type WhoProject } from '../who-links';
 import {
-  lazy,
-  Suspense,
+  useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
   type CSSProperties,
@@ -33,7 +33,7 @@ import { Announcer, useAnnounce } from '../../ds/behaviour/announce';
 import { usePageCritical } from '../../ui/page-critical';
 import { A } from '../frames';
 import { hrefFor } from '../paths';
-import { Head, Placeholder, crumbsFor } from '../Place';
+import { Head, crumbsFor } from '../Place';
 import { progressCells, progressOf, type PlanCountsRead } from '../progress';
 import type { PlaceProps } from '../screens';
 import GettingStarted from '../start/GettingStarted';
@@ -57,13 +57,16 @@ import { focusHref, fyiView, type FyiRead, type FyiState } from './fyi';
 import { Capped, CAP } from './Capped';
 import { fyiDismiss, fyiRead } from './fyi-reads';
 import { Fyi } from './FyiRegion';
+import { NeedsCard } from './NeedsCard';
 import { HeldSetting } from './HeldSetting';
 import { TakenKeys } from './TakenKeys';
 import { useTakenActions, type TakenActions } from './taken-actions';
-import { LooseFold } from './LooseFold';
+import { LooseBody } from './LooseFold';
 import {
   needsSentence,
   needsView,
+  laneTitle,
+  whoOf,
   waited,
   type AheadRow,
   type AskRow,
@@ -98,33 +101,7 @@ function watchPhone(change: () => void) {
   return () => query.removeEventListener('change', change);
 }
 
-const LooseEnds = lazy(() => import('./LooseEnds'));
-const HeldPage = lazy(() => import('./HeldPage'));
-
-export default function NeedsMe(props: PlaceProps) {
-  if (props.route.section === 'loose-ends')
-    return (
-      <Suspense
-        fallback={<Head trail={crumbsFor(props.route, props.projectName)} sentence="Loading loose ends…" />}
-      >
-        <LooseEnds {...props} />
-      </Suspense>
-    );
-  if (props.route.section === 'held')
-    return (
-      <Suspense
-        fallback={
-          <Head trail={crumbsFor(props.route, props.projectName)} sentence="Loading what was held…" />
-        }
-      >
-        <HeldPage {...props} />
-      </Suspense>
-    );
-  if (props.route.section) return <Placeholder route={props.route} projectName={props.projectName} />;
-  return <NeedsMeScreen {...props} />;
-}
-
-function NeedsMeScreen({
+export default function NeedsMe({
   route,
   projectId,
   projectName,
@@ -187,11 +164,14 @@ function NeedsMeScreen({
         taken={taken}
         dismiss={input => dismissMutation({ projectId, ...input })}
         loose={open => (
-          <LooseFold
+          <LooseBody
+            key={projectId}
+            route={route}
             projectId={projectId}
+            projectName={projectName}
+            viewerHandle={viewerHandle}
             open={open}
             setAside={(epoch, ids) => abandon({ projectId, authorityEpoch: epoch, abandon: ids })}
-            allHref={hrefFor({ ...route, section: 'loose-ends', rest: '' })}
           />
         )}
         settingDetail={laneId => <HeldSetting projectId={projectId} laneId={laneId} />}
@@ -312,6 +292,37 @@ export function NeedsMeView({
   const looseFold = useFold('needs-loose', true);
   const at = (patch: Partial<ProjectRoute>) => hrefFor({ ...route, section: '', rest: '', ...patch });
   const open = useSearch().get('open');
+  const section = location.hash;
+  const previousSection = useRef('');
+  const [looseOpen, toggleLoose] = looseFold;
+  const [fyiAnchor, setFyiAnchor] = useState<HTMLHeadingElement | null>(null);
+  const [looseAnchor, setLooseAnchor] = useState<HTMLHeadingElement | null>(null);
+  const fyiHeading = useCallback((heading: HTMLHeadingElement | null) => {
+    if (heading) {
+      heading.id = 'fyi';
+      heading.dataset.focusKey = 'needs-fyi-heading';
+    }
+    setFyiAnchor(heading);
+  }, []);
+  const looseHeading = useCallback((heading: HTMLHeadingElement | null) => {
+    if (heading) {
+      heading.id = 'loose-ends';
+      heading.dataset.focusKey = 'needs-loose-heading';
+    }
+    setLooseAnchor(heading);
+  }, []);
+  useEffect(() => {
+    if (previousSection.current === section) return;
+    const heading = section === '#loose-ends' ? looseAnchor : section === '#fyi' ? fyiAnchor : null;
+    if (!heading) {
+      if (section !== '#fyi' && section !== '#loose-ends') previousSection.current = section;
+      return;
+    }
+    previousSection.current = section;
+    if (heading === looseAnchor && !looseOpen) toggleLoose();
+    heading.focus({ preventScroll: true });
+    heading.scrollIntoView();
+  }, [section, fyiAnchor, looseAnchor, looseOpen, toggleLoose]);
   const stop = isDrawerStop(open) ? open : null;
   const stationHref = (next: DrawerStop | null) => {
     const url = new URL(location.href);
@@ -669,6 +680,7 @@ export function NeedsMeView({
       title: 'FYI',
       render: (handle: ReactNode) => (
         <Fyi
+          key={`${route.handle}/${route.project}`}
           handle={handle}
           view={list}
           drawnAt={drawnAt}
@@ -681,7 +693,11 @@ export function NeedsMeView({
               rest: link.rest ?? '',
             })
           }
-          heldHref={at({ section: 'held' })}
+          history={() =>
+            fyi && view ? fyiView(fyi, [...view.now, ...view.fyi], drawnAt, true, view.tookOut) : null
+          }
+          sectionLinked={section === '#fyi'}
+          headingRef={fyiHeading}
           taken={taken}
           state={fyi?.state}
         />
@@ -693,6 +709,7 @@ export function NeedsMeView({
       render: (handle: ReactNode) => (
         <Region
           title="Loose ends"
+          headingRef={looseHeading}
           weight="ref"
           handle={handle}
           fold="needs-loose"
@@ -809,67 +826,70 @@ function Held({
         ? 'What failed'
         : 'Open the Lane';
   return (
-    <div
+    <NeedsCard
       className="dec"
       tabIndex={-1}
       id={anchor ? `d-${anchor}` : undefined}
       data-st={row.word === 'Conflict' ? 'conflict' : undefined}
+      title={laneTitle(row)}
+      next={row.next}
+      status={
+        <>
+          <span>Waiting {waited(row.since, drawnAt)}</span>
+          <State word={row.word}>{row.tag}</State>
+        </>
+      }
+      actions={
+        <>
+          {target && canDecide ? (
+            <DecisionKeys
+              laneId={row.laneId}
+              target={target}
+              reviewCheck={row.reviewCheck}
+              decide={decide}
+              announce={announce}
+            />
+          ) : null}
+          {row.url ? (
+            <A className="btn ghost sm" href={row.url}>
+              Open approval
+            </A>
+          ) : null}
+          {waitsHref ? (
+            <A className="btn ghost sm" href={waitsHref}>
+              What it waits on
+            </A>
+          ) : null}
+          {laneHref ? (
+            <A className="btn ghost sm" href={laneHref}>
+              {link}
+            </A>
+          ) : null}
+          <Key kind="ghost" size="sm" onClick={() => setLater(true)}>
+            Later
+          </Key>
+        </>
+      }
     >
-      <div className="dtop">
-        <State word={row.word}>{row.tag}</State>
-        <span>
-          holds{' '}
-          <span className="mono" translate="no">
-            {row.laneId ? 'Lane' : 'Submission'} {row.mark}
-          </span>
-          {row.siblings > 1 ? `, 1 of ${row.siblings} held for this Item` : ''}
-        </span>
-        <span>waiting {waited(row.since, drawnAt)}</span>
+      <p className="meta why" dir="auto">
         {who || row.agentAuthored ? (
-          <RecordedWho
-            handle={who}
-            agentAuthored={row.agentAuthored}
-            model={declaredModel(row.agentClient)}
-            project={project}
-          />
+          <>
+            <RecordedWho
+              handle={who}
+              agentAuthored={row.agentAuthored}
+              model={declaredModel(row.agentClient)}
+              project={project}
+            />
+            {' · '}
+          </>
         ) : null}
-      </div>
-      <h3 dir="auto">{row.head}</h3>
-      {row.note ? (
-        <p className="why" dir="auto">
-          {row.note}
-        </p>
-      ) : null}
-      <div className="btns">
-        {target && canDecide ? (
-          <DecisionKeys
-            laneId={row.laneId}
-            target={target}
-            reviewCheck={row.reviewCheck}
-            decide={decide}
-            announce={announce}
-          />
-        ) : null}
-        {row.url ? (
-          <A className="btn ghost sm" href={row.url}>
-            Open approval
-          </A>
-        ) : null}
-        {waitsHref ? (
-          <A className="btn ghost sm" href={waitsHref}>
-            What it waits on
-          </A>
-        ) : null}
-        {laneHref ? (
-          <A className="btn ghost sm" href={laneHref}>
-            {link}
-          </A>
-        ) : null}
-        <Key kind="ghost" size="sm" onClick={() => setLater(true)}>
-          Later
-        </Key>
-      </div>
-    </div>
+        <span className="mono" translate="no">
+          {row.laneId ? 'Lane' : 'Submission'} {row.mark}
+        </span>
+        {row.siblings > 1 ? `, 1 of ${row.siblings} held for this Item` : ''}
+        {row.detail ? ` · ${row.detail}` : ''}
+      </p>
+    </NeedsCard>
   );
 }
 
@@ -892,49 +912,57 @@ function NoticeCard({
 }) {
   const offer = row.taken;
   return (
-    <div className="dec">
-      <div className="dtop">
-        <State word={offer ? 'Done' : row.word}>{offer ? 'Taken out of main' : row.tag}</State>
-        {offer ? <span>{waited(offer.at, drawnAt)} ago</span> : null}
-      </div>
-      <h3 dir="auto">{row.head}</h3>
+    <NeedsCard
+      className="dec"
+      title={offer ? laneTitle(offer) : row.head}
+      next={offer || row.kind === 'deploy' ? null : row.next}
+      status={
+        <>
+          {offer ? <span>{waited(offer.at, drawnAt)} ago</span> : null}
+          <State word={offer ? 'Done' : row.word}>{offer ? 'Taken out of main' : row.tag}</State>
+        </>
+      }
+      actions={
+        <>
+          {offer ? (
+            <>
+              <TakenKeys
+                target={{ laneId: offer.laneId, intentId: row.id }}
+                title={offer.title}
+                actions={taken}
+                announce={announce}
+              />
+              <A className="btn ghost sm" href={href}>
+                Open the Lane
+              </A>
+            </>
+          ) : row.kind === 'deploy' ? (
+            <a className="btn ghost sm" href={href}>
+              View deploy status
+            </a>
+          ) : (
+            <A className="btn ghost sm" href={href}>
+              {row.kind === 'mirror'
+                ? 'Open the mirror'
+                : row.kind === 'secrets'
+                  ? 'Open Secrets'
+                  : 'Open the Item'}
+            </A>
+          )}
+        </>
+      }
+    >
       {offer ? (
-        <p className="why" dir="auto">
-          Its Lane keeps its saved work. Bring it back to fix it and land it again, or leave it out.
+        <p className="meta" dir="auto">
+          {whoOf(offer.by, offer.agent) ?? 'Someone'} took this change out. Its Lane keeps its saved work.
+          Bring it back to fix it and land it again, or leave it out.
         </p>
-      ) : row.next ? (
-        <p className="why" dir="auto">
-          {row.kind === 'deploy' ? row.next : `Next: ${row.next}`}
+      ) : row.kind === 'deploy' && row.next ? (
+        <p className="meta" dir="auto">
+          {row.next}
         </p>
       ) : null}
-      <div className="btns">
-        {offer ? (
-          <>
-            <TakenKeys
-              target={{ laneId: offer.laneId, intentId: row.id }}
-              title={offer.title}
-              actions={taken}
-              announce={announce}
-            />
-            <A className="btn ghost sm" href={href}>
-              Open the Lane
-            </A>
-          </>
-        ) : row.kind === 'deploy' ? (
-          <a className="btn ghost sm" href={href}>
-            View deploy status
-          </a>
-        ) : (
-          <A className="btn ghost sm" href={href}>
-            {row.kind === 'mirror'
-              ? 'Open the mirror'
-              : row.kind === 'secrets'
-                ? 'Open Secrets'
-                : 'Open the Item'}
-          </A>
-        )}
-      </div>
-    </div>
+    </NeedsCard>
   );
 }
 
@@ -954,32 +982,41 @@ function Parked({
   const [later, setLater] = useState(false);
   if (later) return <Later head={row.head} onShow={() => setLater(false)} />;
   return (
-    <div className="dec">
-      <div className="dtop">
-        <State word="Needs you">{row.tag}</State>
-        <span>
-          <span className="mono" translate="no">
-            Lane {row.mark}
+    <NeedsCard
+      className="dec"
+      title={laneTitle(row)}
+      status={
+        <>
+          <span>
+            {row.park.named ? 'parked' : 'idle'} {waited(row.since, drawnAt)}
           </span>
+          <State word="Needs you">{row.tag}</State>
+        </>
+      }
+      actions={
+        <>
+          <A className="btn ghost sm" href={laneHref}>
+            Open the Lane
+          </A>
+          <Key kind="ghost" size="sm" onClick={() => setLater(true)}>
+            Later
+          </Key>
+        </>
+      }
+    >
+      <p className="meta" dir="auto">
+        {who ? (
+          <>
+            <RecordedWho handle={who} model={null} project={project} />
+            {' · '}
+          </>
+        ) : null}
+        <span className="mono" translate="no">
+          Lane {row.mark}
         </span>
-        <span>
-          {row.park.named ? 'parked' : 'idle'} {waited(row.since, drawnAt)}
-        </span>
-        {who ? <RecordedWho handle={who} model={null} project={project} /> : null}
-      </div>
-      <h3 dir="auto">{row.head}</h3>
-      <p className="why" dir="auto">
-        {row.park.reason}
+        {row.park.reason ? ` · ${row.park.reason}` : ''}
       </p>
-      <div className="btns">
-        <A className="btn ghost sm" href={laneHref}>
-          Open the Lane
-        </A>
-        <Key kind="ghost" size="sm" onClick={() => setLater(true)}>
-          Later
-        </Key>
-      </div>
-    </div>
+    </NeedsCard>
   );
 }
 
@@ -1021,34 +1058,58 @@ function Question({
     }
   };
   return (
-    <div className="dec">
-      <div className="dtop">
-        <State word={ended ? 'Stopped' : directed ? 'Waiting its turn' : 'Needs you'}>
-          {ended
-            ? 'Session ended'
-            : directed
-              ? 'For another session'
-              : row.handBack
-                ? 'Handed back'
-                : 'Question'}
-        </State>
-        <span>
-          {row.ahead || directed
-            ? `asked ${waited(row.at, drawnAt)} ago`
-            : `waiting ${waited(row.at, drawnAt)}`}
-        </span>
-        {row.who ? (
+    <NeedsCard
+      className="dec"
+      titleClass="thread-choice"
+      title={row.handBack ? `Hand-back for Lane ${row.laneId?.slice(0, 8) ?? ''}` : row.text}
+      status={
+        <>
+          <span>
+            {row.ahead || directed
+              ? `asked ${waited(row.at, drawnAt)} ago`
+              : `waiting ${waited(row.at, drawnAt)}`}
+          </span>
+          <State word={ended ? 'Stopped' : directed ? 'Waiting its turn' : 'Needs you'}>
+            {ended
+              ? 'Session ended'
+              : directed
+                ? 'For another session'
+                : row.handBack
+                  ? 'Handed back'
+                  : 'Question'}
+          </State>
+        </>
+      }
+      actions={
+        <>
+          {ended && dismissAsk ? (
+            <Key size="sm" disabled={dismissing} onClick={() => void onDismiss()}>
+              Dismiss
+            </Key>
+          ) : null}
+          {contextHref ? (
+            <A className="btn ghost sm" href={contextHref}>
+              Open the thread
+            </A>
+          ) : null}
+          {!ended ? (
+            <Key kind="ghost" size="sm" onClick={() => setLater(true)}>
+              Later
+            </Key>
+          ) : null}
+        </>
+      }
+    >
+      {row.who ? (
+        <p className="meta" dir="auto">
           <RecordedWho
             handle={recordedIdentity(row.who)}
             agentAuthored={!!row.agent}
             model={null}
             project={project}
           />
-        ) : null}
-      </div>
-      <h3 dir="auto" className="thread-choice">
-        {row.handBack ? `Hand-back for Lane ${row.laneId?.slice(0, 8) ?? ''}` : row.text}
-      </h3>
+        </p>
+      ) : null}
       {row.handBack ? <HandBackDetails {...row.handBack} tried={row.text} /> : null}
       {ended ? (
         <>
@@ -1085,24 +1146,7 @@ function Question({
           onAnswered={choice => announce(`Answered “${choice}”.`)}
         />
       )}
-      <div className="btns">
-        {ended && dismissAsk ? (
-          <Key size="sm" disabled={dismissing} onClick={() => void onDismiss()}>
-            Dismiss
-          </Key>
-        ) : null}
-        {contextHref ? (
-          <A className="btn ghost sm" href={contextHref}>
-            Open the thread
-          </A>
-        ) : null}
-        {!ended ? (
-          <Key kind="ghost" size="sm" onClick={() => setLater(true)}>
-            Later
-          </Key>
-        ) : null}
-      </div>
-    </div>
+    </NeedsCard>
   );
 }
 

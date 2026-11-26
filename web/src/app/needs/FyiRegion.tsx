@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-// The FYI region (Needs me) and the Held page ("Held, redone or refused"): what the reader may want to know but need
-// not act on, newest first, from projectNeedsFyi:read plus the held Lanes that ask nobody. On Needs me it shows the
-// first rows and links to the Held page; there (`all`) it shows every row, with the same filter and Clear all.
+// FYI opens the already bounded window a page at a time, with the same kind filter and Clear all.
 import { useState, type ReactNode } from 'react';
-import { Key, Region, Row, Segment, State, Who } from '../../ds';
+import { Key, Region, Segment, State, Who } from '../../ds';
 import { A } from '../frames';
-import { Capped } from './Capped';
+import { NeedsCard } from './NeedsCard';
 import { focusHref, fyiSum, sinceText, type Area, type FyiRow, type FyiState, type fyiView } from './fyi';
 import type { Dismiss } from './NeedsMe';
 import { TakenKeys } from './TakenKeys';
@@ -33,15 +31,16 @@ function when(at: number, now: number) {
 
 export function Fyi({
   handle,
-  view,
+  view: preview,
   state,
   drawnAt,
   dismiss,
   announce,
   href,
-  heldHref,
+  history,
+  sectionLinked,
+  headingRef,
   taken,
-  all = false,
 }: {
   handle: ReactNode;
   view: ReturnType<typeof fyiView> | null;
@@ -50,14 +49,16 @@ export function Fyi({
   dismiss: Dismiss;
   announce: (text: string) => void;
   href: (to: FyiRow['links'][number]['to']) => string;
-  /** The Held page's link (Needs me); absent on the Held page itself. */
-  heldHref?: string;
-  /** Bring a taken-out Lane back or leave it out (J08); absent on the Held page. */
+  history: () => ReturnType<typeof fyiView> | null;
+  sectionLinked: boolean;
+  headingRef: (heading: HTMLHeadingElement | null) => void;
   taken?: TakenActions;
-  /** The Held page: every row, not the first few. */
-  all?: boolean;
 }) {
   const [filter, setFilter] = useState<'all' | Area>('all');
+  const [limit, setLimit] = useState<number>();
+  const pageSize = limit ?? (sectionLinked ? 2 * FYI_CAP : FYI_CAP);
+  const expanded = pageSize > FYI_CAP;
+  const view = expanded ? history() : preview;
   const [undo, setUndo] = useState<FyiState | null>(null);
   const [busy, setBusy] = useState(false);
   const send = async (input: Parameters<Dismiss>[0], done: string) => {
@@ -77,16 +78,21 @@ export function Fyi({
     return null;
   };
   const rows = view ? view.rows.filter(row => filter === 'all' || row.area === filter) : [];
+  const changeFilter = (kind: typeof filter) => {
+    setFilter(kind);
+    setLimit(expanded ? 2 * FYI_CAP : FYI_CAP);
+  };
   return (
     <Region
       title="FYI"
+      headingRef={headingRef}
       weight="watch"
       count={view ? view.counts.all : undefined}
       handle={handle}
       sum={view ? fyiSum(view) : undefined}
       hint={view ? `nothing to act on; counted ${sinceText(view.since, drawnAt)}` : undefined}
       tools={
-        view && view.rows.length ? (
+        view && view.rows.some(row => !expanded || !row.currentHold) ? (
           <Key
             size="sm"
             kind="ghost"
@@ -130,34 +136,25 @@ export function Fyi({
                   value: option.value,
                   text: `${option.text} ${view.counts[option.value].toLocaleString('en')}`,
                 }))}
-                onChange={setFilter}
+                onChange={changeFilter}
               />
             </div>
           ) : null}
           {rows.length ? (
-            <Capped
-              rows={rows}
-              more={0}
-              atLeast={false}
-              cap={all ? rows.length : FYI_CAP}
-              order="newest first"
-            >
-              {row => (
-                <Row key={row.key} cols="auto minmax(0, 1fr) auto auto" className="fyi-row">
-                  <span className="mono t3 fyi-at">{when(row.at, drawnAt)}</span>
-                  <span className="ttl" dir="auto">
-                    <State word={row.word}>{row.tag}</State> {row.title}
-                    <span className="meta fyi-fact">
-                      {row.who ? (
-                        <>
-                          <Who handle={row.who} />
-                          {row.fact ? ' · ' : ''}
-                        </>
-                      ) : null}
-                      {row.fact}
-                    </span>
-                  </span>
-                  <span className="fyi-links">
+            rows.slice(0, pageSize).map(row => (
+              <NeedsCard
+                key={row.key}
+                className="fyi-row"
+                status={
+                  <>
+                    <span className="mono t3 fyi-at">{when(row.at, drawnAt)}</span>
+                    <State word={row.word}>{row.tag}</State>
+                  </>
+                }
+                title={row.title}
+                next={row.next}
+                actions={
+                  <>
                     {row.links.map(link => (
                       <A
                         key={link.label}
@@ -176,49 +173,67 @@ export function Fyi({
                         quiet
                       />
                     ) : null}
-                  </span>
-                  {row.taken ? null : (
-                    <button
-                      type="button"
-                      className="fyi-x"
-                      aria-label={`Dismiss: ${row.title}`}
-                      title="Dismiss"
-                      disabled={busy}
-                      onClick={() =>
-                        void send({ keys: [row.key] }, 'Dismissed. It shows again if it changes.')
-                      }
-                    >
-                      <svg
-                        width="12"
-                        height="12"
-                        viewBox="0 0 16 16"
-                        aria-hidden="true"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.6"
+                    {row.taken || (expanded && row.currentHold) ? null : (
+                      <button
+                        type="button"
+                        className="fyi-x"
+                        aria-label={`Dismiss: ${row.title}`}
+                        title="Dismiss"
+                        disabled={busy}
+                        onClick={() =>
+                          void send({ keys: [row.key] }, 'Dismissed. It shows again if it changes.')
+                        }
                       >
-                        <path d="M4 4l8 8M12 4l-8 8" />
-                      </svg>
-                    </button>
-                  )}
-                </Row>
-              )}
-            </Capped>
+                        <svg
+                          width="12"
+                          height="12"
+                          viewBox="0 0 16 16"
+                          aria-hidden="true"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.6"
+                        >
+                          <path d="M4 4l8 8M12 4l-8 8" />
+                        </svg>
+                      </button>
+                    )}
+                  </>
+                }
+              >
+                {row.who || row.fact ? (
+                  <p className="meta fyi-fact" dir="auto">
+                    {row.who ? <Who handle={row.who} /> : null}
+                    {row.who && row.fact ? ' · ' : null}
+                    {row.fact}
+                  </p>
+                ) : null}
+              </NeedsCard>
+            ))
           ) : (
             <div className="quietline">
               {view.rows.length ? 'Nothing of this kind.' : `Nothing new ${sinceText(view.since, drawnAt)}.`}
             </div>
           )}
-          {heldHref ? (
-            <Row cols="minmax(0, 1fr) auto">
-              <A href={heldHref} className="lk">
-                Everything Forge held, redid or refused
-              </A>
-              <span className="t3" aria-hidden="true">
-                ›
-              </span>
-            </Row>
-          ) : null}
+          <div className="pf needs-fold">
+            {expanded ? (
+              <Key size="sm" onClick={() => setLimit(FYI_CAP)}>
+                Show fewer
+              </Key>
+            ) : (
+              <Key
+                size="sm"
+                title="Everything Forge held, redid or refused"
+                onClick={() => setLimit(2 * FYI_CAP)}
+              >
+                Show all
+              </Key>
+            )}
+            {expanded && rows.length > pageSize ? (
+              <Key size="sm" onClick={() => setLimit(pageSize + FYI_CAP)}>
+                Show {Math.min(FYI_CAP, rows.length - pageSize)} more
+              </Key>
+            ) : null}
+          </div>
         </>
       )}
     </Region>

@@ -919,7 +919,7 @@ test('Needs me Flow picture: one source, the home layout, widths, tags and worst
       await tag.click();
       assert.equal(new URL(page.url()).hash, '', 'the page stays: the row is reached in place');
       await page.locator(`#d-${id}.flow-here`).waitFor();
-      assert.equal(await page.locator(`#d-${id}`).getAttribute('class'), 'dec flow-here');
+      assert.ok(await page.locator(`#d-${id}.flow-here:focus`).isVisible(), 'the marked row takes focus');
       assert.ok(
         (await region(page, 'Needs you').locator(`#d-${id}`).count()) === 1,
         'the row is under Needs you',

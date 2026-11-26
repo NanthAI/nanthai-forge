@@ -23,7 +23,7 @@ export const accountPlaceLabels: Record<AccountPlace, string> = {
 export const accountTabLabels: Partial<Record<AccountPlace, string>> = { people: 'People' };
 
 export const sectionLabels: Record<ProjectPlace, Record<string, string>> = {
-  needs: { '': 'Now', held: 'Held, redone or refused', 'loose-ends': 'Loose ends' },
+  needs: { '': 'Needs me' },
   lanes: { '': 'Open', history: 'History', touching: 'Who is touching what', sessions: 'Sessions' },
   plan: { '': 'Backlog' },
   code: { '': 'What landed', files: 'Files' },

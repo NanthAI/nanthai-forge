@@ -9,7 +9,7 @@
 import type { StateWord } from '../../ds';
 import type { SetupPreferences } from '../start/setup-model';
 import type { NowRow, TookOutRow } from './model';
-import { takenHead, whoOf } from './model';
+import { laneTitle, whoOf } from './model';
 
 export type FyiState = { clearedAt: number | null; clearedSequence: number | null; dismissed: string[] };
 export type FyiRead = {
@@ -82,6 +82,8 @@ export type FyiRow = {
   title: string;
   who: string | null;
   fact: string;
+  next?: string | null;
+  currentHold?: boolean;
   links: Link[];
   /** A revert the reader ran: its Lane can be brought back, or left out (J08). Such a row has no plain dismiss. */
   taken?: { laneId: string; intentId: string; title: string | null };
@@ -146,9 +148,11 @@ function heldRows(held: readonly NowRow[]): FyiRow[] {
     event: false,
     word: row.word,
     tag: row.tag,
-    title: row.head,
+    title: laneTitle(row),
     who: row.who,
-    fact: [row.next ? `next: ${row.next}` : '', row.note ?? ''].filter(Boolean).join(' · '),
+    fact: row.detail ?? '',
+    next: row.next,
+    currentHold: true,
     links: row.laneId
       ? [
           { label: 'What it waits on', to: { place: 'lanes', section: 'touching' }, focusLane: row.laneId },
@@ -167,9 +171,9 @@ function tookRows(took: readonly TookOutRow[]): FyiRow[] {
     event: false,
     word: 'Done',
     tag: 'Taken out',
-    title: takenHead(row, true),
+    title: laneTitle(row),
     who: null,
-    fact: 'its Lane keeps its saved work',
+    fact: 'You took this change out. Its Lane keeps its saved work.',
     links: [{ label: 'Open the Lane', to: { place: 'lanes', rest: row.laneId } }],
     taken: { laneId: row.laneId, intentId: row.id, title: row.title },
   }));
@@ -187,10 +191,10 @@ function readRows(read: FyiRead): FyiRow[] {
   const rows: FyiRow[] = [];
   for (const landing of read.landings) {
     const how = !landing.checked
-      ? 'landed without a check'
+      ? 'No check ran'
       : landing.redone
         ? `checked again after main moved${landing.thrown ? `, ${minutes(landing.thrown)} of CI time thrown away` : landing.thrown === null ? ', CI time thrown away not reported' : ''}`
-        : 'landed, checked';
+        : 'Check passed';
     // Every Review and Why opens the thing it names (ae068e0c): the Lane's evidence, else this landing's receipt.
     const receipt = { place: 'code', rest: landing.receiptId };
     const review: Link = landing.laneId
@@ -277,7 +281,7 @@ export function fyiView(
   read: FyiRead,
   held: readonly NowRow[],
   now: number,
-  /** The Held page lists every Lane held now, whatever the reader dismissed or cleared on Needs me. */
+  /** Expanded FYI keeps current holds visible even after the reader clears the history. */
   holdsAlways = false,
   took: readonly TookOutRow[] = [],
 ): FyiView {

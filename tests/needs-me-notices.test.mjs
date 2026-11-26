@@ -13,7 +13,7 @@ import { moduleUrl } from './convex-module.mjs';
 const needs = await import(moduleUrl('../convex/projectNeedsMe.ts'));
 const revertNotice = await import(moduleUrl('../convex/projectHostedRevertNotice.ts'));
 const { needsCount } = await import(moduleUrl('../web/src/app/needs/count.ts'));
-const { needsView, needsSentence, heldSentence } = await import(moduleUrl('../web/src/app/needs/model.ts'));
+const { needsView, needsSentence } = await import(moduleUrl('../web/src/app/needs/model.ts'));
 
 const fix = (state, summary) =>
   JSON.stringify({
@@ -113,7 +113,7 @@ test('more notices than the read lists make the Needs you count a lower bound, n
   const view = needsView(await read(f));
   assert.equal(view.countAtLeast, true);
   assert.match(needsSentence(view).bold, /^At least 20 things hold work/);
-  assert.equal(heldSentence(view).bold, 'Nothing is held now.', 'the held-Lane read was complete');
+  assert.equal(view.atLeast, false, 'the held-Lane read was complete');
 });
 
 /** A revert a person or agent ran (J08): the entry also names the Lane, who took it out and whose Lane it was. */

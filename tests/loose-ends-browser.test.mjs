@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 // Needs me › Loose ends (Item fc1831eb) in a real browser, on synthetic data through the real shell frame and route
-// screen (tests/browser/loose-ends.tsx): route entry subscribes once to the details read and nothing runs while idle;
+// region (tests/browser/loose-ends.tsx): Select replaces the summary read with one details read in place;
 // a hidden tab drops it and catches up with one subscription; each Show 25 more is one call with the group's cursor,
 // an empty continued page keeps going, and a failed page retries only itself; dated checks link to their Item; a Lane
 // saved meanwhile is skipped and named, and retry repeats only the Lane whose call failed; selection works from the
@@ -32,7 +32,7 @@ const REOPEN = 'projectHostedLifecycle:transition';
 const INTENTS = 'forge-loose-ends-intents-v1:';
 const laneId = n => `5d1c7a0e-0000-4000-8000-${String(n).padStart(12, '0')}`;
 
-test('Loose ends page: one details read, paged groups, set-aside results and retry, axe and widths', async t => {
+test('Loose ends Select: one details read, paged groups, set-aside results and retry, axe and widths', async t => {
   const launchOptions = chromiumLaunchOptions(t);
   if (!launchOptions) return;
   const out = mkdtempSync(join(tmpdir(), 'forge-loose-ends-'));
@@ -58,6 +58,12 @@ test('Loose ends page: one details read, paged groups, set-aside results and ret
     page.on('console', message => message.type() === 'error' && errors.push(message.text()));
     await routeBrowserFixture(page, out, html, { paths: ['/loose-ends.html'] });
     await page.goto(`https://forge.test/loose-ends.html?${new URLSearchParams({ data: 'demo', ...query })}`);
+    const before = page.url();
+    await page
+      .getByRole('region', { name: 'Loose ends' })
+      .getByRole('button', { name: 'Select', exact: true })
+      .click();
+    assert.equal(page.url(), before, 'Select opens in place');
     await page
       .locator(ready)
       .first()
@@ -74,10 +80,15 @@ test('Loose ends page: one details read, paged groups, set-aside results and ret
   const said = page => page.locator('[data-announce]').textContent();
   try {
     await t.test(
-      'route entry reads the details once; idle reads nothing; a hidden tab catches up once',
+      'Select switches from summary to details once, supports multiselect, and sleeps when hidden',
       async t => {
         const page = await open(t, DESK);
         assert.deepEqual(await calls(page), [`subscribe ${READ} {"details":true}`]);
+        assert.deepEqual(await page.evaluate(() => window.subscriptionChanges), [
+          `subscribe ${READ} {}`,
+          `unsubscribe ${READ} {}`,
+          `subscribe ${READ} {"details":true}`,
+        ]);
         assert.equal(await page.evaluate(() => window.intervals), 0, 'nothing on the page sets a timer');
         await page.evaluate(() => window.reads.sleep());
         await page.evaluate(() => window.reads.wake());
@@ -91,6 +102,13 @@ test('Loose ends page: one details read, paged groups, set-aside results and ret
           9,
           'the rows stay while asleep and after the catch-up',
         );
+        await page.getByRole('button', { name: 'Done selecting' }).click();
+        await page.getByRole('button', { name: 'Select', exact: true }).waitFor();
+        assert.equal(await page.locator('.row.le').count(), 0);
+        assert.deepEqual((await page.evaluate(() => window.subscriptionChanges)).slice(-2), [
+          `unsubscribe ${READ} {"details":true}`,
+          `subscribe ${READ} {}`,
+        ]);
       },
     );
 
@@ -160,7 +178,7 @@ test('Loose ends page: one details read, paged groups, set-aside results and ret
           assert.equal(await group(page, name).locator('.band input[type=checkbox]').count(), 1, name);
         assert.equal(await dated.locator('input[type=checkbox]').count(), 0);
         // (a) the mock sentence; a group not reported says so only on its band.
-        const head = await page.locator('.head').textContent();
+        const head = await page.locator('.loose-selection-summary').textContent();
         assert.match(
           head,
           /9 or more loose ends, 1 urgent\. The oldest is a Lane with no save for 6 days\. Setting a Lane aside keeps every save; a project in the trash can be restored for 90 days\./,
@@ -626,7 +644,10 @@ test('Loose ends page: one details read, paged groups, set-aside results and ret
 
     await t.test('empty, loading and a failed read that retries', async t => {
       const empty = await open(t, PHONE, { data: 'empty' }, '.loose-ends .quietline');
-      assert.match(await empty.locator('.head').textContent(), /Nothing is left lying around\./);
+      assert.match(
+        await empty.locator('.loose-selection-summary').textContent(),
+        /Nothing is left lying around\./,
+      );
       assert.match(
         await empty.locator('.quietline').first().textContent(),
         /^No loose ends in Lanes or projects\. Open Intents are read on request below\./,

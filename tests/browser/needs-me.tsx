@@ -31,6 +31,7 @@ const first = params.get('data') === 'first' || review;
 const connect = params.get('data') === 'connect';
 const calm = params.get('data') === 'calm' || stall;
 const variant = params.get('data');
+const cardHistory = variant === 'card-history';
 const stress = variant === 'stress';
 const worst = stress || variant === 'worst' || variant === 'over';
 const quiet = variant === 'quiet' || variant === 'empty' || variant === 'deploys';
@@ -216,6 +217,9 @@ const fyi: FyiRead = first
         landing(3, 'Adapter: abort on timeout', 89),
         landing(2, 'Stream parser: flush on close', 133, { redone: true, thrown: 240 }),
         landing(1, 'Bump the lockfile', 170, { checked: false }),
+        ...(cardHistory
+          ? Array.from({ length: 8 }, (_, i) => landing(70 + i, `Earlier landing ${i}`, 175 + i))
+          : []),
       ],
       landingsMore: false,
       broke: [],
@@ -553,7 +557,23 @@ const initialRead: NeedsRead =
                       canDecide: true,
                       asks: [],
                     }
-                  : baseRead;
+                  : cardHistory
+                    ? {
+                        ...baseRead,
+                        held: [
+                          lane(97, 'dependency', 1, {
+                            title:
+                              'Reconcile every saved API record with the released schema before switching the project to the new import route',
+                            dependsOn: {
+                              laneId: uuid(98),
+                              title:
+                                'Backfill the saved audit trail and confirm the imported record keeps the original revision, author and linked release across all projects',
+                            },
+                          }),
+                          ...baseRead.held,
+                        ],
+                      }
+                    : baseRead;
 type Mark = LineFeed['lanes'][number];
 const moving = (n: number, stage: Mark['stage'], minutes: number, check?: string): Mark => ({
   laneId: uuid(400 + n),
@@ -846,7 +866,6 @@ function Fixture() {
             <LooseFoldView
               read={loose}
               setAside={record('setAside')}
-              allHref="/sample-one/tidepool/needs/loose-ends"
               copy={async text => void writes.push(['copy', text])}
             />
           ) : null

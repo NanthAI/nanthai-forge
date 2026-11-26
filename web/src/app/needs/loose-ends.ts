@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 // Loose ends (Item fc1831eb) as data. `looseEndsView` is the folded Needs me region's Lane groups. `looseEndsScreen`
-// is the Loose ends page from the details read (projectLooseEnds:read with details: true): the five groups in the
+// is Loose ends in Select mode (projectLooseEnds:read with details: true): the groups in the
 // approved order, each with its rows, its next page cursor, or why it is not reported, plus pages the reader asked for
 // merged once per group. `setAsideWord` says what happened to each Lane the owner set aside, `trashWord` to each
 // project moved to the trash, and `handText` is the one prompt that hands Lanes to an agent. Pure.
@@ -94,7 +94,7 @@ const LANE_META: { key: LaneKey; title: string; hint: string }[] = [
   { key: 'active', title: 'Still active', hint: 'has a live landing or recent activity' },
 ];
 
-/** The folded region's view: Lane groups only. Leftover projects and dated checks are read on the Loose ends page. */
+/** The compact region's view: Lane groups only. Select mode reads leftover projects and dated checks. */
 export function looseEndsView(read: LooseEndsRead, now: number) {
   const groups = LANE_META.flatMap(meta => {
     const group = read.groups[meta.key];
@@ -353,7 +353,7 @@ const datedRow = (row: DatedRow, now: number): ScreenRow => ({
   proposed: !!row.proposed,
 });
 
-/** The Loose ends page: the five groups in the approved order (and the Lanes held meanwhile), the sentence over them.
+/** Loose ends selection groups in order (including Lanes held meanwhile), with a summary.
  * The owner (the read carries the set-aside authority) picks Lanes; a project is picked by its own owner. */
 export function looseEndsScreen(read: LooseEndsRead, pages: Pages, now: number, viewer?: string) {
   const owner = !!read.setAside;

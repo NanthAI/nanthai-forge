@@ -64,10 +64,12 @@ test('Needs me: exact progress, N+ when capped, a withdrawn landing under FYI; a
       assert.match(left, /^Left 245 Items$/);
       // FYI is the quiet group of Item 48049998: the withdrawal is a row there, never counted in Needs you.
       assert.deepEqual(await page.getByText(/^Refused$/).allTextContents(), []);
-      assert.match(
-        await page.locator('section[aria-label="FYI"]').textContent(),
-        /Site function for share cards: its agent withdrew the landing\./,
-      );
+      const fyi = page.getByRole('region', { name: 'FYI', exact: true });
+      const withdrawn = fyi.locator('.fyi-row', {
+        has: page.getByRole('heading', { name: 'Site function for share cards' }),
+      });
+      assert.match(await withdrawn.locator('.needs-card-status').textContent(), /Withdrawn/);
+      assert.match(await withdrawn.locator('.fyi-fact').textContent(), /Withdrawn to add a delta/);
       assert.doesNotMatch(
         await page.locator('section[aria-label="Needs you"]').textContent(),
         /Site function for share cards/,

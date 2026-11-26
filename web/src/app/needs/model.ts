@@ -49,6 +49,8 @@ export type NowRow = HeldLane & {
   tag: string;
   /** The line's question: what holds it and what the reader decides. */
   head: string;
+  /** Detail for the card, whose title and state are already shown separately. */
+  detail: string | null;
   who: string | null;
   /** The Lane's approval request, when the hold is a landing waiting for the owner. */
   approval: Approval | null;
@@ -100,7 +102,7 @@ export type NeedsView = {
   count: number;
   /** True when the held, question or parked rows stopped at the read's limit. */
   atLeast: boolean;
-  /** True when `count` is a lower bound: `atLeast`, or more recovery notices than the read lists. The Held page
+  /** True when `count` is a lower bound: `atLeast`, or more recovery notices than the read lists. FYI
    * counts Lanes only, so it keeps `atLeast`. */
   countAtLeast: boolean;
   /** False when the approvals read hit its bound: a missing request is "can't confirm", never "none". */
@@ -144,6 +146,13 @@ const facts: Record<HeldWhy, (title: string) => string> = {
   dependency: title => `${title} waits for the Lane it depends on.`,
   withdrawn: title => `${title}: its agent withdrew the landing.`,
   unknown: title => `${title} is held; Forge has no landing outcome on record for it.`,
+};
+const cardDetails: Partial<Record<HeldWhy, string>> = {
+  conflict: 'Conflicts with another change.',
+  infra: 'The check could not run on your CI.',
+  'stale-head': 'Main moved during the landing.',
+  review: 'Waiting for approval to land.',
+  unknown: 'Forge has no landing outcome on record.',
 };
 /** Who acts next on an FYI row, and how. `who` is the agent (or person) holding the Lane. */
 function nextStep(why: HeldWhy, who: string | null) {
@@ -249,18 +258,16 @@ const AGENT_COMMAND = /\bnforge\b/i;
 export const readable = (text: string | null | undefined) =>
   text && !RAW_UUID.test(text) && !AGENT_COMMAND.test(text) ? text : null;
 /** "@who took “title” out of main" (an offer to the Lane's owner), or "You took …" for the one who ran it. */
-export function takenHead(taken: Taken, mine: boolean) {
+function takenHead(taken: Taken) {
   const title = readable(taken.title?.replace(/\s+/g, ' ').trim());
-  return `${mine ? 'You' : (whoOf(taken.by, taken.agent) ?? 'Someone')} took ${title ? `“${title}”` : 'a change'} out of main.`;
+  return `${whoOf(taken.by, taken.agent) ?? 'Someone'} took ${title ? `“${title}”` : 'a change'} out of main.`;
 }
 function noticeRow(notice: Notice): NoticeRow {
   return {
     ...notice,
     word: notice.kind === 'reverted' ? 'Check failed' : 'Needs you',
     tag: noticeTags[notice.kind],
-    head: notice.taken
-      ? takenHead(notice.taken, false)
-      : (readable(notice.summary) ?? noticeFallback[notice.kind]),
+    head: notice.taken ? takenHead(notice.taken) : (readable(notice.summary) ?? noticeFallback[notice.kind]),
     next: readable(notice.next),
   };
 }
@@ -296,6 +303,7 @@ export function needsView(read: NeedsRead, now = Date.now()): NeedsView {
         head: after
           ? `${laneTitle(lane)} waits for ${after} to land.`
           : (waits ? questions : facts)[why](laneTitle(lane)),
+        detail: lane.note || (waits && after ? `Waiting for ${after} to land.` : (cardDetails[why] ?? null)),
         who,
         approval,
         landing:
@@ -433,22 +441,6 @@ export function needsSentence(view: NeedsView): { bold: string; rest: string } {
       (stuck
         ? `${plural(stuck, 'Lane')} ${stuck === 1 ? 'is' : 'are'} held; ${stuck === 1 ? 'its' : 'their'} agent or holder acts next.`
         : 'Nothing is held and no agent is waiting for an answer.'),
-  };
-}
-
-/** The Held page's sentence: how many Lanes are held now (those waiting on the reader and those waiting on their
- * agent or holder), by the same rows Needs me draws, then what the list below it is. */
-export function heldSentence(view: NeedsView): { bold: string; rest: string } {
-  const held = view.now.length + view.fyi.length;
-  return {
-    bold: held
-      ? `${view.atLeast ? 'At least ' : ''}${plural(held, 'Lane')} ${held === 1 ? 'is' : 'are'} held now.`
-      : view.atLeast
-        ? 'Some held Lanes could not be listed.'
-        : 'Nothing is held now.',
-    rest: view.now.length
-      ? `${view.now.length.toLocaleString()} wait${view.now.length === 1 ? 's' : ''} on you, decided on Needs me. Below: everything Forge held, redid or refused.`
-      : 'Below: everything Forge held, redid or refused.',
   };
 }
 

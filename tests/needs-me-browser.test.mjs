@@ -47,6 +47,7 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
       engine = browser,
       hasTouch = false,
       fixture = '/needs.html',
+      hash = '',
       query = {},
       locale,
       ready = '.dock[data-dock] .region',
@@ -82,7 +83,7 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
     page.on('console', message => message.type() === 'error' && errors.push(message.text()));
     await routeBrowserFixture(page, out, html);
     const search = new URLSearchParams({ data, theme, ...query });
-    await page.goto(`https://forge.test${fixture}?${search}`);
+    await page.goto(`https://forge.test${fixture}?${search}${hash}`);
     // The dock fixture is ready when its grips attach; other fixtures supply their own ready marker.
     await page
       .locator(ready)
@@ -535,26 +536,29 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
         needs.some(text => text.startsWith('The adapter tests can run')),
         'the question stays',
       );
-      assert.ok(needs.includes('Docs: queue limits page is parked for you.'), 'named to the reader: at once');
+      assert.ok(needs.includes('Docs: queue limits page'), 'named to the reader: at once');
       assert.ok(
-        needs.includes('Bench: replay the 12-Lane run is parked, no one named.'),
+        needs.includes('Bench: replay the 12-Lane run'),
         'no one named, idle 5 h: in the starter’s Needs me',
       );
       assert.ok(!needs.some(text => text.startsWith('Parked an hour ago')), 'idle 1 h: not yet');
       assert.ok(!needs.some(text => text.includes('retry budget')), "an agent's conflict is not Needs you");
       assert.ok(!needs.some(text => text.includes('Release notes')), 'a refusal is not Needs you');
       const fyi = await region(page, 'FYI').locator('.fyi-row .ttl').allTextContents();
-      assert.ok(
-        fyi.some(text => text.includes('Adapter: retry budget for fetch conflicts with another change')),
+      assert.ok(fyi.includes('Adapter: retry budget for fetch'));
+      const refused = region(page, 'FYI').locator('.fyi-row', { hasText: 'Release notes for 3.2' });
+      assert.equal(await refused.locator('h3').textContent(), 'Release notes for 3.2');
+      assert.match(await refused.locator('.needs-card-status').textContent(), /Refused/);
+      assert.match(
+        await refused.locator('.needs-card-next').textContent(),
+        /Next: sample-one\/copper-moth reads why and lands again/,
       );
-      assert.ok(fyi.some(text => /Forge refused the landing of Release notes for 3\.2/.test(text)));
-      assert.ok(fyi.some(text => text.includes('next: sample-one/copper-moth reads why and lands again')));
+      assert.doesNotMatch(await refused.textContent(), /Forge refused the landing of/);
       // A person's own failed check is theirs to fix, not a decision: FYI, by its real cause, never titled by a raw id.
-      assert.ok(
-        fyi.some(
-          text => text.startsWith('Check failed') && text.includes('Lane 5d1c7a0e: its check failed.'),
-        ),
-      );
+      const failed = region(page, 'FYI').locator('.fyi-row', {
+        has: page.getByRole('heading', { name: 'Lane 5d1c7a0e', exact: true }),
+      });
+      assert.match(await failed.locator('.needs-card-status').textContent(), /Check failed/);
       const uuid = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/;
       assert.ok(![...needs, ...fyi].some(text => uuid.test(text)), 'no raw id as a title, anywhere');
       // Owner 2026-11-23 14:16Z: the FYI tile row is gone (its figures duplicated the Now tiles in a different, capped window).
@@ -580,6 +584,54 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
       assert.equal(await page.locator('section.region[aria-label="Also here"]').count(), 0);
       assert.equal(await page.evaluate(() => window.intervals), 0, 'no repeating timer: idle costs nothing');
     });
+
+    await t.test(
+      'FYI expands and pages in place, and long cards use the full width on desktop and phone',
+      async t => {
+        for (const viewport of [DESK, PHONE]) {
+          const page = await open(t, viewport, 'card-history');
+          const fyi = region(page, 'FYI');
+          const rows = fyi.locator('.fyi-row');
+          const original = page.url();
+          assert.equal(await page.locator('#sidebar-needs .page-link').count(), 0);
+          assert.equal(await rows.count(), 6);
+          const card = rows.filter({ hasText: 'Reconcile every saved API record' });
+          assert.ok(await card.getByRole('button', { name: /^Dismiss:/ }).isVisible());
+          await fyi.getByRole('button', { name: 'Show all', exact: true }).click();
+          assert.equal(page.url(), original);
+          assert.equal(await rows.count(), 12);
+          await fyi.getByRole('button', { name: /^Show \d+ more$/ }).click();
+          assert.ok((await rows.count()) > 12);
+          for (const label of ['What it waits on', 'Open the Lane'])
+            assert.ok(await card.locator('.needs-card-top').getByRole('link', { name: label }).isVisible());
+          const boxes = await card.evaluate(element => {
+            const bounds = selector => element.querySelector(selector).getBoundingClientRect().toJSON();
+            const title = element.querySelector('h3');
+            const next = element.querySelector('.needs-card-next');
+            const lines = node => {
+              const range = document.createRange();
+              range.selectNodeContents(node);
+              return new Set([...range.getClientRects()].map(rect => Math.round(rect.top))).size;
+            };
+            return {
+              top: bounds('.needs-card-top'),
+              title: bounds('h3'),
+              next: bounds('.needs-card-next'),
+              titleLines: lines(title),
+              nextLines: lines(next),
+            };
+          });
+          assert.equal(boxes.title.width, boxes.top.width);
+          assert.equal(boxes.next.width, boxes.top.width);
+          assert.ok(boxes.title.top >= boxes.top.bottom && boxes.next.top >= boxes.title.bottom);
+          assert.ok(boxes.titleLines > 1 && boxes.nextLines > 1);
+          await fyi.getByRole('radio', { name: /^Outside the code/ }).click();
+          assert.equal(await rows.count(), 2, 'the kind filter works in expanded history');
+          await fyi.getByRole('button', { name: 'Clear all' }).click();
+          assert.deepEqual(await page.evaluate(() => window.writes), [['dismiss', { clearAll: true }]]);
+        }
+      },
+    );
 
     await t.test('a hand-back and an asked-ahead question are actionable in Needs you', async t => {
       const page = await open(t, PHONE, 'conversation');
@@ -689,7 +741,7 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
           ['Lanes nobody holds'],
         );
         assert.match(
-          await loose.getByRole('link', { name: 'All loose ends, with picking many' }).getAttribute('title'),
+          await loose.locator('.needs-fold').getAttribute('title'),
           /^Not reported yet: .*leftover projects/,
         );
         await loose.getByRole('button', { name: 'Ask an agent to tidy up' }).click();
@@ -714,6 +766,15 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
         );
       },
     );
+
+    await t.test('Needs me anchors focus the FYI and Loose ends headings', async t => {
+      const fyi = await open(t, DESK, 'card-history', 'dark', { hash: '#fyi' });
+      await fyi.getByRole('button', { name: 'Show fewer' }).waitFor();
+      await fyi.locator('#fyi:focus').waitFor();
+      const loose = await open(t, PHONE, 'card-history', 'dark', { hash: '#loose-ends' });
+      await loose.locator('#loose-ends:focus').waitFor();
+      assert.ok(await region(loose, 'Loose ends').locator('.loose-row').first().isVisible());
+    });
 
     await t.test('with no loose ends, the open panel says so on one line', async t => {
       for (const [viewport, width] of [
@@ -791,7 +852,7 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
         assert.equal(shell, '7', 'the 4 other decisions plus the revert, the fix and the mirror');
         const rows = needs.locator('.dec');
         // Notices come first, so they are among the rows shown before "Show more".
-        const tags = await rows.locator('.dtop').allTextContents();
+        const tags = await rows.locator('.needs-card-status').allTextContents();
         for (const tag of ['Reverted from main', 'Fix needed', 'GitHub mirror'])
           assert.ok(
             tags.some(text => text.includes(tag)),
@@ -843,12 +904,17 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
             );
             // The offer says who took which Lane out and when, with two answers; nothing is held for it.
             const offer = needs.locator('.dec', { hasText: 'Stream parser: handle split UTF-8' });
+            assert.equal(await offer.locator('h3').textContent(), 'Stream parser: handle split UTF-8', label);
             assert.match(
-              await offer.locator('h3').textContent(),
-              /^@sample-two took “Stream parser: handle split UTF-8” out of main\.$/,
+              await offer.locator('p.meta').textContent(),
+              /@sample-two took this change out/,
               label,
             );
-            assert.match(await offer.locator('.dtop').textContent(), /Taken out of main.*14 min ago/, label);
+            assert.match(
+              await offer.locator('.needs-card-status').textContent(),
+              /14 min ago.*Taken out of main/,
+              label,
+            );
             assert.deepEqual(
               await offer.getByRole('button').allTextContents(),
               ['Bring it back', 'Leave it out'],
@@ -867,11 +933,12 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
             // The reader's own revert is an FYI row, never a Needs you card.
             assert.equal(await needs.getByText('Retry the upload on a dropped socket').count(), 0, label);
             const own = fyi.locator('.fyi-row', { hasText: 'Retry the upload on a dropped socket' });
-            assert.match(
+            assert.equal(
               await own.locator('.ttl').textContent(),
-              /You took “Retry the upload on a dropped socket” out of main\./,
+              'Retry the upload on a dropped socket',
               label,
             );
+            assert.match(await own.locator('p.meta').textContent(), /You took this change out/, label);
             assert.deepEqual(
               await own.getByRole('button').allTextContents(),
               ['Bring it back', 'Leave it out'],

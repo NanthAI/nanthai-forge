@@ -108,7 +108,7 @@ SECRET_FOUND: a save (or land --save) held a credential and stored nothing. Remo
   lanes: {
     title: 'Lanes',
     text: `start {planningItemId} gives the full Lane id and path. New default folders use <title-slug>-<first 8 of id>. Existing folders and start retries keep their paths. Pass path to choose a folder.
-- lanes {planningItemId?,intentId?,state?,limit?,cursor?,view?} lists open Lanes with Intent, actor, save and landing. Filter by Issue or exact Intent. With planningItemId, state "all" includes landed Lanes. Views: "live" hides dormant Lanes, "dormant" lists them, "tree" shows stacks, overlaps, state and next step. Follow continueCursor. In "loose-ends", follow groups.stopped.continueCursor. Start the Intent group with {view:"loose-ends",intents:true} and follow groups.intents.continueCursor.
+- lanes {planningItemId?,intentId?,state?,limit?,cursor?,view?} lists open Lanes with Intent, actor, save and landing. With planningItemId, state "all" includes landed Lanes. Views: "live" hides dormant Lanes, "dormant" lists them, "tree" shows stacks, overlaps, state and next step. Follow continueCursor. In "loose-ends", follow groups.stopped.continueCursor. Start the Intent group with {view:"loose-ends",intents:true} and follow groups.intents.continueCursor. Needs me is one page with FYI and Loose ends in place.
 - x abandon-dormant {apply?,limit?} dry-runs, or with apply:true abandons at most 25 abandonable dormant Lanes per call.
 - lane-history {laneId?} reads one Lane's history: openedAt, startBase, lastSyncedBase, state, head and landing {receiptId,commit,current,revertedBy?,mainRedHolds?}.
 - flow {} shows the top bar's stops, Lane counts, longest wait, main today and CI minutes in one read.

@@ -661,9 +661,10 @@ test('J08: a card is worded for a person, never from the board text: no raw id o
     assert.equal(fyi.rows.length, 1);
     assert.equal(
       fyi.rows[0].title,
-      'You took a change out of main.',
-      'a title that is only an id is never drawn',
+      'Lane 5d1c7a0e',
+      'a title that is only an id falls back to the short Lane mark',
     );
+    assert.match(fyi.rows[0].fact, /You took this change out/);
     assert.deepEqual(fyi.rows[0].taken, { laneId: uuid(12), intentId: uuid(11), title: uuid(13) });
     for (const row of fyi.rows) assert.doesNotMatch(`${row.title} ${row.fact}`, RAW);
     assert.equal(view.count, 4, 'only the four current Needs you notices count');

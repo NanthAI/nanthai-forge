@@ -196,7 +196,7 @@ test('project pages stay reachable by sidebar, flyout and phone sheets, with sta
         await page.goto(origin + project);
         const heading = page.getByRole('heading', {
           level: 1,
-          name: 'Now',
+          name: 'Needs me',
           exact: true,
         });
         await heading.waitFor();
@@ -440,10 +440,9 @@ test('project pages stay reachable by sidebar, flyout and phone sheets, with sta
         await assets(page, layerGate);
         await page.goto(origin + base);
         if (name === 'Project') {
-          await page
-            .getByRole('heading', { level: 1 })
-            .getByRole('button', { name: 'Needs me: Now. Choose a page' })
-            .waitFor();
+          const heading = page.getByRole('heading', { level: 1, name: 'Needs me', exact: true });
+          await heading.waitFor();
+          assert.equal(await heading.getByRole('button').count(), 0, 'Needs me has no page picker');
         }
         const nav = page.getByRole('navigation', { name, exact: true });
         const trigger = nav.getByRole('button', { name: 'More', exact: true });

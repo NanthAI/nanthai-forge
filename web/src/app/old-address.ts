@@ -6,13 +6,13 @@
 // `/review/<id>`) needs one access-checked read (convex/urlLegacy.ts): the page that renders it is OldAddress.tsx.
 import { longId } from '../../../src/project-routes';
 import { reservedHandles } from '../../../src/readable-urls';
-import { hrefFor, type AppRoute } from './paths';
+import { hrefFor, needsSectionHref, type AppRoute } from './paths';
 
 type Dest = { place: Extract<AppRoute, { frame: 'project' }>['place']; section: string; rest: string };
 type Ref = { projectId: string } | { handle: string; slug: string };
 export type Find = { kind: 'decision' | 'review'; id: string };
 export type OldAddress =
-  /** Go to `to` (the address without its #hash). */
+  /** Go to `to` (its hash, when present, takes precedence). */
   | { kind: 'go'; to: string }
   /** Ask the server where `find` (or the project) lives, then go there; `dest` is where the project's own page is,
    * `search` what the new address keeps of the old query. */
@@ -74,7 +74,7 @@ function fromQuery(p: URLSearchParams): Pick {
     return { dest: plan(longId(p.get('intent')!)) };
   if (p.get('planningItem')) return { dest: plan(p.get('planningItem')!) };
   if (p.get('activity') === '1' || section === 'coordination' || section === 'activity')
-    return { dest: { place: 'needs', section: 'held', rest: '' } };
+    return { dest: front, search: '?view=needs#fyi' };
   if (tab === 'settings' || settingsTabs.includes(section ?? '')) {
     const home = settings[settingsId];
     // The old devices list is the account's: the project's settings open instead.
@@ -147,7 +147,11 @@ export function oldAddress(pathname: string, search: string): OldAddress | null 
   };
   switch (section) {
     case 'activity':
-      return to({ place: 'needs', section: 'held', rest: '' });
+      return { kind: 'go', to: needsSectionHref(first, second, 'fyi') };
+    case 'needs':
+    case 'needs-me':
+      if (tail.length || (id !== 'held' && id !== 'loose-ends')) return null;
+      return { kind: 'go', to: needsSectionHref(first, second, id === 'held' ? 'fyi' : 'loose-ends') };
     case 'intents':
     case 'work':
       return to(plan(id ? longId(id) : ''));

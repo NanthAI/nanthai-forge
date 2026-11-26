@@ -49,7 +49,7 @@ export type AccountPlace = (typeof accountPlaces)[number];
 
 /** Pages of a place. Its first page has no path segment. */
 export const placeSections: Record<ProjectPlace, readonly string[]> = {
-  needs: ['', 'held', 'loose-ends'],
+  needs: [''],
   lanes: ['', 'history', 'touching', 'sessions'],
   plan: [''],
   code: ['', 'files'],
@@ -157,9 +157,7 @@ export function hrefFor(route: AppRoute): string {
     case 'project': {
       const parts = [ROOT, enc(route.handle), enc(route.project)];
       const place = placeSegment[route.place];
-      // Needs me is the project's front page; its sections sit under needs-me/.
       if (place) parts.push(place);
-      else if (route.section) parts.push('needs-me');
       if (route.section) parts.push(enc(route.section));
       // A detail (a Lane, an Item, a file) follows; detail ids never equal a section name.
       if (route.rest) parts.push(...route.rest.split('/').map(enc));
@@ -168,6 +166,10 @@ export function hrefFor(route: AppRoute): string {
     case 'missing':
       return route.path;
   }
+}
+
+export function needsSectionHref(handle: string, project: string, section: 'fyi' | 'loose-ends') {
+  return `${hrefFor({ frame: 'project', handle, project, place: 'needs', section: '', rest: '' })}?view=needs#${section}`;
 }
 
 /** Discovery links keep the public front page when the visitor signs in. The ordinary root still opens Needs me. */

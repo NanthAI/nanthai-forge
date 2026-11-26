@@ -3,23 +3,57 @@
 // Needs me › Loose ends (Items 48049998, fc1831eb, 77d2e8bc): what was started and left, read from projectLooseEnds:read
 // while the region is open, which it is by default (a reader who folds it is remembered, and a folded region reads
 // nothing). Only groups with rows are listed; with none it says "No loose ends." on one line, and the groups not
-// reported yet are named on hover and in the full view. A Lane nobody holds can be set aside here, one at a
+// reported yet are named on hover and in Select mode. A Lane nobody holds can be set aside here, one at a
 // time, through the existing dormant sweep (which re-checks it: one that gained a save meanwhile is skipped). "Ask an
-// agent to tidy up" copies one instruction an agent can follow with the existing loose-ends read. The Loose ends
-// section stays as the expanded view, with picking many at once.
-import { useMemo, useState } from 'react';
+// agent to tidy up" copies one instruction an agent can follow with the existing loose-ends read.
+import { lazy, Suspense, useMemo, useState } from 'react';
 import { useQuery } from 'convex/react';
 import { makeFunctionReference } from 'convex/server';
 import type { Id } from '../../../../convex/_generated/dataModel';
 import { Band, Key, Row, State, Who } from '../../ds';
 import { Announcer, useAnnounce } from '../../ds/behaviour/announce';
-import { A } from '../frames';
+import type { PlaceProps } from '../screens';
 import { looseEndsView, setAsideWord, type LooseEndsRead } from './loose-ends';
 
 const looseRead = makeFunctionReference<'query', { projectId: Id<'hostedProjects'> }, string>(
   'projectLooseEnds:read',
 );
 export type SetAside = (authorityEpoch: number, laneIds: string[]) => Promise<string>;
+const LooseSelection = lazy(() => import('./LooseSelection'));
+
+export function LooseBody({
+  open,
+  setAside,
+  ...props
+}: Pick<PlaceProps, 'route' | 'projectId' | 'projectName' | 'viewerHandle'> & {
+  open: boolean;
+  setAside: SetAside;
+}) {
+  const [selecting, setSelecting] = useState(false);
+  if (!open) return null;
+  return (
+    <>
+      <div className="pf">
+        <Key size="sm" onClick={() => setSelecting(!selecting)}>
+          {selecting ? 'Done selecting' : 'Select'}
+        </Key>
+      </div>
+      {selecting ? (
+        <Suspense
+          fallback={
+            <div className="quietline" aria-busy="true">
+              Loading loose ends…
+            </div>
+          }
+        >
+          <LooseSelection {...props} />
+        </Suspense>
+      ) : (
+        <LooseFold projectId={props.projectId} open={open} setAside={setAside} />
+      )}
+    </>
+  );
+}
 
 /** What an agent is asked to do: read the full stopped group, then follow each row's own `next`. */
 export const TIDY_TEXT =
@@ -29,28 +63,24 @@ export function LooseFold({
   projectId,
   open,
   setAside,
-  allHref,
 }: {
   projectId: Id<'hostedProjects'>;
   open: boolean;
   setAside: SetAside;
-  allHref: string;
 }) {
   const live = useQuery(looseRead, open ? { projectId } : 'skip');
   const read = useMemo(() => (live === undefined ? undefined : (JSON.parse(live) as LooseEndsRead)), [live]);
   if (!open) return null;
-  return <LooseFoldView read={read} setAside={setAside} allHref={allHref} />;
+  return <LooseFoldView read={read} setAside={setAside} />;
 }
 
 export function LooseFoldView({
   read,
   setAside,
-  allHref,
   copy = text => navigator.clipboard.writeText(text),
 }: {
   read: LooseEndsRead | undefined;
   setAside: SetAside;
-  allHref: string;
   copy?: (text: string) => Promise<void>;
 }) {
   const [outcome, setOutcome] = useState<Record<string, string>>({});
@@ -65,9 +95,9 @@ export function LooseFoldView({
   const view = looseEndsView(read, read.at);
   const shown = view.groups.filter(group => group.reported && group.rows.length);
   const unreported = view.groups.filter(group => !group.reported);
-  // The groups not reported yet are said on hover, never as always-on bands (the full view lists each with its reason).
+  // Select mode also names the groups that aren't reported and why.
   const notYet = unreported.length
-    ? `Not reported yet: ${unreported.map(group => group.title.toLowerCase()).join(', ')}. The full view says why.`
+    ? `Not reported yet: ${unreported.map(group => group.title.toLowerCase()).join(', ')}. Select shows why.`
     : undefined;
   const one = async (laneId: string) => {
     if (!read.setAside) return;
@@ -127,7 +157,7 @@ export function LooseFoldView({
             {group.rows.length > 3 || group.more ? (
               <div className="pf">
                 {Math.min(3, group.rows.length)} of {group.rows.length}
-                {group.more ? ' or more' : ''}; the rest are in <A href={allHref}>Loose ends</A>.
+                {group.more ? ' or more' : ''}; use Select to see the rest.
               </div>
             ) : null}
           </div>
@@ -137,10 +167,7 @@ export function LooseFoldView({
           No loose ends.
         </div>
       )}
-      <div className="pf needs-fold">
-        <A href={allHref} className="lk" title={notYet}>
-          All loose ends, with picking many
-        </A>
+      <div className="pf needs-fold" title={notYet}>
         <Key
           size="sm"
           kind="ghost"

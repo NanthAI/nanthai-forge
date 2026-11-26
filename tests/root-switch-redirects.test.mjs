@@ -59,7 +59,7 @@ async function arrive(start) {
       continue;
     }
     if (old) return { look: old, hops };
-    return { at: url.pathname + url.search, route: parseAppPath(url.pathname), hops };
+    return { at: url.pathname + url.search + url.hash, route: parseAppPath(url.pathname), hops };
   }
   assert.fail(`${start} did not settle`);
 }
@@ -86,7 +86,8 @@ const rows = [
   [`${p}/lanes`, `${p}/lanes`],
   [`${p}/lanes/${LANE}`, `${p}/lanes/${LANE}`],
   [`${p}/lanes/${short('l', LANE)}`, `${p}/lanes/${LANE}`],
-  [`${p}/activity`, `${p}/needs-me/held`],
+  [`${p}/activity`, `${p}?view=needs#fyi`],
+  [`${p}/needs-me/loose-ends`, `${p}?view=needs#loose-ends`],
   [`${p}/intents`, `${p}/plan`],
   [`${p}/intents/${short('i', LANE)}`, `${p}/plan/${LANE}`],
   [`${p}/planning`, `${p}/plan`],
@@ -130,7 +131,7 @@ const earlier = [
   [`/-${p}?view=needs`, `${p}?view=needs`],
   [`/-${p}/lanes/${LANE}?submission=s1`, `${p}/lanes/${LANE}?submission=s1`],
   [`/-${p}/lanes/${LANE}/checked`, `${p}/lanes/${LANE}/checked`],
-  [`/-${p}/needs-me/held`, `${p}/needs-me/held`],
+  [`/-${p}/needs-me/held`, `${p}?view=needs#fyi`],
   [`/-${p}/code/files/src/a.ts`, `${p}/code/files/src/a.ts`],
   [`/-${p}/settings/mirror`, `${p}/settings/mirror`],
 ];

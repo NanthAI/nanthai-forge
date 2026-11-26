@@ -150,7 +150,7 @@ function Pages() {
       lastProject = null;
       navigate(destination.href, { replace: true });
     } else if (needsSignIn) {
-      navigate(signInHref(location.pathname + location.search), { replace: true });
+      navigate(signInHref(location.pathname + location.search + location.hash), { replace: true });
     }
   }, [isLoading, isAuthenticated, needsSignIn]);
   useEffect(() => {

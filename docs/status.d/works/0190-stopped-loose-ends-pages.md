@@ -1,13 +1,13 @@
 The CLI and MCP Loose ends read pages dormant and stopped Lanes, inactive projects, and dated Done-when
-checks. The Needs me › Loose ends page shows the same five groups from one details read, links each dated
+checks. Select in the Loose ends region on Needs me opens the same groups from one details read, links each dated
 check to its Item, and asks for a group's next page only when the reader presses Show 25 more. The owner
 picks rows to set Lanes aside, copy one prompt that hands Lanes to an agent through the explicit takeover, or
 move their own leftover projects to the trash (restorable for 90 days). A row that changed meanwhile is skipped
 and named, retry repeats only failed calls, and Undo reopens or restores what the last action changed. Rows carry details kept by the writes that already happen: saves and landed-before on Lanes, the pass of an
 unrequested check on Checked, never landed, and size and open Lanes on leftover projects. A row not yet backfilled
 says "not recorded" and never a guessed number. Select all reads the rest of Lanes nobody holds a page at a time. The Intent group pages open Intents with no linked Item
-with their observed activity and supports a retry-safe, reversible set-aside batch. On the page it is its own group,
-Open Intents with no Item, read on request (Look for them, then Show 25 more): opening the page reads no Intents. The owner
+with their observed activity and supports a retry-safe, reversible set-aside batch. Open Intents with no Item is its
+own group, read on request (Look for them, then Show 25 more). Entering Select mode reads no Intents. The owner
 picks rows and sets them aside in batches of 25, one mutation per batch; an Intent that gained a save, an Item or a change
 since its page was read is skipped and named, a failed batch is replayed unchanged, and Undo reopens each at the version its
 receipt returned. A row whose Item link is not reported, whose Lanes one read cannot cover, or that is proposed or ready (Undo

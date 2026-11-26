@@ -53,7 +53,9 @@ test('served old addresses reach the rebuilt app: plain paths redirect, id-only 
   for (const [from, to] of [
     ['/projects?request=r1', `${ROOT}/account?request=r1`],
     ['/settings', `${ROOT}/account/people`],
-    ['/mara/tide-pool/activity#top', `${ROOT}/mara/tide-pool/needs-me/held#top`],
+    ['/mara/tide-pool/activity#top', `${ROOT}/mara/tide-pool?view=needs#fyi`],
+    ['/mara/tide-pool/needs-me/held', `${ROOT}/mara/tide-pool?view=needs#fyi`],
+    ['/mara/tide-pool/needs-me/loose-ends', `${ROOT}/mara/tide-pool?view=needs#loose-ends`],
     ['/mara/tide-pool/planning?planningItem=abcd1234', `${ROOT}/mara/tide-pool/plan/abcd1234`],
   ]) {
     const { page, old } = await open(from);

@@ -60,7 +60,7 @@ const old = earlier ? null : oldAddress(pathname, location.search);
 if (earlier) {
   location.replace(earlier + location.search + location.hash);
 } else if (old?.kind === 'go') {
-  location.replace(old.to + location.hash);
+  location.replace(old.to + (old.to.includes('#') ? '' : location.hash));
 } else {
   root.render(
     <AppBoundary>

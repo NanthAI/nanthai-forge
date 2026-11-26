@@ -19,7 +19,7 @@ export function safeNext(value: string | null | undefined): string {
     !url.pathname.startsWith('//') &&
     (isAppPath(url.pathname) || oldAddress(url.pathname, url.search)?.kind === 'look') &&
     !url.pathname.toLowerCase().startsWith(`${ROOT}/signin`)
-    ? url.pathname + url.search
+    ? url.pathname + url.search + url.hash
     : `${ROOT}/account`;
 }
 

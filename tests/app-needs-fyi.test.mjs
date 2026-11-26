@@ -87,7 +87,7 @@ test('agent conflicts and refusals are FYI rows beside landings and settings, ne
     "yesterday's landing is outside today's window; held Lanes and messages last while their state does",
   );
   const conflict = view.rows.find(row => row.key.startsWith('held:c'));
-  assert.match(conflict.fact, /^next: sample-one\/quiet-otter updates it from main and lands again/);
+  assert.match(conflict.next, /^sample-one\/quiet-otter updates it from main and lands again/);
   assert.deepEqual(view.counts, { all: 5, code: 4, outside: 1 });
   assert.equal(view.rows.find(row => row.key.startsWith('setting:')).title, 'Settings changed: checks');
 });
@@ -260,7 +260,7 @@ test('incident ae068e0c: a red row’s Why opens that red (its sequence), never 
 
 test("a held FYI row carries its cause line and a link to that Lane's wait chain", () => {
   const rows = fyiView(fyiRead(), needs([held('c', 'conflict', minutesAgo(10))]).fyi, NOW).rows;
-  assert.match(rows[0].fact, /^next: /);
+  assert.ok(rows[0].next, 'the next step is separate from detail');
   const wait = rows[0].links.find(link => link.label === 'What it waits on');
   assert.deepEqual(wait.to, { place: 'lanes', section: 'touching' });
   assert.equal(wait.focusLane, 'c');

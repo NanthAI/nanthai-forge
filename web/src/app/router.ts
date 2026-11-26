@@ -21,7 +21,7 @@ const inApp = (url: URL) =>
   url.origin === location.origin && isAppPath(url.pathname) && !oldAddress(url.pathname, url.search);
 
 function snapshot() {
-  const href = location.pathname + location.search;
+  const href = location.pathname + location.search + location.hash;
   if (href !== current) {
     current = href;
     route = parseAppPath(location.pathname);

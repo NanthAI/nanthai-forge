@@ -13,7 +13,10 @@ import { navigate } from './router';
 export default function OldAddressPage({ look }: { look: Extract<OldAddress, { kind: 'look' }> }) {
   const found = useQuery(api.urlLegacy.resolve, { ...look.ref, ...(look.find && { find: look.find }) });
   useEffect(() => {
-    if (found) navigate(lookHref(look, found) + location.hash, { replace: true });
+    if (found) {
+      const href = lookHref(look, found);
+      navigate(href + (href.includes('#') ? '' : location.hash), { replace: true });
+    }
   }, [found, look]);
   if (found === null)
     return (

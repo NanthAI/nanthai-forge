@@ -61,6 +61,14 @@ test('a project discovery link survives sign-in while the ordinary signed-in add
   assert.equal(paths.isPublicProjectView(project('settings'), true, 'public'), false);
 });
 
+test('sign-in returns to the linked section of Needs me', () => {
+  for (const section of ['fyi', 'loose-ends']) {
+    const href = `${ROOT}/mara/tide-pool?view=needs#${section}`;
+    const next = new URL(paths.signInHref(href), 'https://forge.test').searchParams.get('next');
+    assert.equal(safeNext(next), href);
+  }
+});
+
 test('b0704959: the app is served at the root; the public page, docs, files and the earlier /- addresses are not app pages', () => {
   assert.equal(ROOT, '');
   assert.equal(paths.isAppPath('/mara/tide-pool'), true, 'the project page is the address bindings store');

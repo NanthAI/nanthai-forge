@@ -20,6 +20,8 @@ import { ConvexError } from 'convex/values';
 import { createRoot } from 'react-dom/client';
 import '../../web/src/ds';
 import '../../web/src/app/app.css';
+import '../../web/src/app/needs/needs.css';
+import { Region } from '../../web/src/ds';
 import { ProjectFrame } from '../../web/src/app/frames';
 import type { LooseEndsRead } from '../../web/src/app/needs/loose-ends';
 import { createLiveReads } from '../../web/src/live-reads';
@@ -356,6 +358,7 @@ const live = () => {
 };
 const rerun = () => queueMicrotask(() => listeners.forEach(listener => listener()));
 const copied: string[] = [];
+const subscriptionChanges: string[] = [];
 Object.defineProperty(navigator, 'clipboard', {
   value: { writeText: async (text: string) => void copied.push(text) },
 });
@@ -364,20 +367,24 @@ const fake = {
     const { projectId: _, ...rest } = args;
     return {
       localQueryResult: () => {
+        if (!args.details) return live();
         if (data === 'loading') return undefined;
         // The failed read answers once the page subscribes again (its Try again).
         if (data === 'error' && subscriptions < 2) throw new Error('Synthetic read failure');
         return live();
       },
       onUpdate: (listener: () => void) => {
-        subscriptions++;
+        if (args.details) subscriptions++;
         listeners.add(listener);
-        calls.push(`subscribe ${name(query)} ${JSON.stringify(rest)}`);
+        const joined = `subscribe ${name(query)} ${JSON.stringify(rest)}`;
+        subscriptionChanges.push(joined);
+        if (args.details) calls.push(joined);
         // The fresh subscription's answer arrives from the server.
-        if (data === 'error' && subscriptions === 2) queueMicrotask(listener);
+        if (args.details && data === 'error' && subscriptions === 2) queueMicrotask(listener);
         return () => {
           listeners.delete(listener);
-          calls.push(`unsubscribe ${name(query)}`);
+          subscriptionChanges.push(`unsubscribe ${name(query)} ${JSON.stringify(rest)}`);
+          if (args.details) calls.push(`unsubscribe ${name(query)}`);
         };
       },
     };
@@ -468,17 +475,17 @@ const fake = {
   },
 };
 const reads = createLiveReads();
-Object.assign(window, { calls, reads, copied });
+Object.assign(window, { calls, reads, copied, subscriptionChanges });
 const client = reads.client(fake) as unknown as ConvexReactClient;
 const route = {
   frame: 'project' as const,
   handle: 'sample-one',
   project: 'tidepool',
   place: 'needs' as const,
-  section: 'loose-ends',
+  section: '',
   rest: '',
 };
-const { default: LooseEnds } = await import('../../web/src/app/needs/LooseEnds');
+const { LooseBody } = await import('../../web/src/app/needs/LooseFold');
 
 createRoot(document.getElementById('root')!).render(
   <ProjectFrame
@@ -490,13 +497,20 @@ createRoot(document.getElementById('root')!).render(
     controls={{ onPalette: () => {}, onKeys: () => {}, viewerHandle: 'sample-one', onPicker: () => {} }}
   >
     <ConvexProvider client={client}>
-      <LooseEnds
-        route={route}
-        projectId={(params.get('here') ?? 'fixture-project') as never}
-        projectName="tidepool"
-        feed={undefined}
-        viewerHandle="sample-one"
-      />
+      <div className="needs-me">
+        <Region title="Loose ends">
+          <LooseBody
+            route={route}
+            projectId={(params.get('here') ?? 'fixture-project') as never}
+            projectName="tidepool"
+            viewerHandle="sample-one"
+            open
+            setAside={async () => {
+              throw new Error('The Select fixture exercises the detailed actions.');
+            }}
+          />
+        </Region>
+      </div>
     </ConvexProvider>
   </ProjectFrame>,
 );

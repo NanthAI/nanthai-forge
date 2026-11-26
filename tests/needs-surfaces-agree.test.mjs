@@ -82,7 +82,6 @@ function surfaces(needsRead, lanes) {
     badge: count.needsCount(needsRead, NOW).n,
     nowRows: view.now.length + view.asks.length + view.parked.length,
     nowHeadline: model.needsSentence(view),
-    heldHeadline: model.heldSentence(view),
     heldPageRows: heldPage.rows.filter(row => !row.event).map(row => row.key.split('@')[0]),
     // The top bar's line says "held" only for Lanes that wait on the reader.
     lineHeld: lineStopCounts(feed, saved, waiting).held,
@@ -110,7 +109,6 @@ test('9b9057a9: a Lane held on its agent is held on every surface and needs nobo
     'never "nothing is held" while a Lane is held',
   );
   assert.match(said.nowHeadline.rest, /1 Lane is held/);
-  assert.equal(said.heldHeadline.bold, '1 Lane is held now.');
   assert.deepEqual(said.heldPageRows, ['held:88671ba0'], 'the Held page lists it');
   assert.equal(said.lineHeld, 0, 'the line counts only holds that wait on the reader');
   assert.notEqual(said.mark, 'waiting');
@@ -133,8 +131,6 @@ test("9b9057a9: a Lane held for the reader's approval is counted and listed by e
   assert.equal(said.badge, 1);
   assert.equal(said.nowRows, 1);
   assert.match(said.nowHeadline.bold, /^1 thing holds work until you decide\.$/);
-  assert.equal(said.heldHeadline.bold, '1 Lane is held now.');
-  assert.match(said.heldHeadline.rest, /1 waits on you/);
   assert.deepEqual(said.heldPageRows, ['held:rev']);
   assert.equal(said.lineHeld, 1);
   assert.equal(said.mark, 'waiting');
@@ -145,7 +141,6 @@ test('9b9057a9: a question waiting for the reader is counted, and no Lane is hel
   const said = surfaces(read([], { asks: [ask('lane-q')] }), []);
   assert.equal(said.badge, 1);
   assert.equal(said.nowRows, 1);
-  assert.equal(said.heldHeadline.bold, 'Nothing is held now.');
   assert.deepEqual(said.heldPageRows, []);
   assert.equal(said.lineHeld, 0);
 });
@@ -155,7 +150,6 @@ test('9b9057a9: with nothing held and nothing asked every surface says none', ()
   assert.equal(said.badge, 0);
   assert.equal(said.nowRows, 0);
   assert.equal(said.nowHeadline.rest, 'Nothing is held and no agent is waiting for an answer.');
-  assert.equal(said.heldHeadline.bold, 'Nothing is held now.');
   assert.deepEqual(said.heldPageRows, []);
   assert.equal(said.lineHeld, 0);
 });
@@ -197,11 +191,6 @@ test('9b9057a9 review: a review-held Lane that has passed its check shows the F 
   const lane = mark('ready-held', { stage: 'ready' });
   assert.equal(baseMark({ lanes: [lane], more: 0 }, new Set(['ready-held'])), 'waiting');
   assert.equal(baseMark({ lanes: [{ ...lane, held: false }], more: 0 }), 'landing');
-});
-
-test('9b9057a9 review: a capped read says "at least" on the Held headline', () => {
-  const view = model.needsView(read([held('a', 'check-failed')], { more: 3, moreIsLowerBound: true }), NOW);
-  assert.match(model.heldSentence(view).bold, /^At least 1 Lane is held now\.$/);
 });
 
 // Incident replay 9b9057a9 (Lane 88671ba0, Item ffb6cc49, 2026-11-23 08:51Z). The Licence work had three Lanes in one

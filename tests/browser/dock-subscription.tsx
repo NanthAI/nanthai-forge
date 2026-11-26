@@ -58,7 +58,6 @@ function Fixture() {
                 projectId={'sample-project' as Id<'hostedProjects'>}
                 open
                 setAside={async () => ''}
-                allHref="/loose"
               />
               <MeasuredDisclosure />
             </Region>
