@@ -53,6 +53,23 @@ const save = extra => ({
   ...extra,
 });
 const chars = value => JSON.stringify(value).length;
+// Like the common-reply ratchet, measure the payload independently of the build envelope.
+const payloadChars = ({ cliCommit, ...payload }) => {
+  assert.equal(cliCommit, sha);
+  assert.equal(chars({ cliCommit, ...payload }) - chars(payload), 79);
+  return chars(payload);
+};
+
+test('a landed receipt keeps its bounded local preflight outcome', () => {
+  const localPreflight = { tests: 18, outcome: 'incomplete', seconds: 92.4, reused: false };
+  const receipt = slimReceipt({
+    transport: 'hosted',
+    action: 'finish',
+    result: { submission: { phase: 'landed', acceptance: { id: 'receipt' } }, localPreflight },
+  });
+  assert.deepEqual(receipt.result.localPreflight, localPreflight);
+  assert.equal(receipt.transport, undefined, 'the landed receipt took the brief rendering path');
+});
 
 test('a save drops the retired overlap list an older server still sends (Issue 853fcde3)', () => {
   const slim = slimReceipt(
@@ -62,7 +79,8 @@ test('a save drops the retired overlap list an older server still sends (Issue 8
   assert.equal(slim.result.outcome.result.head, sha);
   assert.equal(slim.result.outcome.status, 'completed');
   assert(!('behindMain' in slim), 'not behind main: nothing to say');
-  assert(!('cliCommit' in slim) && !('schema' in slim) && !('transport' in slim) && !('resolved' in slim));
+  assert.equal(slim.cliCommit, sha);
+  assert(!('schema' in slim) && !('transport' in slim) && !('resolved' in slim));
 });
 
 test('behind main, a checkout and a healthy mirror report only what differs', () => {
@@ -317,7 +335,7 @@ healthy.wait = waited;
 
 test('a healthy start, save, sync, wait and landing print about 300 characters each', t => {
   const sizes = Object.fromEntries(
-    Object.entries(healthy).map(([name, full]) => [name, chars(slimReceipt(full))]),
+    Object.entries(healthy).map(([name, full]) => [name, payloadChars(slimReceipt(full))]),
   );
   t.diagnostic(
     Object.entries(healthy)
@@ -600,7 +618,7 @@ test('queued and durable composing submits print one exact continuation within 1
     const brief = printedReceipt(full, options);
     const mode = `${phase} ${continuation.wake ? 'background wake' : 'foreground wait'}`;
     t.diagnostic(`${mode}: ${chars(full)} -> ${chars(brief)} chars`);
-    assert(chars(brief) <= MAX_QUEUED_SUBMIT, `${mode}: ${chars(brief)} chars`);
+    assert(payloadChars(brief) <= MAX_QUEUED_SUBMIT, `${mode}: ${payloadChars(brief)} payload chars`);
     assert.equal(brief.operationId, opId);
     assert.equal(brief.result.submission.id, submission.id);
     assert.equal(brief.result.submission.phase, phase);

@@ -17,6 +17,7 @@ import { liveLanding, ownsLiveLanding } from '../dist/landing-freeze.js';
 import { digest } from '../dist/hash.js';
 import { clientCacheRoot } from '../dist/root-paths.js';
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
+import { writePreflightReceipt } from '../dist/preflight-receipt.js';
 import { recordTurnWork, settleTurnWork } from '../dist/agent-turn-work.js';
 import { readHoldHistory } from '../dist/heavy-queue.js';
 import {
@@ -118,6 +119,35 @@ test('preflight: a failing run is recorded, and finish says the last run failed'
   assert.throws(
     () => finishGates(root, defaults({}), lane, advice()),
     error => code('PREFLIGHT_REQUIRED')(error) && error.message.includes('Its last run failed.'),
+  );
+});
+
+test('a cached quick static failure includes the preflight outcome in the refusal', t => {
+  const root = repo(t);
+  writePreflightReceipt(root, {
+    schema: 1,
+    ...lane,
+    tests: 0,
+    selection: 'local',
+    quick: true,
+    exitCode: 1,
+    passed: false,
+    durationMs: 1250,
+    at: '2026-01-01T00:00:00.000Z',
+    static: [{ name: 'format', outcome: 'failed', ms: 10 }],
+  });
+  assert.throws(
+    () => finishGates(root, defaults({}), lane, advice()),
+    error => {
+      assert.equal(error.code, 'PREFLIGHT_REQUIRED');
+      assert.deepEqual(error.recovery.localPreflight, {
+        tests: 0,
+        outcome: 'failed',
+        seconds: 1.3,
+        reused: true,
+      });
+      return true;
+    },
   );
 });
 

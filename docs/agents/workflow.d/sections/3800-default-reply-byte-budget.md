@@ -1,5 +1,11 @@
 ### Default reply byte budget
 
+Landing replies name the CLI build in `cliCommit`. When the local preflight gate
+uses a run, the local landing receipt keeps `localPreflight` with the number of
+test files, the outcome, elapsed seconds, and whether the run was reused. The
+operation journal keeps that evidence for a replay even if a later preflight
+updates the Lane's latest result.
+
 The deterministic ledger `tests/fixtures/agent-reply-budget.json` ratchets UTF-8 JSON
 bytes, including the newline, for each common CLI reply. The landing test
 `tests/agent-reply-budget.test.mjs` fails any growth; change a ceiling only with its

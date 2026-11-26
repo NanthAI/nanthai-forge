@@ -258,6 +258,7 @@ function briefLanded(result: Json): Json | undefined {
           ? { testFiles }
           : {}),
     },
+    ...(obj(result.localPreflight) ? { localPreflight: result.localPreflight } : {}),
     // A landing that does not reach GitHub says so in the brief reply too (friction 28e84c06).
     ...(obj(result.mirrorStopped) ? { mirrorStopped: result.mirrorStopped } : {}),
   };
@@ -510,8 +511,6 @@ function briefLaneStatus(result: Json, now = Date.now()): Json | undefined {
 }
 
 function brief(out: Json): Json {
-  // Legacy receipts have only a commit. A producing CLI with full build identity keeps it together.
-  if (out.cliVersion === undefined) delete out.cliCommit;
   delete out.schema;
   delete out.transport;
   if (sameOperation(out.resolved, out.operationId)) delete out.resolved;

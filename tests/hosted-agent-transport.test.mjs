@@ -16,6 +16,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { runPreflight } from '../dist/agent-preflight.js';
+import { writePreflightReceipt } from '../dist/preflight-receipt.js';
 import { effectiveAgentDefaults } from '../dist/agent-parallel-defaults.js';
 import { readHostedLaneCheckout } from '../dist/hosted-lane-checkout-marker.js';
 import { agentFixture } from './hosted-agent-fixture.mjs';
@@ -1014,6 +1015,20 @@ test('hosted finish preserves a passing preflight for an equivalent source tree 
   assert.notEqual(receipt.head, marker.selection.head);
   const result = await s.transport().dispatch('finish', { laneId: s.lane.laneId });
   assert.equal(result.result.defaults.preflight.status, 'passed');
+  const expected = {
+    tests: 0,
+    outcome: 'passed',
+    seconds: Math.round(receipt.durationMs / 100) / 10,
+    reused: true,
+  };
+  assert.deepEqual(result.result.localPreflight, expected);
+  assert.match(result.cliCommit, /^(?:[0-9a-f]{12,64}|development)$/);
+  writePreflightReceipt(s.root, { ...receipt, passed: false, exitCode: 1, durationMs: 2100 });
+  const replay = await s.transport().dispatch('finish', {
+    laneId: s.lane.laneId,
+    operationId: result.operationId,
+  });
+  assert.deepEqual(replay.result.localPreflight, expected, 'an enqueued land keeps the outcome it used');
 });
 
 test('landing-message negotiation reuses discovery and retains legacy request shapes on older deployments', async t => {

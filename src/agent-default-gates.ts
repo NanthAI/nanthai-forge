@@ -9,6 +9,7 @@ import {
   readPreflightReceipt,
   runPreflight,
   PREFLIGHT_SECONDS_PER_FILE,
+  type PreflightReceipt,
 } from './agent-preflight.js';
 import type { EffectiveAgentDefaults } from './agent-parallel-defaults.js';
 import type { readHostedOverlapAdvice } from './hosted-overlap-client.js';
@@ -49,7 +50,7 @@ export function finishGates(
   advice: Advice | undefined,
   runRequired: boolean | (() => void) = false,
   replayBudgetRefusal = false,
-) {
+): Record<string, unknown> {
   const advisories: Record<string, unknown> = {};
   if (!defaults) return advisories;
   if (defaults.preflight !== 'off') {
@@ -63,6 +64,23 @@ export function finishGates(
       (receipt.tree && lane.tree ? receipt.tree === lane.tree : receipt.head === lane.head);
     // A full preflight run of this head: neither static-only nor land's quick head run.
     const fullRun = sameSource && receipt && !receipt.staticOnly && !receipt.quick ? receipt : null;
+    const recordRun = (run: PreflightReceipt, reused: boolean) => {
+      advisories.localPreflight = {
+        tests: run.tests,
+        outcome: preflightOutcome(run),
+        seconds: Math.round(run.durationMs / 100) / 10,
+        reused,
+      };
+    };
+    const preflightRecovery = () =>
+      advisories.localPreflight ? { localPreflight: advisories.localPreflight } : {};
+    const runLocal: typeof runPreflight = (...args) => {
+      const result = runPreflight(...args);
+      recordRun(result, false);
+      return result;
+    };
+    if (fullRun) recordRun(fullRun, true);
+    else if (sameSource && receipt?.staticOnly) recordRun(receipt, true);
     const run = command(root, 'preflight', { laneId: lane.laneId });
     const refuseStaticFailure = (result: typeof receipt) => {
       const failed = result?.static?.filter(check => check.outcome === 'failed');
@@ -74,11 +92,16 @@ export function finishGates(
         )
         .join(' ');
       const fix = failed.find(check => check.fix)?.fix;
+      if (result && !advisories.localPreflight) recordRun(result, true);
       throw new ForgeError(
         'PREFLIGHT_REQUIRED',
         `Inline preflight failed static checks for saved head ${lane.head.slice(0, 12)}. ${causes} Fix the reported files, save, then run land --save with the same options and a fresh operationId.`,
         undefined,
-        { ...(fix ? { command: fix.map(shellQuote).join(' ') } : {}), static: result!.static },
+        {
+          ...preflightRecovery(),
+          ...(fix ? { command: fix.map(shellQuote).join(' ') } : {}),
+          static: result!.static,
+        },
       );
     };
     if (sameSource) refuseStaticFailure(receipt);
@@ -198,7 +221,7 @@ export function finishGates(
           receipt?.laneId === lane.laneId && receipt.head === lane.head ? receipt.static : undefined;
         // The plan land just made, in its run order, with only the budget cut: re-planning would cost
         // as much again (about 12 s on Forge itself) for the same head.
-        const result = runPreflight(
+        const result = runLocal(
           root,
           lane.laneId,
           lane.head,
@@ -221,19 +244,11 @@ export function finishGates(
         !(sameSource && receipt?.static?.length)
       ) {
         if (typeof runRequired === 'function') runRequired();
-        receipt = runPreflight(
-          root,
-          lane.laneId,
-          lane.head,
-          staticPlan,
-          lane.tree,
-          true,
-          changed,
-          heavyOptions,
-        );
+        receipt = runLocal(root, lane.laneId, lane.head, staticPlan, lane.tree, true, changed, heavyOptions);
         refuseStaticFailure(receipt);
       }
       if (quick) {
+        if (!quickRan) recordRun(quick, true);
         refuseStaticFailure(quick);
         if (preflightOutcome(quick) === 'failed')
           throw new ForgeError(
@@ -241,6 +256,7 @@ export function finishGates(
             `Inline preflight failed for saved head ${lane.head.slice(0, 12)}: the plan is over ${defaults.preflightMaxMinutes} min, so land ran its top-ranked tests for ${quick.budgetSeconds ?? LAND_QUICK_SECONDS} s, and ${quick.failure?.files.length ? quick.failure.files.join(', ') : 'one'} failed.${quick.failure ? ` ${quick.failure.excerpt}` : ''} Fix it, save, then run land --save with the same options and a fresh operationId. Each land runs these tests again, so one that passes on rerun does not block it.`,
             undefined,
             {
+              ...preflightRecovery(),
               command: run,
               quick: quickSummary(quick, plan.status === 'planned' ? plan.tests.length : quick.tests),
             },
@@ -289,7 +305,7 @@ export function finishGates(
             if (typeof runRequired === 'function') runRequired();
             // Reuse this plan and its existing local wall-time budget. No hosted read, new
             // operation or recursive dispatch: the caller continues the original finish.
-            const result = runPreflight(
+            const result = runLocal(
               root,
               lane.laneId,
               lane.head,
@@ -312,14 +328,16 @@ export function finishGates(
                 failed ? 'PREFLIGHT_REQUIRED' : 'PREFLIGHT_BUDGET_EXCEEDED',
                 `Inline preflight ${failed ? 'failed' : 'exceeded its budget'} for saved head ${lane.head.slice(0, 12)}.${result.failure ? ` ${result.failure.excerpt}` : ''} Continue with: ${next}. Then replay the same land operation.`,
                 undefined,
-                { command: next },
+                { ...preflightRecovery(), command: next },
               );
             stillSaved();
-            return finishGates(root, defaults, lane, advice);
+            return { ...finishGates(root, defaults, lane, advice), ...preflightRecovery() };
           }
           throw new ForgeError(
             'PREFLIGHT_REQUIRED',
             `Run the ${plan.tests.length} affected test file(s) for saved head ${lane.head.slice(0, 12)} first (about ${plan.estimateMinutes} min): ${run}.${failed} Then land again.`,
+            undefined,
+            preflightRecovery(),
           );
         }
         advisories.preflight = {

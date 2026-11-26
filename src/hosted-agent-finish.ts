@@ -509,7 +509,10 @@ async function recordFinishStop(session: HostedAgentSession, error: unknown) {
   session.journal.forget(finishTransientKey);
   if (session.journal.get(finishRefusedKey) === 'PREFLIGHT_BUDGET_EXCEEDED')
     session.journal.forget(finishRefusedKey);
-  await session.journal.retain(finishStoppedKey, () => safe.code);
+  const localPreflight = safe.recovery?.localPreflight;
+  await session.journal.retain(finishStoppedKey, () =>
+    localPreflight ? { code: safe.code, localPreflight } : safe.code,
+  );
   // An already coded failure names its cause in its message (Item 3f76a3df).
   const cause = hostedFailureCauseOf(safe.message) ?? hostedFailureCause(error);
   if (safe.code === 'HOSTED_ACTION_FAILED' && transientFailureCause(cause))
@@ -594,7 +597,8 @@ export async function executeHostedFinish(session: HostedAgentSession, input: un
       throw error;
     }
   const context = session.journal.get<FinishContext>('finish-context');
-  const defaults = session.journal.get<Record<string, unknown>>('finish-defaults');
+  const { localPreflight, ...defaults } =
+    session.journal.get<Record<string, unknown>>('finish-defaults') ?? {};
   const changedPaths = session.journal.get<number | null>(finishChangedPathsKey);
   const notSaved = session.journal.get<NotSaved>(finishNotSavedKey);
   // Retained by the check selection (no extra read): the runner's logs are public.
@@ -605,7 +609,8 @@ export async function executeHostedFinish(session: HostedAgentSession, input: un
     ...(result as Record<string, unknown>),
     ...(checkLogs ? { checkLogs } : {}),
     ...(landingAdvice ? { landingAdvice } : {}),
-    ...(defaults ? { defaults } : {}),
+    ...(Object.keys(defaults).length ? { defaults } : {}),
+    ...(localPreflight ? { localPreflight } : {}),
     ...(notSaved ? { notSaved } : {}),
     // Changed paths this landing carries against the Lane's base; null when the base manifest is not cached.
     ...(changedPaths === undefined ? {} : { changedPaths }),
