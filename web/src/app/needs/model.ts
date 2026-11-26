@@ -5,6 +5,7 @@
 // is the top bar's "Needs you" number; held Lanes that ask nobody become FYI rows naming who acts next; requests asked
 // ahead are listed apart and never counted (DESIGN.md rules 15, 16, 41). Pure: tests/app-needs-me.test.mjs pins it.
 import type { StateWord } from '../../ds';
+import { landingHold } from '../../../../src/hosted-landing-hold';
 import { heldState, heldWhyState } from '../lane-state';
 import {
   approvalsTruncated,
@@ -64,6 +65,20 @@ export type NowRow = HeldLane & {
   next: string | null;
 };
 export type AskRow = Ask & { who: string | null };
+
+export function protectedApprovalCopy(row: HeldLane) {
+  if (row.why !== 'review' || !row.note) return null;
+  const paths = landingHold({
+    observation: { state: 'pending', pendingReason: 'waiting-for-review' },
+    error: { code: 'REVIEW_REQUIRED', message: row.note },
+  })?.paths;
+  if (!paths?.length) return null;
+  const reason =
+    paths.length === 1
+      ? `Changes a protected path: ${paths[0]}.`
+      : `Changes ${paths.length} protected paths: ${paths[0]} and ${paths.length - 1} more.`;
+  return row.reviewCheck === 'not-configured' ? `${reason} No check is set up.` : reason;
+}
 /** Work reverted from main, work that needs a fix, or a stopped mirror (Item 12fde646): a shared-state decision. */
 export type NoticeRow = Notice & { word: StateWord; tag: string; head: string };
 /** A revert the reader ran: an FYI row with the Lane to bring back. */

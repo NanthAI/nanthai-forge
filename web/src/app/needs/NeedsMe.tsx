@@ -65,6 +65,7 @@ import { LooseBody } from './LooseFold';
 import {
   needsSentence,
   needsView,
+  protectedApprovalCopy,
   laneTitle,
   whoOf,
   waited,
@@ -284,6 +285,11 @@ export function NeedsMeView({
     phone ? PHONE_LAYOUT : LAYOUT,
   );
   const [message, announce] = useAnnounce();
+  const [decisionMessage, setDecisionMessage] = useState('');
+  const announceDecision = (text: string, show?: boolean) => {
+    setDecisionMessage(show ? text : '');
+    if (!show) announce(text);
+  };
   const list = useMemo(
     () => (fyi && view ? fyiView(fyi, view.fyi, drawnAt, false, view.tookOut) : null),
     [fyi, view, drawnAt],
@@ -454,6 +460,9 @@ export function NeedsMeView({
             handle={handle}
             hint="what waits on you"
           >
+            <div role="status" className={decisionMessage ? 'quietline' : 'sr'}>
+              {decisionMessage}
+            </div>
             {!view ? (
               <div className="quietline" aria-busy="true">
                 Loading what needs you…
@@ -546,7 +555,7 @@ export function NeedsMeView({
                               }
                               decide={decide}
                               canDecide={read!.canDecide}
-                              announce={announce}
+                              announce={announceDecision}
                             />
                           );
                         return drawerContent && !phone ? (
@@ -813,9 +822,15 @@ function Held({
   anchor: string | null;
   decide: Decide;
   canDecide: boolean;
-  announce: (text: string) => void;
+  announce: (text: string, show?: boolean) => void;
 }) {
   const target = decideTarget(row);
+  const protectedReason = protectedApprovalCopy(row);
+  const laneName = laneTitle(row);
+  const title = protectedReason
+    ? `${laneName} waits for ${canDecide ? 'your' : 'the owner’s'} approval to land.`
+    : laneName;
+  const detail = protectedReason ?? row.detail;
   const who = recordedIdentity(row.actor, row.agent);
   const [later, setLater] = useState(false);
   if (later) return <Later head={row.head} onShow={() => setLater(false)} />;
@@ -831,7 +846,7 @@ function Held({
       tabIndex={-1}
       id={anchor ? `d-${anchor}` : undefined}
       data-st={row.word === 'Conflict' ? 'conflict' : undefined}
-      title={laneTitle(row)}
+      title={title}
       next={row.next}
       status={
         <>
@@ -887,7 +902,7 @@ function Held({
           {row.laneId ? 'Lane' : 'Submission'} {row.mark}
         </span>
         {row.siblings > 1 ? `, 1 of ${row.siblings} held for this Item` : ''}
-        {row.detail ? ` · ${row.detail}` : ''}
+        {detail ? ` · ${detail}` : ''}
       </p>
     </NeedsCard>
   );

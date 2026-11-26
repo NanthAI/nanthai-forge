@@ -15,6 +15,7 @@ import {
   type CSSProperties,
   type ReactNode,
 } from 'react';
+import { Unchecked } from '../Unchecked';
 import { useConvex, useQuery } from 'convex/react';
 import { api } from '../../../../convex/_generated/api';
 import type { Id } from '../../../../convex/_generated/dataModel';
@@ -1031,6 +1032,7 @@ function Side({
           <div className="ph plain" style={{ borderTop: 'var(--rule) solid var(--line)' }}>
             <h2>Receipt</h2>
             <State word="Landed" />
+            {lane.landed.unchecked ? <Unchecked /> : null}
           </div>
           <dl className="kv">
             <dt>Landed</dt>

@@ -10,6 +10,7 @@ export type SetupView = {
   viewerIsOwner: boolean;
   offerEarnedTrust?: true;
   created: { at: number; by: string | null };
+  checkless?: true;
   repository: { fullName: string; at: number; by: string | null } | null;
   mirror: { repository: string; at: number } | null;
   check:
@@ -65,6 +66,13 @@ export function setupSteps(
   skipped: readonly SkippableStep[] = [],
 ): SetupStep[] {
   const landed = !!view.firstLanding;
+  const check: SetupStep = {
+    id: 'check',
+    title: 'Choose the check that decides a landing',
+    ...(view.check
+      ? { fact: checkWords(view.check), state: 'done', at: view.check.chosenAt }
+      : { fact: 'A check is required to land. Bring your own CI.', state: 'next' }),
+  };
   const steps: SetupStep[] = [
     {
       id: 'import',
@@ -85,20 +93,7 @@ export function setupSteps(
       by: view.repository?.by,
       at: view.repository?.at,
     },
-    view.check
-      ? {
-          id: 'check',
-          title: 'Choose the check that decides a landing',
-          fact: checkWords(view.check),
-          state: 'done',
-          at: view.check.chosenAt,
-        }
-      : {
-          id: 'check',
-          title: 'Choose the check that decides a landing',
-          fact: 'A check is required to land. Bring your own CI; GitHub is not required.',
-          state: 'next',
-        },
+    ...(view.checkless ? [] : [check]),
     lanes > 0 || landed
       ? { id: 'agent', title: 'Connect an agent', fact: 'An agent has started a Lane.', state: 'done' }
       : {
@@ -111,7 +106,7 @@ export function setupSteps(
       ? {
           id: 'land',
           title: 'Land a first change',
-          fact: 'On main, checked by your check.',
+          fact: view.checkless ? 'On main.' : 'On main, checked by your check.',
           state: 'done',
           at: view.firstLanding!.at,
         }

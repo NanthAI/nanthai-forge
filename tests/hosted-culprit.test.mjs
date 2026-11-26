@@ -1613,13 +1613,15 @@ async function replaySystemReverse(
   await f.transaction('advanceFull', culprit.advance, { projectId: f.projectId, runId: f.recoveryId() });
   if (held) {
     // Never auto-landed: no check, no landing, main and receipts untouched; the prepared
-    // Candidate waits for a person and the culprit's Intent says so (Needs you).
+    // Candidate waits for the owner and the culprit's Intent says so (Needs you).
     const state = JSON.parse(f.recovery().recovery);
     assert.equal(state.stage, 'done');
     assert.equal(state.held.candidateId, compose.candidateId);
     assert.match(
       state.held.reason,
-      held === 'protected' ? /protected paths: src\/file-1\.ts/ : /coverage is unavailable/,
+      held === 'protected'
+        ? /needs owner approval: protected paths src\/file-1\.ts/
+        : /coverage is unavailable/,
     );
     assert.equal(f.tables.projectHostedLandingRequests.size, 0);
     assert.equal(

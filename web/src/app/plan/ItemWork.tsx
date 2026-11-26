@@ -4,6 +4,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { Avatar, Count, Glyph, Key, Region, Row, State, Who, useFold, type StateWord } from '../../ds';
 import { age } from '../../ui/status';
 import { A } from '../frames';
+import { Unchecked } from '../Unchecked';
 import type { ProjectRoute } from '../screen-route';
 import { whoLinks, type WhoProject } from '../who-links';
 
@@ -33,6 +34,7 @@ type Landing = {
   commit: string;
   at: string;
   check: 'passed' | 'not-checked' | null;
+  checked?: false;
   files: number | null;
   sequence?: number;
   detailsPending?: true;
@@ -621,6 +623,12 @@ export function ItemWork({
                 >
                   Landing {landing.receiptId.slice(0, 8)}
                 </A>
+                {landing.checked === false ? (
+                  <>
+                    {' '}
+                    <Unchecked />
+                  </>
+                ) : null}
                 <div className="meta">
                   {landing.files === null
                     ? 'File count unavailable'
@@ -628,7 +636,7 @@ export function ItemWork({
                 </div>
               </div>
               <div>
-                {landing.check === 'passed' ? (
+                {landing.checked === false ? null : landing.check === 'passed' ? (
                   <span className="st" data-st="passed">
                     <Glyph of="passed" /> Passed
                   </span>

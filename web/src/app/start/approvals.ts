@@ -15,11 +15,11 @@ export type ApprovalMode = AutonomyPolicy['acceptance']['mode'];
 export const approvalWords: Record<ApprovalMode, { title: string; sub: string }> = {
   review: {
     title: 'Ask me before each landing',
-    sub: 'Every checked change waits for a person on Needs me.',
+    sub: 'Every landing waits for you on Needs me.',
   },
   'auto-on-pass': {
     title: 'Land on its own when the check passes',
-    sub: 'Checked work reaches main without waiting for you. Protected paths still wait for a person.',
+    sub: 'Ordinary changes reach main under project policy. Protected paths always ask the owner.',
   },
 };
 

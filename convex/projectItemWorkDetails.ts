@@ -114,6 +114,7 @@ export async function itemWorkLandingDetails<T extends { receiptId: string; comm
       return {
         ...landing,
         check: receipt ? (receipt.check ? ('passed' as const) : ('not-checked' as const)) : null,
+        ...(receipt?.checked === false ? { checked: false as const } : {}),
         paths: candidateLandingPaths(candidate || undefined, source?.head),
       };
     }),

@@ -21,16 +21,25 @@ const policy = (acceptance = {}, checkEntries = []) => ({
   checkEntries,
 });
 
-test('default, configured and check-entry paths name their existing approver; unrelated paths do not warn', () => {
-  assert.match(protectedPathNotice(policy(), ['.github/workflows/check.yml']).message, /project owner/);
+test('default, configured and check-entry paths ask the owner for approval and unrelated paths do not warn', () => {
+  assert.match(
+    protectedPathNotice(policy(), ['.github/workflows/check.yml']).message,
+    /^The owner must approve this landing/,
+  );
   assert.equal(protectedPathNotice(policy(), ['src/plain.ts']), undefined);
   const configured = policy({ ownerApprovalPaths: ['deploy/**'], protectedPaths: ['src/guarded.*'] }, [
     'tools/check.mjs',
   ]);
   assert.equal(protectedPathNotice(configured, ['.github/workflows/check.yml']), undefined);
   assert.deepEqual(protectedPathNotice(configured, ['deploy/job.yml']).paths, ['deploy/job.yml']);
-  assert.match(protectedPathNotice(configured, ['src/guarded.ts']).message, /a person allowed to accept/);
-  assert.match(protectedPathNotice(configured, ['tools/check.mjs']).message, /project owner/);
+  assert.match(
+    protectedPathNotice(configured, ['src/guarded.ts']).message,
+    /^The owner must approve this landing/,
+  );
+  assert.match(
+    protectedPathNotice(configured, ['tools/check.mjs']).message,
+    /^The owner must approve this landing/,
+  );
   assert.equal(
     protectedPathNotice(policy({ ownerApprovalPaths: [] }), ['.github/workflows/check.yml']),
     undefined,
@@ -38,6 +47,7 @@ test('default, configured and check-entry paths name their existing approver; un
   assert.equal(protectedPathNotice(policy({ ownerApprovalPaths: [], protectedPaths: [] }), null), undefined);
   assert.equal(protectedPathNotice(policy({ ownerApprovalPaths: [] }), null).coverage, 'unavailable');
   assert.equal(protectedPathNotice(policy(), null).coverage, 'unavailable');
+  assert.match(protectedPathNotice(policy(), null).message, /^The owner may need to approve this landing/);
 });
 
 test('a large change caps only the approval notice and reports omitted paths', () => {
@@ -103,7 +113,7 @@ test('direct preflight and land without prior explicit save both explain approva
   const mutation = s.exchange.client.mutation;
   s.exchange.client.mutation = async (ref, args) => {
     if (args.request && JSON.parse(args.request).candidateId)
-      assert(printed.some(line => line.includes('Landing will need approval')));
+      assert(printed.some(line => line.includes('The owner must approve this landing')));
     return mutation(ref, args);
   };
   const land = await s

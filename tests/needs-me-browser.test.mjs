@@ -290,6 +290,21 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
         }
       },
     );
+    await t.test(
+      'Needs you asks for fresh approval when main moves during a one-tap unchecked approval',
+      async t => {
+        const page = await open(t, PHONE, 'review', 'dark', { query: { 'main-moved': '1' } });
+        await page.getByRole('button', { name: 'Approve and land', exact: true }).click();
+        await page
+          .getByText('Main moved. Approve the new Candidate when it appears.', { exact: true })
+          .waitFor();
+        assert.equal(await page.getByRole('dialog').count(), 0);
+        const writes = await page.evaluate(() => window.writes);
+        assert.equal(writes.length, 1);
+        assert.equal(writes[0][1].decision, 'grant');
+        assert.match(writes[0][1].landing.attemptId, /0502$/);
+      },
+    );
     for (const { name, query, count, unit } of [
       { name: 'exact', query: {}, count: ['1,207', '1', '5'], unit: 'Item' },
       {

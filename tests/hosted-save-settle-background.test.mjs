@@ -806,7 +806,7 @@ test('netlify incident: the first changed split save names approval before a ste
   const returned = await agent.dispatch('save', { message: 'Save protected configuration' });
   assert.equal(returned.result.status, 'settling');
   assert.deepEqual(returned.result.protectedPathNotice.paths, ['netlify.toml']);
-  assert.match(returned.result.protectedPathNotice.message, /project owner/);
+  assert.match(returned.result.protectedPathNotice.message, /^The owner must approve this landing/);
   assert(
     !f.c.calls.includes('projectConvexSourceStore:commit'),
     'approval is explained before source steps or checks',

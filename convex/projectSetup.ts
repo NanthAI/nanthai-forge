@@ -45,6 +45,7 @@ export const setupView = v.object({
   owner: v.union(v.string(), v.null()),
   viewerIsOwner: v.boolean(),
   created: stamp,
+  checkless: v.optional(v.literal(true)),
   repository: v.union(
     v.object({ fullName: v.string(), at: v.number(), by: v.union(v.string(), v.null()) }),
     v.null(),
@@ -181,6 +182,7 @@ async function setup(ctx: QueryCtx, projectId: Id<'hostedProjects'>, checklist: 
   ]);
   const owner = await handle(ctx, project.owner);
   return {
+    ...(project.checklessDefault ? { checkless: true as const } : {}),
     owner,
     viewerIsOwner: user.subject === project.owner,
     created: { at: project._creationTime, by: owner },

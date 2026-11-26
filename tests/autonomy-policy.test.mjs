@@ -71,8 +71,14 @@ test('acceptance.autoRevert: absent means on, no preset sets it, a field edit me
   const hold = (policy, culpritPaths, reversePaths) =>
     autoRevertHold({ project, policy, culpritPaths, reversePaths });
   assert.equal(hold(guarded, ['src/a.ts'], ['src/a.ts']), null);
-  assert.match(hold(guarded, ['src/a.ts', 'convex/x.ts'], ['src/a.ts']), /protected paths: convex\/x\.ts/);
-  assert.match(hold(guarded, ['src/a.ts'], ['convex/x.ts']), /protected paths: convex\/x\.ts/);
+  assert.match(
+    hold(guarded, ['src/a.ts', 'convex/x.ts'], ['src/a.ts']),
+    /needs owner approval: protected paths convex\/x\.ts/,
+  );
+  assert.match(
+    hold(guarded, ['src/a.ts'], ['convex/x.ts']),
+    /needs owner approval: protected paths convex\/x\.ts/,
+  );
   assert.match(hold(guarded, ['src/a.ts'], null), /coverage is unavailable/);
   assert.match(hold(guarded, null, ['.github/workflows/ci.yml']), /protected/);
   assert.equal(hold(guarded, null, ['src/a.ts']), null, 'unknown culprit paths defer to the reverse paths');

@@ -33,10 +33,13 @@ type Facts = { setup: SetupView; policy: AutonomyPolicy; landing: LandingModeVie
 
 function sentence(facts: Facts) {
   const { setup, policy } = facts;
-  if (!setup.check) return 'Nothing can land yet: choose the check that decides a landing.';
+  if (!setup.check)
+    return setup.checkless
+      ? 'Choose a check to require passing evidence on each landing.'
+      : 'Choose the check that decides a landing.';
   const check = checkWords(setup.check);
   return policy.acceptance.mode === 'review'
-    ? `Each landing waits for a person after ${check} passes.`
+    ? `Each landing waits for the owner after ${check} passes.`
     : `Checked work lands on its own when ${check} passes.`;
 }
 
@@ -144,7 +147,7 @@ function ProjectApprovals({ facts, projectId, onDone }: ApprovalProps) {
       <p className="quietline">
         {paths.length ? (
           <>
-            Protected paths wait for a person: <code translate="no">{paths.join(', ')}</code>.
+            Protected paths ask the owner: <code translate="no">{paths.join(', ')}</code>.
           </>
         ) : (
           'No protected paths.'

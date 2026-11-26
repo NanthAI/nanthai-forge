@@ -33,6 +33,7 @@ export type CodeHistoryRow = {
   automatic: boolean;
   /** The check that accepted it: null when it landed without one. */
   check: { runId: string; testsSkipped: boolean } | null;
+  checked?: false;
   firstCheck: 'admission-run' | 'recheck' | 'scoped-intersection' | null;
   /** Landed with others in one checked batch. */
   batch: boolean;
@@ -75,6 +76,7 @@ export function codeHistoryRow(receipt: HostedAcceptance, sequence: number, visi
     head: receipt.candidate.head,
     base: receipt.previous.head,
     automatic: receipt.automatic,
+    ...(receipt.checked === false ? { checked: false as const } : {}),
     check: receipt.check
       ? // Tests the change's paths did not reach were skipped, never left pending (9e71abcc).
         { runId: receipt.check.runId, testsSkipped: Boolean(receipt.check.skipped) }

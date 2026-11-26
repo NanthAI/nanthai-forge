@@ -64,7 +64,7 @@ function DeclineKey({ disabled, onDecline }: { disabled: boolean; onDecline: (re
   );
 }
 
-export function useDecideRun(decide: Decide, announce: (text: string) => void) {
+export function useDecideRun(decide: Decide, announce: (text: string, show?: boolean) => void) {
   const [busy, setBusy] = useState<string | null>(null);
   const run = async (
     laneId: string | null,
@@ -84,13 +84,16 @@ export function useDecideRun(decide: Decide, announce: (text: string) => void) {
     if (!input) return;
     setBusy(decision);
     try {
-      const reply = await decide(input);
-      const failed = /"error"\s*:/.test(reply)
-        ? (JSON.parse(reply).error?.message as string | undefined)
-        : undefined;
-      announce(failed ? `Not done: ${failed}` : done);
+      const reply = JSON.parse(await decide(input));
+      const failed: string | undefined = reply.error?.message;
+      const landing = reply.landing ?? reply;
+      const reapproval =
+        decision === 'grant' && landing.needsReapproval === true && typeof landing.reason === 'string'
+          ? landing.reason
+          : undefined;
+      announce(failed ? `Not done: ${failed}` : (reapproval ?? done), !failed && Boolean(reapproval));
       // Item c63c2171: an allowed GitHub connect goes on to GitHub's authorization.
-      const github = failed ? null : githubContinue(JSON.parse(reply));
+      const github = failed ? null : githubContinue(reply);
       if (github) location.assign(github);
     } catch {
       announce('Not done: Forge could not be reached. Nothing changed; try again.');
@@ -145,7 +148,7 @@ export function AheadKeys({
   );
 }
 
-/** Both browser entry points confirm approval of the same exact attempt when no check run is recorded. */
+/** Both entry points decide the same exact attempt. Confirm early approval or a missing configured run. */
 export function DecisionKeys({
   laneId,
   target,
@@ -157,7 +160,7 @@ export function DecisionKeys({
   target: DecideTarget;
   reviewCheck: HeldLane['reviewCheck'];
   decide: Decide;
-  announce: (text: string) => void;
+  announce: (text: string, show?: boolean) => void;
 }) {
   const { run, busy } = useDecideRun(decide, announce);
   const [confirmation, setConfirmation] = useState<string | null>(null);
@@ -177,7 +180,7 @@ export function DecisionKeys({
       : 'Approve now';
   const approve = () => {
     setConfirmation(null);
-    return run(laneId, target, 'grant', 'Approved. The landing is no longer waiting for you.');
+    return run(laneId, target, 'grant', 'Approved. Landing on main.');
   };
   return (
     <>
@@ -186,7 +189,7 @@ export function DecisionKeys({
         keys="a"
         disabled={busy !== null}
         onClick={event => {
-          if (!attempt || reviewCheck === 'ran') return void approve();
+          if (!attempt || reviewCheck === 'ran' || reviewCheck === 'not-configured') return void approve();
           trigger.current = event.currentTarget;
           setConfirmation(attempt);
         }}

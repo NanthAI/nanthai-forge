@@ -198,6 +198,19 @@ test('setup records who and when; GitHub neither counts nor gates the required c
   assert.deepEqual(model.setupProgress(ready), { done: 3, total: 4 });
 });
 
+test('new checkless projects can finish the first-run checklist without choosing a check', () => {
+  const first = view({ checkless: true, approvalsAnswered: true });
+  const fresh = model.setupSteps(first, 'shop', 0);
+  assert.equal(
+    fresh.some(step => step.id === 'check'),
+    false,
+  );
+  assert.deepEqual(model.setupProgress(fresh), { done: 1, total: 3 });
+  const landed = { ...first, firstLanding: { at: 3 } };
+  assert.equal(model.setupSteps(landed, 'shop', 1).find(step => step.id === 'land').fact, 'On main.');
+  assert.equal(model.gettingStartedShown(landed), false);
+});
+
 test('after the first landing the owner is asked once who approves, then it goes away', () => {
   assert.equal(model.gettingStartedShown(view()), true);
   assert.equal(model.askWhoApproves(view()), false);
@@ -214,7 +227,7 @@ test('an approval answer changes only the acceptance mode, as a compare-and-swap
   const parsed = policyWriteSchema.parse(command);
   assert.deepEqual(parsed.acceptance, { mode: 'review' });
   assert.deepEqual(Object.keys(command).sort(), ['acceptance', 'action', 'expectedPolicy', 'operationId']);
-  assert.match(approvals.approvalWords['auto-on-pass'].sub, /Protected paths still wait/);
+  assert.match(approvals.approvalWords['auto-on-pass'].sub, /Protected paths always ask the owner/);
 });
 
 test('choosing a CI file sends a runner setting the server parses, with no placeholder for a person', () => {

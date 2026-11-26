@@ -11,10 +11,16 @@ import { queueComposeLanes, queueIntentLanes, queueViewKeys } from './projectHos
 import type { HostedLandingState } from '../src/hosted-landing';
 
 /** Use observed execution, not a reservation. Both held-review paths already have the landing row. */
-export function reviewCheckEvidence(row: LandingRow, state: HostedLandingState) {
+export function reviewCheckEvidence(row: LandingRow, state: HostedLandingState, projectHasNoCheck = false) {
   if (row.runId && (state.timing?.ciObservedAt || state.timing?.ciEndedAt))
     return { reviewCheck: 'ran' as const };
-  return { reviewCheck: state.request.check ? ('pending' as const) : ('none' as const) };
+  return {
+    reviewCheck: state.request.check
+      ? ('pending' as const)
+      : projectHasNoCheck
+        ? ('not-configured' as const)
+        : ('none' as const),
+  };
 }
 
 export function reviewSubmitter(row: LandingRow, state: HostedLandingState) {
@@ -31,7 +37,12 @@ export function reviewSubmitter(row: LandingRow, state: HostedLandingState) {
 
 /** Read only review entries in the queue's existing directory window. A Lane mark
  * may overlap, move to a newer head, or be absent while its submitted attempt still waits. */
-export async function openLandingReviews(ctx: QueryCtx, projectId: Id<'hostedProjects'>, link: ApprovalLink) {
+export async function openLandingReviews(
+  ctx: QueryCtx,
+  projectId: Id<'hostedProjects'>,
+  link: ApprovalLink,
+  projectHasNoCheck = false,
+) {
   const keys = (await queueViewKeys(ctx, projectId)).filter(key => key.held === 'review');
   const rows = await Promise.all(
     keys.slice(0, QUEUE_VIEW_LIMIT).map(async key => {
@@ -51,7 +62,7 @@ export async function openLandingReviews(ctx: QueryCtx, projectId: Id<'hostedPro
         intentId,
         submissionId: state.id,
         attemptId: state.attemptId,
-        ...reviewCheckEvidence(row, state),
+        ...reviewCheckEvidence(row, state, projectHasNoCheck),
         url: await link(exact, state.id),
         note: state.error?.message ?? null,
         since: Date.parse(state.timing?.ciEndedAt ?? state.timing?.selectedAt ?? state.at),

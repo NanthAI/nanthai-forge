@@ -8,7 +8,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { moduleUrl } from './convex-module.mjs';
 
-const { needsView, needsSentence, whoOf, parkLine } = await import(
+const { needsView, needsSentence, whoOf, parkLine, protectedApprovalCopy } = await import(
   moduleUrl('../web/src/app/needs/model.ts')
 );
 const countModule = await import(moduleUrl('../web/src/app/needs/count.ts'));
@@ -42,6 +42,22 @@ const read = (lanes, requests, more = 0, moreIsLowerBound = false) => ({
   moreIsLowerBound,
   approvals: JSON.stringify({ requests, complete: true }),
   canDecide: true,
+});
+
+test('protected-path approval names what changes and says when there is no configured check', () => {
+  const review = held('l1', 'review', 10, {
+    note: 'needs owner approval: protected paths .github/workflows/deploy.yml, forge.config.ts, netlify.toml',
+    reviewCheck: 'not-configured',
+  });
+  const copy = protectedApprovalCopy(review);
+  assert.equal(
+    copy,
+    'Changes 3 protected paths: .github/workflows/deploy.yml and 2 more. No check is set up.',
+  );
+  assert.equal(
+    protectedApprovalCopy({ ...review, reviewCheck: 'none' }),
+    'Changes 3 protected paths: .github/workflows/deploy.yml and 2 more.',
+  );
 });
 
 test('the shell count is the page count: what waits on a person, never what asks nobody or is asked ahead', () => {

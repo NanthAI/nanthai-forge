@@ -64,6 +64,7 @@ export type Reply = {
       receiptId: string;
       commit: string;
       at: string;
+      unchecked?: true;
       revertedBy?: { receiptId: string; at: string };
       /** Seconds from "land" to on main and at each stop; null when not recorded (convex/projectLaneTiming.ts). */
       timing?: {

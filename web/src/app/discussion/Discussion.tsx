@@ -10,6 +10,7 @@ import { useContext, useEffect, useId, useRef, useState, type FormEvent } from '
 import { Band, DockPerson, Key, Menu } from '../../ds';
 import type { Id } from '../../../../convex/_generated/dataModel';
 import { ReportKey } from '../ReportKey';
+import { Unchecked } from '../Unchecked';
 import type { ReportTarget } from '../ReportAbuse';
 import { By } from './By';
 import { ConversationEntry } from './ConversationEntry';
@@ -367,6 +368,11 @@ function Comment({
       ? { target: 'message', messageId: row.id }
       : { target: 'comment', planningItemId: comment.itemId, commentId: comment.id };
   const review = row ? null : readReview(comment.text);
+  const uncheckedMark =
+    comment.system && comment.landing?.checked === false
+      ? `receipt ${comment.landing.receiptId.slice(0, 8)} unchecked`
+      : null;
+  const uncheckedAt = uncheckedMark ? comment.text.indexOf(uncheckedMark) : -1;
   const counts = row ? [] : reactionsFor(reactions, comment.id);
   // A system note (a landing receipt) takes no reaction or reply: nobody wrote it.
   const react =
@@ -404,6 +410,12 @@ function Comment({
         </p>
       ) : review ? (
         <ReviewFindings review={review} original={comment.text} />
+      ) : uncheckedMark && uncheckedAt >= 0 ? (
+        <p>
+          {comment.text.slice(0, uncheckedAt + uncheckedMark.length - 'unchecked'.length)}
+          <Unchecked />
+          {comment.text.slice(uncheckedAt + uncheckedMark.length)}
+        </p>
       ) : (
         <SafeMarkdown text={comment.text} idPrefix={comment.id} />
       )}

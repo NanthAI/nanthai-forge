@@ -125,8 +125,25 @@ export function Receipt({
               </dd>
             </>
           ) : null}
-          <dt>Checked</dt>
-          <dd>{checkLine(row)}</dd>
+          <dt>Check</dt>
+          <dd>
+            {row.checked === false ? (
+              <>
+                None. Landed unchecked.{' '}
+                <A className="lk" href="/docs/quickstart/#configure-the-first-hosted-check">
+                  Add a check
+                </A>
+              </>
+            ) : (
+              checkLine(row)
+            )}
+          </dd>
+          {row.checked === false && row.automatic ? (
+            <>
+              <dt>Acceptance</dt>
+              <dd>Landed by project policy. No check is set up.</dd>
+            </>
+          ) : null}
           <dt>To main</dt>
           <dd>{evidence === undefined ? '…' : toMain ? `${toMain} from land` : 'not reported'}</dd>
           <dt>Files</dt>

@@ -193,17 +193,23 @@ export const read = query({
       let mainCheckedAt =
         verdict?.kind === 'green' && verdict.reverted === undefined ? Date.parse(verdict.at) : NaN;
       const landings = [];
-      for (const row of accepted.slice(0, FYI_LANDINGS)) {
-        const receipt = JSON.parse(row.value) as {
-          id: string;
-          at: string;
-          message?: string;
-          messageRef?: string;
-          actor?: { id: string; kind: string };
-          automatic?: boolean;
-          check?: unknown;
-          firstCheck?: { landedOn: string; reason?: string };
-        };
+      const checkedWindow = accepted
+        .map(row => ({
+          row,
+          receipt: JSON.parse(row.value) as {
+            id: string;
+            at: string;
+            message?: string;
+            messageRef?: string;
+            actor?: { id: string; kind: string };
+            automatic?: boolean;
+            check?: unknown;
+            checked?: false;
+            firstCheck?: { landedOn: string; reason?: string };
+          },
+        }))
+        .filter(({ receipt }) => receipt.checked !== false);
+      for (const { row, receipt } of checkedWindow.slice(0, FYI_LANDINGS)) {
         // A full-gated landing that turns main green stamps the event with its
         // acceptance time. A different time proves this recovery came from an audit.
         if (verdict?.kind === 'green' && verdict.sequence === row.sequence && verdict.at !== receipt.at)
@@ -300,7 +306,7 @@ export const read = query({
           ? { setup: { visibility: setup.visibility, skipped: setup.skipped, revision: setup.revision } }
           : {}),
         landings,
-        landingsMore: accepted.length > FYI_LANDINGS,
+        landingsMore: checkedWindow.length > FYI_LANDINGS,
         broke,
         ...(Number.isFinite(mainCheckedAt) ? { mainCheckedAt } : {}),
         settings,

@@ -13,7 +13,7 @@ import type { Id } from '../../../../convex/_generated/dataModel';
 import { State } from '../../ds';
 import { decideTarget, useProjectDecide } from './decide';
 import { AheadKeys, DecisionKeys } from './DecisionKeys';
-import { aheadRow, needsView, type Approval, type NeedsRead } from './model';
+import { aheadRow, needsView, protectedApprovalCopy, type Approval, type NeedsRead } from './model';
 
 const needsRead = makeFunctionReference<'query', { projectId: Id<'hostedProjects'> }, NeedsRead>(
   'projectNeedsMe:read',
@@ -54,6 +54,7 @@ export function LaneDecision({
     return named ?? (held ? now.find(entry => entry.laneId === laneId) : undefined);
   }, [read, laneId, submission, held]);
   const target = row ? decideTarget(row) : null;
+  const protectedReason = row ? protectedApprovalCopy(row) : null;
   const said = message ? (
     <p className="quietline" role="status">
       {message}
@@ -64,11 +65,15 @@ export function LaneDecision({
       <section className="dec lane-decision" aria-label="Your decision">
         <div className="dtop">
           <State word={row.word}>{row.tag}</State>
-          <span>waits for you to land</span>
+          <span>
+            {protectedReason
+              ? `${row.title ?? 'This landing'} changes a protected path. Approve to land.`
+              : 'Waits for your approval to land.'}
+          </span>
         </div>
         {row.note ? (
           <p className="why" dir="auto">
-            {row.note}
+            {protectedReason ?? row.note}
           </p>
         ) : null}
         <div className="btns">

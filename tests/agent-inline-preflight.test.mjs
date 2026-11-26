@@ -371,8 +371,8 @@ test('protected-path approval is printed before required inline preflight spends
     s.transport(),
   );
   assert.equal(result.result.submission.phase, 'landed');
-  assert.match(result.result.protectedPathNotice.message, /a person allowed to accept/);
-  const notice = output.findIndex(line => line.includes('Landing will need approval'));
+  assert.match(result.result.protectedPathNotice.message, /^The owner must approve this landing/);
+  const notice = output.findIndex(line => line.includes('The owner must approve this landing'));
   const check = output.findIndex(line => line.includes('preflight plan:'));
   assert(notice >= 0 && check > notice, 'approval is explained before the preflight run starts');
 });

@@ -79,7 +79,11 @@ const baseRead: NeedsRead = first
             ? {
                 submissionId: uuid(501),
                 attemptId: uuid(502),
-                reviewCheck: params.has('pending-check') ? 'pending' : 'none',
+                reviewCheck: params.has('main-moved')
+                  ? 'not-configured'
+                  : params.has('pending-check')
+                    ? 'pending'
+                    : 'none',
                 url: `/approve?project=synthetic&submission=${uuid(501)}`,
                 note: 'needs owner approval: protected paths .github/workflows/ci.yml',
               }
@@ -723,6 +727,12 @@ const record =
   (name: string) =>
   async (input: unknown): Promise<string> => {
     writes.push([name, input]);
+    if (name === 'decide' && params.has('main-moved'))
+      return JSON.stringify({
+        status: 'pending',
+        needsReapproval: true,
+        reason: 'Main moved. Approve the new Candidate when it appears.',
+      });
     // The server's grant of a connect names GitHub's authorization (projectHostedApprovals:decide → grantConnect).
     if (connect && name === 'decide')
       return JSON.stringify({

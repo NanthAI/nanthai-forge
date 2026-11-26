@@ -25,6 +25,7 @@ export type DiscussionComment = {
   attachments?: PlanningAttachment[];
   /** Written by Forge from a landing receipt (Issue 3a733ee8), never by a member: no reply or reaction. */
   system?: true;
+  landing?: { receiptId: string; checked?: false };
   conversation?: ThreadEntry;
 };
 export type Thread = { root: DiscussionComment; replies: DiscussionComment[] };

@@ -62,9 +62,9 @@ export function governanceReason(
 ): string | null {
   if (actor.id === project.owner && actor.kind === 'person') return null;
   const protectedPath = ownerApprovalMatcher(policy, checks);
-  if (paths === null && protectedPath.any)
+  if (paths === null && (protectedPath.any || policy.acceptance.protectedPaths.length > 0))
     return 'needs owner approval: protected-path coverage is unavailable';
-  const matched = (paths ?? []).filter(path => protectedPath(path));
+  const matched = protectedPathMatches(policy, paths, checks) ?? [];
   if (matched.length) return `needs owner approval: protected paths ${matched.join(', ')}`;
   // Only explicitly permitted unchecked people skip automatic review; protected paths still apply.
   return reviewReason(
@@ -91,9 +91,6 @@ export function protectedPathNotice(policy: ProtectedPathPolicy, paths: string[]
     policy.checkEntries,
   );
   if (!reason) return undefined;
-  const approver = matched?.some(path => owner(path))
-    ? 'project owner (a person)'
-    : 'a person allowed to accept';
   let bytes = 0;
   const shown = (matched ?? [])
     .filter(path => {
@@ -104,8 +101,8 @@ export function protectedPathNotice(policy: ProtectedPathPolicy, paths: string[]
   return {
     message:
       matched === null
-        ? 'Landing may need protected-path approval; path coverage is unavailable. Read policy for the configured approver.'
-        : `Landing will need approval from ${approver} under the current protected-path policy.`,
+        ? 'The owner may need to approve this landing. Protected-path coverage is unavailable.'
+        : 'The owner must approve this landing under the current protected-path policy.',
     paths: shown,
     more: (matched?.length ?? 0) - shown.length,
     coverage: matched === null ? ('unavailable' as const) : ('complete' as const),

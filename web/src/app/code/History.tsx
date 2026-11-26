@@ -8,6 +8,7 @@
 import { useState, type KeyboardEvent } from 'react';
 import { Head, crumbsFor } from '../Place';
 import { A } from '../frames';
+import { Unchecked } from '../Unchecked';
 import { hrefFor } from '../paths';
 import { useSearch } from '../router';
 import { RegionBoundary, type CodeProps } from './CodePlace';
@@ -192,7 +193,7 @@ function LandingRow({ row, href, selected }: { row: CodeHistoryRow; href: string
       <span className="who">
         <LandedBy row={row} />
       </span>
-      <span className="t2">{row.check ? 'Checked' : 'No check'}</span>
+      <span className="t2">{row.checked === false ? <Unchecked /> : row.check ? null : 'No check'}</span>
     </A>
   );
 }
