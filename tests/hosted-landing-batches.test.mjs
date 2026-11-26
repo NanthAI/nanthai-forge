@@ -236,6 +236,13 @@ test('a main receipt race recomposes the whole cohort without transferring evide
   const receipts = [...f.tables.projectHostedAcceptances.values()].map(r => JSON.parse(r.value));
   assert(receipts.every(r => r.check.runId !== f.runs()[0].id));
   assert.equal(new Set(receipts.map(r => r.check.runId)).size, 1);
+  for (const { runnerAccounting } of f.tables.projectHostedLandingRequests.values()) {
+    assert.equal(runnerAccounting.runs, 2, 'the passed check on the stale main still counts as discarded');
+    assert.deepEqual(
+      runnerAccounting.runIds,
+      f.runs().map(run => run.id.slice(-8)),
+    );
+  }
   assert(JSON.parse(f.c.objects.get(f.currentMain().head)).files.some(f => f.path === 'accepted.txt'));
   // c3c69c57: every fork onto a moved main names its reason.
   assertForkRacesNamed(f, 'cohort');

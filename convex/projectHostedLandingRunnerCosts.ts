@@ -113,21 +113,27 @@ export function bindRunnerAccounting(
  * budget (4 per 20 landings) already; a rebind of a run older than the last 8 would count once more. */
 export const COUNTED_RUN_IDS = 8;
 
-/** Count a run once when it is bound to this work (Item 1018d0f8, root cause 3a5737c4): the
- * discarded-check budget reads distinct runs, not attempts. A check carried to a resubmission, or bound
- * again after another one (a failed cohort splits back onto a member's admission run), is the same run.
+/** Count a run once when it is bound to this work (Item 1018d0f8, root cause 3a5737c4). A check
+ * carried to a resubmission, or bound again after another one, is the same run for the discarded-check budget.
  * Returns the same object when nothing changes, so the caller can skip the write. */
 export function countRunnerRun(
   accounting: RunnerAccounting,
   runId: string | null | undefined,
+  providerRetryOf?: string,
 ): RunnerAccounting {
   const key = runId && countedRunKey(runId);
   if (!accounting || !key || accounting.runs === undefined || accounting.runIds?.includes(key))
     return accounting;
+  const keys = accounting.runIds ?? [];
+  const replaced = providerRetryOf && countedRunKey(providerRetryOf);
+  // An unjudged provider run gives its slot to the retry. A member without that key
+  // (for example, newly included after recomposition) binds the new check normally.
+  if (replaced && keys.includes(replaced))
+    return { ...accounting, runIds: [...keys.filter(id => id !== replaced), key] };
   return {
     ...accounting,
     runs: accounting.runs + 1,
-    runIds: [...(accounting.runIds ?? []), key].slice(-COUNTED_RUN_IDS),
+    runIds: [...keys, key].slice(-COUNTED_RUN_IDS),
   };
 }
 
@@ -141,10 +147,11 @@ export function bindRunnerRun(
   accounting: RunnerAccounting,
   boundRunId: string | null | undefined,
   runId: string | null | undefined,
+  providerRetryOf?: string,
 ): RunnerAccounting {
   const bound =
     accounting && runId && runId !== boundRunId ? bindRunnerAccounting(accounting, runId) : accounting;
-  return countRunnerRun(bound, runId);
+  return countRunnerRun(bound, runId, providerRetryOf);
 }
 
 /** Fresh accounting for new work. The run count starts only for a new lineage: a retry of a predecessor

@@ -28,6 +28,25 @@ async function drainActive(f) {
   }
 }
 const batches = f => [...f.tables.projectHostedLandingBatches.values()].map(row => JSON.parse(row.value));
+
+function assertRetryReplaced(f, failed, replacement) {
+  const failedKey = failed.id.slice(-8);
+  const replacementKey = replacement.id.slice(-8);
+  const members = [...f.tables.projectHostedLandingRequests.values()].filter(
+    row => row.runId === replacement.id,
+  );
+  assert(members.length > 0, 'the retry is bound to its queue entries');
+  for (const { runnerAccounting } of members) {
+    assert.equal(runnerAccounting.runs, 1, 'the provider retry adds no discarded check');
+    assert.deepEqual(runnerAccounting.runIds, [replacementKey]);
+  }
+  assert(
+    [...f.tables.projectHostedLandingRequests.values()].every(
+      row => !row.runnerAccounting.runIds.includes(failedKey),
+    ),
+    'no entry keeps the replaced provider key',
+  );
+}
 // The incident run: 13 jobs, ~5.7 min each when cancelled (74 runner-minutes).
 const RUNNER_MINUTES_PER_DISCARDED_RUN = 74;
 
@@ -85,6 +104,7 @@ test('a platform retry of the batch head keeps every stacked batch check (same h
   await f.rawChecks.callback(f.rawChecks.complete(active.get(head.id), 'runner-unavailable'));
   await drainActive(f);
   assert.equal(f.runs().length, 5, 'exactly one retry run for the head');
+  assertRetryReplaced(f, head, f.runs().at(-1));
   assert(!batches(f).some(batch => batch.phase === 'superseded'), 'no stacked group is superseded');
   for (const run of f.runs().filter(run => initial.slice(1).some(old => old.id === run.id)))
     assert(!run.cancelRequested && run.status === 'running', 'stacked runs keep running');
@@ -131,6 +151,7 @@ test('incident a7de3a93 replay: a solo head retried after a platform outcome kee
   await f.rawChecks.callback(f.rawChecks.complete(active.get(head.id), 'interrupted'));
   await drainActive(f);
   assert.equal(f.runs().length, 4, 'retrySoloLandingCheck enqueues one run for the same Candidate');
+  assertRetryReplaced(f, head, f.runs().at(-1));
   assert.equal(f.runs().at(-1).request.candidateId, head.request.candidateId);
   assert(!batches(f).some(batch => batch.phase === 'superseded'), 'the stacked batch is not superseded');
   for (const run of f.runs().filter(run => initial.slice(1).some(old => old.id === run.id)))

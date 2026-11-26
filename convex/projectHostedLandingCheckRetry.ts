@@ -45,6 +45,7 @@ export async function retrySoloLandingCheck(
     ...(reason ? { providerDelayed: true } : {}),
     original: { ...attempt, platformRetries: (attempt.platformRetries ?? 0) + 1 },
     checkOperationId: operationId,
+    providerRetryOf: run.id,
     replacementReplay: {
       ...checkReplay(run),
       replacementCause: { kind: 'provider-retry', link: run.id },

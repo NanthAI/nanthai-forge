@@ -117,6 +117,28 @@ test('a Lane check that ends without a failing test restarts twice, then enters 
   assert.equal(landed(f), 1, 'unknown is not red');
 });
 
+test('incident 1018d0f8 case 5: a partial Actions run replaced at admission adds no discarded check', async t => {
+  const f = await batchesFixture(t, { ...full, count: 1 });
+  // 19941e9f reported shard work before losing a runner. a80e5b62 checked the same Candidate and landed.
+  const [first] = f.runs();
+  const active = await f.rawChecks.activate(first.id);
+  await f.rawChecks.callback(f.rawChecks.shard(active, 0));
+  await f.rawChecks.callback(f.rawChecks.complete(active, 'runner-unavailable'));
+  await f.drain();
+
+  const [, retry] = f.runs();
+  assert.ok(retry && retry.id !== first.id);
+  assert.equal(retry.request.candidateId, first.request.candidateId);
+  while (await round(f, []));
+  assert.equal(landed(f), 1);
+  assert.equal(f.runs().length, 2);
+  const [receipt] = [...f.tables.projectHostedAcceptances.values()].map(row => JSON.parse(row.value));
+  assert.equal(receipt.check.runId, retry.id);
+  const [{ runnerAccounting }] = rows(f);
+  assert.equal(runnerAccounting.runs, 1, 'the accepted retry occupies the original run slot');
+  assert.deepEqual(runnerAccounting.runIds, [retry.id.slice(-8)]);
+});
+
 // Passed-change grouping (owner 2026-11-22, Item 10b0a94b): with pre-queue Lane checks only changes
 // whose own check passed form a cohort. A fresh arrival (here: unadmitted after its Lane check
 // ended without a failing test three times) checks alone; grouping such changes was measured at

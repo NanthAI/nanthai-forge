@@ -125,6 +125,9 @@ test('a cohort platform retry on a moved main installs provider-retry linked to 
   assert.ok(retry, 'the cohort rechecks on the moved main');
   assert.equal(retry.candidate.base.head, moved.head, 'the retry is composed on the moved main');
   for (const member of members) {
+    const { runnerAccounting } = rowOf(f, member.id);
+    assert.equal(runnerAccounting.runs, 1, 'recomposition still replaces the unjudged provider run');
+    assert.deepEqual(runnerAccounting.runIds, [retry.id.slice(-8)]);
     const attempts = (await read(f, member.id)).attempts;
     const retired = attempts.find(attempt => attempt.id === member.attemptId);
     assert.ok(retired, 'the retired attempt stays in the history');

@@ -210,7 +210,7 @@ export async function settleLandingAdmission(
         false,
         true,
         undefined,
-        { replay },
+        { replay, ...(infraEnd(run) ? { providerRetryOf: run.id } : {}) },
       );
       return true;
     }

@@ -287,6 +287,7 @@ export async function batchFinishStep(
                 replacementReplay: {
                   replacementCause: { kind: 'provider-retry' as const, link: batch.retriedRunId },
                 },
+                ...(batch.retriedRunInfrastructure ? { providerRetryOf: batch.retriedRunId } : {}),
               }
             : batch.nextCheckCause === checkCause.evidenceRefresh
               ? {
@@ -316,9 +317,15 @@ export async function batchFinishStep(
           environment: run.request.expectedEnvironment,
         },
       });
-    const { nextCheckCause: _cause, retriedRunId: _retried, ...dispatched } = batch;
+    const {
+      nextCheckCause: _cause,
+      retriedRunId: _retried,
+      retriedRunInfrastructure: _infrastructure,
+      ...dispatched
+    } = batch;
     void _cause;
     void _retried;
+    void _infrastructure;
     await writeBatch(ctx, key, {
       ...dispatched,
       phase: 'checking',

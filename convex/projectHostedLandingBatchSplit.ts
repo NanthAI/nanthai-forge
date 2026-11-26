@@ -8,7 +8,7 @@ import type { BatchFailure } from '../src/hosted-batch-diagnosis';
 import { type HostedCheckRun, checkCause } from '../src/hosted-check';
 import { landingObservation, type HostedLandingAttempt } from '../src/hosted-landing';
 import { HOSTED_PLATFORM_RETRIES, recordOutcome, splitGroups } from '../src/hosted-landing-admission';
-import { clearCiDown, holdBatchForCiDown } from './projectHostedLandingCiDown';
+import { clearCiDown, holdBatchForCiDown, infraEnd } from './projectHostedLandingCiDown';
 import { batchMemberDiagnostic } from '../src/hosted-batch-diagnosis';
 import {
   enqueueBatchCheck,
@@ -259,13 +259,19 @@ export async function retryLandingBatchCheck(
   if (!pending.length) return writeBatch(ctx, input, { ...batch, phase: 'landed' });
   const main = await hostedStartMain(ctx, input.projectId);
   const predecessor = await predecessorStatus(ctx, input, batch);
+  const providerRetry = infraEnd(run);
   if (
     predecessor === 'invalid' ||
     (predecessor !== 'pending' &&
       (main.head !== shared.main.head || main.receipt.id !== shared.main.receiptId))
   ) {
     if (pending.length === batch.members.length)
-      return retryLandingBatch(ctx, input, { ...batch, platformRetries: retries }, checkCause.retry);
+      return retryLandingBatch(
+        ctx,
+        input,
+        { ...batch, platformRetries: retries, ...(providerRetry ? { retriedRunInfrastructure: true } : {}) },
+        checkCause.retry,
+      );
     return splitLandingBatch(ctx, input, batch);
   }
   const settings = (
@@ -306,6 +312,7 @@ export async function retryLandingBatchCheck(
         ...checkReplay(run),
         replacementCause: { kind: 'provider-retry', link: run.id },
       },
+      ...(providerRetry ? { providerRetryOf: run.id } : {}),
       ...(reason ? { providerDelayed: true } : {}),
       check: {
         runId: next.id,

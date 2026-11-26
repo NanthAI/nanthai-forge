@@ -540,6 +540,14 @@ test('main moves after the hold: approval does not publish the stale Candidate; 
   assert.deepEqual(receipt.actor, { id: 'owner', kind: 'person' });
   assert.equal(receipt.previous.head, moved.head);
   assert(receipt.check, 'the fresh attempt carries its own check');
+  const row = [...f.tables.projectHostedLandingRequests.values()].find(row => row.submissionId === state.id);
+  assert.equal(
+    row.runnerAccounting.runs,
+    2,
+    'the protected-path hold and main move discarded the first check',
+  );
+  const keys = [...f.tables.projectHostedCheckRuns.values()].map(run => run.runId.slice(-8));
+  assert.deepEqual(row.runnerAccounting.runIds, keys);
 });
 
 test('a queued owner approval still requires the exact held policy when it reaches publication', async t => {

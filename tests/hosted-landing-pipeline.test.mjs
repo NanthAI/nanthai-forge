@@ -584,6 +584,9 @@ test('70a9bd2f: an admission platform retry keeps the exact combined successor',
   await drainActive(f);
   assert(states(f).every(state => state.phase === 'landed'));
   assert.equal(f.runs().length, 3, 'only the platform-failed admission repeats');
+  const retried = [...f.tables.projectHostedLandingRequests.values()].find(row => row.runId === retry.id);
+  assert.equal(retried.runnerAccounting.runs, 2, 'a cancellation and its retry count as separate runs');
+  assert.deepEqual(retried.runnerAccounting.runIds, [a.id.slice(-8), retry.id.slice(-8)]);
   assert(
     [...f.tables.projectHostedAcceptances.values()].some(row => JSON.parse(row.value).check.runId === c.id),
   );

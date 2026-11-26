@@ -43,6 +43,8 @@ export const batchSchema = z
     nextCheckCause: checkCauseSchema.optional(),
     /** The provider run a platform retry replaced, carried to the next check's attempts (ced8e98f). */
     retriedRunId: z.uuid().optional(),
+    /** A provider infrastructure end, as opposed to another unjudged result such as cancellation. */
+    retriedRunInfrastructure: z.literal(true).optional(),
     /** The cohort's last whole pass, kept across main-race retries (Issue 28f08555). */
     recheck: scopedRecheckBasisSchema.optional(),
     included: z.array(z.uuid()).max(HOSTED_BATCH_MEMBERS).optional(),

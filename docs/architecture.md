@@ -2513,7 +2513,9 @@ whether it was a [first try](concepts.md#core-model) and adds it to `flow.first`
 without landing marks its bound Lanes `retried` on the patch that end already makes
 (an end that moves nothing else patches for it alone), the next binding page copies
 the mark, and the landing reads it from the page it already reads, with its own
-`supersedes` and discarded-check counts. The top bar, `nforge status` (`mainToday`; a bare status
+`supersedes` and discarded-check counts. When Forge retries after a provider infrastructure failure, the retry
+takes the failed run's slot in the discard count. A cancellation or fresh check required by a main move or
+protected review still counts the retired check. The top bar, `nforge status` (`mainToday`; a bare status
 asks for the stored day, `mainDay`, on the capability or clone main read it already makes, and works out the figure
 on its own clock, so a cached query never serves yesterday's)
 and `flow` read the UTC day from it. Readers work out "today" and

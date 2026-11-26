@@ -302,6 +302,7 @@ export async function installBatchAttempt(
     providerDelayed?: true;
     moverReceiptId?: string;
     replacementReplay?: import('./projectHostedLandingReplay').LandingReplay;
+    providerRetryOf?: string;
   },
 ) {
   const { original } = input;
@@ -368,7 +369,10 @@ export async function installBatchAttempt(
     undefined,
     // A named mover outranks the caller's retry evidence, as the fork cause above says.
     input.replacementReplay && !input.moverReceiptId
-      ? { replacementReplay: input.replacementReplay }
+      ? {
+          replacementReplay: input.replacementReplay,
+          ...(input.providerRetryOf ? { providerRetryOf: input.providerRetryOf } : {}),
+        }
       : undefined,
   );
   return attempt;
