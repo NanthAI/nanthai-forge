@@ -59,6 +59,7 @@ const projectPublicationStore = await import(moduleUrl('../convex/projectPublica
 const projectLifecycle = await import(moduleUrl('../convex/projectLifecycle.ts'));
 const r2ArchiveSource = await import(moduleUrl('../convex/r2ArchiveSource.ts'));
 const projectActorNames = await import(moduleUrl('../convex/projectActorNames.ts'));
+const projectHostedSeedWorkStore = await import(moduleUrl('../convex/projectHostedSeedWorkStore.ts'));
 const projectWorkIndexStore = await import(moduleUrl('../convex/projectWorkIndexStore.ts'));
 const projectWorkCommand = await import(moduleUrl('../convex/projectWorkCommand.ts'));
 const projectWorkIndex = await import(moduleUrl('../convex/projectWorkIndex.ts'));
@@ -588,6 +589,7 @@ export function state(jobs = [job()], { keysetPaging = false, legacyWorkRecords 
     r2ArchiveSource,
     projectPublicationStore,
     inventoryAccess,
+    projectHostedSeedWorkStore,
     projectWorkIndexStore,
     projectWorkCommand,
     projectWorkIndexBuildStore,

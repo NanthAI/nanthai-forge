@@ -315,8 +315,8 @@ test('planning puts in the revision-free mutation: unrelated writes never refuse
 });
 
 // Part 9: completing cutover removes disposable source/target fingerprints from ordinary writes.
-// The before fixture leaves an unrelated writer in migration, so the measured command already owns
-// primary provenance on both sides; the difference is its migration telemetry alone.
+// An unrelated older event writer remains in each bridge scenario. Canonical Work
+// commands never maintain comparison rows after the reader cutover.
 test('primary Work writes retire migration I/O without changing item versions or tab reads', async t => {
   const { workRecordWriter } = await import(moduleUrl('../convex/projectWorkRecordWriter.ts'));
   const { meterWorkIO } = await import('./hosted-read-set.mjs');
@@ -390,8 +390,12 @@ test('primary Work writes retire migration I/O without changing item versions or
   const before = await measure(false),
     after = await measure(true);
   for (const name of Object.keys(after)) {
-    assert.ok(before[name].migrationWrites > 0, `${name}: baseline exercises migration maintenance`);
     assert.equal(after[name].migrationWrites, 0, `${name}: primary writes no migration metadata`);
+    if (name !== 'hostedIntent') {
+      assert.equal(before[name].migrationWrites, 0, `${name}: bridge writes no migration metadata`);
+      continue;
+    }
+    assert.ok(before[name].migrationWrites > 0, `${name}: the retained queue bridge maintains old metadata`);
     for (const dimension of ['readDocuments', 'readBytes', 'writeDocuments', 'writeBytes'])
       assert.ok(
         after[name][dimension] < before[name][dimension],

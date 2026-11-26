@@ -1053,13 +1053,13 @@ test('audit reads enforce membership and public-identity rules across signed-out
   }
 });
 
-test('purged Items and legacy non-records projects read safely in itemHistory and windowHistory', async t => {
+test('Item audit reads without a mode marker and returns durable purge tombstones', async t => {
   const s = await setup(t);
   addDeviceAndAccounts(s);
   s.ctx.auth.getUserIdentity = async () => ({ subject: 'owner' });
   const p = makePort(s);
 
-  // Legacy project (workStore !== 'records'): itemHistory works from planningVersions; windowHistory reports unavailable.
+  // A project without a mode marker still serves its canonical Item history and date window.
   const legacyId = (await runPut(p, { kind: 'issue', title: 'Legacy tracked' })).itemId;
   await runPut(p, { planningItemId: legacyId, expectedVersion: 1, status: 'closed', reason: 'Legacy close' });
   const legacyHist = await runPlanning(p, { planningItemId: legacyId, history: true });
@@ -1067,8 +1067,11 @@ test('purged Items and legacy non-records projects read safely in itemHistory an
   assert.equal(legacyHist.events.length, 2);
   assert.equal(legacyHist.events[0].changes[0].transition, 'closed');
   const legacyWin = await runPlanning(p, { history: { from: '2020-01-01' } });
-  assert.equal(legacyWin.coverage, 'unavailable');
-  assert.deepEqual(legacyWin.items, []);
+  assert.notEqual(legacyWin.coverage, 'unavailable');
+  assert.equal(
+    legacyWin.items.some(item => item.itemId === legacyId),
+    true,
+  );
 
   // Purged Item on records project: returns tombstone without throwing PLANNING_ITEM_PURGED.
   await s.ctx.db.patch(s.projectId, { workStore: 'records', workStoreWriters: ['planning'] });

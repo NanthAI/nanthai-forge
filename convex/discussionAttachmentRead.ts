@@ -7,7 +7,6 @@ import { guard } from './cliServer';
 import { report } from './errors';
 import { commentOnItem } from './planningCommentRead';
 import { accessibleProject, readProjectRole } from './projectAuthority';
-import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { storeItem } from './projectWorkStoreReads';
 import { publicWorkPlan } from './publicWorkPlan';
 import { projectPrefix } from './r2Operations';
@@ -21,13 +20,8 @@ const contentType = /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+(?:;[\x20-\x7e]*)?$/
 /** Permanent deletion retains comment headers. The current Item's durable
  * tombstone ends downloads even before the redaction sweep reaches those rows. */
 export async function retainedItem(ctx: QueryCtx, project: Doc<'hostedProjects'>, itemId: string) {
-  if (project.workStore === 'records') {
-    const item = await storeItem(ctx, project._id, itemId);
-    return Boolean(item && !item.purged);
-  }
-  const generation = await selectedGeneration(ctx, project);
-  const row = generation && (await record(ctx, recordPartition(generation), 'planningItems', itemId));
-  return Boolean(row && !JSON.parse(row.value).purged);
+  const item = await storeItem(ctx, project._id, itemId);
+  return Boolean(item && !item.purged);
 }
 
 /** The same transaction checks discussion access and reads the committed artifact pin.

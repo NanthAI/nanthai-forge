@@ -25,14 +25,13 @@ function callSites(files, name) {
   return sites;
 }
 const expected = {
-  // The one place a project row is inserted (native-owner, journal until its birth).
+  // The one place a project row is reserved before verified Work can be selected.
   "insert('hostedProjects'": { 'projectCreation.ts': 1 },
   createProject: {
     'projectBootstrapStore.ts': 2, // browser new project: R2 reservation, then publish (same key)
     'projectGithubImportStore.ts': 1, // GitHub import; its publication calls selectBornMain
-    'projectHosting.ts': 1, // nforge host; a plain-folder seed commit calls serverBirth
-    // Archive upload allocates a native-owner project. Editable births from an archive move to the
-    // record store in the next F2 step of Item c0af6cfa (decision 11206381); backup and recovery stay.
+    'projectHosting.ts': 1, // nforge host; verified native and Git seeds call serverBirth
+    // Archive upload reserves a project. Its seed commit selects the verified Work.
     'projectBackupObjects.ts': 1,
   },
   selectBornMain: {
@@ -40,10 +39,9 @@ const expected = {
     'projectGithubImportPublication.ts': 1,
     'projectHostedBirth.ts': 1, // make-editable
   },
-  // Every server birth: selectBornMain and the plain-folder seed. A Git worktree host stays native-owner
-  // until the next F2 step of Item c0af6cfa gives it a verified native main and a record-store birth.
+  // Every server birth: selectBornMain and the verified hosted seed.
   serverBirth: { 'projectHostedBirth.ts': 1, 'projectHostedSeed.ts': 1 },
-  bornRecordStore: { 'projectHostedBirth.ts': 1 },
+  bornRecordStore: { 'projectHostedBirth.ts': 1, 'projectHostedSeed.ts': 1, 'projectWork.ts': 1 },
   // The seam itself, plus existing projects switching authority. Those keep their journal history until
   // slice 6 copies and compares it; they are not births.
   nextSourceAuthority: {

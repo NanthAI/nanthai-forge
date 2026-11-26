@@ -14,7 +14,6 @@ export function initialSeedIndex(request: SeedRequest, state: ReturnType<typeof 
     request.revision !== 0 ||
     request.sourceHead !== request.head ||
     state.parents.length ||
-    state.git ||
     request.receipt ||
     request.preview.unavailable
   )
@@ -24,7 +23,11 @@ export function initialSeedIndex(request: SeedRequest, state: ReturnType<typeof 
   const utf8 = new TextEncoder();
   if (digest(work) !== request.work.sha256 || utf8.encode(work).length !== request.work.size)
     return undefined;
-  const blobs = new Set([request.head, ...state.files.map(file => file.blob)]);
+  const blobs = new Set([
+    request.head,
+    ...state.files.map(file => file.blob),
+    ...(state.git ? [state.git.bundle] : []),
+  ]);
   if (blobs.size + 1 !== request.preview.files) return undefined;
   const manifest = {
     schema: 1 as const,

@@ -173,6 +173,7 @@ export const detail = query({
     ...identity,
     value: v.union(v.string(), v.null()),
     deferred: v.optional(v.literal(true)),
+    hydrated: v.optional(v.literal(true)),
     editable: v.boolean(),
     intentPin: v.union(v.string(), v.null()),
   }),
@@ -197,10 +198,24 @@ export const detail = query({
               value,
               planningHistoryBudget(),
               pinned,
-              project.workStore === 'records' ? planningTimesFallbackReporter() : undefined,
+              planningTimesFallbackReporter(),
             )
           : value;
-      if (input.collection === 'planningItems' && readsStore(project, input.collection)) {
+      if (input.collection === 'planningItems') {
+        // The existing search projection is a compact way to defer large Item bodies.
+        // It never supplies the current value or decides whether the canonical Item exists.
+        if (input.inlineItemOnly) {
+          const header = await record(ctx, recordPartition(generation), 'planningItems', input.id);
+          if (header && JSON.parse(header.value).payloadKey)
+            return {
+              generationId: generation._id,
+              revision: generation.initialRevision,
+              value: null,
+              deferred: true as const,
+              editable: project.owner === user.subject,
+              intentPin: null,
+            };
+        }
         const item = await storeItemRow(ctx, project._id, input.id, input.inlineItemOnly);
         return {
           generationId: generation._id,
@@ -212,25 +227,12 @@ export const detail = query({
               )
             : null,
           ...(item?.deferred ? { deferred: true as const } : {}),
+          ...(item?.value ? { hydrated: true as const } : {}),
           editable: project.owner === user.subject,
           intentPin: null,
         };
       }
       const row = await record(ctx, recordPartition(generation), input.collection, input.id);
-      if (
-        input.inlineItemOnly &&
-        input.collection === 'planningItems' &&
-        row &&
-        JSON.parse(row.value).payloadKey
-      )
-        return {
-          generationId: generation._id,
-          revision: generation.initialRevision,
-          value: null,
-          deferred: true as const,
-          editable: project.owner === user.subject,
-          intentPin: null,
-        };
       const main = ['lanes', 'views', 'runs'].includes(input.collection)
         ? await hostedMain(ctx, generation)
         : null;
@@ -381,14 +383,10 @@ export async function journalWorkRecordsRead(
         };
     }
     const numItems = Math.min(input.paginationOpts.numItems, 100);
-    const store = readsStore(project, input.collection, input.parentId);
+    const store = readsStore(input.collection, input.parentId);
     const partition = recordPartition(generation);
     const payloads = new Map<string, Promise<Map<string, string>>>();
-    const readItem = async (id: string) => {
-      if (store) return storeItem(ctx, project._id, id);
-      const item = await record(ctx, partition, 'planningItems', id);
-      return item ? JSON.parse(await hostedRecordValue(ctx, partition, item, payloads)) : null;
-    };
+    const readItem = (id: string) => storeItem(ctx, project._id, id);
     const continuation = linkedLandingCursor(input.paginationOpts.cursor, input);
     if (continuation)
       return {

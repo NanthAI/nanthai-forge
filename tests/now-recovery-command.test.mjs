@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { setup } from './hosted-planning-fixture.mjs';
+import { setup, pinIntent } from './hosted-planning-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 const commands = await import(moduleUrl('../convex/projectWorkCommand.ts'));
 const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
@@ -35,15 +35,13 @@ async function fixture(t, scale = 0) {
   const project = s.tables.hostedProjects.get(s.projectId);
   project.sourceAuthority = { mode: 'server', epoch: 1 };
   project.needsFix = { [intentId]: JSON.stringify(notice) };
-  await records.writeHostedRecord(s.ctx, {
+  await pinIntent(s.ctx, {
     projectId: s.projectId,
     actor: 'owner',
     authorityEpoch: 1,
-    expectedVersion: null,
     record: {
       kind: 'intent',
       id: intentId,
-      version: 0,
       at,
       outcome: 'Restore bytes',
       constraints: '',
@@ -148,7 +146,7 @@ test('Now Close updates the canonical recovery Intent and Work, clears the works
   const intent = await readIntent(s);
   assert.equal(intent.status, 'abandoned');
   assert.equal(intent.needsFix, undefined);
-  assert.equal(intent.version, 1);
+  assert.equal(intent.version, 2);
   assert.equal(s.tables.hostedProjects.get(s.projectId).needsFix, undefined);
   const workspace = JSON.parse(await index.workspace._handler(s.ctx, { projectId: s.projectId }));
   assert.equal(workspace.needsFix, undefined);
@@ -159,7 +157,7 @@ test('Now Close updates the canonical recovery Intent and Work, clears the works
   });
   assert.equal(JSON.parse(detail.value).status, 'abandoned');
   assert.equal((await commands.command._handler(s.ctx, s.close))._id, result._id);
-  assert.equal((await readIntent(s)).version, 1);
+  assert.equal((await readIntent(s)).version, 2);
   t.diagnostic(JSON.stringify(measured));
 });
 
@@ -172,8 +170,8 @@ test('replaying an old Close cannot clear a newer recovery notice; revoked acces
     projectId: s.projectId,
     actor: 'owner',
     authorityEpoch: 1,
-    expectedVersion: 1,
-    record: { ...closed, version: 2, status: 'active', needsFix: newer },
+    expectedVersion: closed.version,
+    record: { ...closed, version: closed.version + 1, status: 'active', needsFix: newer },
   });
   s.tables.hostedProjects.get(s.projectId).needsFix = { [s.intentId]: JSON.stringify(newer) };
   await commands.command._handler(s.ctx, s.close);

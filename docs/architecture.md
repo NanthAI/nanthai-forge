@@ -809,8 +809,7 @@ Hosted Intent, note and Channel operations use a derived indexed Work generation
 The `projectWorkHeads` row owns the mutable Work revision and projection metadata. Legacy project/generation fields seed it lazily; ordinary writes leave those shared documents unchanged. Revision-sensitive reads (provenance plans and exports) hydrate the head, and each such query re-runs for every open tab on every journal write. Neither the project `state` query nor the `projectWorkIndex:workspace` query every tab subscribes to reads the head: `state`'s `work.revision` is the seed value, the workspace carries the generation's counts (a collection the generation had no rows of is probed for its first row) and no revision, and pages that show live counts count their loaded rows. The live revision is `projectWorkIndex:revision`, held only by the transfer screen and an open source verification. Collection/detail reads depend on the stable generation and their selected record ranges, so one planning write re-runs two queries per tab: the Intent list (an Issue is also an Intent row) and the page holding the item. Opening a project does not prepare its index. A fresh native seed stages its initial Work generation without running the full rebuild. The compatibility `ensure` action only reads the current generation unless the explicit operator request supplies `rebuild:true`. Detail-storage migration retains the ready generation, and canonical hosted main moves do not invalidate it. Anchored notes still validate source bytes in an action (the web reads the revision once for that one command); Channel acceptance retains its pinned revision check. The legacy command action delegates those five metadata commands to the same atomic mutation and ignores their client-held revision; original retries reconcile by actor, operation and command. Its project-revision checks now apply only to pinned Channel/anchored-source paths. Journal replay and operation receipts retain contiguous revisions and original retry identities.
 
 Filtered planning lists use the existing `planningSearch` roots as a selection index,
-then hydrate only matching items from their current reader (record heads in records mode,
-journal rows otherwise). Seven ordinary compound indexes on `projectPlanningRecords`
+then hydrate only matching Items from their canonical record heads. Seven ordinary compound indexes on `projectPlanningRecords`
 (the original table until a legacy generation completes migration) cover every kind/status/Initiative combination while retaining append-position order;
 no row, backfill, write call or text-search query is added. State counts on the existing
 `records` read inspect root metadata in one page (up to 1,000 rows / 1 MB), without bodies,
@@ -821,37 +820,33 @@ and selected item bodies, rather than the board; CPU is linear in the selected p
 existing authorization and generation pins apply. Idle calls remain zero. Older projections
 retain ordinary list scans; count coverage reports their incomplete search preparation.
 
-Planning is moving to the hosted record store, which keeps a version and a head per item and no project-wide revision. Issues and Initiatives are kind `issue` (one record version per planning version); planning comments and Intent notes are kind `comment` (insert-only; the parent is the Issue or Intent id, which is the same id for a planned Issue). Journal Intents (web Intents and the Intent each Issue is) are kind `intent`, the kind hosted start already writes: the shared fields keep their names, the rest stay verbatim under `journal`, and the base has no landing receipt (or no base before any Lane). An Intent with no recorded creator was the project owner's. Status moves are kind `lifecycle` (insert-only, parent the Intent), so neither a note nor a move rewrites the Intent's other fields. The journal owns a copied Intent until a hosted Lane starts on it: that start stores the next version with the Lane's base and receipt (a `proposed` Intent becomes `active`), and from then on hosted paths own its status; the copy, compare and dual write report such an Intent as `hosted` and leave it. Each command retains its original operation identity and ordered history; writer cutovers below choose the primary store. The owner copies existing rows with `nforge hosted-work DEPLOYMENT PROJECT_ID '{"action":"copy-work-store"}'`: one mutation per page of 100 index rows. A version already stored with the same digest is left alone and one with other bytes is reported, never overwritten, so a rerun copies nothing. `{"action":"compare-work-store"}` checks read-only, one query per page: rows missing or different in the store, rows that do not read under their schema, Issue heads behind the journal, and store heads with no journal Issue. `{"action":"set-work-store","mode":"dual"}` turns on the dual write, after a clean copy and compare: each journal append also stores the Issue versions, comments, notes, Intents and lifecycle moves it projects, in the same mutation (no extra call; up to 3 more documents per item). `"mode":"records"` keeps the dual write and serves the planning reads from the store: `projectWorkIndex:records` for the Issue list, an Issue's versions and comments, and an Intent's notes and status moves, and `projectWorkIndex:detail` for an Issue, for the web and agents alike. Rows keep the journal's shape (the whole item, never a payload header) and its append order (the order the heads were created). Each head of kind `issue`, `comment` or `lifecycle` keeps its current version inline as the journal row read it, so a page reads one document per row, no more documents or bytes than the journal page it replaces; planning comments and notes on the same id are told apart by head status (`comment` or `note`). Note heads store their Intent id only in the parent field; readers reconstruct it in the returned journal shape. Heads stored before they kept their value are read from record and body, and a copy run brings them up to date (`refreshed`). A write then re-runs only the page holding its item. The compare also checks each journal row against what the store reader returns for it, and that the inline value is what the verified body reads back as, field for field (`readItems`, `readVersions`, `readComments`, `readNotes`, `readLifecycle`); `"newest":N` checks only the newest N rows of each collection (one or two pages each) instead of the whole history. A bounded compare uses compact journal fingerprints and canonical version hashes; matching hashes open no full record bodies. While any eligible writer is still migrating, ordinary journal and canonical writes update those fingerprints in the same transaction. Once all five commands are primary, ordinary writes stop computing or storing migration reader hashes and stop reading or writing fingerprints and target pointers; explicit comparisons use the full current records. Crossing that writer boundary invalidates old digest coverage once, so rollback cannot reuse stale hashes. The owner can initialize a bounded legacy baseline with `{"action":"copy-work-store","digestsOnly":true,"newest":200}`: this writes only disposable hashes and compact pointers, without refreshing heads or copying record bodies. Fingerprints use private collections in the existing index table and stay outside portable Work and source-return read ranges. Missing fingerprint coverage uses the existing full comparison; the result labels each page method `full` or `digest`, and the cursor pins that choice. Hash differences open the original values for diagnosis. Full unbounded comparison retains its reader and body-integrity checks. The Intent list, search, id resolution, briefs, view rationale and note counts use transactional index projections. Those projections are updated from the primary command in the same mutation and rebuilt by replaying retained event history. They do not require a second journal append. `"mode":"dual"` switches the reads back and `"mode":"journal"` turns the dual write off. A row the store cannot read is skipped there and the compare reports it; the journal write stands. Native-owner projects keep their Work in the journal. A project born under server authority with no Work commands starts in `records` with every writer primary: every such birth (`selectBornMain` for app, GitHub import and make-editable births, and a fresh plain-folder `nforge host` seed) goes through `serverBirth`, which sets it in the birth transaction's own project patch. Two creation paths still start native-owner and journal-only until they get a record-store birth: a Git worktree `nforge host` and a project allocated by an archive upload. A plain folder whose native Work already ran commands is born under server authority but keeps its journal index until its Work is copied and compared. `tests/born-record-store-guard.test.mjs` counts every creation and birth call site and fails one that is not classified. In `records` a command retains its provenance in its record version instead of a `projectWorkEvents` row; the journal index projections it also updates stay until their remaining readers move to the store.
+Hosted planning reads the record store. An Issue or Initiative has an immutable
+version for each change and a head holding its current version and planning-time
+pin. Comments, Intent notes and status moves each retain their own record. The
+Intent head keeps its original creator and source pin. A hosted Lane can take
+ownership by attaching its base receipt, and a Work import leaves that head alone.
 
-`set-work-store` optionally accepts `writers`, independently of the reader mode:
-`note`, `intent`, `intent-status`, and `planning` (puts and comments together).
-Each enabled command retains its operation provenance in its primary immutable
-version's existing body document instead of appending a journal row. That document
-keeps the original operation, command, request, actor, timestamp and revision;
-previous revision derives from revision minus one. The canonical value moves inline
-to the same version header and is still checked against its immutable digest and
-byte length. There is no additional audit version or body. A no-op status retains
-a new Intent version with the same attributes; a pinned hosted Intent's status
-stays owned by its hosted path.
+New projects import canonical Work from the pinned, verified seed before selecting
+the backup and main. A Git host captures its pinned HEAD as a native root State
+and keeps the verified Git bundle. Nonempty Work imports in pages of at most 100
+records and 500 KiB through the original seed operation. Replaying a committed
+page advances no record. A verified empty Work seed does not run an import page.
+Archived Work uses the same canonical write helpers when it is first initialized.
 
-Existing history remains in place. State, export and index rebuild replay both
-stores by revision. Planning's unbounded command shapes switch together; retained
-reader epochs select the side that can contain large records first, then read the
-bounded metadata side within that exact revision window. Byte-driven partial pages
-and flag transitions neither lose nor re-read operations. The query fills across
-epochs within one client call. Removing a writer restores future journal appends;
-previously retained versions remain readable. Original-operation retries and
-Intent creator/source-pin lookup recognize either location. Anchored notes,
-Channel acceptance retain their existing authority and `WORK_STALE` checks.
-Older metadata action clients share the revision-free mutation; scheduled internal
-writers pass their trusted actor and recheck current project authority there.
+The P8 bridge can still copy and fully compare the legacy index before recording
+the cutover with all four primary writers. A copy leaves an existing record with
+the same digest alone and reports a different digest without overwriting it.
+Ordinary writes update the retained record and the transactional planning
+projections in one mutation. They no longer maintain migration fingerprints.
+Where a deployment still has live journal-only or dual-mode Work, prepare its
+canonical records and verify them on the preceding release before deploying
+record-store readers.
 
-Compact source fingerprints also retain independently captured canonical version
-hashes, and current heads have independent compact target pointers. Equal hashes
-never read inline primary values; differences open the original documents.
-Old versions without derived reader hashes use the verified full reader, and
-equal source is reported as matched. Full verification still detects out-of-band
-immutable-header corruption, which is outside the disposable digest cache.
+Primary commands retain their operation, request, actor, time and Work revision
+on their immutable version. Older event rows and the event-window frontier remain
+readable by export, rebuild, operation retry and Intent authority checks. Anchored
+notes and comment purges still use the existing journal paths. Archived Item
+snapshots still resolve through their journal segments.
 
 
 

@@ -23,12 +23,8 @@ async function readSnapshot(ctx, { projectId }) {
     owner = snapshot.project.owner === actor,
     editable = [];
   if (!owner) {
-    for await (const event of ctx.db
-      .query('projectWorkEvents')
-      .withIndex('by_project_and_revision', q => q.eq('projectId', projectId))) {
-      if (JSON.parse(event.command).action === 'intent' && event.baseBackupId && event.actor === actor)
-        editable.push(event.operationId);
-    }
+    for (const event of snapshot.events)
+      if (event.command.action === 'intent' && event.actor === actor) editable.push(event.id);
   }
   return JSON.stringify({
     projectId,

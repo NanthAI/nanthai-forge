@@ -12,6 +12,9 @@ const initiativeWork = await import(moduleUrl('../convex/projectInitiativeWork.t
 const rebuild = await import(moduleUrl('../convex/projectInitiativeWorkRebuild.ts'));
 const fold = await import(moduleUrl('../convex/projectInitiativeWorkFold.ts'));
 const workIndex = await import(moduleUrl('../convex/projectWorkIndexStore.ts'));
+const { storeVersion } = await import(moduleUrl('../convex/projectWorkStore.ts'));
+const { hostedRecordValue } = await import('../dist/hosted-records.js');
+const { workStoreRecord } = await import('../dist/work-store-records.js');
 const hash = 'a'.repeat(64),
   other = 'b'.repeat(64),
   at = '2026-01-01T00:00:00.000Z';
@@ -291,11 +294,22 @@ export async function itemWorkFixture({
         status,
         body,
         operationId: randomUUID(),
+        request: 'b'.repeat(64),
+        previousVersion: version - 1,
+        provenance: 'user-declared-local',
+        intentIds: [],
         at: `2026-11-${20 + version}T09:00:00.000Z`,
         author: 'owner',
         agent: 'cobalt-fox',
         agentClient: 'codex:gpt-6.2-sol',
       };
+      await storeVersion(
+        s.ctx,
+        { _id: auth.projectId },
+        hostedRecordValue(workStoreRecord('planningVersions', snapshot)),
+        undefined,
+        false,
+      );
       snapshots.push(snapshot);
       await s.ctx.db.insert('projectPlanningRecords', {
         projectId: auth.projectId,
@@ -309,22 +323,23 @@ export async function itemWorkFixture({
     }
     await s.ctx.db.patch(root._id, { value: JSON.stringify(snapshots.at(-1)) });
     for (let i = 0; i < 30; i++) {
-      const id = randomUUID();
-      await s.ctx.db.insert('projectPlanningRecords', {
-        projectId: auth.projectId,
-        generationId,
-        collection: 'planningComments',
-        key: id,
-        position: i,
-        parent: itemId,
-        value: JSON.stringify({
-          id,
-          itemId,
-          text: `Parser evidence ${i}`,
-          author: 'owner',
-          at: new Date(Date.UTC(2026, 9, i + 1)).toISOString(),
-        }),
-      });
+      const comment = {
+        id: randomUUID(),
+        itemId,
+        request: 'a'.repeat(64),
+        text: `Parser evidence ${i}`,
+        author: 'owner',
+        authorLabel: 'owner',
+        provenance: 'user-declared-local',
+        at: new Date(Date.UTC(2026, 9, i + 1)).toISOString(),
+      };
+      await storeVersion(
+        s.ctx,
+        { _id: auth.projectId },
+        hostedRecordValue(workStoreRecord('planningComments', comment)),
+        undefined,
+        false,
+      );
     }
   };
   const readHistoryRaw = args =>

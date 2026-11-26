@@ -7,7 +7,7 @@ import { batchUndo } from '../dist/planning-batch.js';
 import { summarizeRollupDryRun, previewPlanningRollup } from '../dist/planning-rollup-preview.js';
 import { successorIntentId } from '../dist/hosted-intent-chain.js';
 import { getFunctionName } from 'convex/server';
-import { setup } from './hosted-planning-fixture.mjs';
+import { setup, pinIntent } from './hosted-planning-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 
 const { advance } = await import(moduleUrl('../convex/projectPlanRollup.ts'));
@@ -19,7 +19,7 @@ const preview = await import(moduleUrl('../convex/projectPlanRollupPreview.ts'))
 const { workspace } = await import(moduleUrl('../convex/projectWorkIndex.ts'));
 const { transition } = await import(moduleUrl('../convex/projectHostedLifecycle.ts'));
 const intentRepair = await import(moduleUrl('../convex/projectHostedIntentRepair.ts'));
-const { writeHostedRecord } = await import(moduleUrl('../convex/projectHostedRecords.ts'));
+const { writeHostedRecord, recordHead } = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 const { set: setPolicy } = await import(moduleUrl('../convex/projectAutonomy.ts'));
 
 async function plan(t) {
@@ -58,16 +58,27 @@ async function plan(t) {
   const set = (itemId, fields) =>
     s.send({ action: 'put-planning-item', itemId, expectedVersion: 1, operationId: randomUUID(), ...fields });
   const work = async (itemId, status, laneStatus = status === 'active' ? 'active' : null) => {
-    const intent = await s.ctx.db.insert('projectHostedRecordHeads', {
+    const project = s.tables.hostedProjects.get(s.projectId);
+    project.sourceAuthority ??= { mode: 'server', epoch: 1 };
+    const base = { head: (await s.read()).sourceHead, receiptId: 'fixture-main' };
+    await pinIntent(s.ctx, {
       projectId: s.projectId,
-      kind: 'intent',
-      key: itemId,
-      status,
-      version: 1,
-      parent: '',
-      recordId: 'synthetic-work-pointer',
+      actor: 'owner',
+      authorityEpoch: project.sourceAuthority.epoch,
       planningItemId: itemId,
+      record: {
+        kind: 'intent',
+        id: itemId,
+        at: '2026-01-01T00:00:00.000Z',
+        outcome: 'Synthetic Work',
+        constraints: '',
+        creatorAccountId: 'owner',
+        assigneeAccountIds: [],
+        status,
+        base,
+      },
     });
+    const intent = await recordHead(s.ctx, s.projectId, 'intent', itemId);
     const lane =
       laneStatus &&
       (await s.ctx.db.insert('projectHostedRecordHeads', {
@@ -80,7 +91,7 @@ async function plan(t) {
         recordId: 'synthetic-lane-pointer',
         planningItemId: itemId,
       }));
-    return { intent, lane };
+    return { intent: intent._id, lane };
   };
   const toggle = (rollUpPlanningStatus, operationId = randomUUID()) =>
     setPolicy._handler(s.ctx, {
@@ -458,12 +469,11 @@ async function lifecycleFixture(s, itemId, { intentId = itemId, at = '2026-01-01
     expectedVersion: null,
     planningItemId: itemId,
   };
-  await writeHostedRecord(s.ctx, {
+  await pinIntent(s.ctx, {
     ...auth,
     record: {
       kind: 'intent',
       id: intentId,
-      version: 0,
       at,
       outcome: 'Synthetic Work',
       constraints: '',
@@ -562,7 +572,7 @@ test('the version-fenced stale Intent repair updates canonical Work, not Plan, a
   const expected = await intentRepair.preview._handler(s.ctx, inputs);
   assert.deepEqual(
     expected.map(({ id, version, status }) => ({ id, version, status })),
-    [{ id: settled, version: 0, status: 'completed' }],
+    [{ id: settled, version: 1, status: 'completed' }],
   );
   assert.equal((await s.read(settled)).status, 'open');
   const approved = { projectId: s.projectId, expected };
@@ -571,7 +581,7 @@ test('the version-fenced stale Intent repair updates canonical Work, not Plan, a
   assert.deepEqual(await intentRepair.preview._handler(s.ctx, inputs), []);
   const head = id =>
     [...s.tables.projectHostedRecordHeads.values()].find(row => row.kind === 'intent' && row.key === id);
-  assert.equal(head(settled).version, 1);
+  assert.equal(head(settled).version, 2);
   assert.equal(head(settled).status, 'completed');
   assert.equal((await s.read(settled)).status, 'open');
 

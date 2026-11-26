@@ -8,7 +8,6 @@ import type { Doc, Id } from './_generated/dataModel';
 import { v } from 'convex/values';
 import { internalQuery } from './server';
 import { ownedProject } from './projectAuthority';
-import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { storeItem } from './projectWorkStoreReads';
 import { recordHead } from './projectHostedRecords';
 import { itemLandingNotesPurging } from './projectItemPurgeFence';
@@ -36,11 +35,7 @@ export async function itemLandingNoteTombstone(
   project: Doc<'hostedProjects'>,
   itemId: string,
 ) {
-  if (project.workStore === 'records') return Boolean((await storeItem(ctx, project._id, itemId))?.purged);
-  const generation = await selectedGeneration(ctx, project);
-  if (!generation) return false;
-  const item = await record(ctx, recordPartition(generation), 'planningItems', itemId);
-  return Boolean(item && JSON.parse(item.value).purged);
+  return Boolean((await storeItem(ctx, project._id, itemId))?.purged);
 }
 
 /** Who published a landing and whether a person accepted it, from the publishing call path (no read):

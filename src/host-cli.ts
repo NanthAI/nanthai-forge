@@ -19,6 +19,8 @@ import type { ExchangeTransport } from './native-exchange.js';
 import { prepareHostedSeed, seedHostedProject } from './hosted-seed.js';
 import { readHostState, updateHostState, type HostState } from './host-binding.js';
 import { ForgeError, invariant } from './errors.js';
+import { workGit } from './work-git.js';
+import { gitSeedOwner } from './hosted-seed-git.js';
 export const HOST_HELP = `nforge host ROOT [--name NAME] [--visibility private|public] [--new] [--json] [--wait]
 nforge host ROOT --delete-project PROJECT_ID --confirm SLUG [--allow-bound-project] [--json]
   (SLUG is printed by nforge clone.)
@@ -33,7 +35,7 @@ nforge host ROOT --cutover-pins
 nforge host ROOT --source-authority '{"operationId":"UUID","expected":{"mode":"native-owner","epoch":0},"mode":"server"}'
 Run nforge login first (cli scope). Only missing source/Work objects are uploaded.
 Source and records are seeded in bounded pages, then main is validated and selected.
-Plain directories get a local Forge-native bootstrap; Git is never invoked for them. New native hosts select server authority with their verified main in the final seed transaction; existing projects and interrupted older seeds keep their authority. Clone the printed project to start Lanes. Source capture uses the normal ignore rules and preserves file bytes and executable modes.
+Plain directories get a local Forge-native bootstrap. Git hosting uses the pinned HEAD tree and retains a verified Git bundle and its Work. New hosts select server authority with verified native main in the final seed transaction; existing projects and interrupted older seeds keep their authority. Clone the printed project to start Lanes.
 --json streams progress and result events as JSON lines; --wait remains accepted for compatibility. With no action, --json reads status only. --resume explicitly resumes interrupted hosting with its original operation. An already bound owner needs --new to create another project. --abort-seed discards a started seed's server-side progress (source bytes stay) so --resume seeds again from page 0.
 `;
 export interface HostingClient {
@@ -49,6 +51,35 @@ export type HostOptions = {
   onProgress?: ProgressSink;
   deferBackfill?: boolean;
 };
+function openHostingStore(root: string) {
+  return WorkStore.open<
+    | 'commitRecords'
+    | 'directory'
+    | 'laneLocked'
+    | 'load'
+    | 'locked'
+    | 'lockedAsync'
+    | 'native'
+    | 'observing'
+    | 'page'
+    | 'path'
+    | 'pinnedBytes'
+    | 'pinnedData'
+    | 'pointer'
+    | 'prepareCommitRecords'
+    | 'prepareSave'
+    | 'preparing'
+    | 'publishSave'
+    | 'readRecords'
+    | 'records'
+    | 'revision'
+    | 'root'
+    | 'save'
+    | 'select'
+    | 'snapshotBytes'
+  >(root);
+}
+
 export async function hostProject(
   root: string,
   options: HostOptions,
@@ -63,32 +94,7 @@ export async function hostProject(
     'Use a non-empty hosted project name.',
   );
   if (!existsSync(join(root, '.git')) && !nativeOwner(realpathSync(root))) initNative(root);
-  const store = WorkStore.open<
-      | 'commitRecords'
-      | 'directory'
-      | 'laneLocked'
-      | 'load'
-      | 'locked'
-      | 'lockedAsync'
-      | 'native'
-      | 'observing'
-      | 'page'
-      | 'path'
-      | 'pinnedBytes'
-      | 'pinnedData'
-      | 'pointer'
-      | 'prepareCommitRecords'
-      | 'prepareSave'
-      | 'preparing'
-      | 'publishSave'
-      | 'readRecords'
-      | 'records'
-      | 'revision'
-      | 'root'
-      | 'save'
-      | 'select'
-      | 'snapshotBytes'
-    >(root),
+  const store = openHostingStore(root),
     original = readHostState(store);
   const bound = original.hosting?.deployment ?? original.binding?.deployment;
   const { deployment, site } = await serviceTarget(options, bound, true);
@@ -135,7 +141,17 @@ export async function hostProject(
       visibility: options.visibility ?? ('private' as const),
       revision: store.revision(),
       currentFirst: false,
-      ...(store.native ? { serverAuthority: true as const } : {}),
+      serverAuthority: true as const,
+      ...(!store.native
+        ? {
+            gitHead: workGit(store.root, [
+              '--no-replace-objects',
+              'rev-parse',
+              '--verify',
+              'HEAD^{commit}',
+            ]).trim(),
+          }
+        : {}),
     };
     state.hosting = current;
     return structuredClone(current);
@@ -180,7 +196,16 @@ export async function hostProject(
     progress.phase('preparing source and Work');
     // Pin before the first creation call; a lost creation reply can then resume
     // even if concurrent local work advances this owner in the meantime.
-    await prepareHostedSeed(store, pending.revision, pending.pushId, pending.serverAuthority);
+    const seedStore = pending.gitHead
+      ? openHostingStore(await gitSeedOwner(store, pending.gitHead, pending.revision, pending.pushId))
+      : store;
+    await prepareHostedSeed(
+      seedStore,
+      pending.revision,
+      pending.pushId,
+      pending.serverAuthority,
+      Boolean(pending.gitHead),
+    );
     const client = dependencies?.client ?? coordinationClient(deployment, process.env.FORGE_AUTH_TOKEN);
     progress.phase('creating hosted project');
     const created = (await client.mutation(makeFunctionReference<'mutation'>('projectHosting:create'), {
@@ -201,7 +226,7 @@ export async function hostProject(
       new ConvexExchange(deployment, process.env.FORGE_AUTH_TOKEN, created.projectId, pending.pushId, null);
     if (transport instanceof ConvexExchange) transport.uploadBatchSize = 100;
     const pushed = await seedHostedProject(
-      store,
+      seedStore,
       {
         projectId: created.projectId,
         operationId: pending.pushId,
@@ -228,7 +253,7 @@ export async function hostProject(
       name: pending.name,
       visibility: pending.visibility,
       backupId: pushed.backupId,
-      ...(store.native ? { acceptanceOwner: !pending.serverAuthority } : {}),
+      ...(seedStore.native ? { acceptanceOwner: !pending.serverAuthority } : {}),
       ...(pending.serverAuthority ? { sourceAuthority: { mode: 'server' as const, epoch: 1 } } : {}),
     };
     updateHostState(store, state => {

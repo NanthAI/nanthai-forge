@@ -22,6 +22,10 @@ const work = await import(moduleUrl('../convex/projectWorkCommand.ts'));
 const workIndex = await import(moduleUrl('../convex/projectWorkIndex.ts'));
 const { readHostedRecord, writeHostedRecord } = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 
+const { storeVersion } = await import(moduleUrl('../convex/projectWorkStore.ts'));
+const { hostedRecordValue } = await import('../dist/hosted-records.js');
+const { workStoreRecord } = await import('../dist/work-store-records.js');
+
 function seedPlan(f) {
   const backupId = f.insert('projectBackups', {
     projectId: f.projectId,
@@ -63,10 +67,36 @@ function seedPlan(f) {
   return generationId;
 }
 
-function addPlan(f, ids) {
+async function addPlan(f, ids) {
   const generationId = seedPlan(f);
   for (const [position, id] of ids.entries()) {
     const item = { id, title: `Item ${position}`, kind: 'issue', status: 'open' };
+    await f.store.transaction(
+      'seedCanonicalItem',
+      {
+        _handler: ctx =>
+          storeVersion(
+            ctx,
+            { _id: f.projectId },
+            hostedRecordValue(
+              workStoreRecord('planningVersions', {
+                ...item,
+                operationId: randomUUID(),
+                request: 'a'.repeat(64),
+                previousVersion: 0,
+                version: 1,
+                provenance: 'user-declared-local',
+                body: '',
+                intentIds: [],
+                at: '2026-01-01T00:00:00.000Z',
+              }),
+            ),
+            undefined,
+            false,
+          ),
+      },
+      {},
+    );
     f.insert('projectPlanningRecords', {
       projectId: f.projectId,
       generationId,
@@ -105,7 +135,7 @@ const close = (f, id, state = 'abandoned') => f.changeLane(id, { state, lifecycl
 test('starting a planned Lane marks Plan and skips Next, and concurrent siblings keep the mark', async () => {
   const f = await acceptanceFixture();
   const [id, free] = [randomUUID(), randomUUID()];
-  addPlan(f, [id, free]);
+  await addPlan(f, [id, free]);
   assert.equal(nextItem(await rows(f)).next?.id, id);
   const operationId = randomUUID();
   const [first, second] = await Promise.all([
@@ -134,7 +164,7 @@ for (const { label, keepOpen, sibling } of [
   test(`the first Lane completion tick retires the exact landed work ${label}`, async () => {
     const f = await acceptanceFixture();
     const [id, free] = [randomUUID(), randomUUID()];
-    addPlan(f, [id, free]);
+    await addPlan(f, [id, free]);
     const started = await begin(f, planned(id));
     const lane = await f.changeLane(started.lane.laneId, { head: f.state.sha256, sourceVersion: 1 });
     if (sibling) await begin(f, planned(id));
@@ -191,8 +221,9 @@ for (const { label, keepOpen, sibling } of [
     await f.materialize(accepted.receipt.id);
     assert.deepEqual(markRow(f, id), beforeReplay, 'replay preserves sibling and later contributions');
     const measured = f.counts.find(row => row.name === 'acceptanceComplete');
-    assert.equal(measured.readRangesByTable.projectWorkGenerations, 1, 'select the legacy Work generation');
-    assert.equal(measured.readRangesByTable.projectWorkDataRecords, 1, 'look up the durable Item tombstone');
+    assert.equal(measured.readRangesByTable.projectWorkGenerations, undefined);
+    assert.equal(measured.readRangesByTable.projectWorkDataRecords, undefined);
+    assert.ok(measured.readRangesByTable.projectHostedRecordHeads > 0, 'read the canonical Item head');
     assert.equal(measured.readRangesByTable.projectPlanningRecords, undefined, 'no planning search read');
     assert.deepEqual(
       measured.written.filter(table => table.startsWith('projectWork') || table === 'projectPlanningRecords'),
@@ -369,7 +400,7 @@ test('membership alone does not certify an unmarked open Lane for roll-up', asyn
   dev(t);
   const f = await acceptanceFixture();
   const itemId = randomUUID();
-  addPlan(f, [itemId]);
+  await addPlan(f, [itemId]);
   const started = await begin(f, planned(itemId));
   const overlap = [...f.tables.projectHostedOverlapLanes.values()].find(
     row => row.laneId === started.lane.laneId,
@@ -401,7 +432,7 @@ for (const older of [false, true])
     dev(t);
     const f = await acceptanceFixture();
     const itemId = randomUUID();
-    addPlan(f, [itemId]);
+    await addPlan(f, [itemId]);
     const started = await begin(f, planned(itemId));
     const lane = await f.changeLane(started.lane.laneId, { head: f.state.sha256, sourceVersion: 1 });
     const composed = await f.makeCandidate([
@@ -459,7 +490,7 @@ for (const older of [false, true])
 test('an Intent cascade removes its staged Lane marks when abandonment becomes visible', async () => {
   const f = await acceptanceFixture();
   const itemId = randomUUID();
-  addPlan(f, [itemId]);
+  await addPlan(f, [itemId]);
   const first = await begin(f, planned(itemId));
   const sibling = await begin(f, planned(itemId));
   const operationId = randomUUID();

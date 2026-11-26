@@ -27,6 +27,8 @@ import { indexEntry } from './projectWorkIndexFields';
 import { HOSTED_WORK_INDEX_FORMAT } from '../src/work-hosted-summary';
 import { seedRow as rowFor } from './projectHostedSeedObjects';
 import { commitCatalogSeedPage, replaySeedPage } from './projectHostedSeedPages';
+import { abortSeedWork } from './projectHostedSeedWorkStore';
+import { bornRecordStore } from './projectWorkStoreFingerprintWrites';
 
 const identity = { projectId: v.id('hostedProjects'), operationId: v.string() };
 async function caller(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>) {
@@ -134,6 +136,9 @@ export const abort = mutation({
         'SEED_COMMITTED',
         'This seed already selected its source and cannot be aborted.',
       );
+      if (!row.aborting) await ctx.db.patch(row._id, { aborting: true });
+      const records = row.workImport ? await abortSeedWork(ctx, input.projectId) : 0;
+      if (records) return { status: 'partial' as const, deleted: records };
       const pages = await ctx.db
         .query('projectHostedSeedPages')
         .withIndex('by_seed_and_index', q => q.eq('seedId', row._id))
@@ -154,7 +159,7 @@ export const inspect = internalQuery({
     await activeOwnedProject(ctx, input.projectId, input.owner);
     const row = await rowFor(ctx, input.projectId);
     invariant(
-      row && row.owner === input.owner && row.operationId === input.operationId,
+      row && row.owner === input.owner && row.operationId === input.operationId && !row.aborting,
       'WORK_OPERATION_CHANGED',
       'Select the original seed operation.',
     );
@@ -176,7 +181,7 @@ export const commitPage = internalMutation({
     await activeOwnedProject(ctx, input.projectId, input.owner);
     const row = await rowFor(ctx, input.projectId);
     invariant(
-      row && row.owner === input.owner && row.operationId === input.operationId,
+      row && row.owner === input.owner && row.operationId === input.operationId && !row.aborting,
       'WORK_OPERATION_CHANGED',
       'Select the original seed operation.',
     );
@@ -271,6 +276,8 @@ export const commit = internalMutation({
     owner: v.string(),
     mainDigest: v.union(v.string(), v.null()),
     validatedWorkRecords: v.optional(v.literal(1)),
+    workImportCount: v.number(),
+    emptyWorkVerified: v.boolean(),
     initialIndex: v.optional(v.object({ metadata: v.string(), entries: v.array(indexEntry) })),
   },
   returns: v.string(),
@@ -278,7 +285,7 @@ export const commit = internalMutation({
     const project = await activeOwnedProject(ctx, input.projectId, input.owner),
       row = await rowFor(ctx, input.projectId);
     invariant(
-      row && row.owner === input.owner && row.operationId === input.operationId,
+      row && row.owner === input.owner && row.operationId === input.operationId && !row.aborting,
       'WORK_OPERATION_CHANGED',
       'Select the original seed operation.',
     );
@@ -310,6 +317,14 @@ export const commit = internalMutation({
       content && isStored(content) && !content.removed && content.size === request.root.size,
       'INVALID_WORK_BACKUP',
       'The seed root is unavailable.',
+    );
+    invariant(
+      (input.emptyWorkVerified && request.revision === 0 && input.workImportCount === 0) ||
+        (row.workImport?.digest === request.work.sha256 &&
+          row.workImport.next === row.workImport.total &&
+          row.workImport.total === input.workImportCount),
+      'INVALID_WORK_BACKUP',
+      'Publish only after the exact seed Work finished importing.',
     );
     const backupId = await ctx.db.insert('projectBackups', {
       projectId: input.projectId,
@@ -356,11 +371,7 @@ export const commit = internalMutation({
     // A new host becomes agent-writable only when its complete, verified source
     // and matching schema-2 main are selected in this same transaction. Legacy
     // seed requests never change authority, including retries after an upgrade.
-    // A Work with no commands starts in the record store (Item c0af6cfa). A native owner that already
-    // ran commands keeps them in its journal index until slice 6 copies them.
-    const birth = request.serverAuthority
-      ? serverBirth(row.authority, request.revision === 0 ? 0 : null)
-      : null;
+    const birth = request.serverAuthority ? serverBirth(row.authority, request.revision) : null;
     const authority = birth?.authority ?? row.authority;
     if (request.format === 'native') {
       const selected = hostedMainV2Schema.parse({
@@ -394,7 +405,7 @@ export const commit = internalMutation({
     await ctx.db.patch(project._id, {
       currentBackup: backupId,
       revision: project.revision + 1,
-      ...birth?.fields,
+      ...(birth?.fields ?? bornRecordStore(request.revision)),
     });
     await ctx.db.patch(row._id, { backupId, ...(input.mainDigest ? { mainDigest: input.mainDigest } : {}) });
     return progress({ ...row, backupId, ...(input.mainDigest ? { mainDigest: input.mainDigest } : {}) });

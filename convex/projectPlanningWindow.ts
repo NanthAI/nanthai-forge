@@ -305,17 +305,6 @@ export async function readBacklogWindowAudit(
     ...fields,
   });
   const cursorFor = (next: z.infer<typeof windowCursorSchema>) => WINDOW_CURSOR + JSON.stringify(next);
-  if (project.workStore !== 'records')
-    return result({
-      counts: { total: 0, closed: 0, reopened: 0, created: 0, changed: 0 },
-      countsScope: 'window',
-      items: [],
-      coverage: 'unavailable',
-      unresolved: 0,
-      recordsFrom: null,
-      recordedLater: 0,
-      nextCursor: null,
-    });
 
   const scanBudget = planningHistoryBudget(WINDOW_SCAN_BYTES);
   const charge = planningHistoryBudget(PAGE_BYTES);

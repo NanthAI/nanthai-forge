@@ -45,5 +45,12 @@ export async function requireHostedOwnerDrained(
       'SOURCE_AUTHORITY_DRAIN_REQUIRED',
       'Switch through the bound owner after its queue and journals drain, with the exact seeded owner revision.',
     );
+    invariant(
+      (backup.preview.revision === 0 && !project.work?.revision) ||
+        (project.workStoreCutoverRevision !== undefined &&
+          project.workStoreEventWindows?.at(-1)?.storeFirst === true),
+      'SOURCE_AUTHORITY_DRAIN_REQUIRED',
+      'The selected Work must finish record-store conversion before switching to server authority.',
+    );
   }
 }

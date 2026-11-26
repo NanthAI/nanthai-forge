@@ -217,18 +217,6 @@ export async function commentRow(
   );
 }
 
-/** The Item the comment is on, as its reader sees it: the work-store head in records mode, else the selected index. */
-async function commentParent(
-  ctx: MutationCtx,
-  project: Doc<'hostedProjects'>,
-  input: Input,
-  partition: Id<'projectWorkGenerations'>,
-) {
-  if (project.workStore === 'records')
-    return (await recordHead(ctx, input.projectId, 'comment', input.commentId))?.parent;
-  return (await record(ctx, partition, 'planningComments', input.commentId))?.parent;
-}
-
 /** Purge one planning comment. Returns 1 when this purge removed it (also on a retry with the same operationId), 0
  * when an earlier purge (its Item's, or another comment purge) already did. A decision comment's line in the Item
  * body is replaced by an audited put, and its derived body version takes the form a rebuild gives it. A row in the
@@ -243,7 +231,7 @@ export async function purgeComment(ctx: MutationCtx, input: Input): Promise<0 | 
   invariant(generation, 'PROJECT_WORK_INDEX_MISSING', 'Prepare the hosted Work index before purging.');
   const missing = 'No comment with that id on that Item.';
   invariant(
-    (await commentParent(ctx, project, input, recordPartition(generation))) === input.itemId,
+    (await recordHead(ctx, input.projectId, 'comment', input.commentId))?.parent === input.itemId,
     'NOT_FOUND',
     missing,
   );

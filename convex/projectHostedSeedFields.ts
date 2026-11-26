@@ -22,10 +22,19 @@ export const hostedSeedTables = {
     objectCatalog: v.optional(v.literal(true)),
     backupId: v.optional(v.id('projectBackups')),
     mainDigest: v.optional(v.string()),
+    workImport: v.optional(
+      v.object({
+        digest: v.string(),
+        total: v.number(),
+        next: v.number(),
+        fragment: v.number(),
+      }),
+    ),
+    aborting: v.optional(v.literal(true)),
   }).index('by_project', ['projectId']),
   projectHostedSeedPages: defineTable({
     projectId: v.id('hostedProjects'),
-    seedId: v.id('projectHostedSeeds'),
+    seedId: v.union(v.id('projectHostedSeeds'), v.id('projectBackups')),
     index: v.number(),
     body: v.string(),
     previous: v.string(),

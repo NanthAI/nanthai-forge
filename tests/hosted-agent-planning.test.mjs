@@ -11,7 +11,7 @@ import { rmSync } from 'node:fs';
 import { hostedAgentDirectory } from '../dist/hosted-agent-journal.js';
 import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
-import { setup } from './hosted-planning-fixture.mjs';
+import { setup, pinIntent } from './hosted-planning-fixture.mjs';
 import { agentFixture } from './hosted-agent-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import {
@@ -327,16 +327,14 @@ test('the worker closes an Item from its completed hosted Intent; planning reads
     const title = met ? 'Ready to close' : 'Evidence still missing';
     const { itemId } = (await put(p, { kind: 'issue', title, body, status: 'in-progress' })).result;
     const at = '2026-11-20T12:00:00.000Z';
-    await writeHostedRecord(ctx, {
+    await pinIntent(ctx, {
       projectId,
       actor,
       authorityEpoch,
       planningItemId: itemId,
-      expectedVersion: null,
       record: {
         kind: 'intent',
         id: itemId,
-        version: 0,
         at,
         outcome: title,
         constraints: '',
@@ -3691,21 +3689,17 @@ test('planning history leaves missing legacy predecessors unknown and preserves 
   await put(p, { itemId, expectedVersion: 1, status: 'closed' });
   const legacy = (await list(p, { id: itemId, reconcile: false })).item;
   assert.equal(legacy.closedAt, legacy.at);
-  for (const table of ['projectPlanningRecords', 'projectWorkDataRecords'])
-    for (const [key, row] of s.tables[table]) {
-      if (
-        row.collection === 'planningVersions' &&
-        row.parent === itemId &&
-        JSON.parse(row.value).version === 1
-      )
-        s.tables[table].delete(key);
-    }
+  for (const row of s.tables.projectHostedRecords.values())
+    if (row.kind === 'issue' && row.key === itemId && row.version === 1) await s.ctx.db.delete(row._id);
+  for (const head of s.tables.projectHostedRecordHeads.values())
+    if (head.kind === 'issue' && head.key === itemId)
+      await s.ctx.db.patch(head._id, { planningTimes: undefined });
   const unknown = (await list(p, { id: itemId, reconcile: false })).item;
   assert.equal(unknown.closedAt, null);
   assert.equal(unknown.lastStatusChangeAt, null);
   const result = await list(p, { initiativeId, counts: true, history: true });
   assert.equal(result.counts.closed, 1);
-  assert.equal(result.history.coverage, 'unavailable');
+  assert.equal(result.history.coverage, 'partial');
   assert.equal((await list(port(s), { id: itemId, reconcile: false })).item.closedAt, undefined);
   await assert.rejects(
     list(port(s), { initiativeId, counts: true, history: true }),

@@ -16,6 +16,8 @@ import { seedPageSchema, seedRequestSchema, validateSeedPage } from '../src/host
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { initialSeedIndex } from './projectHostedSeedIndex';
+import { emptySeedWork, importSeedWork } from './projectHostedSeedWork';
+import type { Doc } from './_generated/dataModel';
 const identity = { projectId: v.id('hostedProjects'), operationId: v.string() };
 export const stage = action({
   args: { ...identity, index: v.number(), body: v.string(), previous: v.string() },
@@ -81,6 +83,7 @@ export const finish = action({
           owner,
         })) as string,
       );
+      const seed = row as Doc<'projectHostedSeeds'>;
       if (row.backupId)
         return canonicalPayload({
           nextPage: row.nextPage,
@@ -137,10 +140,20 @@ export const finish = action({
         );
         if (metadata.schema === 2) initialIndex = initialSeedIndex(request, state);
       }
+      const workImportCount = await importSeedWork(
+        ctx,
+        { ...input, owner },
+        request,
+        metadata,
+        pins => reader.read(input.projectId, owner, pins),
+        seed.workImport,
+      );
       return await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedSeed:commit'), {
         ...input,
         owner,
         mainDigest,
+        workImportCount,
+        emptyWorkVerified: emptySeedWork(request),
         ...(initialIndex ? { initialIndex } : {}),
         ...(request.format === 'native' && metadata.schema === 2 ? { validatedWorkRecords: 1 } : {}),
       });

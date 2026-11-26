@@ -334,6 +334,34 @@ async function closeBudgetFixture(t, scale, compact) {
       if (row.generationId === s.generationId && row.key === child.id)
         await s.ctx.db.patch(id, { value: JSON.stringify({ ...JSON.parse(row.value), parentId: owner.id }) });
   }
+  // The fixture starts at version 3. Give each historical root its same
+  // selected canonical version before measuring new version appends.
+  for (const item of items().values()) {
+    const { ref, value } = hostedRecordValue(workStoreRecord('planningVersions', item));
+    const identity = { projectId: s.projectId, kind: 'issue', key: item.id };
+    const index = { parent: item.initiativeId ?? '', status: item.status, version: item.version };
+    const bodyId = await s.ctx.db.insert('projectHostedRecordBodies', { projectId: s.projectId, value });
+    const recordId = await s.ctx.db.insert('projectHostedRecords', {
+      ...identity,
+      ...index,
+      bodyId,
+      digest: ref.digest,
+      bytes: ref.bytes,
+    });
+    const closedAt = item.status === 'closed' ? item.at : null;
+    await s.ctx.db.insert('projectHostedRecordHeads', {
+      ...identity,
+      ...index,
+      recordId,
+      value: JSON.stringify(item),
+      planningTimes: {
+        version: item.version,
+        lastStatusChangeAt: item.at,
+        closedAt,
+        closeKept: closedAt,
+      },
+    });
+  }
   for (const [position, initiative] of [...items().values()]
     .filter(row => row.kind === 'initiative')
     .entries())
@@ -469,7 +497,13 @@ test('100 long-lived Items can replace 20 Related pairs each and evict expired a
     const item = { ...JSON.parse(root.value), version: currentVersion, previousVersion: currentVersion - 1 };
     await s.ctx.db.patch(root._id, { value: JSON.stringify(item) });
     assert.equal(
-      await storeVersion(s.ctx, project, hostedRecordValue(workStoreRecord('planningVersions', item))),
+      await storeVersion(
+        s.ctx,
+        { _id: project._id },
+        hostedRecordValue(workStoreRecord('planningVersions', item)),
+        undefined,
+        false,
+      ),
       'copied',
     );
     const head = [...s.tables.projectHostedRecordHeads.values()].find(
@@ -555,7 +589,10 @@ async function runClosePages(s, from, costs, states, retryFailedPage) {
     costs.push(cost);
     states.push(await observedPlan(s));
     const events = s.tables.projectWorkEvents.size;
-    assert(cost.indexRanges <= 18 * (events - priorEvents) + 80, JSON.stringify(cost));
+    // Undo reads the selected immutable version before publishing the new one.
+    // Keep both its per-version bound and the provider's transaction ceiling.
+    assert(cost.indexRanges <= 21 * (events - priorEvents) + 80, JSON.stringify(cost));
+    assert(cost.indexRanges <= transactionRangeCeiling, JSON.stringify(cost));
     const count = closeTasks(s).length;
     await run();
     assert.equal(s.tables.projectWorkEvents.size, events, 'replayed cursor writes nothing');

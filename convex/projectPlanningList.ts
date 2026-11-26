@@ -5,9 +5,8 @@ import { getDocumentSize, v, type Infer } from 'convex/values';
 import type { QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import type { IndexRange, PaginationOptions } from 'convex/server';
-import { record, recordPartition } from './projectWorkIndexStore';
-import { hostedRecordValue } from './hostedRecordValue';
-import { readsStore, storeItemRow } from './projectWorkStoreReads';
+import { recordPartition } from './projectWorkIndexStore';
+import { storeItemRow } from './projectWorkStoreReads';
 import type { PlanningTimesRead } from './projectPlanningTimes';
 import { planningWaitingKinds } from '../src/work-planning-types';
 import {
@@ -268,15 +267,8 @@ export async function planningPage(
         );
       continue;
     }
-    if (readsStore(project, 'planningItems')) {
-      const item = await storeItemRow(ctx, project._id, root.key);
-      if (item?.value) rows.push({ id: root.key, position: root.position, ...item });
-    } else {
-      const row = await record(ctx, partition, 'planningItems', root.key);
-      if (!row) continue;
-      const value = JSON.parse(await hostedRecordValue(ctx, partition, row));
-      if (value) rows.push({ id: root.key, position: root.position, value });
-    }
+    const item = await storeItemRow(ctx, project._id, root.key);
+    if (item?.value) rows.push({ id: root.key, position: root.position, ...item });
   }
   return {
     ...page,

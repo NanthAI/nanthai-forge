@@ -16,7 +16,6 @@ const { apply } = await import(moduleUrl('../convex/projectPlanningBatch.ts'));
 const { command } = await import(moduleUrl('../convex/projectWorkCommand.ts'));
 const { read: plan } = await import(moduleUrl('../convex/projectPlanView.ts'));
 const { records, detail } = await import(moduleUrl('../convex/projectWorkIndex.ts'));
-const { setMode } = await import(moduleUrl('../convex/projectWorkStore.ts'));
 const unavailable = error => error.data.code === 'PROJECT_UNAVAILABLE';
 
 async function project(t) {
@@ -316,10 +315,7 @@ test('a writer can undo a cross-Initiative move even when the previous Item snap
   };
   await s.send(child);
   const args = { projectId: s.projectId, collection: 'planningItems', id: child.itemId };
-  assert(
-    JSON.parse((await detail._handler(s.ctx, args)).value).payloadKey,
-    'the prior snapshot needs chunks',
-  );
+  assert.equal((await detail._handler(s.ctx, { ...args, inlineItemOnly: true })).deferred, true);
   const move = {
     action: 'put-planning-item',
     itemId: child.itemId,
@@ -450,10 +446,9 @@ test('Capture by a writer cannot reuse the identity of an independent Work Inten
   assert.equal(await s.latest(intentId), undefined);
 });
 
-test('an initial Item read has a bounded DB read in both storage layouts; full text is opt-in', async t => {
+test('an initial Item read has a bounded DB read with or without a cached head value; full text is opt-in', async t => {
   const s = await project(t);
   await s.ctx.db.patch(s.projectId, { sourceAuthority: { mode: 'server', epoch: 1 } });
-  await setMode._handler(s.ctx, { projectId: s.projectId, mode: 'dual' });
   const item = { ...s.capture(), body: `Long prose.\n\n${'example '.repeat(6000)}\n\n- [ ] Review` };
   await s.send(item);
   const args = { projectId: s.projectId, collection: 'planningItems', id: item.itemId };
@@ -468,17 +463,14 @@ test('an initial Item read has a bounded DB read in both storage layouts; full t
     assert(cost.readBytes < 12000, 'the read does not open a body or any payload chunks');
     assert.equal(cost.writeDocuments, 0);
   };
-  await verifyDeferred('indexed journal');
-  assert(JSON.parse((await detail._handler(s.ctx, args)).value).payloadKey);
-  const hosted = s.tables.hostedProjects.get(s.projectId);
+  await verifyDeferred('canonical record including head summary');
   const record = [...s.tables.projectHostedRecords.values()].find(
     row => row.key === item.itemId && row.kind === 'issue',
   );
   assert(record, 'the canonical Item record was written');
   const head = [...s.tables.projectHostedRecordHeads.values()].find(row => row.recordId === record._id);
   s.tables.projectHostedRecordHeads.set(head._id, { ...head, value: undefined });
-  s.tables.hostedProjects.set(s.projectId, { ...hosted, workStore: 'records' });
-  await verifyDeferred('canonical record');
+  await verifyDeferred('canonical record with no cached body');
   assert.equal(JSON.parse((await detail._handler(s.ctx, args)).value).body, item.body);
 });
 

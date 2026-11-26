@@ -143,12 +143,22 @@ export async function copyPrivate(source: string, destination: string) {
   return copied;
 }
 
-export async function exportWork(store: StoreAccess, revision: number, archive = false) {
+export async function exportWork(
+  store: StoreAccess,
+  revision: number,
+  archive = false,
+  selectedHead?: string,
+) {
   invariant(Number.isSafeInteger(revision) && revision >= 0, 'BAD_ARGUMENT', 'Send a valid Work revision.');
   const snapshot = store.locked(() => {
     const data = store.load(),
       refs = refsAt(store),
-      head = headAt(store.root);
+      head = selectedHead ?? headAt(store.root);
+    invariant(
+      selectedHead === undefined || data.revision === revision,
+      'WORK_STALE',
+      'Work changed before the pinned Git snapshot was prepared.',
+    );
     const bytes = store.snapshotBytes();
     return { data, refs, head, bytes, capturedAt: new Date().toISOString() };
   });
@@ -216,7 +226,7 @@ export async function exportWork(store: StoreAccess, revision: number, archive =
     store.locked(() => {
       invariant(
         JSON.stringify(store.load()) === JSON.stringify(snapshot.data) &&
-          headAt(store.root) === snapshot.head &&
+          (selectedHead !== undefined || headAt(store.root) === snapshot.head) &&
           JSON.stringify(refsAt(store)) === JSON.stringify(snapshot.refs),
         'WORK_STALE',
         'Source or Work changed during export. Retry its current snapshot; nothing was overwritten.',

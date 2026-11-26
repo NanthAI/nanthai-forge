@@ -42,7 +42,6 @@ test('an Intent created in Work retains its independent origin when written to t
   const s = await setup(t);
   const base = (await s.read()).sourceHead;
   s.tables.hostedProjects.get(s.projectId).sourceAuthority = { mode: 'server', epoch: 1 };
-  await store.setMode._handler(s.ctx, { projectId: s.projectId, mode: 'dual' });
   const intentId = randomUUID();
   await s.send({ action: 'intent', operationId: intentId, outcome: 'Independent Work Intent', base });
   const origin = async () => (await recordHead(s.ctx, s.projectId, 'intent', intentId))?.planningItemId;
@@ -55,7 +54,6 @@ test('an Intent written in the projection that creates its Item is born bound to
   const s = await setup(t);
   const base = (await s.read()).sourceHead;
   s.tables.hostedProjects.get(s.projectId).sourceAuthority = { mode: 'server', epoch: 1 };
-  await store.setMode._handler(s.ctx, { projectId: s.projectId, mode: 'dual' });
   const item = s.item({ title: 'Planned' });
   await s.send(item);
   const born = await recordHead(s.ctx, s.projectId, 'intent', item.itemId);
@@ -102,7 +100,8 @@ test('legacy copy and status mutations preserve imported attributes before data 
   const copy = () =>
     store.copy._handler(s.ctx, { projectId: s.projectId, collection: 'intents', cursor: null });
   const copied = JSON.parse(await copy());
-  assert.equal(copied.copied, 2);
+  assert.equal(copied.copied, 0);
+  assert.equal(copied.same, 2, 'the imported records already match their original Work bytes');
   assert.equal((await recordHead(s.ctx, s.projectId, 'intent', id)).planningItemId, undefined);
   const body = async () => {
     const head = [...s.tables.projectHostedRecordHeads.values()].find(
@@ -134,7 +133,6 @@ test('legacy copy and status mutations preserve imported attributes before data 
   assert.equal(s.tables.projectWorkEvents.size, events);
   for (const row of missing) s.tables.projectWorkDataRecords.set(row._id, row);
   assert.equal(JSON.parse(await copy()).same, 2, 'copy retry preserves exact immutable versions');
-  await store.setMode._handler(s.ctx, { projectId: s.projectId, mode: 'dual' });
   await s.send({ action: 'intent-status', intentId: id, status: 'completed' });
   assert.equal((await check()).status, 'completed');
   const rows = [...s.tables.projectWorkDataRecords.values()];

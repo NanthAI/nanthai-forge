@@ -16,7 +16,20 @@ export const actions = await import(moduleUrl('../convex/projectWorkActions.ts')
 export const work = await import(moduleUrl('../convex/projectWork.ts'));
 const projectIntentLandingNotes = await import(moduleUrl('../convex/projectIntentLandingNotes.ts'));
 const backups = await import(moduleUrl('../convex/projectBackups.ts'));
+const projectHostedSeedWorkStore = await import(moduleUrl('../convex/projectHostedSeedWorkStore.ts'));
 const { previewWorkArchive } = await import(moduleUrl('../web/src/work-archive.ts'));
+const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
+
+/** Add a Lane-owned pin to live Work, as a hosted start does after the Item or Intent exists. */
+export async function pinIntent(ctx, input) {
+  const head = await records.recordHead(ctx, input.projectId, 'intent', input.record.id);
+  return records.writeHostedRecord(ctx, {
+    ...input,
+    expectedVersion: head?.version ?? null,
+    record: { ...input.record, version: (head?.version ?? -1) + 1 },
+  });
+}
+
 export async function setup(t, native = true, prepare, prepareIndex = true) {
   const directory = fixture(t),
     root = join(directory, 'source');
@@ -44,10 +57,12 @@ export async function setup(t, native = true, prepare, prepareIndex = true) {
       (ref, args) => {
         const [module, name] = getFunctionName(ref).split(':');
         return (
-          { projectWork: work, projectBackups: backups, projectIntentLandingNotes }[module]?.[name]?._handler(
-            s.ctx,
-            args,
-          ) ?? originalQuery(ref, args)
+          {
+            projectWork: work,
+            projectBackups: backups,
+            projectIntentLandingNotes,
+            projectHostedSeedWorkStore,
+          }[module]?.[name]?._handler(s.ctx, args) ?? originalQuery(ref, args)
         );
       };
   const projectId = 'project',

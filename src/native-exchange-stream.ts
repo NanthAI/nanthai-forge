@@ -17,20 +17,24 @@ import type { WorkData } from './work-types.js';
 
 /** Four independent immutable reads in flight; preserve record order and drain
  * failures before returning. Each read is <=100 records / a 2 MiB target. */
-function batchedPinReader(pins: BytePin[], read: (pins: BytePin[]) => Promise<Buffer[]>) {
+function batchedPinReader(
+  pins: BytePin[],
+  read: (pins: BytePin[]) => Promise<Buffer[]>,
+  limits = { bytes: 2 * 1024 * 1024, inFlight: 4 },
+) {
   const pending: { start: number; end: number; result: Promise<PromiseSettledResult<Buffer[]>> }[] = [];
   let queued = 0,
     position = 0,
     current: Buffer[] = [],
     start = 0;
   function fill() {
-    while (queued < pins.length && pending.length < 4) {
+    while (queued < pins.length && pending.length < limits.inFlight) {
       const from = queued;
       let bytes = 0;
       while (
         queued < pins.length &&
         queued - from < 100 &&
-        (!bytes || bytes + pins[queued]!.size <= 2 * 1024 * 1024)
+        (!bytes || bytes + pins[queued]!.size <= limits.bytes)
       )
         bytes += pins[queued++]!.size;
       const batch = pins.slice(from, queued);
@@ -81,14 +85,16 @@ export function batchedRecordReader(
   records: WorkRecordRoot,
   read: (pins: BytePin[]) => Promise<Buffer[]>,
   packs?: RecordPack[],
+  limits?: { bytes: number; inFlight: number },
 ) {
   if (!packs)
     return batchedPinReader(
       records.fields.flatMap(f => ('records' in f ? f.records : [])),
       read,
+      limits,
     );
   const pins = validateRecordPacks(records, packs),
-    reader = batchedPinReader(packs, read);
+    reader = batchedPinReader(packs, read, limits);
   let index = 0,
     position = 0,
     offset = 0,

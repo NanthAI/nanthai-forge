@@ -228,7 +228,7 @@ export function buildExchangeRoot(
 export async function* byteTreeChunks(
   recipe: z.infer<typeof recipeSchema>,
   read: (pins: BytePin[]) => Promise<Buffer[]>,
-  options: { batchSize?: number } = {},
+  options: { batchSize?: number; batchBytes?: number } = {},
 ): AsyncGenerator<Buffer> {
   invariant(
     recipe.tree.length === recipe.size,
@@ -244,7 +244,8 @@ export async function* byteTreeChunks(
     // Reverse the frontier so batches and yielded bytes retain logical order.
     while (pending.length && batch.length < (options.batchSize ?? 8)) {
       const next = pending[pending.length - 1]!;
-      if (batch.length && (next.height > 0 || bytes + next.size > 2 * 1024 * 1024)) break;
+      if (batch.length && (next.height > 0 || bytes + next.size > (options.batchBytes ?? 2 * 1024 * 1024)))
+        break;
       batch.push(pending.pop()!);
       bytes += next.size;
       if (next.height > 0) break;

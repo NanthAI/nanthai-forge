@@ -25,6 +25,18 @@ export function noteRecordId(intentId: string, index: number, kind: 'note' | 'li
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-8${h.slice(13, 16)}-${variant}${h.slice(17, 20)}-${h.slice(20, 32)}`;
 }
 
+// The wrapper is indexed as a UTC date. Historic Work keeps its exact date in
+// the original body, including when the archive only held a placeholder.
+function retainedDate(value: unknown) {
+  const text = typeof value === 'string' ? value : '';
+  const at = Date.parse(text);
+  return Number.isFinite(at)
+    ? /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(text)
+      ? text
+      : new Date(at).toISOString()
+    : new Date(0).toISOString();
+}
+
 /** A journal Intent as an `intent` record at `version`. Fields hosted Intents share keep their names; the
  * rest stay verbatim under `journal`. Notes, lifecycle, their counters and `conversation` (the order of the
  * Intent's notes and comments, which are `comment` records with this parent) are left out, so a note or a
@@ -34,18 +46,22 @@ function intentRecord(value: Record<string, unknown>, owner: string, version: nu
   // This input has already been hydrated. Projection-looking field names here
   // belong to the imported record, not to the disposable index header.
   const journal: Record<string, unknown> = { ...rest };
+  if (typeof base === 'string' && base.length === 40) journal.base = base;
+  const currentOutcome = (outcome as string).trim(),
+    displayedOutcome = currentOutcome.slice(0, 500) || 'Intent';
+  if (displayedOutcome !== currentOutcome) journal.outcome = outcome;
   for (const name of ['notes', 'lifecycle', 'noteCount', 'lifecycleCount', 'conversation'])
     delete journal[name];
   return {
     kind: 'intent',
     id: id as string,
     version,
-    at: (rest.updatedAt ?? rest.createdAt) as string,
-    outcome: outcome as string,
+    at: retainedDate(rest.updatedAt ?? rest.createdAt),
+    outcome: displayedOutcome,
     constraints: (constraints as string | undefined) ?? '',
     creatorAccountId: (creatorAccountId as string | undefined) ?? owner,
     assigneeAccountIds: (assigneeAccountIds as string[] | undefined) ?? [],
-    ...(typeof base === 'string' ? { base: { head: base } } : {}),
+    ...(typeof base === 'string' && base.length === 64 ? { base: { head: base } } : {}),
     status: status as 'active',
     journal,
   };
@@ -59,16 +75,16 @@ export function workStoreRecord(
   intent: { owner: string; version: number } = { owner: '', version: 0 },
 ): HostedRecord {
   if (collection === 'planningVersions') {
-    const item = planningItemSchema.parse(value);
-    return { kind: 'issue', id: item.id, version: item.version, at: item.at, item };
+    const item = planningItemSchema.passthrough().parse(value);
+    return { kind: 'issue', id: item.id, version: item.version, at: item.at || retainedDate(item.at), item };
   }
   if (collection === 'planningComments') {
-    const comment = planningCommentSchema.parse(value);
+    const comment = planningCommentSchema.passthrough().parse(value);
     return {
       kind: 'comment',
       id: comment.id,
       version: 0,
-      at: comment.at,
+      at: comment.at || retainedDate(comment.at),
       parent: comment.itemId,
       position: 0,
       comment,
@@ -85,17 +101,17 @@ export function workStoreRecord(
       kind: 'lifecycle',
       id: noteRecordId(intentId, index, 'lifecycle'),
       version: 0,
-      at: entry.at as string,
+      at: (entry.at as string) || retainedDate(entry.at),
       parent: intentId,
       position: index,
       entry: entry as { from: string; to: string; at: string },
     };
-  const note = noteSchema.parse(value);
+  const note = noteSchema.passthrough().parse(entry);
   return {
     kind: 'comment',
     id: note.id ?? noteRecordId(intentId, index),
     version: 0,
-    at: note.at,
+    at: note.at || retainedDate(note.at),
     parent: intentId,
     position: index,
     note,

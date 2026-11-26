@@ -96,8 +96,7 @@ const secretRows = s =>
       ),
   );
 
-/** Work store mode for the fixture: copy the store and write both (`dual`) before the Item exists, so the store
- * holds every version; `records` makes the store the primary reader before the Item is Deleted. */
+/** Simulate historical journal provenance or begin a retained-event window for the purge fixtures. */
 async function storeMode(s, mode) {
   const handlers = {
     'projectWorkStore:copy': workStore.copy,
@@ -111,9 +110,10 @@ async function storeMode(s, mode) {
   };
   if (mode === 'dual') {
     s.tables.hostedProjects.get(s.projectId).sourceAuthority = { mode: 'server', epoch: 1 };
-    await dispatchHostedWork(client, s.projectId, { action: 'copy-work-store' });
+    return;
   }
   await dispatchHostedWork(client, s.projectId, { action: 'set-work-store', mode });
+  await s.ctx.db.patch(s.projectId, { workStoreWriters: [] });
 }
 
 /** An alias of the Intent in the selected index, as a folded Issue leaves one (src/work-intent-converter.ts). */
@@ -1232,11 +1232,7 @@ async function backfillArchive(s, ctx, beforePage = () => {}) {
 async function purgeArchiveFixture(t, { history, indexed }) {
   const { s, itemId } = await deletedItem(t, { records: true, useAlias: false });
   const r2 = storage(t);
-  await workStore.setMode._handler(s.ctx, {
-    projectId: s.projectId,
-    mode: 'records',
-    writers: ['planning', 'note'],
-  });
+  await s.ctx.db.patch(s.projectId, { workStoreWriters: ['planning', 'note'] });
   const revision = journalRevision(s);
   for (let offset = 0; offset < 3; offset++)
     await s.send(
@@ -1961,11 +1957,7 @@ test('a lost fragment PUT and codec change leave no hidden bytes from a later-pu
 });
 
 async function archiveOneNote(s, r2, itemId) {
-  await workStore.setMode._handler(s.ctx, {
-    projectId: s.projectId,
-    mode: 'records',
-    writers: ['planning', 'note'],
-  });
+  await s.ctx.db.patch(s.projectId, { workStoreWriters: ['planning', 'note'] });
   await s.send(
     { action: 'note', kind: 'comment', intentId: itemId, text: `Archived ${SECRET}` },
     journalRevision(s),
@@ -1998,11 +1990,7 @@ test('a pending legacy publication adds its index entry and invalidates an index
   const pages = await backfillArchive(s, executor(s).ctx);
   assert.ok(pages.length >= 3, 'archive coverage crosses a bounded event page and its next phase');
   assert.ok(pages.every(page => page.segments <= 16));
-  await workStore.setMode._handler(s.ctx, {
-    projectId: s.projectId,
-    mode: 'records',
-    writers: ['planning', 'note'],
-  });
+  await s.ctx.db.patch(s.projectId, { workStoreWriters: ['planning', 'note'] });
   await s.send(
     { action: 'note', kind: 'comment', intentId: itemId, text: `Archived ${SECRET}` },
     journalRevision(s),
@@ -2149,11 +2137,7 @@ test('the tombstone retries an appended archive tail and lists a relocated comma
   const [first] = await fillArchivePage(s, r2, keep, 1);
   const operationId = randomUUID();
   let appended;
-  await workStore.setMode._handler(s.ctx, {
-    projectId: s.projectId,
-    mode: 'records',
-    writers: ['planning', 'note'],
-  });
+  await s.ctx.db.patch(s.projectId, { workStoreWriters: ['planning', 'note'] });
   await s.send(
     { action: 'note', kind: 'comment', intentId: itemId, text: `Archived ${SECRET}` },
     journalRevision(s),

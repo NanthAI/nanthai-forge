@@ -468,6 +468,15 @@ const projectBackupFields = {
   metadataPublication: v.optional(v.id('projectPublications')),
   ownerDerived: v.optional(v.object({ sha256: v.string(), size: v.number() })),
   validatedWorkRecords: v.optional(v.literal(1)),
+  initialWorkImport: v.optional(
+    v.object({
+      operationId: v.string(),
+      digest: v.string(),
+      total: v.number(),
+      next: v.number(),
+      fragment: v.number(),
+    }),
+  ),
   validatedClosure: v.optional(v.literal(1)),
   historyBackfilling: v.optional(v.boolean()),
   objectManifest: v.optional(v.object({ digest: v.string(), size: v.number() })),

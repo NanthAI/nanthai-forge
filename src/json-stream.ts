@@ -8,7 +8,9 @@ type Frame = {
   key?: string;
   path: (string | number)[] | undefined;
   descend: boolean;
+  nextIndex: number;
 };
+export const discardJsonValue = Symbol('discard streamed JSON value');
 /** Decode JSON without retaining the complete UTF-8 buffer, UTF-16 text and
  * parsed graph together. Tokens can span arbitrary byte/escape boundaries.
  * JSON.parse remains the authority for scalar syntax and string escapes. */
@@ -39,8 +41,10 @@ export async function parseJsonStream(
       complete = true;
     } else {
       if (frame.state !== 'value' && frame.state !== 'value-or-end') invalid();
-      if (Array.isArray(frame.value)) frame.value.push(value);
-      else {
+      if (Array.isArray(frame.value)) {
+        frame.value.push(value);
+        frame.nextIndex++;
+      } else {
         if (frame.key === undefined) invalid();
         Object.defineProperty(frame.value, frame.key, {
           value,
@@ -69,7 +73,7 @@ export async function parseJsonStream(
     const parent = stack.at(-1);
     return parent
       ? parent.descend
-        ? [...parent.path!, Array.isArray(parent.value) ? parent.value.length : parent.key!]
+        ? [...parent.path!, Array.isArray(parent.value) ? parent.nextIndex : parent.key!]
         : undefined
       : [];
   }
@@ -77,6 +81,10 @@ export async function parseJsonStream(
     const mapped = await transform!.value(child, path),
       parent = stack.at(-1);
     if (!parent) result = mapped;
+    else if (mapped === discardJsonValue) {
+      if (Array.isArray(parent.value)) parent.value.pop();
+      else delete parent.value[parent.key!];
+    } else if (Array.isArray(parent.value)) parent.value[parent.value.length - 1] = mapped;
     else
       Object.defineProperty(parent.value, path.at(-1)!, {
         value: mapped,
@@ -95,6 +103,7 @@ export async function parseJsonStream(
         path,
         descend: !!path && (transform?.descend?.(path) ?? true),
         value: child,
+        nextIndex: 0,
         state: char === '[' ? 'value-or-end' : 'key-or-end',
       });
     } else if (char === '}' || char === ']') {

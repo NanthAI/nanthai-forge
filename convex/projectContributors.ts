@@ -19,6 +19,7 @@ import { invariant } from '../src/errors';
 import { report } from './errors';
 import { selectedGeneration, record, recordPartition } from './projectWorkIndexStore';
 import { syncPersonOrder } from './accountProjectOrder';
+import { findWorkEvent } from './projectWorkEventStore';
 
 export async function intentAuthority(
   ctx: QueryCtx | MutationCtx,
@@ -30,10 +31,7 @@ export async function intentAuthority(
   const generation = await selectedGeneration(ctx, project);
   const alias = generation ? await record(ctx, recordPartition(generation), 'intentAliases', intentId) : null;
   const targetId: string = alias ? JSON.parse(alias.value).intentId : intentId;
-  const event = await ctx.db
-    .query('projectWorkEvents')
-    .withIndex('by_project_and_operation', q => q.eq('projectId', projectId).eq('operationId', targetId))
-    .unique();
+  const event = await findWorkEvent(ctx, projectId, targetId, { authority: true });
   const row = generation ? await record(ctx, recordPartition(generation), 'intents', targetId) : null;
   const intent = row ? JSON.parse(row.value) : null;
   const authority = generation

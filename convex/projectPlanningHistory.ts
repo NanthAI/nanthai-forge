@@ -148,31 +148,15 @@ async function* earlierVersions(
 ): AsyncGenerator<VersionRead> {
   const through = item.at === undefined ? item.version : item.version - 1;
   if (charge.exhausted || through < 1) return;
-  if (project.workStore === 'records') {
-    const rows = ctx.db
-      .query('projectHostedRecords')
-      .withIndex('by_project_and_kind_and_key_and_version_and_plan', q =>
-        q.eq('projectId', project._id).eq('kind', 'issue').eq('key', item.id).lte('version', through),
-      )
-      .order('desc');
-    for await (const row of rows) {
-      if (!charge.record(row) || row.purged) break;
-      yield { ...row, snapshot: () => recordSnapshot(ctx, partition, row, charge) };
-    }
-    return;
-  }
-  for await (const row of legacyVersions(ctx, partition, item.id)) {
-    if (!charge.record(row)) break;
-    const previous = JSON.parse(row.value) as Snapshot;
-    if (previous.version > through) continue;
-    if (previous.purged) break;
-    yield {
-      ...previous,
-      snapshot: async () => {
-        const value = await legacyVersionValue(ctx, partition, row, charge);
-        return value === null ? null : (JSON.parse(value) as Snapshot);
-      },
-    };
+  const rows = ctx.db
+    .query('projectHostedRecords')
+    .withIndex('by_project_and_kind_and_key_and_version_and_plan', q =>
+      q.eq('projectId', project._id).eq('kind', 'issue').eq('key', item.id).lte('version', through),
+    )
+    .order('desc');
+  for await (const row of rows) {
+    if (!charge.record(row) || row.purged) break;
+    yield { ...row, snapshot: () => recordSnapshot(ctx, partition, row, charge) };
   }
 }
 
@@ -286,8 +270,6 @@ export async function initiativeCloseHistory(
     day: new Date(start + i * dayMs).toISOString().slice(0, 10),
     count: 0,
   }));
-  if (project.workStore !== 'records')
-    return { closedByDay: [], coverage: 'unavailable' as const, unresolved: 0 };
   const selectionBudget = planningHistoryBudget(initiativeWindowBytes);
   const charge = planningHistoryBudget();
   const purgedItems = new Set(

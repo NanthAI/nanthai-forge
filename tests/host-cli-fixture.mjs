@@ -21,6 +21,7 @@ const projectMain = await import(moduleUrl('../convex/projectMain.ts'));
 for (const name of [
   'projectHostedSeed',
   'projectHostedSeedActions',
+  'projectHostedSeedWorkStore',
   'projectHostedAgent',
   'projectHostedChannels',
 ])

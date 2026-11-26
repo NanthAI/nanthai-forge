@@ -82,6 +82,7 @@ export async function prepareHostedSeed(
   revision: number,
   operationId: string,
   serverAuthority?: true,
+  bootstrapGitHead = false,
 ) {
   z.uuid().parse(operationId);
   const directory = join(store.directory, `hosted-seed-${operationId}`);
@@ -191,7 +192,7 @@ export async function prepareHostedSeed(
     const accepted = data.channelMoves
       .filter(move => move.channel === 'main' && move.status === 'accepted')
       .at(-1);
-    const head = accepted?.head ?? data.nativeHead!;
+    const head = (bootstrapGitHead ? data.nativeHead : accepted?.head) ?? data.nativeHead!;
     main = pin(source.object(head));
     for (const original of data.runs) {
       const run = portableRun(original);
@@ -287,7 +288,7 @@ export async function prepareHostedSeed(
   // Work bytes are available through the record tree; retaining their logical
   // object also keeps existing checkpoint/recovery readers compatible.
   keep(work);
-  const accepted = (JSON.parse(work.toString('utf8')).channelMoves ?? []).filter(
+  const accepted = (bootstrapGitHead ? [] : (JSON.parse(work.toString('utf8')).channelMoves ?? [])).filter(
     (move: { channel: string; status: string }) => move.channel === 'main' && move.status === 'accepted',
   );
   const receipt = accepted.at(-1),

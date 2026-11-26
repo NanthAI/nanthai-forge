@@ -252,7 +252,7 @@ export const hostedRecordSchema = z.discriminatedUnion('kind', [
       version,
       at: z.string().min(1),
       kind: z.literal('issue'),
-      item: planningItemSchema,
+      item: planningItemSchema.passthrough(),
     })
     .strict(),
   z
@@ -264,7 +264,7 @@ export const hostedRecordSchema = z.discriminatedUnion('kind', [
       parent: z.uuid(),
       /** Note order within its Intent; planning comments order by `at`. */
       position: version,
-      comment: planningCommentSchema.optional(),
+      comment: planningCommentSchema.passthrough().optional(),
       // The full note schema lives in work-types, which imports modules that import this one; the
       // Work store mapper (work-store-records) validates a note with it before it is encoded here.
       note: z

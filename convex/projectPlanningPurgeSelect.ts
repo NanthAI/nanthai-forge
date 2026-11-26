@@ -126,7 +126,6 @@ export const preflight = internalQuery({
       generationId: target.generation._id,
       // Rows at or before this revision are in the base checkpoint (the stored archive the index is built from).
       initialRevision: baseRevision(target.project, target.generation),
-      workStore: target.project.workStore ?? 'journal',
       journalRevision: target.project.journalRevision ?? 0,
       pendingArchives: await pendingIntentArchives(
         ctx,

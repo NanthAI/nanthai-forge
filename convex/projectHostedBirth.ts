@@ -29,19 +29,18 @@ type Birth = {
   origin: 'new-project' | 'github-import' | 'make-editable';
 };
 /** The one seam for a project born under server authority (guarded by
- * tests/born-record-store-guard.test.mjs). `workRevision` is the born Work revision when its
- * Work has no commands, so it starts in the record store (Item c0af6cfa); null only for a native
- * owner whose earlier commands are still in its journal index until slice 6 copies them. */
-export function serverBirth(previous: SourceAuthority, workRevision: number | null) {
+ * tests/born-record-store-guard.test.mjs). A nonempty seed imports its Work before calling this seam. */
+export function serverBirth(previous: SourceAuthority, workRevision: number) {
   const authority = nextSourceAuthority(previous, previous, 'server'),
     at = new Date().toISOString();
+  const retainedWork = bornRecordStore(workRevision);
   return {
     authority,
     at,
     fields: {
       sourceAuthority: authority,
       sourceCutover: { minimumCliVersion: CUTOVER_CLI_VERSION, at },
-      ...(workRevision === null ? {} : bornRecordStore(workRevision)),
+      ...retainedWork,
     },
   };
 }

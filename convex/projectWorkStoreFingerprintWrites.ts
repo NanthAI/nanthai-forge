@@ -5,7 +5,7 @@ import type { MutationCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import type { HostedRecordRef } from '../src/hosted-records';
 
-const primaryWriters = ['note', 'intent', 'intent-status', 'planning'] as const;
+export const primaryWriters = ['note', 'intent', 'intent-status', 'planning'] as const;
 
 /** Migration telemetry stops once every eligible command owns retained versions. Reader rollback
  * alone does not restart it; removing a primary writer invalidates coverage in setMode first. */

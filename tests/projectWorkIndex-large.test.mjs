@@ -257,6 +257,12 @@ test('record rebuild replays purged rows as their redacted commands and keeps th
       command: JSON.stringify(command),
     });
   const put = patch => ({ action: 'put-planning-item', operationId: randomUUID(), ...patch });
+  const source = f.s.tables.hostedProjects.get('project');
+  // This replay fixture covers the original event table. The retained-event
+  // purge executor exercises the canonical ledger separately.
+  source.workStoreWriters = [];
+  source.workStoreEventWindows = [];
+  delete source.workStoreCutoverRevision;
   const secret = 'walrus-purge-fixture';
   const initiative = put({ itemId: randomUUID(), expectedVersion: 0, kind: 'initiative', title: secret });
   await send(initiative);

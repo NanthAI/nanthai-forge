@@ -39,7 +39,7 @@ const gitId = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 export function filesFromGit(root: string, head: string, source: NativeSource): NativeFile[] {
   const bytes = workGit(
     root,
-    ['--no-lazy-fetch', 'ls-tree', '-rz', '--full-tree', head],
+    ['--no-lazy-fetch', '--no-replace-objects', 'ls-tree', '-rz', '--full-tree', head],
     undefined,
     false,
     true,
@@ -69,18 +69,34 @@ export function filesFromGit(root: string, head: string, source: NativeSource): 
             .toLowerCase()
             .split('/')
             .some(part => ['.git', '.forge'].includes(part)) &&
-          header[1] === 'blob' &&
-          ['100644', '100755', '120000'].includes(header[0]!),
+          ((header[1] === 'blob' && ['100644', '100755', '120000'].includes(header[0]!)) ||
+            (header[1] === 'commit' && header[0] === '160000')),
         'UNSUPPORTED_NATIVE_GIT_FILE',
         `Native workspace cannot represent this tracked path: ${path}. Original repository is preserved.`,
       );
+      const mode =
+        header[0] === '160000'
+          ? 'gitlink'
+          : header[0] === '120000'
+            ? 'symlink'
+            : header[0] === '100755'
+              ? 'executable'
+              : 'file';
       const blob = source.put(
-        workGit(root, ['--no-lazy-fetch', 'cat-file', 'blob', header[2]!], undefined, false, true),
+        mode === 'gitlink'
+          ? Buffer.from(header[2]!)
+          : workGit(
+              root,
+              ['--no-lazy-fetch', '--no-replace-objects', 'cat-file', 'blob', header[2]!],
+              undefined,
+              false,
+              true,
+            ),
       );
       return {
         path,
         blob,
-        mode: header[0] === '120000' ? 'symlink' : header[0] === '100755' ? 'executable' : 'file',
+        mode,
       };
     })
     .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));

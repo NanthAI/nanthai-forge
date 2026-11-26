@@ -370,13 +370,16 @@ test('R2 failures, short and long reads, and wrong bytes yield only structured e
   assert.equal(f.stats.calls, 4, 'Only verified bytes reach the release check');
 });
 
-test('the journal-backed discussion resolves the same exact comment and fails if its generation loses it', async t => {
+test('discussion uses the canonical comment independently of its historical generation', async t => {
   const f = await fixture(t);
   delete f.project.workStore;
   assert.equal((await f.download({ viewer: 'visitor' })).status, 200);
   f.s.tables.projectWorkDataRecords.delete('legacy-comment');
+  assert.equal((await f.download({ viewer: 'visitor' })).status, 200);
+  for (const head of f.s.tables.projectHostedRecordHeads.values())
+    if (head.kind === 'comment') f.s.tables.projectHostedRecordHeads.delete(head._id);
   await expectError(await f.download({ viewer: 'visitor' }), 404, 'NOT_FOUND');
-  assert.equal(f.fake.requests.length, 1);
+  assert.equal(f.fake.requests.length, 2);
 });
 
 test('one and two MB downloads do constant metadata work with zero idle calls', async t => {

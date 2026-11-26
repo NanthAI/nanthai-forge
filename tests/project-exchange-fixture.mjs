@@ -40,6 +40,7 @@ const names = [
   'projectBackups',
   'projectWork',
   'projectWorkActions',
+  'projectHostedSeedWorkStore',
   'projectDiffstats',
 ];
 export const modules = Object.fromEntries(
@@ -180,7 +181,7 @@ export async function currentOwnerDisplay(s, store, data = store.load(), project
 
 /** Drive the real paged hosted seed for a prepared record checkpoint. */
 export async function seedRecordCheckpoint(s, prepared) {
-  for (const name of ['projectHostedSeed', 'projectHostedSeedActions'])
+  for (const name of ['projectHostedSeed', 'projectHostedSeedActions', 'projectHostedSeedWorkStore'])
     modules[name] ??= await import(moduleUrl(`../convex/${name}.ts`));
   for (const table of ['projectHostedSeeds', 'projectHostedSeedPages', 'projectHostedChannels'])
     s.tables[table] ??= new Map();

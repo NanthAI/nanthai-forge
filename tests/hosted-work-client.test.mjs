@@ -23,7 +23,7 @@ const transport = s => ({
   action: (ref, input) => actions[getFunctionName(ref).split(':')[1]]._handler(s.ctx, input),
 });
 
-test('scoped read transport uses the ready index, hydrates only selected payload, rejects stale source and keeps access current', async t => {
+test('scoped read transport uses the ready generation and returns the selected canonical body, rejects stale source and keeps access current', async t => {
   const s = await setup(t),
     client = transport(s),
     before = s.reads();
@@ -36,7 +36,7 @@ test('scoped read transport uses the ready index, hydrates only selected payload
     action: 'records',
     collection: 'planningItems',
   });
-  assert.equal(rows.page[0].value.payload, true);
+  assert.equal(rows.page[0].value.body, item.body);
   const continuation = await dispatchHostedWork(client, s.projectId, {
     action: 'records',
     collection: 'planningItems',

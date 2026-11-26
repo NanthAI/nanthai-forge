@@ -101,6 +101,7 @@ type Detail = {
   generationId: string | null;
   revision: number | null;
   value: string | null;
+  hydrated?: true;
   editable: boolean;
   intentPin: string | null;
 };
@@ -138,7 +139,7 @@ export async function readIndexedWorkDetail(
     );
     if (!result.value) return { ...result, value: null };
     const header = JSON.parse(result.value) as Record<string, unknown>;
-    if (!header.payloadKey)
+    if (result.hydrated || !header.payloadKey)
       return { ...result, value: header, intentPin: result.intentPin ? JSON.parse(result.intentPin) : null };
     let cursor: string | null = null;
     const chunks: Page['page'] = [];

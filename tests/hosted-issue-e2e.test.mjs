@@ -119,6 +119,10 @@ async function world(t, { ticks = ['x', 'x'], completeOnAccept = false } = {}) {
     for (const head of f.tables.projectHostedRecordHeads.values()) {
       if (!(head.kind === 'intent' && head.key === issue) && !(head.kind === 'lane' && head.parent === issue))
         continue;
+      const existing = [...s.tables.projectHostedRecordHeads.values()].find(
+        row => row.kind === head.kind && row.key === head.key,
+      );
+      if (existing) s.tables.projectHostedRecordHeads.delete(existing._id);
       s.tables.projectHostedRecordHeads.set(head._id, { ...head, projectId: s.projectId });
     }
     for (const overlap of f.tables.projectHostedOverlapLanes.values()) {

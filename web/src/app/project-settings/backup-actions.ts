@@ -61,11 +61,13 @@ export async function storeArchive(client: ConvexReactClient, upload: Upload) {
     const projectId = await client.mutation(api.projectBackupObjects.open, {
       key: upload.input.key,
       name: upload.input.name,
+      serverAuthority: true,
     });
     const { uploadArchiveObjects } = await import('../../archive-object-upload');
     const seeded = await uploadArchiveObjects(client, projectId, upload.file, {
       operationId: upload.input.operationId,
       preview: upload.input.preview,
+      serverAuthority: true,
     });
     upload.id = seeded.backupId;
     return 'Source and Work stored as reusable private objects.';

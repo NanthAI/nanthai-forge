@@ -23,6 +23,7 @@ import { readHosted } from './hosted-read.mjs';
 const modules = {};
 for (const name of [
   'projectWork',
+  'projectHostedSeedWorkStore',
   'r2ArchiveSource',
   'projectBackups',
   'projectContributors',
@@ -602,6 +603,7 @@ test('new contributor proposals transfer objects, preserve old archives, pull di
   const projectId = await modules.projectBackupObjects.open._handler(s.ctx, {
     key,
     name: 'Object backup import',
+    serverAuthority: true,
   });
   for (const name of ['projectHostedSeed', 'projectHostedSeedActions'])
     modules[name] = await import(moduleUrl(`../convex/${name}.ts`));
@@ -611,6 +613,7 @@ test('new contributor proposals transfer objects, preserve old archives, pull di
   const importedBackup = await uploadArchiveObjects(client, projectId, new File([c.bytes], 'backup.tar.gz'), {
     operationId: randomUUID(),
     preview: c.input.preview,
+    serverAuthority: true,
   });
   const backupId = importedBackup.backupId;
   assert.equal(s.tables.projectBackups.get(backupId).transport, 'objects');

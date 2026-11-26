@@ -15,21 +15,19 @@ import {
 // Intents are mutable records: the journal owns a copied Intent until a hosted Lane pins its execution
 // (a base with a receipt); from then on hosted paths own it and the copy, compare and dual write leave it.
 import {
-  compareFingerprints,
   fingerprintSource,
   fingerprintHead,
   fingerprintCoverage,
   workReadDigest,
 } from './projectWorkStoreDigests';
 import { workProject } from './projectWorkHead';
-import { workStoreMigrationActive } from './projectWorkStoreFingerprintWrites';
+import { primaryWriters } from './projectWorkStoreFingerprintWrites';
 import { v } from 'convex/values';
 import { mutation, query, type MutationCtx, type QueryCtx } from './cliServer';
 import type { Doc, Id } from './_generated/dataModel';
 import { invariant, ForgeError } from '../src/errors';
 import { report } from './errors';
 import { accessibleProject } from './projectAuthority';
-import { sourceAuthority } from '../src/hosted-source-authority';
 import { selectedGeneration, recordPartition, record as indexRecord } from './projectWorkIndexStore';
 import { independentIntentItem, recordHead, recordVersion, hostedRecordBody } from './projectHostedRecords';
 import { hostedRecordIndex, hostedRecordValue } from '../src/hosted-records';
@@ -44,7 +42,7 @@ import { sameValue, storeReadOf } from './projectWorkStoreReads';
 import { advancePlanningTimes, pinnedPlanningTimes } from './projectPlanningTimes';
 import { retainAuditVersion } from './projectPlanningAuditWindow';
 
-type WorkStoreProject = Pick<Doc<'hostedProjects'>, '_id' | 'workStore'>;
+type WorkStoreProject = Pick<Doc<'hostedProjects'>, '_id' | 'workStore' | 'workStoreCutoverRevision'>;
 const pinRequired =
   'This Item has unproved planning times. Complete the planning-times backfill before advancing its record-store head.';
 
@@ -77,11 +75,6 @@ async function ownerStore(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProj
     project.owner === user.subject,
     'PROJECT_UNAVAILABLE',
     'The Work store copy and compare are available to the project owner.',
-  );
-  invariant(
-    sourceAuthority(project).mode !== 'native-owner',
-    'BAD_ARGUMENT',
-    'A native-owner project keeps its Work in the journal.',
   );
   const generation = await selectedGeneration(ctx, project);
   invariant(generation, 'PROJECT_WORK_INDEX_MISSING', 'Prepare the hosted Work index first.');
@@ -161,12 +154,19 @@ export async function storeVersion(
 ): Promise<'copied' | 'same' | 'refreshed' | 'different'> {
   const projectId = project._id;
   const { record, ref } = encoded;
-  const requirePin = project.workStore === 'records' && record.kind === 'issue';
-  const old = await recordVersion(ctx, projectId, record.kind, record.id, record.version);
+  const requirePin =
+    (project.workStore === 'records' || project.workStoreCutoverRevision !== undefined) &&
+    record.kind === 'issue';
+  const head = await recordHead(ctx, projectId, record.kind, record.id);
+  // A live write beyond the selected head has no immutable version to open.
+  // Copies and same-version writes still compare the exact version.
+  const old =
+    liveProjection && head && record.version > head.version
+      ? null
+      : await recordVersion(ctx, projectId, record.kind, record.id, record.version);
   // A purged version keeps its original digest while the index holds its tombstone: the purge vouches for it.
   if (old?.purged !== undefined) return 'same';
   if (old && (old.digest !== ref.digest || old.bytes !== ref.bytes)) return 'different';
-  const head = await recordHead(ctx, projectId, record.kind, record.id);
   if (!old) {
     await insertVersion(
       ctx,
@@ -328,7 +328,6 @@ export async function storeProjection(
   ctx: MutationCtx,
   project: WorkStoreProject & Pick<Doc<'hostedProjects'>, 'owner'>,
   entries: { collection: string; key: string; parent: string; position: number; value: string }[],
-  partition?: Id<'projectWorkGenerations'>,
   provenance?: WorkProvenance,
   createdIntentId?: string,
 ): Promise<StoredWorkEvent | null> {
@@ -349,11 +348,7 @@ export async function storeProjection(
             : 'planningComments';
   const items = new Set(entries.filter(e => e.collection === 'planningSearch').map(e => e.key));
   for (const entry of entries) {
-    if (
-      !(workStoreSources as readonly string[]).includes(entry.collection) &&
-      entry.collection !== 'planningItems'
-    )
-      continue;
+    if (!(workStoreSources as readonly string[]).includes(entry.collection)) continue;
     const collection = entry.collection as WorkStoreSource,
       header = JSON.parse(entry.value);
     const value = header.payloadKey
@@ -366,40 +361,22 @@ export async function storeProjection(
         )
       : header;
     const audit = collection === primary ? provenance : undefined;
-    try {
-      if (collection === 'intents')
-        await storeIntent(ctx, projectId, owner, value, true, audit, {
-          migrationDigests: Boolean(partition),
-          createdIndependently: entry.key === createdIntentId,
-          // The Item and its same-id Intent are written by one projection: the Intent is born bound to it.
-          bound: items.has(entry.key),
-        });
-      else if (entry.collection !== 'planningItems')
-        await storeVersion(
-          ctx,
-          project,
-          hostedRecordValue(workStoreRecord(collection, value)),
-          audit,
-          Boolean(partition),
-          true,
-        );
-    } catch (error) {
-      if (audit || (project.workStore === 'records' && collection === 'planningVersions')) throw error;
-      // A failed dual write is observable by its independently updated source fingerprint below.
-    }
-    if (partition) {
-      const encoded = await fingerprintSource(
+    if (collection === 'intents')
+      await storeIntent(ctx, projectId, owner, value, true, audit, {
+        migrationDigests: false,
+        createdIndependently: entry.key === createdIntentId,
+        // A same-id Intent is bound when its Item is written in this projection.
+        bound: items.has(entry.key),
+      });
+    else {
+      await storeVersion(
         ctx,
-        projectId,
-        partition,
-        owner,
-        entry.collection,
-        entry.key,
-        entry.position,
-        value,
+        project,
+        hostedRecordValue(workStoreRecord(collection, value)),
+        audit,
+        false,
+        true,
       );
-      const head = encoded ? await recordHead(ctx, projectId, encoded.kind, encoded.id) : null;
-      if (head) await fingerprintHead(ctx, projectId, partition, head);
     }
   }
   if (!provenance) return null;
@@ -415,9 +392,7 @@ export async function storeProjection(
   return eventDocument(body);
 }
 
-/** Switch a project's Work store mode. Dual write starts only after a clean copy and compare; on the
- * dogfood project, only after the restore drill (Issue 7e9678c8) has passed. `records` keeps the dual
- * write and also serves the planning reads from the store (S4); `dual` switches those reads back. */
+/** P8 bridge. After copying, pinning and comparing Work, mark its retained-event frontier. */
 export const setMode = mutation({
   args: {
     projectId: v.id('hostedProjects'),
@@ -431,48 +406,40 @@ export const setMode = mutation({
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
-      const { project, partition } = await ownerStore(ctx, input.projectId);
-      const workStore = input.mode === 'journal' ? undefined : input.mode;
-      const next = { ...project, workStore, workStoreWriters: input.writers ?? project.workStoreWriters };
-      const invalidate =
-        Boolean(project.workStore) !== Boolean(workStore) ||
-        workStoreMigrationActive(project) !== workStoreMigrationActive(next);
-      if (project.workStore !== workStore) await ctx.db.patch(project._id, { workStore });
-      if (invalidate) {
-        // No per-write invalidation: crossing the migration boundary invalidates its disposable
-        // baseline once. Rollback cannot trust fingerprints skipped while writers were primary.
-        const coverage = await ctx.db
-          .query(splitRecordTable('_workStoreDigestCoverage'))
-          .withIndex('by_generation_and_collection_and_key', q =>
-            q.eq('generationId', partition).eq('collection', '_workStoreDigestCoverage'),
-          )
-          .take(100);
-        for (const row of coverage)
-          await ctx.db.patch(row._id, { value: JSON.stringify({ invalidated: true }) });
-      }
-      if (input.writers !== undefined) {
+      invariant(
+        input.mode === 'records' &&
+          (input.writers === undefined ||
+            (input.writers.length === primaryWriters.length &&
+              primaryWriters.every(writer => input.writers!.includes(writer)))),
+        'BAD_ARGUMENT',
+        'The Work store cutover retains all four record writers.',
+      );
+      const { project } = await ownerStore(ctx, input.projectId);
+      const ready =
+        project.workStore === 'records' &&
+        primaryWriters.every(writer => project.workStoreWriters?.includes(writer));
+      if (!ready) {
         const current = await workProject(ctx, project);
-        const wasPlanning = project.workStoreWriters?.includes('planning') ?? false;
-        const isPlanning = input.writers.includes('planning');
         await ctx.db.patch(project._id, {
-          ...(wasPlanning === isPlanning
+          ...(project.workStoreEventWindows?.at(-1)?.storeFirst
             ? {}
             : {
                 workStoreEventWindows: [
                   ...(project.workStoreEventWindows ?? []),
-                  { revision: current.work!.revision, storeFirst: isPlanning },
+                  { revision: current.work!.revision, storeFirst: true },
                 ],
               }),
-          workStoreWriters: input.writers,
-          ...(input.writers.length && project.workStoreCutoverRevision === undefined
+          workStore: 'records',
+          workStoreWriters: [...primaryWriters],
+          ...(project.workStoreCutoverRevision === undefined
             ? { workStoreCutoverRevision: current.work!.revision }
             : {}),
         });
       }
       return JSON.stringify({
         mode: input.mode,
-        changed: project.workStore !== workStore,
-        ...(input.writers !== undefined ? { writers: input.writers } : {}),
+        changed: !ready,
+        writers: primaryWriters,
       });
     } catch (error) {
       return report(error);
@@ -618,46 +585,14 @@ export async function journalWorkStoreCompare(
 ) {
   try {
     const { project, partition } = await ownerStore(ctx, input.projectId);
-    const digestPrefix = 'work-digest:';
     const fullPrefix = 'work-full:';
-    const mode = input.cursor?.startsWith(digestPrefix)
-      ? 'digest'
-      : input.cursor?.startsWith(fullPrefix)
-        ? 'full'
-        : undefined;
-    if (mode)
-      input = {
-        ...input,
-        cursor: input.cursor!.slice(mode === 'digest' ? digestPrefix.length : fullPrefix.length),
-      };
-    if (
-      mode === 'digest' ||
-      (mode !== 'full' &&
-        workStoreMigrationActive(project) &&
-        (input.digestOnly ?? input.newest !== undefined))
-    ) {
-      const compared = workStoreMigrationActive(project)
-        ? await compareFingerprints(
-            ctx,
-            input.projectId,
-            partition,
-            input.collection,
-            input.cursor,
-            input.newest ?? 100,
-          )
-        : null;
-      invariant(
-        compared || mode !== 'digest',
-        'WORK_STALE',
-        'The Work store comparison coverage changed. Restart this bounded compare.',
-      );
-      if (compared)
-        return JSON.stringify({
-          ...compared,
-          method: 'digest',
-          cursor: compared.cursor ? digestPrefix + compared.cursor : null,
-        });
-    }
+    invariant(
+      !input.cursor?.startsWith('work-digest:'),
+      'WORK_STALE',
+      'Restart the comparison against the full retained Work records.',
+    );
+    if (input.cursor?.startsWith(fullPrefix))
+      input = { ...input, cursor: input.cursor.slice(fullPrefix.length) };
     const full = (value: { cursor: string | null } & Record<string, unknown>) =>
       JSON.stringify({ ...value, method: 'full', cursor: value.cursor ? fullPrefix + value.cursor : null });
     const collection = input.collection as CompareSource;

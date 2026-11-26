@@ -10,7 +10,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
-import { setup } from './hosted-planning-fixture.mjs';
+import { setup, pinIntent } from './hosted-planning-fixture.mjs';
 import { installPlanningSearch } from './planning-search-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { executeHostedPlanning } from '../dist/hosted-agent-planning.js';
@@ -131,16 +131,14 @@ async function world(t, policy) {
       text: `Comment on ${token(row)}`,
       authorLabel: 'Owner',
     });
-    await records.writeHostedRecord(s.ctx, {
+    await pinIntent(s.ctx, {
       projectId: s.projectId,
       actor: 'owner',
       authorityEpoch: 1,
-      expectedVersion: null,
       planningItemId: items[row].itemId,
       record: {
         kind: 'intent',
         id: items[row].itemId,
-        version: 0,
         at: new Date(NOW).toISOString(),
         outcome: items[row].title,
         constraints: items[row].body,

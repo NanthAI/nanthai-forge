@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { acceptanceFixture, control } from './hosted-acceptance-fixture.mjs';
 import { batchesFixture, batchPublish, states, synthetic } from './hosted-landing-batches-fixture.mjs';
-import { setup as planningSetup, actions as workActions } from './hosted-planning-fixture.mjs';
+import { setup as planningSetup, actions as workActions, pinIntent } from './hosted-planning-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { policyPreset } from '../dist/autonomy-policy.js';
 import { mergeItems } from '../dist/planning-batch.js';
@@ -196,7 +196,7 @@ test('an independent or unmarked legacy landing posts no Item note and schedules
       `${name}: an unmarked Intent writes like an independent one`,
     );
     assert.deepEqual(result.independent.written, result.legacy.written, name);
-    assert.equal(result.planned.ranges - result.independent.ranges, 1, name);
+    assert.equal(result.planned.ranges - result.independent.ranges, 2, name);
     const { itemId, ...previousNote } = plannedNote;
     assert.equal(itemId, plannedNote.intentId);
     const before = Buffer.byteLength(JSON.stringify(previousNote));
@@ -319,11 +319,7 @@ async function recordsStore(s) {
     mutation: (ref, args) => handlers[getFunctionName(ref)]._handler(s.ctx, args),
     action: () => assert.fail('no action'),
   };
-  for (const input of [
-    { action: 'copy-work-store' },
-    { action: 'set-work-store', mode: 'dual' },
-    { action: 'set-work-store', mode: 'records' },
-  ])
+  for (const input of [{ action: 'copy-work-store' }, { action: 'set-work-store', mode: 'records' }])
     await dispatchHostedWork(client, s.projectId, input);
   assert.equal(s.tables.hostedProjects.get(s.projectId).workStore, 'records');
 }
@@ -417,16 +413,14 @@ test('linked landing notes use bounded comment continuations without dropping no
   const item = s.item({ intentIds: linked });
   for (const id of linked) {
     await s.send(s.item({ itemId: id, title: 'Duplicate' }));
-    await records.writeHostedRecord(s.ctx, {
+    await pinIntent(s.ctx, {
       projectId: s.projectId,
       actor: 'owner',
       authorityEpoch: 1,
-      expectedVersion: null,
       planningItemId: id,
       record: {
         kind: 'intent',
         id,
-        version: 0,
         at: AT,
         outcome: 'Linked work',
         constraints: '',

@@ -289,6 +289,9 @@ test('doubled dogfood history retains its index through main moves and increment
     if (collection === 'intents') continue;
     for (let i = 0; i < count; i++) put(collection, String(i), i, { id: String(i), retainedBytes: 4096 });
   }
+  const project = s.tables.hostedProjects.get(s.projectId);
+  const { bornRecordStore } = await import(moduleUrl('../convex/projectWorkStoreFingerprintWrites.ts'));
+  Object.assign(project, bornRecordStore((await s.read()).data.revision));
   const metadata = JSON.parse(generation.metadata);
   Object.assign(metadata.counts, shape);
   generation.metadata = JSON.stringify(metadata);
@@ -337,7 +340,8 @@ test('doubled dogfood history retains its index through main moves and increment
   }
   assert.equal(s.tables.projectWorkGenerations.size, 1);
   assert.equal(s.tables.hostedProjects.get(s.projectId).work.generationId, generationId);
-  assert.equal(s.tables.projectWorkEvents.size, 201);
+  assert.equal(s.tables.projectWorkEvents.size, 1);
+  assert.equal([...s.tables.projectHostedRecordBodies.values()].filter(row => row.operationId).length, 200);
   assert.equal(metrics.historyBytes, 0);
   assert(maxResponseBytes < 64 * 1024);
   assert(metrics.readDocuments <= 1200 * 24, JSON.stringify(metrics));

@@ -12,13 +12,10 @@ import { diffPlanningVersion, modelFromAgentClient, type AuditChange } from '../
 import { decisionOperationId } from '../src/work-planning-put';
 import type { PlanningItem } from '../src/work-planning-types';
 import { hostedRecordBody } from './projectHostedRecords';
-import { hostedRecordValue } from './hostedRecordValue';
 import { itemLanePage, itemLanePosition, type ItemLanePosition } from './projectItemLanePage';
 import { itemNoteKey, itemNotePage, noteKey } from './projectItemNotePage';
 import { cursorJson, itemLandingFromNote } from './projectItemLandingHistory';
 import { legacyVersions, legacyVersionValue, planningHistoryBudget } from './projectPlanningHistory';
-import { record } from './projectWorkIndexStore';
-import { splitRecordTable } from './projectWorkRecordTables';
 import { storeItem } from './projectWorkStoreReads';
 import { auditPrefix, auditVersion, type AuditVersion } from './projectPlanningAuditWindow';
 
@@ -286,15 +283,7 @@ export async function readItemAuditHistory(
   const pageLimit = Math.min(Math.max(Math.trunc(input.limit ?? 50), 1), MAX_LIMIT);
   const workCap = Math.min(pageLimit, WORK_STREAM_CAP);
   const charge = planningHistoryBudget(PAGE_BYTES);
-  const recordsMode = project.workStore === 'records';
-
-  let current: PlanningItem | null = null;
-  if (recordsMode) {
-    current = (await storeItem(ctx, project._id, input.itemId)) as PlanningItem | null;
-  } else if (partition) {
-    const row = await record(ctx, partition, 'planningItems', input.itemId);
-    if (row) current = JSON.parse(await hostedRecordValue(ctx, partition, row)) as PlanningItem;
-  }
+  const current = (await storeItem(ctx, project._id, input.itemId)) as PlanningItem | null;
   invariant(current, 'NOT_FOUND', 'Planning item not found.');
 
   // Where retained history starts for this Item (one exact lookup for version 1).
@@ -308,7 +297,7 @@ export async function readItemAuditHistory(
     historyStartsAt = current.at;
     firstVersion = 1;
     completeFromCreation = true;
-  } else if (recordsMode) {
+  } else {
     const v1 = await ctx.db
       .query('projectHostedRecords')
       .withIndex('by_project_and_kind_and_key_and_version_and_plan', q =>
@@ -333,20 +322,6 @@ export async function readItemAuditHistory(
         completeFromCreation = true;
       }
     }
-  } else if (partition) {
-    const [earliest] = await ctx.db
-      .query(splitRecordTable('planningVersions'))
-      .withIndex('by_generation_and_collection_and_parent_and_position', q =>
-        q.eq('generationId', partition).eq('collection', 'planningVersions').eq('parent', input.itemId),
-      )
-      .order('asc')
-      .take(1);
-    if (earliest && charge.record(earliest)) {
-      const snap = JSON.parse(earliest.value) as PlanningItem;
-      historyStartsAt = snap.at;
-      firstVersion = snap.version;
-      completeFromCreation = snap.version === 1 && !snap.purged;
-    }
   }
 
   const state = decodeCursor(input.cursor, current.version, current.kind === 'issue');
@@ -356,77 +331,48 @@ export async function readItemAuditHistory(
   type CommentStreamEntry = { event: AuditEvent; raw: CommentRow; examined: number };
   const commentEntries: CommentStreamEntry[] = [];
   // Rows read for this stream, in order (skipped ones included): cursors advance by them, not by events.
-  const commentExamined: { _creationTime: number; position?: number }[] = [];
+  const commentExamined: { _creationTime: number }[] = [];
   let commentHasMore = false;
   if (state.c !== null && !current.purged) {
-    if (recordsMode) {
-      const time = typeof state.c === 'object' ? state.c : undefined;
-      const heads = await ctx.db
-        .query('projectHostedRecordHeads')
-        .withIndex('by_project_and_kind_and_parent_and_status', q => {
-          const base = q
-            .eq('projectId', project._id)
-            .eq('kind', 'comment')
-            .eq('parent', input.itemId)
-            .eq('status', 'comment');
-          return time ? base.lte('_creationTime', time.at) : base;
-        })
-        .order('desc')
-        .take(pageLimit + 1 + (time?.skip ?? 0));
-      const trimmed = skipTies(heads, time);
-      commentHasMore = trimmed.length > pageLimit;
-      for (const head of trimmed.slice(0, pageLimit)) {
-        if (!charge.record(head)) {
+    const time = typeof state.c === 'object' ? state.c : undefined;
+    const heads = await ctx.db
+      .query('projectHostedRecordHeads')
+      .withIndex('by_project_and_kind_and_parent_and_status', q => {
+        const base = q
+          .eq('projectId', project._id)
+          .eq('kind', 'comment')
+          .eq('parent', input.itemId)
+          .eq('status', 'comment');
+        return time ? base.lte('_creationTime', time.at) : base;
+      })
+      .order('desc')
+      .take(pageLimit + 1 + (time?.skip ?? 0));
+    const trimmed = skipTies(heads, time);
+    commentHasMore = trimmed.length > pageLimit;
+    for (const head of trimmed.slice(0, pageLimit)) {
+      if (!charge.record(head)) {
+        commentHasMore = true;
+        break;
+      }
+      let comment: CommentRow | null = null;
+      if (head.value !== undefined) comment = JSON.parse(head.value) as CommentRow;
+      else {
+        const rec = await ctx.db.get(head.recordId);
+        if (rec && rec.purged === undefined && charge.record(rec))
+          comment =
+            (JSON.parse(await hostedRecordBody(ctx, rec)) as { comment?: CommentRow }).comment ?? null;
+        else if (charge.exhausted) {
           commentHasMore = true;
           break;
         }
-        let comment: CommentRow | null = null;
-        if (head.value !== undefined) comment = JSON.parse(head.value) as CommentRow;
-        else {
-          const rec = await ctx.db.get(head.recordId);
-          if (rec && rec.purged === undefined && charge.record(rec))
-            comment =
-              (JSON.parse(await hostedRecordBody(ctx, rec)) as { comment?: CommentRow }).comment ?? null;
-          else if (charge.exhausted) {
-            commentHasMore = true;
-            break;
-          }
-        }
-        commentExamined.push(head);
-        if (!comment) continue;
-        commentEntries.push({
-          raw: comment,
-          examined: commentExamined.length - 1,
-          event: await commentEvent(ctx, project._id, comment, charge),
-        });
       }
-    } else if (partition) {
-      const beforePos = typeof state.c === 'number' ? state.c : undefined;
-      const rows = await ctx.db
-        .query(splitRecordTable('planningComments'))
-        .withIndex('by_generation_and_collection_and_parent_and_position', q => {
-          const base = q
-            .eq('generationId', partition)
-            .eq('collection', 'planningComments')
-            .eq('parent', input.itemId);
-          return beforePos !== undefined ? base.lte('position', beforePos) : base;
-        })
-        .order('desc')
-        .take(pageLimit + 1);
-      commentHasMore = rows.length > pageLimit;
-      for (const row of rows.slice(0, pageLimit)) {
-        if (!charge.record(row)) {
-          commentHasMore = true;
-          break;
-        }
-        const comment = JSON.parse(row.value) as CommentRow;
-        commentExamined.push(row);
-        commentEntries.push({
-          raw: comment,
-          examined: commentExamined.length - 1,
-          event: await commentEvent(ctx, project._id, comment, charge),
-        });
-      }
+      commentExamined.push(head);
+      if (!comment) continue;
+      commentEntries.push({
+        raw: comment,
+        examined: commentExamined.length - 1,
+        event: await commentEvent(ctx, project._id, comment, charge),
+      });
     }
   }
   const decisionByOp = new Map<string, CommentRow>();
@@ -457,9 +403,14 @@ export async function readItemAuditHistory(
         });
       }
     } else {
-      const cached = recordsMode
-        ? await auditPrefix(ctx, project._id, current, state.v, pageLimit, PAGE_BYTES - charge.readBytes)
-        : null;
+      const cached = await auditPrefix(
+        ctx,
+        project._id,
+        current,
+        state.v,
+        pageLimit,
+        PAGE_BYTES - charge.readBytes,
+      );
       let versions: AuditVersion[];
       if (cached) {
         charge.spend(cached.bytes);
@@ -473,75 +424,42 @@ export async function readItemAuditHistory(
         }
       } else {
         const loaded: { item: PlanningItem; actor?: string }[] = [];
-        if (recordsMode) {
-          // Lifecycle-plan rows share a key and version with the real row: page by raw rows, never by a filtered take.
-          const rows = ctx.db
-            .query('projectHostedRecords')
-            .withIndex('by_project_and_kind_and_key_and_version_and_plan', q =>
-              q
-                .eq('projectId', project._id)
-                .eq('kind', 'issue')
-                .eq('key', input.itemId)
-                .lte('version', state.v!),
-            )
-            .order('desc');
-          let raw = 0;
-          for await (const row of rows) {
-            if (loaded.length > pageLimit) {
-              versionHasMore = true;
-              break;
-            }
-            if (raw++ >= 4 * (pageLimit + 1)) {
-              versionHasMore = true;
-              versionBudgetHit = true;
-              if (!loaded.length) versionNextFloor = row.version;
-              break;
-            }
-            if (row.lifecyclePlanId !== undefined || row.purged !== undefined) continue;
-            if (!charge.record(row)) {
-              versionBudgetHit = true;
-              versionHasMore = true;
-              break;
-            }
-            const snap = await loadVersionSnapshot(ctx, project._id, partition, row, charge);
-            if (!snap) {
-              versionBudgetHit = true;
-              versionHasMore = true;
-              break;
-            }
-            loaded.push(snap);
+        // Lifecycle-plan rows share a key and version with the real row: page by raw rows, never by a filtered take.
+        const rows = ctx.db
+          .query('projectHostedRecords')
+          .withIndex('by_project_and_kind_and_key_and_version_and_plan', q =>
+            q
+              .eq('projectId', project._id)
+              .eq('kind', 'issue')
+              .eq('key', input.itemId)
+              .lte('version', state.v!),
+          )
+          .order('desc');
+        let raw = 0;
+        for await (const row of rows) {
+          if (loaded.length > pageLimit) {
+            versionHasMore = true;
+            break;
           }
-        } else if (partition) {
-          let skipped = 0;
-          for await (const row of legacyVersions(ctx, partition, input.itemId)) {
-            if (!charge.record(row)) {
-              versionBudgetHit = true;
-              versionHasMore = true;
-              break;
-            }
-            const header = JSON.parse(row.value) as PlanningItem;
-            if (header.version > state.v) {
-              if (++skipped > 4096) {
-                versionBudgetHit = true;
-                break;
-              }
-              continue;
-            }
-            if (header.purged) break;
-            if (loaded.length >= pageLimit + 1) {
-              versionHasMore = true;
-              break;
-            }
-            const value = await legacyVersionValue(ctx, partition, row, charge);
-            if (value === null) {
-              versionHasMore = true;
-              versionBudgetHit = true;
-              break;
-            }
-            const item = JSON.parse(value) as PlanningItem;
-            const actor = await lookupEventActor(ctx, project._id, item.operationId, charge);
-            loaded.push({ item, actor });
+          if (raw++ >= 4 * (pageLimit + 1)) {
+            versionHasMore = true;
+            versionBudgetHit = true;
+            if (!loaded.length) versionNextFloor = row.version;
+            break;
           }
+          if (row.lifecyclePlanId !== undefined || row.purged !== undefined) continue;
+          if (!charge.record(row)) {
+            versionBudgetHit = true;
+            versionHasMore = true;
+            break;
+          }
+          const snap = await loadVersionSnapshot(ctx, project._id, partition, row, charge);
+          if (!snap) {
+            versionBudgetHit = true;
+            versionHasMore = true;
+            break;
+          }
+          loaded.push(snap);
         }
         // With more to come, the oldest loaded version is only the predecessor that the oldest shown one diffs against
         // (a budget cut too); a lone version still shows, with an unavailable predecessor, so paging moves on.
@@ -781,27 +699,7 @@ export async function readItemAuditHistory(
   let nextC: AuditCursor['c'] = null;
   if (state.c !== null && !current.purged) {
     const comments = { entries: commentEntries, examined: commentExamined, hasMore: commentHasMore };
-    if (recordsMode) nextC = advanceTimed(comments, typeof state.c === 'object' ? state.c : false, cConsumed);
-    else {
-      // Legacy comments page by position (inclusive upper bound).
-      const through =
-        cConsumed < commentEntries.length
-          ? cConsumed === 0
-            ? null
-            : commentEntries[cConsumed - 1]!.examined
-          : commentHasMore && commentExamined.length
-            ? commentExamined.length - 1
-            : undefined;
-      nextC =
-        through === undefined
-          ? commentHasMore
-            ? state.c
-            : null
-          : through === null
-            ? state.c
-            : (commentExamined[through]!.position ?? 0) - 1;
-      if (typeof nextC === 'number' && nextC < 0) nextC = null;
-    }
+    nextC = advanceTimed(comments, typeof state.c === 'object' ? state.c : false, cConsumed);
   }
 
   const advanceKey = <K, R>(

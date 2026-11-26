@@ -176,7 +176,10 @@ test('hosted Intent authority reconciles original operations, retains concurrent
     s.ctx.runMutation = native;
     const replay = await actions.command._handler(s.ctx, create);
     assert.equal(replay.operationId, create.operationId);
-    assert.equal(s.tables.projectWorkEvents.size, 1);
+    const retainedEvents = () =>
+      [...s.tables.projectHostedRecordBodies.values()].filter(row => row.operationId);
+    assert.equal(retainedEvents().length, 1);
+    assert.equal(s.tables.projectWorkEvents.size, 0);
     assert.equal(s.tables.projectWorkHeads.size, 1, 'journal revision lives outside the project row');
     // `state` is the head-free project record every tab holds; the live revision is the hydrated `get`.
     assert.equal(
@@ -247,7 +250,7 @@ test('hosted Intent authority reconciles original operations, retains concurrent
     };
     await actions.command._handler(s.ctx, note);
     s.ctx.runMutation = native;
-    assert.equal(s.tables.projectWorkEvents.size, 3);
+    assert.equal(retainedEvents().length + s.tables.projectWorkEvents.size, 3);
     assert.equal(
       (await actions.command._handler(s.ctx, create)).revision,
       initialRevision + 1,

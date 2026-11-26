@@ -34,7 +34,7 @@ export const page = internalMutation({
   returns: v.object(resultFields),
   handler: async (ctx, input) => {
     const project = await ctx.db.get(input.projectId);
-    invariant(project?.workStore === 'records', 'PROJECT_UNAVAILABLE', 'Select a record-store Work project.');
+    invariant(project && !project.removal, 'PROJECT_UNAVAILABLE', 'Select an existing Forge project.');
     const generation = await selectedGeneration(ctx, project);
     invariant(generation, 'PROJECT_WORK_INDEX_MISSING', 'Prepare the hosted Work index first.');
     const partition = recordPartition(generation);

@@ -6,7 +6,7 @@ import { accountMutation } from './cliServer';
 import { createProject } from './projectCreation';
 import { invariant } from '../src/errors';
 export const open = accountMutation('write')({
-  args: { key: v.string(), name: v.string() },
+  args: { key: v.string(), name: v.string(), serverAuthority: v.optional(v.literal(true)) },
   returns: v.id('hostedProjects'),
   handler: async (ctx, input) => {
     try {
@@ -26,6 +26,13 @@ export const open = accountMutation('write')({
         'PROJECT_CHANGED',
         'Select this project’s original name.',
       );
+      if (
+        input.serverAuthority &&
+        project.revision === 0 &&
+        project.currentBackup === null &&
+        !project.hostingRequest
+      )
+        await ctx.db.patch(project._id, { hostingRequest: JSON.stringify([project.name, 'private']) });
       return project._id;
     } catch (error) {
       return report(error);

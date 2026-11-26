@@ -7,6 +7,7 @@ import { sourceManifestSchema, workArchiveMetadata } from '../../src/work-archiv
 import { archiveDigest, type WorkArchivePreview } from './work-archive';
 import { buildSeedPages, type SeedEntry } from '../../src/hosted-seed-protocol';
 import { canonicalPayload } from '../../src/hosted-source-operation';
+import type { TreeRef } from '../../src/byte-tree-format';
 
 /** Archives are local import files. Only verified logical content is uploaded;
  * repeated files and previous checkpoints share immutable project objects. */
@@ -14,7 +15,7 @@ export async function uploadArchiveObjects(
   client: ConvexReactClient,
   projectId: Id<'hostedProjects'>,
   file: File,
-  seed?: { operationId: string; preview: WorkArchivePreview },
+  seed?: { operationId: string; preview: WorkArchivePreview; serverAuthority?: true },
 ): Promise<{ digest: string; size: number; backupId?: Id<'projectBackups'> }> {
   const uploaded = new Map<string, number>();
   const put = async (bytes: Uint8Array) => {
@@ -54,17 +55,42 @@ export async function uploadArchiveObjects(
   // Import into a fresh hosted project using the existing finite seed protocol.
   // Metadata already read for upload stays byte-pinned; no whole-Work publication action runs.
   const pin = (value: { digest: string; size: number }) => ({ sha256: value.digest, size: value.size });
-  const recipe = (value: { digest: string; size: number }) => ({
-    ...pin(value),
-    tree: { ...pin(value), height: 0, length: value.size },
-  });
+  const recipe = async (value: { digest: string; size: number }, bytes: Uint8Array) => {
+    const chunkSize = 256 * 1024;
+    if (bytes.length <= chunkSize)
+      return { ...pin(value), tree: { ...pin(value), height: 0, length: value.size } };
+    let refs: TreeRef[] = [];
+    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+      const part = await put(bytes.subarray(offset, offset + chunkSize));
+      refs.push({ ...pin(part), height: 0, length: part.size });
+    }
+    while (refs.length > 1) {
+      const parent: TreeRef[] = [];
+      for (let offset = 0; offset < refs.length; offset += 64) {
+        const children = refs.slice(offset, offset + 64);
+        if (children.length === 1) parent.push(children[0]!);
+        else {
+          const part = await put(
+            new TextEncoder().encode(JSON.stringify({ kind: 'forge-byte-tree', schema: 1, children })),
+          );
+          parent.push({
+            ...pin(part),
+            height: 1 + Math.max(...children.map(child => child.height)),
+            length: children.reduce((sum, child) => sum + child.length, 0),
+          });
+        }
+      }
+      refs = parent;
+    }
+    return { ...pin(value), tree: refs[0]! };
+  };
   const root = await put(
     new TextEncoder().encode(
       JSON.stringify({
         kind: 'forge-native-exchange',
         schema: 1,
-        manifest: recipe(manifestPin),
-        work: recipe(work),
+        manifest: await recipe(manifestPin, metadata.manifest),
+        work: await recipe(work, metadata.work),
       }),
     ),
   );
@@ -89,6 +115,7 @@ export async function uploadArchiveObjects(
     revision: manifest.revision,
     sourceHead: manifest.head,
     format: native ? 'native' : 'git',
+    ...(native && seed.serverAuthority ? { serverAuthority: true } : {}),
     head,
     main: native ? { sha256: head, size: mainSize! } : null,
     receipt: null,

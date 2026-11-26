@@ -16,6 +16,7 @@ import { HOSTED_WORK_INDEX_FORMAT } from '../dist/work-hosted-summary.js';
 const indexActions = await import(moduleUrl('../convex/projectWorkIndexActions.ts'));
 const hosting = await import(moduleUrl('../convex/projectHosting.ts'));
 const workIndex = await import(moduleUrl('../convex/projectWorkIndex.ts'));
+const workActions = await import(moduleUrl('../convex/projectWorkActions.ts'));
 const workCommand = await import(moduleUrl('../convex/projectWorkCommand.ts'));
 const planView = await import(moduleUrl('../convex/projectPlanView.ts'));
 const { activeProject } = await import(moduleUrl('../convex/projectAuthority.ts'));
@@ -31,6 +32,7 @@ test('host creates a brand-new empty native owner through schema-validated Conve
   );
   assert.equal(result.hosted, true);
   const project = f.s.tables.hostedProjects.get(result.projectId);
+  assert.equal([...f.s.tables.projectHostedSeeds.values()][0].workImport, undefined);
   const operationId = result.operationId;
   assert.equal(project.key, operationId);
   assert.equal(project.autonomyPolicy.acceptance.disjointFastPath, false);
@@ -283,22 +285,59 @@ test('server creation requires device login/cli scope and preserves original ope
   await assert.rejects(hosting.create._handler(f.s.ctx, input), error => error.data?.code === 'AUTH_REVOKED');
 });
 
-test('Git-backed hosting preserves Git source/history and complete Work without an archive upload', async t => {
+test('Git hosting pins a native root, retains the original bundle, and imports existing Work', async t => {
   const f = setup(t, true);
   const result = await hostProject(f.root, { deployment: 'https://fixture.convex.cloud' }, f.dependencies);
   const backup = f.s.tables.projectBackups.get(result.backupId);
-  assert.equal(backup.preview.format, 'sha1');
+  assert.equal(backup.preview.format, 'native');
   assert.equal(backup.preview.intents, 1);
-  assert.equal(backup.preview.head, workGit(f.root, ['rev-parse', 'HEAD']).trim());
-  assert.equal(f.s.tables.projectWorkDataRecords.size, 0, 'hosting the Git bundle writes no Work rows');
+  assert.deepEqual(result.sourceAuthority, { mode: 'server', epoch: 1 });
+  const retained = [...f.s.tables.projectHostedRecordHeads.values()].find(row => row.kind === 'intent');
+  assert.equal(retained?.key, f.intent.id);
   await indexActions.ensure._handler(f.s.ctx, { projectId: result.projectId, rebuild: true });
-  assert(f.s.tables.projectWorkDataRecords.size <= 8, 'indexing the Git bundle has a fixed Work footprint');
   const transport = f.dependencies.exchange(result.projectId, randomUUID());
   const { pullNativeExchange } = await import('../dist/native-exchange.js');
   const target = join(f.directory, 'restored');
   await pullNativeExchange(result.backupId, target, transport);
   assert.equal(readFileSync(join(target, 'hello.ts'), 'utf8'), 'export const hello = 7;\n');
   assert.equal(new WorkStore(target).load().intents[0].id, f.intent.id);
+  const { NativeSource } = await import('../dist/native-source.js');
+  const source = new NativeSource(target);
+  const selected = source.state(backup.preview.head);
+  assert.deepEqual(selected.parents, []);
+  assert.equal(selected.git.commit, workGit(f.root, ['rev-parse', 'HEAD']).trim());
+  assert.match(source.object(selected.git.bundle).subarray(0, 32).toString(), /^# v[23] git bundle/);
+  const journal = JSON.parse(
+    await workActions.exportJournal._handler(f.s.ctx, { projectId: result.projectId }),
+  );
+  assert.equal(journal.events.length, 0, 'the original Work is in the selected backup');
+});
+
+test('a lost Work import page reply resumes the original seed before publishing native main', async t => {
+  const f = setup(t);
+  let lost = false;
+  const mutate = f.s.ctx.runMutation;
+  f.s.ctx.runMutation = async (ref, args) => {
+    const result = await mutate(ref, args);
+    if (!lost && getFunctionName(ref) === 'projectHostedSeedWorkStore:stage') {
+      lost = true;
+      throw new Error('Synthetic lost Work page reply');
+    }
+    return result;
+  };
+  await assert.rejects(hostProject(f.root, { deployment: 'https://fixture.convex.cloud' }, f.dependencies), {
+    message: 'The Forge request failed. Retry the original request.',
+  });
+  assert.equal(lost, true);
+  assert.equal(f.s.tables.projectHostedChannels.size, 0);
+  assert.equal(f.s.tables.projectBackups.size, 0);
+  assert.equal(f.s.tables.projectHostedRecords.size, 1);
+  const original = readHostState(f.store).hosting;
+  const result = await hostProject(f.root, {}, f.dependencies);
+  assert.equal(result.operationId, original.operationId);
+  assert.equal(f.s.tables.projectHostedRecords.size, 1);
+  assert.equal(f.s.tables.projectHostedChannels.size, 1);
+  assert.equal(f.s.tables.projectBackups.size, 1);
 });
 
 test('interrupted history stays unselected until the complete seed validates', async t => {

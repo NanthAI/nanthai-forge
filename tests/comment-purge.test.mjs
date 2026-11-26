@@ -61,6 +61,7 @@ async function recordsMode(s) {
   s.tables.hostedProjects.get(s.projectId).sourceAuthority = { mode: 'server', epoch: 1 };
   await dispatchHostedWork(client, s.projectId, { action: 'copy-work-store' });
   await dispatchHostedWork(client, s.projectId, { action: 'set-work-store', mode: 'records' });
+  await s.ctx.db.patch(s.projectId, { workStoreWriters: [] });
 }
 
 /** An Item with a kept comment, the reported comment (with an attachment), a reply to it and a later put. */
@@ -68,12 +69,7 @@ async function commented(t, { records = false, primary = false, decision = false
   const s = await setup(t);
   if (records || primary) await recordsMode(s);
   // Planning as a primary store writer: its commands' rows live in the store's record bodies, not the event table.
-  if (primary)
-    await workStore.setMode._handler(s.ctx, {
-      projectId: s.projectId,
-      mode: 'records',
-      writers: ['planning', 'note'],
-    });
+  if (primary) await s.ctx.db.patch(s.projectId, { workStoreWriters: ['planning', 'note'] });
   const item = s.item({ title: 'Kept title', body: 'Kept body' });
   await s.send(item);
   const comment = (text, extra = {}) => ({

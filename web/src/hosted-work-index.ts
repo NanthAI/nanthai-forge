@@ -25,6 +25,7 @@ type Detail = {
   revision: number | null;
   value: string | null;
   deferred?: true;
+  hydrated?: true;
   editable: boolean;
   intentPin: string | null;
 };
@@ -287,7 +288,7 @@ export async function readSelectedWorkRecord<T>(
   if (!generationId || (expectedGeneration && generationId !== expectedGeneration) || !result.value)
     throw new Error('This source selection changed. Load the current item before editing.');
   const header = JSON.parse(result.value) as T & IndexHeader;
-  if (!header.payloadKey) return { value: header, generationId };
+  if (result.hydrated || !header.payloadKey) return { value: header, generationId };
   const parts: Row[] = [];
   let cursor: string | null = null;
   do {

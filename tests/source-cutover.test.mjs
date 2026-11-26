@@ -9,6 +9,18 @@ import { requireCutoverVersion } from '../dist/cutover-version.js';
 const code = expected => e => (e.data?.code ?? e.code) === expected;
 const setup = async () => cutoverFixture(await acceptanceFixture());
 
+test('cutover refuses unimported nonempty Work before changing source authority', async () => {
+  const f = await setup();
+  f.patch('hostedProjects', f.projectId, {
+    workStoreCutoverRevision: undefined,
+    workStoreEventWindows: undefined,
+  });
+  await assert.rejects(f.dryRun(), code('SOURCE_AUTHORITY_DRAIN_REQUIRED'));
+  await assert.rejects(f.applyCutover(), code('SOURCE_AUTHORITY_DRAIN_REQUIRED'));
+  assert.equal(f.currentMain().authority.mode, 'native-owner');
+  assert.equal(f.tables.projectSourceCutovers.size, 0);
+});
+
 test('dry-run writes nothing; atomic cutover keeps main identity, changes epoch and records metric-7 time', async () => {
   const f = await setup(),
     before = structuredClone(f.tables);

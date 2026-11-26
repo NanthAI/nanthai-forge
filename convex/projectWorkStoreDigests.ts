@@ -1,32 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-import { JournalNeeded } from './projectJournalStore';
-import { splitRecordTable } from './projectWorkRecordTables';
 // Compact, independently maintained journal fingerprints. These are disposable index metadata, not Work.
 import { writeFingerprint as put } from './projectWorkStoreFingerprintWrites';
-import type { MutationCtx, QueryCtx } from './_generated/server';
+import type { MutationCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { digest } from '../src/state/hash';
-import { hostedRecordValue, type HostedRecordRef } from '../src/hosted-records';
+import { hostedRecordValue } from '../src/hosted-records';
 import { journalRow, workStoreRecord, type WorkStoreSource } from '../src/work-store-records';
 import { record as indexed } from './projectWorkIndexStore';
-import { recordHead, recordVersion, hostedRecordBody } from './projectHostedRecords';
-import { storeReadOf, sameValue } from './projectWorkStoreReads';
+import { hostedRecordBody, recordHead, recordVersion } from './projectHostedRecords';
 
 const sourceCollection = (collection: string) => `_workStoreDigests:${collection}`;
 const headsCollection = (kind: string) => `_workStoreHeads:${kind}`;
 export const workReadDigest = (value: unknown) => digest(canonicalPayload(value));
 type Identity = { id?: string; version?: number; intentId?: string; index?: number };
-type Fingerprint = {
-  key: string;
-  ref: HostedRecordRef;
-  identity: Identity;
-  readDigest?: string;
-  hosted?: boolean;
-  invalid?: boolean;
-  stored?: { ref: HostedRecordRef; readDigest?: string };
-};
 
 /** Updated in the same transaction as each journal projection, before a compare can observe it. */
 export async function fingerprintSource(
@@ -126,163 +114,4 @@ export async function fingerprintCoverage(
     complete: complete || prior?.complete === true,
     sampleSize: Math.max(prior?.sampleSize ?? 0, sampleSize),
   });
-}
-
-/** Equal fingerprints open no journal values, head values or immutable bodies. Full reads diagnose mismatches. */
-export async function compareFingerprints(
-  ctx: QueryCtx,
-  projectId: Id<'hostedProjects'>,
-  partition: Id<'projectWorkGenerations'>,
-  collection: string,
-  cursor: string | null,
-  newest: number,
-) {
-  const readSources: Record<string, string> = {
-    readItems: 'planningItems',
-    readVersions: 'planningVersions',
-    readComments: 'planningComments',
-    readNotes: 'notes',
-    readLifecycle: 'lifecycle',
-  };
-  const source = readSources[collection] ?? collection;
-  const coverage = await indexed(ctx, partition, '_workStoreDigestCoverage', source);
-  const tally = () => ({ count: 0, keys: [] as string[] });
-  const missing = tally(),
-    different = tally(),
-    invalid = tally();
-  const add = (bucket: ReturnType<typeof tally>, key: string) => {
-    bucket.count++;
-    if (bucket.keys.length < 20) bucket.keys.push(key);
-  };
-  if (!coverage) return null;
-  const window = JSON.parse(coverage.value);
-  if (window.invalidated || (!window.complete && newest > window.sampleSize)) return null;
-  const cacheCollection = source === 'issueHeads' ? headsCollection('issue') : sourceCollection(source);
-  const page = await ctx.db
-    .query(splitRecordTable(cacheCollection))
-    .withIndex('by_generation_and_collection_and_position', q =>
-      q.eq('generationId', partition).eq('collection', cacheCollection).gte('position', window.floor),
-    )
-    .order('desc')
-    .paginate({ cursor, numItems: Math.min(newest, 100), maximumBytesRead: 500000 });
-  let checked = 0,
-    matched = 0,
-    hosted = 0;
-  for (const item of page.page) {
-    const expected = JSON.parse(item.value) as Fingerprint;
-    checked++;
-    if (expected.invalid) {
-      add(invalid, expected.key);
-      continue;
-    }
-    let ref = expected.ref;
-    if (source === 'issueHeads') {
-      const journal = await indexed(ctx, partition, sourceCollection('planningItems'), expected.key);
-      if (!journal) {
-        // A bounded source baseline can omit an older Issue that the target head window includes.
-        // Missing hash metadata is a mismatch to diagnose, never evidence that the Issue is absent.
-        const original = await indexed(ctx, partition, 'planningItems', expected.key);
-        if (!original) add(missing, expected.key);
-        else if (JSON.parse(original.value).version !== ref.version) add(different, expected.key);
-        else matched++;
-        continue;
-      }
-      ref = (JSON.parse(journal.value) as Fingerprint).ref;
-    }
-    const current =
-      ['planningItems', 'intents', 'issueHeads'].includes(source) ||
-      (collection in readSources && source !== 'planningVersions')
-        ? await indexed(ctx, partition, headsCollection(ref.kind), ref.key)
-        : null;
-    let pointer = current ? (JSON.parse(current.value) as Fingerprint) : null;
-    if (
-      (['planningItems', 'intents', 'issueHeads'].includes(source) ||
-        (collection in readSources && source !== 'planningVersions')) &&
-      !pointer
-    ) {
-      const head = await recordHead(ctx, projectId, ref.kind, ref.key);
-      const row = head ? await ctx.db.get(head.recordId) : null;
-      if (!head || !row) {
-        add(missing, expected.key);
-        continue;
-      }
-      pointer = {
-        key: head.key,
-        identity: expected.identity,
-        ref: {
-          kind: row.kind,
-          key: row.key,
-          version: row.version,
-          digest: row.digest,
-          bytes: row.bytes,
-        },
-        ...(head.kind === 'intent' && !head.status.startsWith('journal:') ? { hosted: true } : {}),
-      };
-    }
-    if (source === 'intents' && pointer?.hosted) {
-      hosted++;
-      continue;
-    }
-    // These are independently recorded target hashes, captured only from a successful immutable
-    // version write. Source fingerprints remain independent, including failed dual writes.
-    const cached = pointer ? { ref: pointer.ref, readDigest: pointer.readDigest } : expected.stored;
-    const actual = cached
-      ? { ...cached.ref, workReadDigest: cached.readDigest }
-      : await recordVersion(ctx, projectId, ref.kind, ref.key, pointer?.ref.version ?? ref.version);
-    if (!actual) {
-      add(missing, expected.key);
-      continue;
-    }
-    const equal =
-      actual.version === ref.version &&
-      actual.digest === ref.digest &&
-      actual.bytes === ref.bytes &&
-      (!(collection in readSources) || expected.readDigest === actual.workReadDigest);
-    if (equal) {
-      matched++;
-      continue;
-    }
-    // Only differences pay to open the source payload/reader and verify its retained body.
-    const original = await indexed(
-      ctx,
-      partition,
-      source === 'issueHeads' ? 'planningItems' : source,
-      expected.key,
-    );
-    if (original && collection in readSources) {
-      try {
-        const value = await storeReadOf(ctx, projectId, source as 'notes', expected.identity);
-        if (value === null) add(missing, expected.key);
-        else if (sameValue(value, JSON.parse(original.value))) {
-          // Old immutable versions may predate reader-hash metadata. The verified full reader is
-          // authoritative; absent or stale derived metadata is not a source difference.
-          matched++;
-          continue;
-        }
-      } catch (error) {
-        if (error instanceof JournalNeeded) throw error;
-        add(invalid, expected.key);
-      }
-    } else {
-      try {
-        const row = await recordVersion(ctx, projectId, ref.kind, ref.key, actual.version);
-        if (row) await hostedRecordBody(ctx, row);
-      } catch (error) {
-        if (error instanceof JournalNeeded) throw error;
-        add(invalid, expected.key);
-      }
-    }
-    add(different, expected.key);
-  }
-  if (page.isDone && checked < newest && !window.complete)
-    add(invalid, `${source}:digest-baseline-too-small`);
-  return {
-    checked,
-    matched,
-    ...(source === 'issueHeads' || collection in readSources ? {} : { hosted }),
-    missing,
-    different,
-    invalid,
-    cursor: page.isDone ? null : page.continueCursor,
-  };
 }

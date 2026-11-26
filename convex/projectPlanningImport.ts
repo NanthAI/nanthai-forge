@@ -6,9 +6,8 @@ import type { Id } from './_generated/dataModel';
 import { activeOwnedProject, accessibleProject } from './projectAuthority';
 import { projectRole } from './projectRole';
 import { publicPlanVisible } from '../src/planning-model';
-import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
-import { readsStore, storeItem } from './projectWorkStoreReads';
-import { commandPayloadRows, commandValues } from './projectWorkCommandRows';
+import { recordPartition, selectedGeneration } from './projectWorkIndexStore';
+import { storeItem } from './projectWorkStoreReads';
 import { executeCommand } from './projectWorkCommand';
 import { rollupWake } from './projectPlanRollupWake';
 import { beginHostedOperation, finishHostedOperation, hostedOperationRow } from './projectHostedOperations';
@@ -55,22 +54,7 @@ async function inspect(
     project.visibility === 'public' && project.owner !== actor && !(await projectRole(ctx, project, actor));
   const cache = new Map<string, Promise<ImportRecord | null>>();
   const stored = (id: string): Promise<ImportRecord | null> => {
-    if (!cache.has(id))
-      cache.set(
-        id,
-        (async () => {
-          let current: ImportRecord | null = null;
-          if (readsStore(project, 'planningItems')) current = await storeItem(ctx, projectId, id);
-          else {
-            const stored = [await record(ctx, recordPartition(generation), 'planningItems', id)];
-            await commandPayloadRows(stored, keys =>
-              Promise.all(keys.map(key => record(ctx, recordPartition(generation), key.collection, key.key))),
-            );
-            current = commandValues(stored, 'planningItems')[0] ?? null;
-          }
-          return current;
-        })(),
-      );
+    if (!cache.has(id)) cache.set(id, storeItem(ctx, projectId, id));
     return cache.get(id)!;
   };
   const rows: PlanningImportResult['rows'] = [];

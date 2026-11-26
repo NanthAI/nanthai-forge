@@ -187,8 +187,15 @@ test('a base comment whose journal row is kept at the base, and a base decision 
       continue;
     }
     // docs/planning.md "Removing one comment": the Intent's copies of the body keep the line as history.
+    const intendedBodies = new Set(
+      [...s.tables.projectHostedRecords.values()]
+        .filter(row => row.kind === 'intent' && row.key === itemId)
+        .map(row => `projectHostedRecordBodies::${row.bodyId}`),
+    );
     assert.deepEqual(
-      tableWords(s).filter(row => !row.startsWith('projectWorkDataRecords:intents:payload:')),
+      tableWords(s).filter(
+        row => !row.startsWith('projectWorkDataRecords:intents:payload:') && !intendedBodies.has(row),
+      ),
       [],
     );
     const intent = recordBytes(data.intents.find(row => row.id === itemId));

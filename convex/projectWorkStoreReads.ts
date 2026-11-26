@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-// Flip 5 S4 (Issue 0695ab24): with `workStore: 'records'` the planning reads (Issues, their versions and
+// The planning reads (Issues, their versions and
 // their comments) and an Intent's notes and status moves come from the record store instead of the journal index, for the web and agents alike
 // (both read `projectWorkIndex:records` and `:detail`). One head per item and no project-wide row, so a
 // write re-runs only the page that holds it. Rows keep the journal's shape: the whole item or comment
@@ -18,8 +18,7 @@ type Page = { page: Row[]; isDone: boolean; continueCursor: string };
 
 /** Whether this read comes from the record store. Other collections, and shapes the store does not
  * index the same way (a parent filter on Issues, all comments of a project), stay on the journal. */
-export function readsStore(project: Doc<'hostedProjects'>, collection: string, parentId?: string) {
-  if (project.workStore !== 'records') return false;
+export function readsStore(collection: string, parentId?: string) {
   if (collection === 'planningItems') return parentId === undefined;
   return parentId !== undefined && byParent.includes(collection);
 }

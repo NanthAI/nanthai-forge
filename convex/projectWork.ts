@@ -48,7 +48,7 @@ import { chargeAccountChannel } from './accountLimits';
 import { emitChange, workChange } from './coordinationWrite';
 import { movePlanLaneMark } from './projectPlanLaneMarks';
 import { storeProjection } from './projectWorkStore';
-import { workStoreMigrationActive } from './projectWorkStoreFingerprintWrites';
+import { bornRecordStore } from './projectWorkStoreFingerprintWrites';
 import { projectForViewer } from './projectViewerFields';
 
 /** The project record every open tab subscribes to (name, owner, selected source). A non-owner gets only the
@@ -171,9 +171,10 @@ export const initialize = internalMutation({
     operationId: v.string(),
     revision: v.number(),
     workSchema: v.optional(v.number()),
+    importRequired: v.optional(v.literal(true)),
   },
   returns: projectDocument,
-  handler: async (ctx, { projectId, owner, backupId, operationId, revision, workSchema }) => {
+  handler: async (ctx, { projectId, owner, backupId, operationId, revision, workSchema, importRequired }) => {
     try {
       const project = await activeOwnedProject(ctx, projectId, owner),
         backup = await ctx.db.get(backupId);
@@ -191,6 +192,15 @@ export const initialize = internalMutation({
         );
         return project;
       }
+      const imported = backup.initialWorkImport;
+      const completedImport = imported?.operationId === operationId && imported.next === imported.total;
+      invariant(
+        (!importRequired && revision === 0) ||
+          (project.currentBackup === backupId &&
+            (project.workStoreCutoverRevision === revision || completedImport)),
+        'INVALID_WORK_BACKUP',
+        'Initialize nonempty Work only after its selected backup imported the record store.',
+      );
       const initialGeneration =
         workSchema === undefined || project.currentBackup !== backupId
           ? null
@@ -207,6 +217,7 @@ export const initialize = internalMutation({
               .unique();
       const generationId = initialGeneration?.status === 'ready' ? initialGeneration._id : undefined;
       await ctx.db.patch(projectId, {
+        ...(completedImport ? bornRecordStore(revision) : {}),
         work: {
           backupId,
           operationId,
@@ -216,6 +227,7 @@ export const initialize = internalMutation({
         },
         revision: project.revision + 1,
       });
+      if (completedImport) await ctx.db.patch(backupId, { initialWorkImport: undefined });
       return (await ctx.db.get(projectId))!;
     } catch (error) {
       return report(error);
@@ -291,13 +303,24 @@ export async function appendWork(
       );
     const action = parsed.success ? parsed.data.action : purge?.success ? purge.data.action : undefined;
     const frozen =
-      action !== undefined &&
-      project.workStoreWriters?.some(
-        writer =>
-          writer === action ||
-          (writer === 'planning' &&
-            ['put-planning-item', 'comment-planning-item', 'purge-planning-item'].includes(action)),
-      ) &&
+      // The bridge still serves pre-cutover event windows while P8 copies existing projects.
+      // Cleared project fields leave the retained-event frontier in place for F3.
+      (project.workStoreWriters
+        ? project.workStoreWriters.some(
+            writer =>
+              writer === action ||
+              (writer === 'planning' &&
+                (action === 'put-planning-item' ||
+                  action === 'comment-planning-item' ||
+                  action === 'purge-planning-item')),
+          )
+        : project.workStoreEventWindows?.at(-1)?.storeFirst === true) &&
+      (action === 'note' ||
+        action === 'intent' ||
+        action === 'intent-status' ||
+        action === 'put-planning-item' ||
+        action === 'comment-planning-item' ||
+        action === 'purge-planning-item') &&
       (!parsed.success || parsed.data.action !== 'note' || !parsed.data.anchor);
     if (
       parsed.success &&
@@ -479,26 +502,24 @@ export async function appendWork(
             generationId: recordPartition(generation!),
           });
       }
-      if (project.workStore || frozen)
-        retained = await storeProjection(
-          ctx,
-          project,
-          input.projection.entries,
-          workStoreMigrationActive(project) ? recordPartition(generation!) : undefined,
-          frozen
-            ? {
-                projectId: event.projectId,
-                operationId: event.operationId,
-                request: event.request,
-                revision: event.revision,
-                actor: event.actor,
-                at: event.at,
-                command: event.command,
-                ...(event.baseBackupId ? { baseBackupId: event.baseBackupId } : {}),
-              }
-            : undefined,
-          action === 'intent' ? input.operationId : undefined,
-        );
+      retained = await storeProjection(
+        ctx,
+        project,
+        input.projection.entries,
+        frozen
+          ? {
+              projectId: event.projectId,
+              operationId: event.operationId,
+              request: event.request,
+              revision: event.revision,
+              actor: event.actor,
+              at: event.at,
+              command: event.command,
+              ...(event.baseBackupId ? { baseBackupId: event.baseBackupId } : {}),
+            }
+          : undefined,
+        action === 'intent' ? input.operationId : undefined,
+      );
       const metadata = JSON.parse(input.projection.metadata);
       if (parsed.success && (parsed.data.action === 'intent' || parsed.data.action === 'intent-status')) {
         const active = await ctx.db

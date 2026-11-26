@@ -142,6 +142,43 @@ test('native main and complete record bytes seed through bounded pages without a
   assert(f.calls.every(name => !/projectExchangeActions|completeHistory/.test(name)));
 });
 
+test('seed advances Issue pins in Item and version order before selecting the backup', async t => {
+  const f = setup(t, 5);
+  const high = 'f0000000-0000-4000-8000-000000000001';
+  const low = '10000000-0000-4000-8000-000000000001';
+  const service = new WorkService(f.root);
+  for (const itemId of [high, low])
+    for (const version of [0, 1])
+      await service.dispatch(
+        {
+          action: 'put-planning-item',
+          operationId: randomUUID(),
+          itemId,
+          expectedVersion: version,
+          ...(version === 0
+            ? { kind: 'issue', title: 'Imported plan', status: 'open' }
+            : { status: 'closed' }),
+        },
+        f.store.revision(),
+      );
+  await seedHostedProject(f.store, { ...f.input, revision: f.store.revision() }, f.client, f.exchange);
+  const versions = [...f.s.tables.projectHostedRecords.values()].filter(row => row.kind === 'issue');
+  assert.deepEqual(
+    versions.map(row => [row.key, row.version]),
+    [
+      [low, 1],
+      [low, 2],
+      [high, 1],
+      [high, 2],
+    ],
+  );
+  for (const head of f.s.tables.projectHostedRecordHeads.values()) {
+    if (head.kind !== 'issue') continue;
+    assert.equal(head.planningTimes.version, 2);
+    assert.ok(head.planningTimes.closedAt);
+  }
+});
+
 test('lost page reply resumes from its committed cursor, preserving the original snapshot after local writes', async t => {
   const f = setup(t),
     action = f.client.action;

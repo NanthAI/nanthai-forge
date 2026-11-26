@@ -18,7 +18,6 @@ import { accessibleProject, requireDeviceWrite } from './projectAuthority';
 import { audienceOf, coordinationAccess } from './projectAudience';
 import { projectRole } from './projectRole';
 import { recordHead } from './projectHostedRecords';
-import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { retainedItem } from './discussionAttachmentRead';
 import { publicWorkPlan } from './publicWorkPlan';
 import { accountOf, applySwitch, purgeMessages } from './projectBoardOperator';
@@ -115,23 +114,13 @@ async function readableComment(
     !(await publicWorkPlan(ctx, project, new Map()).selectionVisible(itemId))
   )
     return null;
-  let value: string | undefined, actor: string | undefined;
-  if (project.workStore === 'records') {
-    const head = await recordHead(ctx, project._id, 'comment', commentId);
-    if (head?.status !== 'comment' || head.parent !== itemId) return null;
-    const version = await ctx.db.get(head.recordId);
-    const body = version && (await ctx.db.get(version.bodyId));
-    value = head.value ?? body?.value;
-    actor = body?.actor;
-  } else {
-    const generation = await selectedGeneration(ctx, project);
-    const row = generation && (await record(ctx, recordPartition(generation), 'planningComments', commentId));
-    if (!row || row.parent !== itemId) return null;
-    value = row.value;
-    actor = row.actor;
-  }
+  const head = await recordHead(ctx, project._id, 'comment', commentId);
+  if (head?.status !== 'comment' || head.parent !== itemId) return null;
+  const version = await ctx.db.get(head.recordId);
+  const body = version && (await ctx.db.get(version.bodyId));
+  const value = head.value ?? body?.value;
   const comment = value ? (JSON.parse(value) as { text?: string; author?: string }) : {};
-  const author = comment.author ?? actor;
+  const author = comment.author ?? body?.actor;
   return author ? { author, text: comment.text ?? '' } : null;
 }
 

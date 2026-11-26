@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { revertFixture } from './hosted-revert-fixture.mjs';
-import { setup as planningSetup } from './hosted-planning-fixture.mjs';
+import { setup as planningSetup, pinIntent } from './hosted-planning-fixture.mjs';
 import { randomUUID } from 'node:crypto';
 import { moduleUrl } from './convex-module.mjs';
 import {
@@ -447,16 +447,14 @@ test('the Item comment read shows its landing notes once, at the newest end, bet
       authorLabel: 'Owner',
     });
   // The Item's first Intent shares its id (a planned start).
-  await records.writeHostedRecord(s.ctx, {
+  await pinIntent(s.ctx, {
     projectId: s.projectId,
     actor: 'owner',
     authorityEpoch: 1,
-    expectedVersion: null,
     planningItemId: item.itemId,
     record: {
       kind: 'intent',
       id: item.itemId,
-      version: 0,
       at: new Date().toISOString(),
       outcome: 'Planned',
       constraints: '',

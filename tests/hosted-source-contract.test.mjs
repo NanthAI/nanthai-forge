@@ -77,6 +77,16 @@ test('native upload and an unpublished GitHub import keep native authority; a br
     }),
     nativeId,
   );
+  const archiveId = await native.open._handler(s.ctx, {
+    key: s.tables.hostedProjects.get(nativeId).key,
+    name: 'Native',
+    serverAuthority: true,
+  });
+  const archive = s.tables.hostedProjects.get(archiveId);
+  assert.deepEqual(archive.sourceAuthority, defaultAuthority);
+  assert.equal(archive.currentBackup, null);
+  assert.equal(archive.workStore, undefined);
+  assert.ok(archive.hostingRequest, 'the next verified native seed may publish server authority');
 });
 
 test('legacy authority ignores hosting/presence and reads one project row without writes or scans', async () => {

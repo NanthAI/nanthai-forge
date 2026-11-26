@@ -54,6 +54,10 @@ const hosting = z.object({
   backupId: z.string().optional(),
   currentFirst: z.boolean().optional(),
   serverAuthority: z.literal(true).optional(),
+  gitHead: z
+    .string()
+    .regex(/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/)
+    .optional(),
   ready: z.boolean().optional(),
   progress: z
     .object({

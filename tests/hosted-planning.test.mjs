@@ -240,7 +240,7 @@ test('current owner alone writes/exports project planning; existing contributor 
   );
 });
 
-// Flip 5 S1/S2 (Issue 0695ab24): no work may be lost moving planning into the Work store.
+// P8 keeps a copy route for projects with only the legacy index.
 test('the Work store copy moves every Issue version, comment and note once, and the compare finds nothing missing or changed', async t => {
   const { dispatchHostedWork } = await import('../dist/hosted-work-client.js');
   const store = await import(moduleUrl('../convex/projectWorkStore.ts'));
@@ -287,6 +287,8 @@ test('the Work store copy moves every Issue version, comment and note once, and 
   };
   const run = action =>
     dispatchHostedWork(client, s.projectId, { action }).then(result => result.collections);
+  for (const table of ['projectHostedRecords', 'projectHostedRecordHeads', 'projectHostedRecordBodies'])
+    s.tables[table].clear();
   const before = await run('compare-work-store');
   assert.deepEqual(
     [before.planningVersions.missing, before.planningComments.missing, before.notes.missing],
@@ -320,7 +322,7 @@ test('the Work store copy moves every Issue version, comment and note once, and 
   const kept = await run('copy-work-store');
   assert.equal(kept.planningComments.different + kept.notes.different, 1);
   assert.equal(stored.digest, 'f'.repeat(64));
-  // Owner only, and only for a hosted-authority project.
+  // Project ownership still gates the bridge, including for a native owner.
   s.tables.projectContributors.set('contributor', {
     _id: 'contributor',
     projectId: s.projectId,
@@ -331,10 +333,10 @@ test('the Work store copy moves every Issue version, comment and note once, and 
   await assert.rejects(run('compare-work-store'), error => error.code === 'PROJECT_UNAVAILABLE');
   s.caller('owner');
   delete s.tables.hostedProjects.get(s.projectId).sourceAuthority;
-  await assert.rejects(run('copy-work-store'), error => error.code === 'BAD_ARGUMENT');
+  assert.equal((await run('copy-work-store')).planningVersions.same, 3);
 });
 
-test('with dual write on, each planning write stores its Issue version, comment or note in the same mutation; journal-only stores none', async t => {
+test('planning writes retain canonical records and the bridge rejects retired Work modes', async t => {
   const { dispatchHostedWork } = await import('../dist/hosted-work-client.js');
   const store = await import(moduleUrl('../convex/projectWorkStore.ts'));
   const s = await setup(t);
@@ -351,11 +353,12 @@ test('with dual write on, each planning write stores its Issue version, comment 
   };
   const run = input => dispatchHostedWork(client, s.projectId, input);
   const records = () => s.tables.projectHostedRecords.size;
-  const early = s.item({ title: 'Before dual' });
+  const early = s.item({ title: 'Before the P8 bridge' });
   await s.send(early);
-  assert.equal(records(), 0, 'journal-only writes store no record');
-  assert.equal((await run({ action: 'copy-work-store' })).collections.planningVersions.copied, 1);
-  assert.deepEqual(await run({ action: 'set-work-store', mode: 'dual' }), { mode: 'dual', changed: true });
+  assert.ok(records() > 0, 'canonical planning writes precede any migration mode change');
+  assert.equal((await run({ action: 'copy-work-store' })).collections.planningVersions.same, 1);
+  for (const mode of ['journal', 'dual'])
+    await assert.rejects(run({ action: 'set-work-store', mode }), error => error.code === 'BAD_ARGUMENT');
   const initial = await s.read(),
     intentId = randomUUID();
   await actions.command._handler(s.ctx, {
@@ -389,11 +392,7 @@ test('with dual write on, each planning write stores its Issue version, comment 
   );
   const head = [...s.tables.projectHostedRecordHeads.values()].find(row => row.key === early.itemId);
   assert.deepEqual([head.version, head.status], [2, 'closed']);
-  // Switching back stops the dual write; the journal keeps every write.
-  assert.deepEqual(await run({ action: 'set-work-store', mode: 'journal' }), {
-    mode: 'journal',
-    changed: true,
-  });
+  // The refused rollback left canonical writers in effect.
   const before = records();
   await s.send({
     action: 'comment-planning-item',
@@ -402,11 +401,11 @@ test('with dual write on, each planning write stores its Issue version, comment 
     text: 'Later',
     authorLabel: 'Owner',
   });
-  assert.equal(records(), before);
+  assert.equal(records(), before + 1);
   assert.equal((await s.read()).data.planningComments.length, 2);
   s.caller('stranger');
   await assert.rejects(
-    run({ action: 'set-work-store', mode: 'dual' }),
+    run({ action: 'set-work-store', mode: 'records' }),
     error => error.code === 'PROJECT_UNAVAILABLE',
   );
 });
@@ -414,7 +413,7 @@ test('with dual write on, each planning write stores its Issue version, comment 
 // Flip 5 (Issue 0695ab24): web Intents and the Intent each Issue is join the hosted `intent` kind, and
 // their status moves become `lifecycle` records, with nothing lost; once a Lane pins an Intent, the
 // journal copy never overwrites it.
-test('journal Intents and lifecycle copy into the record store, the dual write keeps them current, and a pinned Intent is left alone', async t => {
+test('legacy Intents and lifecycle copy into the record store without replacing a hosted Intent', async t => {
   const { dispatchHostedWork } = await import('../dist/hosted-work-client.js');
   const store = await import(moduleUrl('../convex/projectWorkStore.ts'));
   const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
@@ -452,6 +451,8 @@ test('journal Intents and lifecycle copy into the record store, the dual write k
   await s.send(issue);
   // Closing the Issue moves its Intent's status: one lifecycle entry in the journal.
   await s.send({ ...issue, operationId: randomUUID(), expectedVersion: 1, status: 'closed' });
+  for (const table of ['projectHostedRecords', 'projectHostedRecordHeads', 'projectHostedRecordBodies'])
+    s.tables[table].clear();
   const before = await run({ action: 'compare-work-store' });
   assert.deepEqual([before.intents.missing, before.lifecycle.missing], [2, 1]);
   const copied = await run({ action: 'copy-work-store' });
@@ -476,9 +477,7 @@ test('journal Intents and lifecycle copy into the record store, the dual write k
   );
   assert.deepEqual([body(issue.itemId).status, 'base' in body(issue.itemId)], ['completed', false]);
   assert.equal((await run({ action: 'copy-work-store' })).intents.same, 2, 'a second copy stores nothing');
-  // Dual write: a status move is the Intent's next version plus one lifecycle record; a note changes
-  // neither the Intent nor its version.
-  await run({ action: 'set-work-store', mode: 'dual' });
+  // A status move is the Intent's next version plus one lifecycle record. A note changes neither.
   await s.send({ action: 'note', intentId, text: 'Context', kind: 'comment' });
   assert.equal(head(intentId).version, 0);
   await s.send({ action: 'intent-status', intentId, status: 'completed' });
@@ -518,7 +517,7 @@ test('journal Intents and lifecycle copy into the record store, the dual write k
 // (projectWorkIndex:records and :detail) come from the record store, and they return what the journal
 // reads returned: the same items, versions and comments in the same order, with Intent notes on the
 // same id left out of the comments.
-test('with the store reader on, planning lists, versions, comments and detail read the record store and equal the journal reads', async t => {
+test('planning lists, versions, comments and detail read canonical records across the P8 mode proof', async t => {
   const { dispatchHostedWork } = await import('../dist/hosted-work-client.js');
   const store = await import(moduleUrl('../convex/projectWorkStore.ts'));
   const index = await import(moduleUrl('../convex/projectWorkIndex.ts'));
@@ -538,7 +537,6 @@ test('with the store reader on, planning lists, versions, comments and detail re
   const first = s.item({ title: 'First' });
   await s.send(first);
   await run({ action: 'copy-work-store' });
-  await run({ action: 'set-work-store', mode: 'dual' });
   const second = s.item({ title: 'Second', body: 'Done when: read from the store' });
   await s.send(second);
   await s.send({ ...first, operationId: randomUUID(), expectedVersion: 1, status: 'closed' });
@@ -637,31 +635,29 @@ test('with the store reader on, planning lists, versions, comments and detail re
       }),
     ),
   });
-  const journalCost = await costs();
-  const fromJournal = await reads();
   assert.deepEqual(await run({ action: 'set-work-store', mode: 'records' }), {
     mode: 'records',
     changed: true,
+    writers: ['note', 'intent', 'intent-status', 'planning'],
   });
+  const beforeCost = await costs();
+  const beforeCleanup = await reads();
+  const project = s.tables.hostedProjects.get(s.projectId);
+  delete project.workStore;
+  delete project.workStoreWriters;
   const storeCost = await costs();
   meter.restore();
-  console.log(JSON.stringify({ journalCost, storeCost }));
-  const itemHeads = [...s.tables.projectHostedRecordHeads.values()].filter(head => head.kind === 'issue');
+  console.log(JSON.stringify({ beforeCost, storeCost }));
   for (const name of ['list', 'comments', 'notes', 'detail']) {
-    // At most three ISO dates and the version plus object keys, once per Item already read.
-    // Plus the fixture's row ids: they grow from `row-99` to `row-100` and so on as the shared counter
-    // advances, and store copies are written after the journal rows (up to 4 more bytes a document).
-    const pinAllowance =
-      176 * (name === 'list' ? itemHeads.length : name === 'detail' ? 1 : 0) + 4 * storeCost[name].documents;
     assert.ok(
-      storeCost[name].documents <= journalCost[name].documents &&
-        storeCost[name].bytes <= journalCost[name].bytes + pinAllowance,
-      `${name}: store ${JSON.stringify(storeCost[name])}, journal ${JSON.stringify(journalCost[name])}, pin allowance ${pinAllowance} B`,
+      storeCost[name].documents <= beforeCost[name].documents &&
+        storeCost[name].bytes <= beforeCost[name].bytes,
+      `${name}: after ${JSON.stringify(storeCost[name])}, before ${JSON.stringify(beforeCost[name])}`,
     );
   }
-  assert.equal(storeCost.notes.documents, journalCost.notes.documents, 'notes: one document per note');
+  assert.equal(storeCost.notes.documents, beforeCost.notes.documents, 'notes: one document per note');
   const fromStore = await reads();
-  assert.deepEqual(fromStore, fromJournal);
+  assert.deepEqual(fromStore, beforeCleanup);
   // Heads stored before heads kept their value, with a note's kind as its status (dogfood's copy): the
   // reader falls back to record and body, and the copy brings each one up to date once.
   const old = [...s.tables.projectHostedRecordHeads.values()].filter(head => head.value !== undefined);
@@ -670,8 +666,8 @@ test('with the store reader on, planning lists, versions, comments and detail re
     if (head.status === 'note') head.status = 'comment';
   }
   assert.deepEqual(
-    { ...(await reads()), notes: fromJournal.notes, issueNotes: fromJournal.issueNotes },
-    fromJournal,
+    { ...(await reads()), notes: beforeCleanup.notes, issueNotes: beforeCleanup.issueNotes },
+    beforeCleanup,
     'a head without its value reads its body; a note never shows as a comment',
   );
   const refresh = async () =>
@@ -680,7 +676,7 @@ test('with the store reader on, planning lists, versions, comments and detail re
       0,
     );
   assert.deepEqual([await refresh(), await refresh()], [old.length, 0]);
-  assert.deepEqual(await reads(), fromJournal);
+  assert.deepEqual(await reads(), beforeCleanup);
   // The reader compare opens the body too: an inline value that drifted from it shows as different.
   const drifted = [...s.tables.projectHostedRecordHeads.values()].find(head => head.status === 'comment'),
     kept = drifted.value;
@@ -695,120 +691,6 @@ test('with the store reader on, planning lists, versions, comments and detail re
       [0, 0, true],
       name,
     );
-  // A bounded sample (spend freeze 2026-11-10): newest rows only, at most `newest` per collection.
-  const headsBeforeDigests = [...s.tables.projectHostedRecordHeads.values()].map(head =>
-    structuredClone(head),
-  );
-  const baseline = await run({ action: 'copy-work-store', digestsOnly: true, newest: 200 });
-  assert.ok(Object.values(baseline.collections).every(total => total.copied === 0));
-  assert.deepEqual(
-    [...s.tables.projectHostedRecordHeads.values()],
-    headsBeforeDigests,
-    'digest baseline never refreshes or recopies old heads',
-  );
-  const originalGet = s.ctx.db.get;
-  s.ctx.db.get = id => {
-    assert.ok(!s.tables.projectHostedRecordBodies.has(id), 'equal hashes never fetch full bodies');
-    return originalGet(id);
-  };
-  const sample = await run({ action: 'compare-work-store', newest: 1 });
-  s.ctx.db.get = originalGet;
-  assert.equal(sample.newest, 1);
-  for (const [name, total] of Object.entries(sample.collections)) {
-    assert.ok(total.checked <= 1, name);
-    assert.deepEqual([total.missing, total.different, total.invalid], [0, 0, 0], name);
-  }
-  assert.equal(sample.collections.readComments.checked, 1);
-  const compareMeter = meterReads(s.ctx);
-  const oldClient = {
-    ...client,
-    query: (ref, args) => {
-      const full = { ...args };
-      full.digestOnly = false;
-      return handlers[getFunctionName(ref)]._handler(s.ctx, full);
-    },
-  };
-  const fullCompareCost = await compareMeter.cost(() =>
-    dispatchHostedWork(oldClient, s.projectId, { action: 'compare-work-store', newest: 200 }),
-  );
-  const digestCompareCost = await compareMeter.cost(() => run({ action: 'compare-work-store', newest: 200 }));
-  assert.ok(
-    digestCompareCost.bytes < fullCompareCost.bytes,
-    JSON.stringify({ fullCompareCost, digestCompareCost }),
-  );
-  const withoutMethod = totals =>
-    Object.fromEntries(
-      Object.entries(totals).map(([name, total]) => {
-        const copy = { ...total };
-        delete copy.method;
-        return [name, copy];
-      }),
-    );
-  assert.deepEqual(
-    withoutMethod((await run({ action: 'compare-work-store', newest: 200 })).collections),
-    withoutMethod(
-      (await dispatchHostedWork(oldClient, s.projectId, { action: 'compare-work-store', newest: 200 }))
-        .collections,
-    ),
-  );
-  compareMeter.restore();
-  console.log(JSON.stringify({ migrationCompare: { fullCompareCost, digestCompareCost } }));
-  const historical = [...s.tables.projectHostedRecords.values()].find(row => row.kind === 'issue');
-  const readerHash = historical.workReadDigest;
-  delete historical.workReadDigest;
-  const historicalCache = workRecordRows(s.tables).find(
-    row =>
-      row.collection === '_workStoreDigests:planningVersions' &&
-      JSON.parse(row.value).ref.key === historical.key &&
-      JSON.parse(row.value).ref.version === historical.version,
-  );
-  const historicalValue = historicalCache.value;
-  const missingMetadata = JSON.parse(historicalValue);
-  delete missingMetadata.stored;
-  historicalCache.value = JSON.stringify(missingMetadata);
-  const oldVersion = (await run({ action: 'compare-work-store', newest: 200 })).collections.readVersions;
-  assert.deepEqual(
-    [oldVersion.different, oldVersion.invalid, oldVersion.missing],
-    [0, 0, 0],
-    'a historical version without derived hash metadata uses its verified full reader',
-  );
-  historical.workReadDigest = readerHash;
-  historicalCache.value = historicalValue;
-  const corrupt = [...s.tables.projectHostedRecords.values()].find(row => row.kind === 'comment');
-  const originalDigest = corrupt.digest;
-  corrupt.digest = '0'.repeat(64);
-  let fetchedBodies = 0;
-  s.ctx.db.get = id => {
-    if (s.tables.projectHostedRecordBodies.has(id)) fetchedBodies++;
-    return originalGet(id);
-  };
-  const fullMismatch = await run({ action: 'compare-work-store' });
-  assert.ok(
-    fullMismatch.collections.planningComments.different + fullMismatch.collections.notes.different > 0,
-    'full verification catches out-of-band immutable header corruption',
-  );
-  fetchedBodies = 0;
-  const targetCaches = workRecordRows(s.tables).filter(
-    row =>
-      (row.collection === '_workStoreHeads:comment' || row.collection.startsWith('_workStoreDigests:')) &&
-      JSON.parse(row.value).ref?.key === corrupt.key,
-  );
-  const cacheValues = targetCaches.map(row => row.value);
-  for (const row of targetCaches) {
-    const value = JSON.parse(row.value);
-    if (row.collection === '_workStoreHeads:comment') value.ref.digest = corrupt.digest;
-    else if (value.stored) value.stored.ref.digest = corrupt.digest;
-    row.value = JSON.stringify(value);
-  }
-  const mismatch = await run({ action: 'compare-work-store', newest: 200 });
-  assert.ok(mismatch.collections.planningComments.different + mismatch.collections.notes.different > 0);
-  assert.ok(fetchedBodies > 0, 'a digest mismatch fetches the retained body for diagnosis');
-  s.ctx.db.get = originalGet;
-  corrupt.digest = originalDigest;
-  targetCaches.forEach((row, i) => {
-    row.value = cacheValues[i];
-  });
-
   // Writes keep both stores current while the store serves reads.
   await s.send({
     action: 'comment-planning-item',
@@ -820,11 +702,12 @@ test('with the store reader on, planning lists, versions, comments and detail re
   const texts = async () => (await reads()).comments.map(([, c]) => c.text.split(':')[0]);
   const expected = ['Three', ...Array.from({ length: 20 }, (_, i) => `Comment ${19 - i}`), 'Two', 'One'];
   assert.deepEqual(await texts(), expected);
-  await run({ action: 'set-work-store', mode: 'dual' });
-  assert.deepEqual(await texts(), expected, 'switching back reads the journal, which has every write');
+  delete s.tables.hostedProjects.get(s.projectId).workStore;
+  delete s.tables.hostedProjects.get(s.projectId).workStoreWriters;
+  assert.deepEqual(await texts(), expected, 'clearing the old fields preserves canonical reads');
 });
 
-test('bounded digest comparisons retain 200-record coverage and pin full fallback across page boundaries', async t => {
+test('full P8 comparisons cover every page and report a missing canonical record', async t => {
   const { dispatchHostedWork } = await import('../dist/hosted-work-client.js');
   const store = await import(moduleUrl('../convex/projectWorkStore.ts'));
   const mutation = await import(moduleUrl('../convex/projectWorkCommand.ts'));
@@ -854,74 +737,20 @@ test('bounded digest comparisons retain 200-record coverage and pin full fallbac
   const cold = await run({ action: 'compare-work-store', newest: 201 });
   assert.ok(Object.values(cold.collections).every(total => total.method === 'full'));
   assert.equal(cold.collections.notes.checked, 201);
-  const heads = structuredClone([...s.tables.projectHostedRecordHeads.values()]);
-  const seeded = await run({ action: 'copy-work-store', digestsOnly: true, newest: 200 });
-  assert.equal(seeded.collections.notes.fingerprinted, 200);
-  assert.deepEqual([...s.tables.projectHostedRecordHeads.values()], heads);
-  const meter = meterReads(s.ctx);
-  const digestCost = await meter.cost(() => run({ action: 'compare-work-store', newest: 200 }));
-  const warm = await run({ action: 'compare-work-store', newest: 200 });
-  assert.equal(warm.collections.notes.checked, 200);
-  assert.equal(warm.collections.readNotes.checked, 200);
-  assert.ok(
-    Object.values(warm.collections).every(
-      total =>
-        total.method === 'digest' && total.different === 0 && total.invalid === 0 && total.missing === 0,
-    ),
+  const full = (await run({ action: 'compare-work-store' })).collections;
+  assert.equal(full.notes.checked, 205);
+  assert.ok(full.notes.pages >= 3);
+  for (const [name, total] of Object.entries(full))
+    assert.deepEqual([total.missing, total.different, total.invalid], [0, 0, 0], name);
+  await run({ action: 'copy-work-store', digestsOnly: true, newest: 205 });
+  const missing = [...s.tables.projectHostedRecords.values()].find(
+    row => row.kind === 'comment' && row.status === 'note',
   );
-  const beyond = await run({ action: 'compare-work-store', newest: 201 });
-  assert.equal(beyond.collections.notes.checked, 201);
-  assert.equal(beyond.collections.notes.method, 'full');
-  const legacyClient = {
-    ...client,
-    query: (ref, args) => handlers[getFunctionName(ref)]._handler(s.ctx, { ...args, digestOnly: false }),
-  };
-  const fullCost = await meter.cost(() =>
-    dispatchHostedWork(legacyClient, s.projectId, { action: 'compare-work-store', newest: 200 }),
-  );
-  assert.ok(digestCost.bytes < fullCost.bytes / 2, JSON.stringify({ digestCost, fullCost }));
-  meter.restore();
-  console.log(JSON.stringify({ migrationCompare200: { digestCost, fullCost } }));
-  const insert = s.ctx.db.insert;
-  let failed = false;
-  s.ctx.db.insert = (table, value) => {
-    if (table === 'projectHostedRecords' && !failed) {
-      failed = true;
-      throw Error('Synthetic dual-write failure');
-    }
-    return insert(table, value);
-  };
-  const operationId = randomUUID();
-  const accepted = await mutation.command._handler(s.ctx, {
-    projectId: s.projectId,
-    operationId,
-    command: JSON.stringify({
-      action: 'note',
-      intentId: issue.itemId,
-      kind: 'comment',
-      text: 'Journal remains accepted after dual-store failure',
-    }),
-  });
-  s.ctx.db.insert = insert;
-  assert.equal(accepted.operationId, operationId);
-  const failedDual = await run({ action: 'compare-work-store', newest: 200 });
-  assert.equal(failedDual.collections.notes.method, 'digest');
-  assert.ok(failedDual.collections.notes.missing > 0, 'independent journal hash exposes a failed dual write');
-  await store.setMode._handler(s.ctx, { projectId: s.projectId, mode: 'journal' });
-  await mutation.command._handler(s.ctx, {
-    projectId: s.projectId,
-    operationId: randomUUID(),
-    command: JSON.stringify({
-      action: 'note',
-      intentId: issue.itemId,
-      kind: 'comment',
-      text: 'Journal-only interval',
-    }),
-  });
-  await store.setMode._handler(s.ctx, { projectId: s.projectId, mode: 'records' });
-  const resumed = await run({ action: 'compare-work-store', newest: 200 });
-  assert.equal(resumed.collections.notes.method, 'full');
-  assert.ok(resumed.collections.notes.missing > 0, 'a mode gap cannot reuse stale hash coverage');
+  s.tables.projectHostedRecords.delete(missing._id);
+  const after = (await run({ action: 'compare-work-store', newest: 205 })).collections;
+  assert.equal(after.notes.method, 'full');
+  assert.equal(after.notes.checked, 205);
+  assert.equal(after.notes.missing, 1);
 });
 
 test('frozen Work writers retain replay, export, rebuild and note projections without journal appends', async t => {
@@ -934,7 +763,6 @@ test('frozen Work writers retain replay, export, rebuild and note projections wi
   const s = await setup(t);
   const project = s.tables.hostedProjects.get(s.projectId);
   project.sourceAuthority = { mode: 'server', epoch: 1 };
-  await store.setMode._handler(s.ctx, { projectId: s.projectId, mode: 'records', writers: [] });
   const base = (await s.read()).sourceHead;
   const intentId = randomUUID();
   const send = (command, operationId = command.operationId ?? randomUUID()) =>
@@ -1075,7 +903,8 @@ test('frozen Work writers retain replay, export, rebuild and note projections wi
     journalSize,
     'a no-op status retains its primary Intent version too',
   );
-  await store.setMode._handler(s.ctx, { projectId: s.projectId, mode: 'records', writers: [] });
+  delete project.workStore;
+  delete project.workStoreWriters;
   const rollback = JSON.parse(
     await store.compare._handler(s.ctx, {
       projectId: s.projectId,
@@ -1087,10 +916,9 @@ test('frozen Work writers retain replay, export, rebuild and note projections wi
   assert.equal(
     rollback.method,
     'full',
-    'writer rollback invalidates fingerprints skipped during primary writes',
+    'full comparison still checks records after the legacy fields are cleared',
   );
   assert.equal(rollback.different.count + rollback.missing.count + rollback.invalid.count, 0);
-  await store.setMode._handler(s.ctx, { projectId: s.projectId, mode: 'records', writers: frozen });
   assert.equal((await s.read()).data.intents.find(i => i.id === intentId).status, 'completed');
   // A damaged retained row never silently replays different source.
   const damaged = events[0],
@@ -1112,9 +940,8 @@ test('frozen Work writers retain replay, export, rebuild and note projections wi
   );
 });
 
-test('mixed retained history pages large planning commands once across planning freeze and rollback', async t => {
+test('mixed retained history pages large planning commands once across historical writer epochs', async t => {
   const s = await setup(t);
-  const store = await import(moduleUrl('../convex/projectWorkStore.ts'));
   const commands = await import(moduleUrl('../convex/projectWorkCommand.ts'));
   const project = s.tables.hostedProjects.get(s.projectId);
   project.sourceAuthority = { mode: 'server', epoch: 1 };
@@ -1130,7 +957,15 @@ test('mixed retained history pages large planning commands once across planning 
     { action: 'intent', outcome: 'Large history replay', constraints: '', base: initial.sourceHead },
     intentId,
   );
-  await store.setMode._handler(s.ctx, { projectId: s.projectId, mode: 'records', writers: ['note'] });
+  // Recreate historical writer intervals saved by releases before the F2 cutover.
+  const legacyWriters = async (writers, storeFirst) => {
+    const revision = (await s.read()).data.revision;
+    project.workStore = 'records';
+    project.workStoreWriters = writers;
+    project.workStoreCutoverRevision ??= revision;
+    project.workStoreEventWindows = [...(project.workStoreEventWindows ?? []), { revision, storeFirst }];
+  };
+  await legacyWriters(['note'], false);
   const big = s.item({ body: 'Original large body\n'.repeat(18000) });
   await send(big);
   await send({ action: 'note', intentId, text: 'Mixed legacy planning', kind: 'comment' });
@@ -1142,11 +977,7 @@ test('mixed retained history pages large planning commands once across planning 
     text: 'Large legacy comment\n'.repeat(2800),
     authorLabel: 'Owner',
   });
-  await store.setMode._handler(s.ctx, {
-    projectId: s.projectId,
-    mode: 'records',
-    writers: ['note', 'planning'],
-  });
+  await legacyWriters(['note', 'planning'], true);
   await send({ ...big, operationId: randomUUID(), expectedVersion: 1, title: 'Large retained update' });
   await send({ action: 'intent-status', intentId, status: 'completed' });
   await send({
@@ -1156,7 +987,7 @@ test('mixed retained history pages large planning commands once across planning 
     text: 'Large retained comment\n'.repeat(2800),
     authorLabel: 'Owner',
   });
-  await store.setMode._handler(s.ctx, { projectId: s.projectId, mode: 'records', writers: ['note'] });
+  await legacyWriters(['note'], false);
   await send({ ...big, operationId: randomUUID(), expectedVersion: 2, title: 'Legacy after rollback' });
   await send({ action: 'note', intentId, text: 'Retained after rollback', kind: 'comment' });
   const expected = await s.read();

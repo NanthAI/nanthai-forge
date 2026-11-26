@@ -25,6 +25,7 @@ export { source, load } from './projectWorkLoad';
 import { source, load } from './projectWorkLoad';
 import { exchangeObjectReader } from './projectExchangeReader';
 import { backupManifestDigest } from '../src/work-backup-root';
+import { importStoredWork } from './projectHostedSeedWork';
 export const initialize = action({
   args: { projectId: v.id('hostedProjects'), backupId: v.id('projectBackups'), operationId: v.string() },
   returns: projectDocument,
@@ -43,10 +44,29 @@ export const initialize = action({
         'PROJECT_UNAVAILABLE',
         'Select this project’s original backup.',
       );
+      const importRequired =
+        snapshot.data.revision > 0 ||
+        snapshot.data.intents.length > 0 ||
+        snapshot.data.planningItems.length > 0 ||
+        snapshot.data.planningComments.length > 0;
+      if (
+        !snapshot.project.work &&
+        importRequired &&
+        snapshot.project.workStoreCutoverRevision !== snapshot.data.revision
+      ) {
+        await importStoredWork(
+          ctx,
+          { ...input, owner },
+          snapshot.data,
+          snapshot.originalWorkDigest,
+          snapshot.backup.initialWorkImport,
+        );
+      }
       return await ctx.runMutation(internal.projectWork.initialize, {
         ...input,
         owner,
         revision: snapshot.data.revision,
+        ...(importRequired ? { importRequired: true as const } : {}),
         ...(snapshot.backup.validatedWorkRecords === 1 && snapshot.data.revision === 0
           ? { workSchema: snapshot.data.schema }
           : {}),
