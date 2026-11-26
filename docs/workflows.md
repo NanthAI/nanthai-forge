@@ -218,7 +218,11 @@ field says which path each took.
 
 ### Trust per path per actor
 
-`autonomyPolicy.trust` is absent by default, which turns trust off. With
+`autonomyPolicy.trust` is absent on solo projects by default. When another member
+joins a new project, **Settings → Landing and checks** offers earned trust once to
+the owner. The current policy stays in effect until the owner chooses. Enabling
+earned trust establishes the owner's agents so they skip new-vendor probation.
+With
 `trust: {"enabled": false}` Forge records the history but changes no gate (shadow
 mode). The owner approves the thresholds before setting `enabled: true`. Read the
 policy with `nforge agent ROOT policy` and change it with
@@ -332,7 +336,8 @@ A hosted project owner can pin a Lane with `nforge x ROOT pin '{"laneId":"LANE_I
 
 Hosted policy is independent of uploaded local policy. Source exchange/return preserves hosted Channel receipts and cannot change hosted policy. A person can select a clean Candidate without a prior local acceptance receipt (`acceptanceId` is optional). A person may explicitly select an earlier retained local acceptance for rollback; automatic acceptance cannot. Native object checkpoints support source-byte path/ancestry validation; legacy archives/Git checkpoints retain local Candidate/acceptance provenance, and unavailable protected-path coverage requires a person. Hosted check records remain reports from the local execution owner, not independently verified execution.
 
-New hosted projects, including GitHub imports, receive the supervised preset.
+New hosted projects, including GitHub imports, start with the Trusted preset.
+Owners can select Supervised in Landing and checks. Existing projects retain their policy.
 
 ### GitHub mirror branch
 

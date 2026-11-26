@@ -410,6 +410,8 @@ const projectFields = {
   planVisibility: v.optional(v.literal('members')),
   hostingRequest: v.optional(v.string()),
   autonomyPolicy: v.optional(autonomyPolicy),
+  /** New projects may offer earned trust once when they first have another member. */
+  offerEarnedTrust: v.optional(v.literal(true)),
   planningRollupCatchup: v.optional(v.id('projectWorkDataRecords')),
   /** Desired mirror direction retained while its existing policy is disabled. */
   githubMirrorPausedInbound: v.optional(v.boolean()),

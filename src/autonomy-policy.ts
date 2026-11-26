@@ -268,6 +268,8 @@ export const policyWriteObject = z
     githubMirror: autonomyPolicySchema.shape.githubMirror,
     deploys: autonomyPolicySchema.shape.deploys,
     trust: trustConfigSchema.optional(),
+    /** Owner's answer to the membership-based earned-trust offer. */
+    teamTrustChoice: z.enum(['enable', 'keep']).optional(),
     agentDefaults: agentDefaultsSchema.optional(),
     autoExchange: z
       .object({

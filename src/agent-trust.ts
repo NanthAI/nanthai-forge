@@ -11,7 +11,7 @@ export {
   type TrustConfig,
 } from './agent-trust-config.js';
 
-/** Proposed defaults, pending owner approval (see the B2.6 handoff). */
+/** Earned-trust defaults approved for new teams. */
 export const TRUST_DEFAULTS = {
   trustedAt: 25,
   autonomousAt: 100,

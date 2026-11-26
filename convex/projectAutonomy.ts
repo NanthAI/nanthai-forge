@@ -5,6 +5,8 @@ import { requireStoredRepositoryBinding } from './githubBindingAccess';
 import { ensureMirrorRow, mirrorRow } from './projectGithubMirrorRows';
 import { wakeHeldMirror } from './projectGithubMirrorCadence';
 import { v } from 'convex/values';
+import { TRUST_DEFAULTS } from '../src/agent-trust';
+import { earnedTrustOffered } from './projectCreation';
 import {
   query,
   mutation,
@@ -137,7 +139,11 @@ async function writePolicy(
         ? previous.githubMirror.inbound === true
         : project.githubMirrorPausedInbound
       : undefined;
-  await ctx.db.patch(project._id, { autonomyPolicy: policy, githubMirrorPausedInbound: pausedInbound });
+  await ctx.db.patch(project._id, {
+    autonomyPolicy: policy,
+    githubMirrorPausedInbound: pausedInbound,
+    ...(command.teamTrustChoice ? { offerEarnedTrust: undefined } : {}),
+  });
   if (previous.rollUpPlanningStatus === false && policy.rollUpPlanningStatus !== false)
     await beginRollupCatchup(ctx, { ...project, autonomyPolicy: policy }, command.operationId);
   if (
@@ -346,7 +352,24 @@ export const set = mutation({
         'POLICY_CHANGED',
         'Project policy changed. Refresh it before editing.',
       );
-      const policy = editedPolicy(previous, command);
+      invariant(
+        !command.teamTrustChoice || (!device && (await earnedTrustOffered(ctx, project))),
+        'BAD_ARGUMENT',
+        'The earned-trust choice is available to the owner when a new project has another member.',
+      );
+      const policy =
+        command.teamTrustChoice === 'keep'
+          ? previous
+          : editedPolicy(
+              previous,
+              command.teamTrustChoice === 'enable'
+                ? {
+                    ...command,
+                    acceptance: { ...command.acceptance, gate: 'contract' },
+                    trust: { enabled: true, ...TRUST_DEFAULTS, establishedVendors: [project.owner] },
+                  }
+                : command,
+            );
       if (command.acceptance?.withoutCheck)
         policy.acceptance.withoutCheck = await resolveUncheckedSelection(
           ctx,

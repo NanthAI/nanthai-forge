@@ -61,7 +61,7 @@ function hosted() {
   return { ...s, projectId, selection, device };
 }
 const errorCode = code => error => error.data?.code === code;
-test('new hosted project gets supervised; contributors cannot set policy', async () => {
+test('contributors can read a supervised policy and cannot change it', async () => {
   const s = hosted();
   assert.equal((await policies.read._handler(s.ctx, { projectId: s.projectId })).preset, 'supervised');
   s.tables.projectContributors.set('member', {
@@ -187,15 +187,51 @@ test('internal Channel mutation cannot substitute an owner argument for the auth
   assert.equal(s.tables.projectWorkEvents.size, 0);
 });
 
-test('hosted object import creation stores supervised and leaves an existing project policy alone', async () => {
+test('hosted object import starts Trusted and keeps the policy on an existing project', async () => {
   const s = state([]),
     key = randomUUID();
   const objects = await import(moduleUrl('../convex/projectBackupObjects.ts'));
   const projectId = await objects.open._handler(s.ctx, { key, name: 'New project' });
-  assert.equal(s.tables.hostedProjects.get(projectId).autonomyPolicy.preset, 'supervised');
-  s.tables.hostedProjects.get(projectId).autonomyPolicy = policyPreset('trusted');
-  assert.equal(await objects.open._handler(s.ctx, { key, name: 'New project' }), projectId);
   assert.equal(s.tables.hostedProjects.get(projectId).autonomyPolicy.preset, 'trusted');
+  s.tables.hostedProjects.get(projectId).autonomyPolicy = policyPreset('supervised');
+  assert.equal(await objects.open._handler(s.ctx, { key, name: 'New project' }), projectId);
+  assert.equal(s.tables.hostedProjects.get(projectId).autonomyPolicy.preset, 'supervised');
+});
+
+test('an owner can choose earned trust once after a member joins and establish their agents', async () => {
+  const s = hosted();
+  const project = s.tables.hostedProjects.get(s.projectId);
+  project.autonomyPolicy = policyPreset('trusted');
+  project.offerEarnedTrust = true;
+  const command = {
+    action: 'set-policy',
+    operationId: randomUUID(),
+    teamTrustChoice: 'enable',
+  };
+  const choose = (fields = command) =>
+    policies.set._handler(s.ctx, { projectId: s.projectId, command: JSON.stringify(fields) });
+  await assert.rejects(choose(), errorCode('BAD_ARGUMENT'));
+  s.tables.projectContributors.set('contributor', {
+    _id: 'contributor',
+    projectId: s.projectId,
+    contributor: 'member',
+  });
+  s.caller('member');
+  await assert.rejects(choose(), errorCode('PROJECT_UNAVAILABLE'));
+  s.caller('owner');
+  assert.equal(project.autonomyPolicy.trust, undefined);
+  const result = await choose();
+  assert.deepEqual(result.policy.trust, {
+    enabled: true,
+    trustedAt: 25,
+    autonomousAt: 100,
+    halfLifeDays: 30,
+    culpritKeep: 0.1,
+    probationLandings: 10,
+    establishedVendors: ['owner'],
+  });
+  assert.deepEqual(await choose(), result);
+  await assert.rejects(choose({ ...command, operationId: randomUUID() }), errorCode('BAD_ARGUMENT'));
 });
 
 test('an account JWT can downscope to agent authority but cannot bypass supervised acceptance', async () => {

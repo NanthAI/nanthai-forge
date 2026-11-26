@@ -8,7 +8,7 @@
 // (FirstLanding.tsx), because a saved setting alone is not a connected CI. Settings that have no effect are not
 // offered as choices. How a landing is checked is one folded line per setting, from the policy already read
 // (LandingSettings.tsx); the Automatic and Manual switch appears once its engine (Item bd0f850e) is on main.
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useConvex } from 'convex/react';
 import { api } from '../../../../convex/_generated/api';
 import type { Id } from '../../../../convex/_generated/dataModel';
@@ -26,6 +26,7 @@ import { CheckRoutes } from './CheckRoutes';
 import { OwnerApprovalPaths } from './OwnerApprovalPaths';
 import { LandingSettings } from './LandingSettings';
 import { AwaitingFirstLanding, useFirstChecked } from './FirstLanding';
+import { PendingWrite } from '../../pending-write';
 import '../start/start.css';
 
 type Facts = { setup: SetupView; policy: AutonomyPolicy; landing: LandingModeView | null };
@@ -39,16 +40,34 @@ function sentence(facts: Facts) {
     : `Checked work lands on its own when ${check} passes.`;
 }
 
-function Approvals({
-  facts,
-  projectId,
-  onDone,
-}: {
+type ApprovalProps = {
   facts: Facts;
   projectId: Id<'hostedProjects'>;
   onDone: () => void;
-}) {
+};
+
+function Approvals(props: ApprovalProps) {
+  return <ProjectApprovals key={props.projectId} {...props} />;
+}
+
+function ProjectApprovals({ facts, projectId, onDone }: ApprovalProps) {
   const write = useApprovalWrite(projectId);
+  const client = useConvex();
+  const trustWrite = useRef<PendingWrite<
+    { choice: 'enable' | 'keep'; expected: AutonomyPolicy },
+    unknown
+  > | null>(null);
+  trustWrite.current ??= new PendingWrite(({ operationId, command }) =>
+    client.mutation(api.projectAutonomy.set, {
+      projectId,
+      command: JSON.stringify({
+        action: 'set-policy',
+        operationId,
+        expectedPolicy: command.expected,
+        teamTrustChoice: command.choice,
+      }),
+    }),
+  );
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState('');
   const owner = facts.setup.viewerIsOwner;
@@ -71,6 +90,18 @@ function Approvals({
   };
   const paths = facts.policy.acceptance.protectedPaths;
   const agents = facts.policy.acceptance.autoActors ?? [];
+  const answerTrust = async (choice: 'enable' | 'keep') => {
+    setBusy(true);
+    setProblem('');
+    try {
+      await trustWrite.current!.send({ choice, expected: facts.policy });
+      onDone();
+    } catch {
+      setProblem('The setting did not change. Reload the page and try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <Region title="Who approves landings" hint={owner ? undefined : 'only the owner changes this'}>
       <div role="radiogroup" aria-label="Who approves landings">
@@ -97,6 +128,18 @@ function Approvals({
         <p className="pad gs-err" role="alert">
           {problem}
         </p>
+      ) : null}
+      {facts.setup.offerEarnedTrust ? (
+        <div className="pad">
+          <p>Your project now has other members. Use earned trust for agent checks?</p>
+          <p>Agents earn trust on the paths they change. Your agents skip the initial probation period.</p>
+          <Key kind="rec" disabled={busy} onClick={() => void answerTrust('enable')}>
+            Use earned trust
+          </Key>{' '}
+          <Key disabled={busy} onClick={() => void answerTrust('keep')}>
+            Keep current policy
+          </Key>
+        </div>
       ) : null}
       <p className="quietline">
         {paths.length ? (

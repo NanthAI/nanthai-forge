@@ -60,7 +60,7 @@ test('browser creation publishes one R2 catalog page, initialized indexed Work a
   const projectId = await s.create(args);
   const project = s.tables.hostedProjects.get(projectId);
   assert.equal(project.visibility, 'private');
-  assert.deepEqual(project.autonomyPolicy, policyPreset('supervised'));
+  assert.deepEqual(project.autonomyPolicy, policyPreset('trusted'));
   assert.equal(s.tables.projectBackups.size, 1);
   assert.equal(s.tables.projectWorkGenerations.size, 1);
   assert.equal(s.tables.projectObjects.size, 0);

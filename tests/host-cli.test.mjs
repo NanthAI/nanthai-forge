@@ -93,7 +93,7 @@ test('host seeds native source/Work and saves owner binding without automaticall
   assert.equal(f.s.tables.hostedProjects.size, 1);
   const project = f.s.tables.hostedProjects.get(result.projectId);
   assert.equal(project.visibility, 'private');
-  assert.equal(project.autonomyPolicy.preset, 'supervised');
+  assert.equal(project.autonomyPolicy.preset, 'trusted');
   assert.equal(project.work.backupId, result.backupId);
   assert.equal(project.work.generationId, undefined);
   assert.equal(f.s.tables.projectWorkGenerations.size, 0);

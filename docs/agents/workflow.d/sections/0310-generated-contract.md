@@ -43,7 +43,7 @@
 | `policy` | `operationId?` |
 | `approve-link` | `operationId?` |
 | `request-approval` | `laneId?, reason?, withdraw?, operationId?` |
-| `x set-policy` | `governanceVersion?, dryRun?, expectedPolicy?, preset?, acceptance?, checks?, integrationPreview?, ownerRootUpdates?, autoCreatePlanningItem?, rollUpPlanningStatus?, agentsWriteItemText?, accessIdentities?, mainAudit?, autoSnapshot?, autoSnapshotIntervalMinutes?, checkLogs?, laneUpdates?, lifecycle?, notify?, githubMirror?, deploys?, trust?, agentDefaults?, autoExchange?, operationId?` |
+| `x set-policy` | `governanceVersion?, dryRun?, expectedPolicy?, preset?, acceptance?, checks?, integrationPreview?, ownerRootUpdates?, autoCreatePlanningItem?, rollUpPlanningStatus?, agentsWriteItemText?, accessIdentities?, mainAudit?, autoSnapshot?, autoSnapshotIntervalMinutes?, checkLogs?, laneUpdates?, lifecycle?, notify?, githubMirror?, deploys?, trust?, teamTrustChoice?, agentDefaults?, autoExchange?, operationId?` |
 | `planning` | `planningItemId?, id?, itemId?, transfer?, search?, refine?, kind?, status?, initiativeId?, waitingOn?, type?, owner?, relation?, groupBy?, counts?, history?, limit?, cursor?, commentLimit?, reconcile?, schedule?, operationId?` |
 | `put-planning-item` | `expectedVersion?, kind?, title?, body?, status?, reason?, intentIds?, initiativeId?, planningItemId?, id?, itemId?, fields?, doneWhen?, batch?, operationId?` |
 | `comment-planning-item` | `itemId?, authorLabel?, text, replyTo?, decision?, planningItemId?, id?, files?, operationId?` |

@@ -8,6 +8,7 @@
 export type SetupView = {
   owner: string | null;
   viewerIsOwner: boolean;
+  offerEarnedTrust?: true;
   created: { at: number; by: string | null };
   repository: { fullName: string; at: number; by: string | null } | null;
   mirror: { repository: string; at: number } | null;

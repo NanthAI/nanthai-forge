@@ -22,6 +22,7 @@ import { accessibleProject } from './projectAuthority';
 import { checkSetting } from './projectHostedCheckStore';
 import { accountFor } from './urlIdentity';
 import type { Id } from './_generated/dataModel';
+import { earnedTrustOffered } from './projectCreation';
 
 const stamp = v.object({ at: v.number(), by: v.union(v.string(), v.null()) });
 const check = v.union(
@@ -53,6 +54,7 @@ export const setupView = v.object({
   firstLanding: v.union(v.object({ at: v.number() }), v.null()),
   /** A person or approved agent has set who approves landings; absent means the project still runs on the default. */
   approvalsAnswered: v.boolean(),
+  offerEarnedTrust: v.optional(v.literal(true)),
 });
 
 const handle = async (ctx: QueryCtx, actor: string) => (await accountFor(ctx, actor))?.handle ?? null;
@@ -191,5 +193,8 @@ async function setup(ctx: QueryCtx, projectId: Id<'hostedProjects'>, checklist: 
     check: runner ? checkView(runner.value, runner._creationTime) : null,
     firstLanding: first ? { at: first._creationTime } : null,
     approvalsAnswered: project.autonomyPolicy !== undefined,
+    ...(!checklist && user?.subject === project.owner && (await earnedTrustOffered(ctx, project))
+      ? { offerEarnedTrust: true as const }
+      : {}),
   };
 }

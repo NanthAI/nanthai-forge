@@ -20,6 +20,8 @@ const direct = {
     'the owner manages direct grants: invite, add, remove and the direct roster; `shared` pages the person own direct grants and adds the team-reached projects on its first page (teamGrant.ts)',
   'projectAccess.ts':
     'People and access lists and changes direct grants (setRole compares with the direct grant, not the effective role); linked teams show beside them (projectTeamAccess)',
+  'projectCreation.ts':
+    'detects direct non-owner members for the earned-trust offer, then checks linked team membership separately. This makes no access decision.',
   'projectInvitationAnswers.ts':
     'accepting an invitation creates a direct grant, never lowered by a team role',
   'projectActorNames.ts':
