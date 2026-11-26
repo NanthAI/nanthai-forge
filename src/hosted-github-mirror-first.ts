@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
+import { githubBranch, githubBranchPath } from './github-branch.js';
 import { GithubMirrorApiError, type GithubRequest } from './hosted-github-api.js';
 import { gitHash, gitTree } from './hosted-github-git.js';
 import { invariant } from './errors.js';
@@ -21,9 +22,15 @@ export const firstCommitTree = gitTree([
 
 /** GitHub main's commit, or null when the repository has no commit at all (409, or a 404 with
  * no branch). A repository with other branches but no main is not empty: that 404 stands. */
-export async function githubMain(repository: string, api: GithubRequest): Promise<string | null> {
+export async function githubMain(
+  repository: string,
+  api: GithubRequest,
+  branch?: string,
+): Promise<string | null> {
   try {
-    return (await api<{ object: { sha: string } }>(`/repos/${repository}/git/ref/heads/main`)).object.sha;
+    return (
+      await api<{ object: { sha: string } }>(`/repos/${repository}/git/ref/heads/${githubBranchPath(branch)}`)
+    ).object.sha;
   } catch (error) {
     if (!(error instanceof GithubMirrorApiError) || (error.status !== 404 && error.status !== 409))
       throw error;
@@ -35,7 +42,7 @@ export async function githubMain(repository: string, api: GithubRequest): Promis
 
 /** Creates main in an empty repository with the one-file first commit; returns its commit. */
 export async function createFirstCommit(
-  seed: { repository: string; at: string; identity: { name: string; email: string } },
+  seed: { repository: string; targetBranch?: string; at: string; identity: { name: string; email: string } },
   api: GithubRequest,
 ) {
   const person = { ...seed.identity, date: new Date(Date.parse(seed.at)).toISOString() };
@@ -46,7 +53,7 @@ export async function createFirstCommit(
       message:
         'Forge mirror: first commit\n\nGitHub cannot take a tree into an empty repository; the next commit publishes Forge main.',
       content: firstCommitBytes.toString('base64'),
-      branch: 'main',
+      branch: githubBranch(seed.targetBranch),
       author: person,
       committer: person,
     },

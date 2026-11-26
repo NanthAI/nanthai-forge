@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 'use node';
+import { githubBranch, githubBranchPath } from '../src/github-branch';
 import { convexFetch, networkTimeout } from './networkFetch';
 import { makeFunctionReference } from 'convex/server';
 import type { ActionCtx } from './_generated/server';
@@ -33,6 +34,7 @@ export type InboundBegin = {
   projectId: Id<'hostedProjects'>;
   owner: string;
   repository: string;
+  targetBranch?: string;
   reuseEnabled?: boolean;
   phase: 'pending' | 'compose';
   uploads: { value: string; pin: Pin }[] | null;
@@ -133,7 +135,9 @@ export async function runInbound(
       await postPullStatus(api, loaded.repository, commit, 'pending', 'Forge check started.', link);
     }
   } else {
-    const ref = await api<{ object: { sha: string } }>(`${prefix}/ref/heads/main`);
+    const ref = await api<{ object: { sha: string } }>(
+      `${prefix}/ref/heads/${githubBranchPath(loaded.targetBranch)}`,
+    );
     commit = ref.object.sha;
     if (commit === loaded.mapping.commit) {
       await ctx.runMutation(mutation('projectGithubInbound:adopt'), {
@@ -234,6 +238,7 @@ export async function runInbound(
             baseBytes,
             reply.reuse.probe,
             loaded.repository,
+            githubBranch(loaded.targetBranch),
             commit,
             token,
           )
@@ -248,6 +253,7 @@ async function provePullMerge(
   baseBytes: Uint8Array,
   probe: PullReuseProbe,
   repository: string,
+  targetBranch: string,
   commit: string,
   token: string,
 ): Promise<ReuseDecision> {
@@ -317,7 +323,7 @@ async function provePullMerge(
       pr.merge_commit_sha !== commit ||
       !pr.merged_at ||
       !Number.isFinite(Date.parse(pr.merged_at)) ||
-      pr.base?.ref !== 'main' ||
+      pr.base?.ref !== targetBranch ||
       pr.base.repo?.id !== probe.repositoryId ||
       pr.head?.repo?.id !== probe.repositoryId
     )

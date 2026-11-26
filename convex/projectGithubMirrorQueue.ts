@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
+import { githubBranch } from '../src/github-branch';
 import type { MutationCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
 import type { HostedAcceptance } from '../src/hosted-acceptance';
@@ -38,18 +39,22 @@ export async function enqueueGithubMirror(
     .first();
   // Retarget can publish the same receipt to another repository. The newest job is this
   // receipt's latest target; a retry for that target reuses it, including case-only renames.
-  if (old?.repository.toLowerCase() === policy.repo.toLowerCase())
+  if (
+    old?.repository.toLowerCase() === policy.repo.toLowerCase() &&
+    githubBranch(old.targetBranch) === githubBranch(policy.branch)
+  )
     return { jobId: old._id, scheduled: false };
   // Release signing and configured deployments start from the landing even when the mirror is paused or failing.
   await scheduleReleaseSign(ctx, project, receipt);
   await scheduleDeploys(ctx, project, receipt, evidence?.paths);
   if (!policy.autoPush) return;
-  let queue = await ensureMirrorRow(ctx, project._id, policy.repo);
+  let queue = await ensureMirrorRow(ctx, project._id, policy.repo, policy.branch);
   if (queue.repositoryKey !== queue.repository.toLowerCase())
     await ctx.db.patch(queue._id, { repositoryKey: queue.repository.toLowerCase() });
   // Two-way sync: an inbound job holding the queue settles with the acceptance that landed it.
   if (queue.activeId && (await settleInbound(ctx, queue, receipt))) queue = (await ctx.db.get(queue._id))!;
-  const matching = queue.repository === policy.repo;
+  const matching =
+    queue.repository === policy.repo && githubBranch(queue.targetBranch) === githubBranch(policy.branch);
   const acceptedAt = Date.parse(receipt.at);
   const sequence = receipt.snapshot.revision;
   const run = evidence?.run;
@@ -69,6 +74,7 @@ export async function enqueueGithubMirror(
     receiptId: receipt.id,
     sequence,
     repository: policy.repo,
+    ...(policy.branch && policy.branch !== 'main' ? { targetBranch: policy.branch } : {}),
     repositoryKey: policy.repo.toLowerCase(),
     authorityEpoch: receipt.authorityEpoch,
     status: matching ? 'queued' : 'failed',

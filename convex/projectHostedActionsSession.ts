@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
+import { githubBranch } from '../src/github-branch';
 import { assertHostedCheckActive, checkSetting } from './projectHostedCheckStore';
 import { ConvexError, v } from 'convex/values';
 import { internalMutation, type MutationCtx } from './server';
@@ -69,6 +70,7 @@ function sessionClaims(run: HostedCheckRun, input: SessionInput) {
   const claims = validateActionsClaims(actionsClaimsSchema.parse(JSON.parse(input.claims)), {
     audience: process.env.CONVEX_SITE_URL!,
     repository: run.configuration.repository,
+    controlBranch: githubBranch(run.configuration.controlBranch),
     executionId: run.executionId,
     workflowSha: run.actions?.workflowSha,
     selfHosted: !githubHostedRunsOn(run.configuration.runsOn ?? 'ubuntu-latest'),

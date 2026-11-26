@@ -66,6 +66,7 @@ export async function inboundBegin(
     projectId: project._id,
     owner: project.owner,
     repository: job.repository,
+    ...(job.targetBranch ? { targetBranch: job.targetBranch } : {}),
     reuseEnabled: !inbound.pull && Boolean(twoWay(project)),
     phase: inbound.phase,
     uploads: inbound.uploads ?? null,

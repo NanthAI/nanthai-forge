@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
+import { githubBranchSchema } from '../src/github-branch';
 import { v } from 'convex/values';
 import { z } from 'zod';
 import { githubActionsRunsOnSchema } from '../src/github-actions-runner-label';
@@ -21,6 +22,7 @@ const requestSchema = z
     expected: checkHash.nullable(),
     repository: z.string().regex(/^[\w.-]+\/[\w.-]+$/),
     runsOn: githubActionsRunsOnSchema.default('ubuntu-latest'),
+    controlBranch: githubBranchSchema.optional(),
     concurrencyBudget: z.number().safe().int().min(2).optional(),
     /** Owner-only (the configure transaction): accept that check logs are as visible as the repository. */
     publicLogs: z.boolean().optional(),
@@ -45,8 +47,16 @@ export const configure = action({
         'BAD_ARGUMENT',
         'Pass a repository and runsOn as a nonblank label (1–256 characters, no control characters) or 1–100 such labels.',
       );
-      const { repository, runsOn, concurrencyBudget, publicLogs, submodules, isolation, ...request } =
-        parsed.data;
+      const {
+        repository,
+        runsOn,
+        controlBranch,
+        concurrencyBudget,
+        publicLogs,
+        submodules,
+        isolation,
+        ...request
+      } = parsed.data;
       // Derive the installation via the App now so a missing install or a pending
       // Actions permission approval fails here, not on the first dispatch. The
       // metadata token proves the binding before any name-scoped token exists. Without an
@@ -82,6 +92,7 @@ export const configure = action({
                 provider: 'github-actions',
                 repository,
                 runsOn,
+                ...(controlBranch && controlBranch !== 'main' ? { controlBranch } : {}),
                 ...(concurrencyBudget !== undefined ? { concurrencyBudget } : {}),
                 ...(publicLogs ? { publicLogs: true } : {}),
                 ...(submodules ? { submodules } : {}),
@@ -91,6 +102,7 @@ export const configure = action({
                   runtime: hostedActionsRuntime,
                   runsOn,
                   workflow: 'convex-oidc-v1',
+                  ...(controlBranch && controlBranch !== 'main' ? { controlBranch } : {}),
                 }),
               },
             },

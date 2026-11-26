@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
+import { githubBranch, githubBranchSchema } from './github-branch.js';
 import { networkFetch, networkTimeout } from './network-fetch.js';
 import { z } from 'zod';
 import { invariant } from './errors.js';
@@ -13,7 +14,9 @@ export const actionsClaimsSchema = z.object({
   repository: z.string(),
   workflow_ref: z.string(),
   workflow_sha: z.string().regex(/^[a-f0-9]{40}$/),
-  ref: z.literal('refs/heads/main'),
+  ref: z
+    .string()
+    .refine(ref => ref.startsWith('refs/heads/') && githubBranchSchema.safeParse(ref.slice(11)).success),
   event_name: z.literal('workflow_dispatch'),
   run_id: z.string().regex(/^[1-9][0-9]*$/),
   run_attempt: z.literal('1'),
@@ -26,6 +29,7 @@ export function validateActionsClaims(
   expected: {
     audience: string;
     repository?: string;
+    controlBranch?: string;
     executionId?: string | null;
     workflowSha?: string;
     /** Self-hosted claims are accepted only for a run configured with non-GitHub-hosted labels. */
@@ -39,7 +43,8 @@ export function validateActionsClaims(
       c.exp > now / 1000 &&
       c.nbf <= now / 1000 &&
       c.iat <= now / 1000 &&
-      c.workflow_ref === `${c.repository}/.github/workflows/forge-check.yml@refs/heads/main` &&
+      c.ref === `refs/heads/${githubBranch(expected.controlBranch)}` &&
+      c.workflow_ref === `${c.repository}/.github/workflows/forge-check.yml@${c.ref}` &&
       (!expected.repository || c.repository === expected.repository) &&
       (!expected.executionId || c.run_id === expected.executionId) &&
       (!expected.workflowSha || c.workflow_sha === expected.workflowSha) &&
@@ -116,11 +121,8 @@ export async function verifyActionsOidc(
   const header = z
     .object({ alg: z.literal('RS256'), kid: z.string() })
     .parse(JSON.parse(new TextDecoder().decode(decode(parts[0]!))));
-  const claims = validateActionsClaims(
-    JSON.parse(new TextDecoder().decode(decode(parts[1]!))),
-    { audience },
-    now,
-  );
+  const decoded = actionsClaimsSchema.parse(JSON.parse(new TextDecoder().decode(decode(parts[1]!))));
+  const claims = validateActionsClaims(decoded, { audience, controlBranch: decoded.ref.slice(11) }, now);
   const jwk = await signingJwk(header.kid, request, now);
   const key = await crypto.subtle.importKey(
     'jwk',

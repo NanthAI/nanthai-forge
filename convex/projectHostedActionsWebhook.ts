@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
+import { githubBranch, githubBranchSchema } from '../src/github-branch';
 import { noJobEvidenceReason, prePlanFailureReason } from '../src/ci-provider-recovery';
 import { cancelledUsageTarget } from './projectCancelledRunUsage';
 import { prepareReportCollection } from './projectHostedReportCollection';
@@ -28,7 +29,7 @@ const payloadSchema = z.object({
     display_title: z.string(),
     event: z.literal('workflow_dispatch'),
     path: z.literal('.github/workflows/forge-check.yml'),
-    head_branch: z.literal('main'),
+    head_branch: githubBranchSchema,
     head_sha: z.string().regex(/^[a-f0-9]{40}$/),
     created_at: z.iso.datetime(),
     run_started_at: z.unknown().optional(),
@@ -68,6 +69,7 @@ export const receive = internalMutation({
       directActions(run) &&
         run.configuration.provider === 'github-actions' &&
         run.configuration.repository === payload.repository.full_name &&
+        workflow.head_branch === githubBranch(run.configuration.controlBranch) &&
         run.actions &&
         run.actions.fence === run.fence &&
         Date.parse(workflow.created_at) >= Math.floor(run.actions.reservedAt / 1000) * 1000,

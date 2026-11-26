@@ -6,6 +6,7 @@ export const githubMirrorTables = {
   projectGithubMirrors: defineTable({
     projectId: v.id('hostedProjects'),
     repository: v.string(),
+    targetBranch: v.optional(v.string()),
     activeId: v.union(v.id('projectGithubMirrorJobs'), v.null()),
     // githubSyncCommitSchema payload, shared with the native Mac pusher.
     mapping: v.union(v.string(), v.null()),
@@ -41,7 +42,7 @@ export const githubMirrorTables = {
     verifyFailedId: v.optional(v.id('projectGithubMirrorJobs')),
   })
     .index('by_project', ['projectId'])
-    .index('by_repository_key', ['repositoryKey']),
+    .index('by_repository_and_target_branch', ['repositoryKey', 'targetBranch']),
   /** One row while a terminally failed publish holds the mirror (Item 67771ca6, friction 28e84c06).
    * Written only when a job stops and deleted on resume, so a landed reply that asks reads one
    * index range that no healthy mirror write ever changes. */
@@ -54,6 +55,7 @@ export const githubMirrorTables = {
     receiptId: v.string(),
     sequence: v.number(),
     repository: v.string(),
+    targetBranch: v.optional(v.string()),
     authorityEpoch: v.number(),
     repositoryKey: v.optional(v.string()),
     status: v.union(

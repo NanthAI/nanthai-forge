@@ -1088,6 +1088,43 @@ test('grant-scoped Actions tokens: no Convex call per mint; uninstall, removal a
   assert.equal(await scopeOf(f2, f2.projectId), null);
 });
 
+test('GitHub protection reads and recommends rules for the configured trunk branch', async t => {
+  const f = fixture(t);
+  await f.bind();
+  const project = f.s.tables.hostedProjects.get(f.projectId);
+  f.s.patch('hostedProjects', f.projectId, {
+    autonomyPolicy: {
+      ...project.autonomyPolicy,
+      githubMirror: { repo: 'synthetic/repo', autoPush: true, laneRefs: false, branch: 'release/trunk' },
+    },
+  });
+  const protection = await import(moduleUrl('../convex/githubProtection.ts'));
+  const setup = github(t);
+  const requests = [];
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    if (!url.includes('/rules/branches/')) return setup.request(url, options);
+    requests.push(url);
+    return Response.json([]);
+  });
+  const ctx = {
+    ...f.ctx,
+    runQuery: (ref, input) =>
+      getFunctionName(ref) === 'githubProtection:binding'
+        ? f.s.call('protection-binding', protection.binding, input)
+        : f.ctx.runQuery(ref, input),
+  };
+  const receipt = JSON.parse(
+    await protection.check._handler(ctx, {
+      projectId: f.projectId,
+      repository: 'synthetic/repo',
+    }),
+  );
+  assert.deepEqual(requests, ['https://api.github.com/repos/synthetic/repo/rules/branches/release%2Ftrunk']);
+  assert.equal(receipt.targetBranch, 'release/trunk');
+  assert.deepEqual(receipt.ruleset.conditions.ref_name.include, ['refs/heads/release/trunk']);
+  assert.match(receipt.advice, /synthetic\/repo release\/trunk/);
+});
+
 test('two-way protection: Forge prints the ruleset, reads what main enforces and names each missing rule', async () => {
   const { forgeRuleset, protectionFindings, protectionAdvice } = await import('../dist/github-pull-check.js');
   const { githubProtection } = await import('../dist/github-connect-cli.js');

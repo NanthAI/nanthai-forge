@@ -243,6 +243,18 @@ test('Issue 5bc16ea7: an empty GitHub repository gets a one-file first commit th
   assert(f.calls.every(c => !c.path.endsWith('/refs/heads/main') || c.body.force === false));
   assert.equal(f.remote(), plan.entry.commit);
 });
+test('an empty GitHub repository with a non-main default branch is bootstrapped and advanced there', async () => {
+  const f = mirrorFixture({ verified: false, empty: true, targetBranch: 'release/trunk' });
+  const result = await drain(f);
+  assert.equal(result.entry.commit, f.remote());
+  assert.equal(f.calls.find(call => call.method === 'PUT').body.branch, 'release/trunk');
+  assert.equal(
+    f.calls.find(call => call.method === 'PATCH').path,
+    '/repos/synthetic/mirror/git/refs/heads/release/trunk',
+  );
+  assert(!f.calls.some(call => call.path.endsWith('/heads/main')));
+});
+
 test('Issue 5bc16ea7: a lost first-commit reply is recognized by its tree on the retry, never written twice', async () => {
   const f = mirrorFixture({ verified: false, empty: true, after: { a: '1' } });
   f.lose('/repos/synthetic/mirror/contents/.forge/mirror-first-commit');

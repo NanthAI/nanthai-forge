@@ -385,7 +385,7 @@ test('signed GitHub HTTP delivery authenticates raw bytes and stores only a mini
       'Installation events refresh only named repositories, deduplicated, in 100-name pages.',
     );
     assert(pages.every(page => page.delivery === 'one' && page.event === 'installation_repositories'));
-    // Two-way PR checks: opened/synchronize/reopened into main pass PR number, head and fork only.
+    // Signed PR events pass only check metadata, including a non-default base for queue routing.
     const pr = (action, base = 'main', from = 'someone/fork') =>
       JSON.stringify({
         action,
@@ -412,6 +412,13 @@ test('signed GitHub HTTP delivery authenticates raw bytes and stores only a mini
     assert.deepEqual(received.slice(beforePr), [
       { repository: 'example/project', number: 7, head: 'c'.repeat(40), fork: true },
       { repository: 'example/project', number: 7, head: 'c'.repeat(40), fork: false },
+      {
+        repository: 'example/project',
+        number: 7,
+        baseBranch: 'release',
+        head: 'c'.repeat(40),
+        fork: true,
+      },
     ]);
     assert.equal((await route._handler(ctx, request('{}', { 'x-github-event': 'ping' }))).status, 204);
     delete process.env.GITHUB_WEBHOOK_SECRET;

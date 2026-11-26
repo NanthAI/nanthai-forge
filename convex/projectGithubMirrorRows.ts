@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
+import { githubBranch } from '../src/github-branch';
 import { makeFunctionReference } from 'convex/server';
 import { cancelPendingTask } from './schedulerCancel';
 import type { MutationCtx, QueryCtx } from './_generated/server';
@@ -61,13 +62,19 @@ export async function stoppedMirror(ctx: QueryCtx, projectId: Id<'hostedProjects
 }
 /** The queue row both webhooks and publishes need; absent until a project connects two-way sync or
  * lands. Idempotent: one indexed read, one insert only when missing (friction 77518c88). */
-export async function ensureMirrorRow(ctx: MutationCtx, projectId: Id<'hostedProjects'>, repo: string) {
+export async function ensureMirrorRow(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  repo: string,
+  targetBranch?: string,
+) {
   const old = await mirrorRow(ctx, projectId);
   if (old) return old;
   const id = await ctx.db.insert('projectGithubMirrors', {
     projectId,
     repository: repo,
     repositoryKey: repo.toLowerCase(),
+    ...(targetBranch && targetBranch !== 'main' ? { targetBranch } : {}),
     activeId: null,
     mapping: null,
   });
@@ -105,7 +112,9 @@ export async function mirrorJob(
   );
   const policy = effectivePolicy(project).githubMirror;
   invariant(
-    policy?.autoPush && policy.repo.toLowerCase() === job.repository.toLowerCase(),
+    policy?.autoPush &&
+      policy.repo.toLowerCase() === job.repository.toLowerCase() &&
+      githubBranch(policy.branch) === githubBranch(job.targetBranch),
     'GITHUB_SYNC_DISABLED',
     'Hosted mirror policy changed.',
   );

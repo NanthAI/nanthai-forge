@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
+import { githubBranch } from '../src/github-branch';
 import { prePlanFailureReason, providerAckMs, providerStartupUnavailable } from '../src/ci-provider-recovery';
 import { checkFailureKind } from '../src/hosted-landing-admission';
 import { convexFetch } from './networkFetch';
@@ -325,7 +326,7 @@ export const dispatch = internalAction({
         token,
         async (url, init) => (seen = await convexFetch(url, init)),
         {
-          ref: 'main',
+          ref: githubBranch(run.configuration.controlBranch),
           return_run_details: true,
           inputs: {
             runId: run.id,
@@ -388,6 +389,7 @@ export const pendingReconcile = internalMutation({
       lookup: v.boolean(),
       repository: v.string(),
       reservedAt: v.number(),
+      controlBranch: v.optional(v.string()),
       executionId: v.union(v.string(), v.null()),
       runnerScope: v.union(v.null(), v.object({ repoId: v.number(), installationId: v.number() })),
     }),
@@ -407,6 +409,7 @@ export const pendingReconcile = internalMutation({
       executionId: run.executionId,
       repository: run.configuration.repository,
       reservedAt: actions.reservedAt,
+      ...(run.configuration.controlBranch ? { controlBranch: run.configuration.controlBranch } : {}),
       runnerScope: await runnerTokenScope(ctx, input.projectId, run.configuration.repository),
     };
   },
@@ -510,6 +513,7 @@ export const reconcile = internalAction({
       lookup: boolean;
       repository: string;
       reservedAt: number;
+      controlBranch?: string;
       executionId: string | null;
       runnerScope?: RunnerScope | null;
     } | null = await ctx.runMutation(
@@ -529,7 +533,7 @@ export const reconcile = internalAction({
         const response = await githubAppRequest(
           pending.executionId
             ? `repos/${pending.repository}/actions/runs/${pending.executionId}`
-            : `repos/${pending.repository}/actions/workflows/forge-check.yml/runs?event=workflow_dispatch&per_page=100&created=${encodeURIComponent(`>=${since}`)}`,
+            : `repos/${pending.repository}/actions/workflows/forge-check.yml/runs?event=workflow_dispatch&per_page=100&created=${encodeURIComponent(`>=${since}`)}${pending.controlBranch ? `&branch=${encodeURIComponent(pending.controlBranch)}` : ''}`,
           token,
           async (url, init) => {
             const response = await convexFetch(url, init);

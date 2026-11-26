@@ -210,6 +210,46 @@ test('catch-up reads and writes only selected metadata when unrelated mirror his
   t.diagnostic(JSON.stringify(meters));
 });
 
+test('a same-repository branch retarget excludes legacy main mapping from Candidate CI', async () => {
+  const f = fixture(true, 'synthetic/mirror');
+  const github = mirrorFixture();
+  const receipt = accept(f, github.head, github.root.state, 1);
+  const base = { head: github.head, receiptId: receipt.id };
+  const oldMapping = { ...github.root, state: github.head, acceptanceId: receipt.id, commit: 'b'.repeat(40) };
+  const job = {
+    projectId: f.projectId,
+    repository: 'synthetic/mirror',
+    receiptId: receipt.id,
+    sequence: 1,
+    authorityEpoch: 1,
+    state: github.head,
+    status: 'done',
+    step: 1,
+    cursor: null,
+  };
+  f.insert('projectGithubMirrorJobs', { ...job, mapping: JSON.stringify(oldMapping) });
+  const mirror = { repository: job.repository, mapping: null };
+  const lookup = selected =>
+    f.call(
+      'ci-base',
+      {
+        _handler: ctx => gitServe.mirroredBase(ctx, f.projectId, base, selected),
+      },
+      {},
+    );
+  assert.equal((await lookup(mirror)).commit, oldMapping.commit, 'legacy main still uses its saved mapping');
+  const trunk = { ...mirror, targetBranch: 'trunk' };
+  assert.equal(await lookup(trunk), null, 'the old branch cannot supply Candidate CI ancestry');
+  const newMapping = { ...oldMapping, commit: 'c'.repeat(40) };
+  f.insert('projectGithubMirrorJobs', {
+    ...job,
+    sequence: 2,
+    targetBranch: 'trunk',
+    mapping: JSON.stringify(newMapping),
+  });
+  assert.equal((await lookup(trunk)).commit, newMapping.commit);
+});
+
 test('retarget recovery queues current main for the new repository without overwriting an old completed job', async () => {
   const f = fixture(true, 'synthetic/mirror'),
     github = mirrorFixture();
@@ -256,8 +296,7 @@ test('retarget recovery queues current main for the new repository without overw
           ctx,
           f.projectId,
           { head: github.head, receiptId: receipt.id },
-          JSON.stringify(currentMapping),
-          'Synthetic/Mirror',
+          { mapping: JSON.stringify(currentMapping), repository: 'Synthetic/Mirror' },
         ),
     },
     {},

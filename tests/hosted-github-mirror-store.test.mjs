@@ -7,6 +7,7 @@ import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
 import { defaultR2Config, defaultR2Objects } from './default-r2.mjs';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';
+import { HOSTED_WORK_INDEX_FORMAT } from '../dist/work-hosted-summary.js';
 import { effectivePolicy, policyPreset } from '../dist/autonomy-policy.js';
 import { mirrorFixture } from './hosted-github-mirror-fixture.mjs';
 import { auditReason } from '../dist/main-audit.js';
@@ -863,97 +864,152 @@ for (const { files, gitlinks = false } of [
 
 /** Incident d4eb053e: a project that landed before its mirror was turned on has no mapping, so the
  * first job needs the GitHub commit and Forge State the project was imported from. */
-for (const mapped of [false, true, 'staged'])
-  test(`the first mirror job's seed ${mapped ? 'ignores' : 'carries'} the import commit and State when a mapping ${mapped ? 'exists' : 'is missing'}${mapped === 'staged' ? ', and a burst tip pins the published State' : ''}`, async t => {
-    const f = await acceptanceFixture();
-    bindRepository(t, f.projectId, 'synthetic/mirror');
-    const project = f.tables.hostedProjects.get(f.projectId);
-    f.patch('hostedProjects', f.projectId, {
-      autonomyPolicy: {
-        ...effectivePolicy(project),
-        githubMirror: { repo: 'synthetic/mirror', autoPush: true, laneRefs: false },
-      },
-    });
-    const { state, item } = await f.ready();
-    const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
-    await f.runAcceptance('mirrorSeedIntent', records.writeHostedRecord, {
-      ...f.auth,
-      expectedVersion: null,
-      record: {
-        kind: 'intent',
-        id: item.candidate.intentId,
-        version: 0,
+for (const mapped of [false, true, 'staged', 'native-retarget'])
+  test(
+    mapped === 'native-retarget'
+      ? 'a branch switch bootstraps without the retained native main mapping'
+      : `the first mirror job's seed ${mapped ? 'ignores' : 'carries'} the import commit and State when a mapping ${mapped ? 'exists' : 'is missing'}${mapped === 'staged' ? ', and a burst tip pins the published State' : ''}`,
+    async t => {
+      const f = await acceptanceFixture();
+      bindRepository(t, f.projectId, 'synthetic/mirror');
+      const project = f.tables.hostedProjects.get(f.projectId);
+      f.patch('hostedProjects', f.projectId, {
+        autonomyPolicy: {
+          ...effectivePolicy(project),
+          githubMirror: {
+            repo: 'synthetic/mirror',
+            autoPush: true,
+            laneRefs: false,
+            ...(mapped === 'native-retarget' ? { branch: 'trunk' } : {}),
+          },
+        },
+      });
+      const { state, item } = await f.ready();
+      const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
+      await f.runAcceptance('mirrorSeedIntent', records.writeHostedRecord, {
+        ...f.auth,
+        expectedVersion: null,
+        record: {
+          kind: 'intent',
+          id: item.candidate.intentId,
+          version: 0,
+          at: '2026-01-01T00:00:00.000Z',
+          outcome: 'An accepted outcome',
+          constraints: '',
+          creatorAccountId: 'owner',
+          assigneeAccountIds: [],
+          base: { head: f.main.head, receiptId: f.main.receipt.id },
+          status: 'active',
+        },
+      });
+      await f.accept(state);
+      const input = [...f.tables._scheduled_functions.values()].find(
+        t => t.name === 'projectGithubMirror:step',
+      ).args[0];
+      const imported = { commit: 'c'.repeat(40), head: 'd'.repeat(64) };
+      f.insert('projectGithubImports', {
+        projectId: f.projectId,
+        visibility: 'private',
+        owner: 'owner',
+        operationId: randomUUID(),
+        request: 'synthetic',
+        repository: 'synthetic/mirror',
+        commit: imported.commit,
         at: '2026-01-01T00:00:00.000Z',
-        outcome: 'An accepted outcome',
-        constraints: '',
-        creatorAccountId: 'owner',
-        assigneeAccountIds: [],
-        base: { head: f.main.head, receiptId: f.main.receipt.id },
-        status: 'active',
-      },
-    });
-    await f.accept(state);
-    const input = [...f.tables._scheduled_functions.values()].find(t => t.name === 'projectGithubMirror:step')
-      .args[0];
-    const imported = { commit: 'c'.repeat(40), head: 'd'.repeat(64) };
-    f.insert('projectGithubImports', {
-      projectId: f.projectId,
-      visibility: 'private',
-      owner: 'owner',
-      operationId: randomUUID(),
-      request: 'synthetic',
-      repository: 'synthetic/mirror',
-      commit: imported.commit,
-      at: '2026-01-01T00:00:00.000Z',
-      step: 0,
-      cursor: '',
-      phase: 'ready',
-      totalKnown: true,
-      completed: 0,
-      total: 0,
-      bytes: 0,
-      totalBytes: 0,
-      publication: {
-        backupId: 'projectBackups-1',
-        generationId: 'projectWorkGenerations-1',
-        head: imported.head,
-        root: 'e'.repeat(64),
-      },
-    });
-    if (mapped) {
-      const queueRow = [...f.tables.projectGithubMirrors.values()][0];
-      f.patch('projectGithubMirrors', queueRow._id, { mapping: JSON.stringify(mirrorFixture().root) });
-      // Item a08b0d3a: a staged burst member sits between GitHub main and this tip.
-      if (mapped === 'staged')
-        f.patch('projectGithubMirrors', queueRow._id, {
-          staged: JSON.stringify({ ...mirrorFixture().root, commit: 'a'.repeat(40), state: 'b'.repeat(64) }),
-          stagedRef: mirrorFixture().root.commit,
-          stagedWorkflows: true,
+        step: 0,
+        cursor: '',
+        phase: 'ready',
+        totalKnown: true,
+        completed: 0,
+        total: 0,
+        bytes: 0,
+        totalBytes: 0,
+        publication: {
+          backupId: 'projectBackups-1',
+          generationId: 'projectWorkGenerations-1',
+          head: imported.head,
+          root: 'e'.repeat(64),
+        },
+      });
+      if (mapped === 'native-retarget') {
+        const backupId = 'projectBackups-1';
+        const generationId = f.insert('projectWorkGenerations', {
+          projectId: f.projectId,
+          backupId,
+          format: HOSTED_WORK_INDEX_FORMAT,
+          status: 'ready',
+          revision: 1,
+          initialRevision: 1,
+          nextBatch: 1,
+          metadata: '{}',
         });
-    }
-    const prior = [process.env.FORGE_GITHUB_SYNC_NAME, process.env.FORGE_GITHUB_SYNC_EMAIL];
-    Object.assign(process.env, {
-      FORGE_GITHUB_SYNC_NAME: 'Forge Sync',
-      FORGE_GITHUB_SYNC_EMAIL: '123+fixture@users.noreply.github.com',
-    });
-    t.after(() => {
-      for (const [name, value] of [
-        ['FORGE_GITHUB_SYNC_NAME', prior[0]],
-        ['FORGE_GITHUB_SYNC_EMAIL', prior[1]],
-      ])
-        if (value === undefined) delete process.env[name];
-        else process.env[name] = value;
-    });
-    const seed = JSON.parse(await f.transaction('mirrorBegin', store.begin, input)).seed;
-    assert.deepEqual(seed.import, mapped ? undefined : { commit: imported.commit, state: imported.head });
-    const root = mirrorFixture().root;
-    assert.deepEqual(
-      seed.main,
-      mapped === 'staged'
-        ? { publish: true, expectedRef: root.commit, refState: root.state, workflows: true }
-        : { publish: true },
-    );
-  });
+        f.patch('hostedProjects', f.projectId, {
+          work: { generationId, backupId, operationId: randomUUID(), initialRevision: 1, revision: 1 },
+        });
+        f.insert('projectWorkRecords', {
+          projectId: f.projectId,
+          generationId,
+          collection: 'githubSync',
+          key: 'github',
+          parent: '',
+          position: 0,
+          value: JSON.stringify({
+            repository: 'synthetic/mirror',
+            branch: 'main',
+            adoptedCommit: '',
+            commits: [mirrorFixture().root],
+            pushed: 1,
+          }),
+        });
+      } else if (mapped) {
+        const queueRow = [...f.tables.projectGithubMirrors.values()][0];
+        f.patch('projectGithubMirrors', queueRow._id, { mapping: JSON.stringify(mirrorFixture().root) });
+        // Item a08b0d3a: a staged burst member sits between GitHub main and this tip.
+        if (mapped === 'staged')
+          f.patch('projectGithubMirrors', queueRow._id, {
+            staged: JSON.stringify({
+              ...mirrorFixture().root,
+              commit: 'a'.repeat(40),
+              state: 'b'.repeat(64),
+            }),
+            stagedRef: mirrorFixture().root.commit,
+            stagedWorkflows: true,
+          });
+      }
+      const prior = [process.env.FORGE_GITHUB_SYNC_NAME, process.env.FORGE_GITHUB_SYNC_EMAIL];
+      Object.assign(process.env, {
+        FORGE_GITHUB_SYNC_NAME: 'Forge Sync',
+        FORGE_GITHUB_SYNC_EMAIL: '123+fixture@users.noreply.github.com',
+      });
+      t.after(() => {
+        for (const [name, value] of [
+          ['FORGE_GITHUB_SYNC_NAME', prior[0]],
+          ['FORGE_GITHUB_SYNC_EMAIL', prior[1]],
+        ])
+          if (value === undefined) delete process.env[name];
+          else process.env[name] = value;
+      });
+      const begin = mapped === 'native-retarget' ? f.rawChecks.transaction : f.transaction;
+      const seed = JSON.parse(await begin('mirrorBegin', store.begin, input)).seed;
+      if (mapped === 'native-retarget') {
+        assert.equal(seed.targetBranch, 'trunk');
+        assert.equal(seed.binding, null);
+      }
+      assert.deepEqual(
+        seed.import,
+        mapped && mapped !== 'native-retarget'
+          ? undefined
+          : { commit: imported.commit, state: imported.head },
+      );
+      const root = mirrorFixture().root;
+      assert.deepEqual(
+        seed.main,
+        mapped === 'staged'
+          ? { publish: true, expectedRef: root.commit, refState: root.state, workflows: true }
+          : { publish: true },
+      );
+    },
+  );
 
 const inboundModule = await import(moduleUrl('../convex/projectGithubInboundQueue.ts'));
 /** Two-way sync on the same synthetic project, with one published mirror commit recorded. */
@@ -1127,6 +1183,31 @@ const prHead = (f, head, number = 7, extra = {}) =>
   });
 const pullJobs = (f, number) => f.jobs().filter(job => job.pullKey === String(number));
 const pullOf = job => JSON.parse(job.inbound).pull;
+test('two-way PRs queue checks only for the project’s configured trunk destination', async () => {
+  const f = await twoWayFixture();
+  const targetBranch = 'trunk';
+  const project = f.tables.hostedProjects.get(f.projectId);
+  f.patch('hostedProjects', f.projectId, {
+    autonomyPolicy: {
+      ...project.autonomyPolicy,
+      githubMirror: { ...project.autonomyPolicy.githubMirror, branch: targetBranch },
+    },
+  });
+  f.patch('projectGithubMirrors', f.queueRow()._id, { targetBranch });
+  const { pullRequestEvent } = await import(moduleUrl('../src/github-pull-check.ts'));
+  const event = ref =>
+    pullRequestEvent({
+      action: 'opened',
+      repository: { full_name: 'Synthetic/Mirror' },
+      pull_request: { number: 7, head: { sha: 'b'.repeat(40) }, base: { ref } },
+    });
+  await f.run('pullReceive', pullQueue.receive._handler, event('main'));
+  assert.equal(pullJobs(f, 7).length, 0);
+  await f.run('pullReceive', pullQueue.receive._handler, event(targetBranch));
+  assert.equal(pullJobs(f, 7).length, 1);
+  assert.equal(pullJobs(f, 7)[0].targetBranch, targetBranch);
+});
+
 test('two-way PR: a head queues one check job; redelivery writes nothing; a newer head drops an unstarted one', async () => {
   const f = await twoWayFixture();
   const scheduled = f.scheduled.length;

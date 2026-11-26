@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
+import { githubBranchSchema } from './github-branch.js';
 import { checkCause, checkTerminal } from './check-run-state.js';
 import { checkGateSchema } from './bet2-gate.js';
 import { checkFileSummarySchema } from './check-file-summary.js';
@@ -120,6 +121,7 @@ export const hostedActionsRunnerSchema = z
   .object({
     provider: z.literal('github-actions'),
     repository: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
+    controlBranch: githubBranchSchema.optional(),
     installationId: text.optional(),
     runsOn: githubActionsRunsOnSchema,
     concurrencyBudget: z.number().safe().int().min(2).optional(),

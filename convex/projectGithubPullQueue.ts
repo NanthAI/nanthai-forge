@@ -4,6 +4,7 @@
 // pull_request webhook, the composition and check-run completion hooks and the one settle path.
 // convex/http.ts and the compose, check and mirror stores reach only this module, never the
 // compose or check machinery (incident eb0491bb).
+import { githubBranch } from '../src/github-branch';
 import { makeFunctionReference } from 'convex/server';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
@@ -217,6 +218,7 @@ export const expire = internalMutation({
 export const receive = internalMutation({
   args: {
     repository: v.string(),
+    baseBranch: v.optional(v.string()),
     number: v.number(),
     head: v.string(),
     reopened: v.optional(v.boolean()),
@@ -229,17 +231,31 @@ export const receive = internalMutation({
     const key = input.repository.toLowerCase();
     for (const queue of await ctx.db
       .query('projectGithubMirrors')
-      .withIndex('by_repository_key', q => q.eq('repositoryKey', key))
+      .withIndex('by_repository_and_target_branch', q =>
+        q
+          .eq('repositoryKey', key)
+          .eq('targetBranch', githubBranch(input.baseBranch) === 'main' ? undefined : input.baseBranch),
+      )
       .take(8)) {
       const project = await ctx.db.get(queue.projectId);
       const policy = twoWay(project);
-      if (!policy || policy.repo.toLowerCase() !== key) continue;
+      if (
+        !policy ||
+        policy.repo.toLowerCase() !== key ||
+        githubBranch(policy.branch) !== githubBranch(queue.targetBranch)
+      )
+        continue;
       const pullKey = String(input.number);
-      const older = await ctx.db
+      const history = await ctx.db
         .query('projectGithubMirrorJobs')
         .withIndex('by_project_and_pull', q => q.eq('projectId', queue.projectId).eq('pullKey', pullKey))
         .order('desc')
         .take(10);
+      const older = history.filter(
+        job =>
+          job.repository.toLowerCase() === key &&
+          githubBranch(job.targetBranch) === githubBranch(queue.targetBranch),
+      );
       // A redelivered head is one run. A head whose check ended in error (a provider outage or runner
       // failure: the code was not judged) runs again only when its pull request is reopened; a later
       // job for the head, queued by that reopen, makes its redelivery a duplicate again.
@@ -284,6 +300,7 @@ export const receive = internalMutation({
         receiptId: `pull:${crypto.randomUUID()}`,
         sequence: pullSequence,
         repository: queue.repository,
+        ...(queue.targetBranch ? { targetBranch: queue.targetBranch } : {}),
         authorityEpoch: project!.sourceAuthority!.epoch,
         status: 'queued',
         step: 0,

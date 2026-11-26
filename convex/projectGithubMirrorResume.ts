@@ -46,7 +46,7 @@ export const resume = mutation({
         'This project has no automatic GitHub mirror to resume.',
       );
       const repostedPull = await repostPullStatus(ctx, project._id);
-      const retargeted = await retargetGithubMirror(ctx, project._id, policy.repo);
+      const retargeted = await retargetGithubMirror(ctx, project._id, policy.repo, policy.branch);
       const resumed = await resumeMirrorQueue(ctx, project);
       const statusReposted = (await repostMainStatus(ctx, project._id)) || repostedPull;
       return { ...resumed, ...(retargeted ? { status: 'retargeted' as const } : {}), statusReposted };

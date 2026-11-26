@@ -996,8 +996,12 @@ runner on an old backend completes via W2 and skips pack publication. Qualificat
 of real R2 throughput, signed checksum headers and Actions job scheduling remains
 an operator task.
 
-Deploy this backend and publish this workflow on GitHub `main` before configuring
-the App runner. Keep the Mac interim selected until one hosted Candidate completes
+Publish the workflow on the GitHub runner's control branch before configuring the
+App runner. The default is `main`. Set `"controlBranch":"trunk"` in
+`nforge x ROOT configure-runner` for a runner that uses that branch. Dispatch and
+OIDC verification use the same pinned branch. The control branch contains trusted
+runner code. Anyone with write access to that branch can change the code that
+runs checks, including when the runner and mirror share a repository. Keep the Mac interim selected until one hosted Candidate completes
 with exact shard evidence and its failure/cancellation paths have been qualified.
 Then change the runner configuration with its expected digest; already-enqueued
 Mac runs keep their original configuration and execution owner. Acceptance policy

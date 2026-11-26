@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
+import { githubBranchSchema } from './github-branch.js';
 import { initiativeProgressRequested } from './hosted-contract-features.js';
 import { looseEndIntentBatchSchema } from './hosted-lifecycle.js';
 import { finishRetryReasonSchema, landingTokensSchema } from './hosted-landing.js';
@@ -554,6 +555,7 @@ export const hostedAgentCommandSchemas = {
     .object({
       provider: z.enum(['mac', 'self-hosted', 'github-actions']).optional(),
       runsOn: githubActionsRunsOnSchema.optional(),
+      controlBranch: githubBranchSchema.optional(),
       concurrencyBudget: z.number().safe().int().min(2).optional(),
       publicLogs: z.boolean().optional(),
       submodules: submoduleAllowChangesSchema.optional(),

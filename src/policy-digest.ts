@@ -122,6 +122,7 @@ export const OWNER_GATE: Readonly<Record<string, GateClass>> = {
   'deploys.targets': 'gated',
   'deploys.needsAttentionAfterMinutes': { exempt: 'deploy attention timing only' },
   'githubMirror.repo': 'gated',
+  'githubMirror.branch': 'gated',
   'githubMirror.autoPush': 'gated',
   'githubMirror.laneRefs': 'gated',
   'githubMirror.inbound': 'gated',

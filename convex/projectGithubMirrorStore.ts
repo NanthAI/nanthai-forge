@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
+import { githubBranch } from '../src/github-branch';
 import { wakeCiMirrorWaiters } from './projectCiStatusMirror';
 import { v } from 'convex/values';
 import { internalMutation, type MutationCtx } from './server';
@@ -60,17 +61,23 @@ async function seed(
     const old = generation ? await record(ctx, recordPartition(generation), 'githubSync', 'github') : null;
     if (old) {
       const value = githubSyncSchema.parse(JSON.parse(old.value));
+      const sameRepository = value.repository.toLowerCase() === job.repository.toLowerCase();
+      const sameBranch = value.branch === githubBranch(job.targetBranch);
+      // An explicit target change bootstraps that branch from its verified remote tree.
+      // The retired native mapping remains evidence for its original branch.
+      const explicitRetarget =
+        sameRepository && !sameBranch && effectivePolicy(project).githubMirror?.branch !== undefined;
       invariant(
-        value.repository.toLowerCase() === job.repository.toLowerCase() && value.branch === 'main',
+        (sameRepository && sameBranch) || explicitRetarget,
         'GITHUB_SYNC_BINDING',
         'The native mirror mapping selects another repository or branch.',
       );
       invariant(
-        value.pushed === value.commits.length,
+        explicitRetarget || value.pushed === value.commits.length,
         'GITHUB_SYNC_PENDING',
         'Reconcile the retained native mirror operation before bootstrap.',
       );
-      binding = value.commits[value.pushed - 1] ?? null;
+      if (!explicitRetarget) binding = value.commits[value.pushed - 1] ?? null;
     }
   }
   const fallback = async () => {
@@ -136,6 +143,7 @@ async function seed(
     repository: job.repository,
     seed: {
       repository: job.repository,
+      ...(job.targetBranch ? { targetBranch: job.targetBranch } : {}),
       state: receipt.candidate.head,
       previous: receipt.previous.head,
       acceptanceId: receipt.id,

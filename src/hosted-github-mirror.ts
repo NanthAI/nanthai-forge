@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
+import { githubBranch, githubBranchPath } from './github-branch.js';
 import type { NativeFile, NativeState } from './state/format.js';
 import type { GithubSyncCommit } from './github-sync-types.js';
 import { GithubMirrorApiError, type GithubRequest } from './hosted-github-api.js';
@@ -63,6 +64,7 @@ export function treeChunks<T>(changes: T[], cap = treeChunkEntries): T[][] {
 type GitFile = NativeFile & { sha: string };
 export type MirrorSeed = {
   repository: string;
+  targetBranch?: string;
   state: string;
   previous: string;
   acceptanceId: string;
@@ -296,18 +298,18 @@ export async function prepareMirror(seed: MirrorSeed, io: MirrorIO): Promise<Mir
     };
   }
   // An empty repository first gets the one-file commit the Git Data API needs (see that module).
-  const main = await githubMain(seed.repository, io.api);
+  const main = await githubMain(seed.repository, io.api, seed.targetBranch);
   invariant(
     main || !seed.binding,
     'GITHUB_SYNC_CHANGED',
-    'GitHub main is gone although Forge retains a mirror mapping for it. No ref was changed; Forge never rewrites GitHub history.',
+    `GitHub ${githubBranch(seed.targetBranch)} is gone although Forge retains a mirror mapping for it. No ref was changed; Forge never rewrites GitHub history.`,
   );
   const remote = main ?? (await createFirstCommit(seed, io.api));
   const commit = await io.api<{ tree: { sha: string }; message: string }>(`${prefix}/commits/${remote}`);
   invariant(
     !seed.binding || seed.binding.commit === remote,
     'GITHUB_SYNC_CHANGED',
-    'GitHub main moved away from the retained Forge mirror mapping. No ref was changed; Forge never rewrites GitHub history.',
+    `GitHub ${githubBranch(seed.targetBranch)} moved away from the retained Forge mirror mapping. No ref was changed; Forge never rewrites GitHub history.`,
   );
   if (commit.tree.sha === firstCommitTree) {
     // Forge's own first commit: nothing to verify against, publish all of Forge main on it.
@@ -693,7 +695,9 @@ export async function stepMirror(plan: MirrorPlan, io: MirrorIO, now = Date.now)
           throw error;
         })
       : publish
-        ? await io.api<{ object: { sha: string } }>(`${prefix}/ref/heads/main`)
+        ? await io.api<{ object: { sha: string } }>(
+            `${prefix}/ref/heads/${githubBranchPath(seed.targetBranch)}`,
+          )
         : null;
     invariant(
       branch
@@ -702,7 +706,7 @@ export async function stepMirror(plan: MirrorPlan, io: MirrorIO, now = Date.now)
       'GITHUB_SYNC_CHANGED',
       branch
         ? `GitHub branch ${branch} already holds another commit. Forge never moves a Candidate branch.`
-        : 'GitHub main moved unexpectedly. Mirror stopped without changing its ref.',
+        : `GitHub ${githubBranch(seed.targetBranch)} moved unexpectedly. Mirror stopped without changing its ref.`,
     );
     if (current?.object.sha !== commit) {
       if (seed.notice && !branch && publish) await tellPusher(seed.repository, seed.notice, io);
@@ -726,7 +730,7 @@ export async function stepMirror(plan: MirrorPlan, io: MirrorIO, now = Date.now)
       }
       if (branch) await io.api(`${prefix}/refs`, 'POST', { ref: `refs/heads/${branch}`, sha: commit });
       else if (publish)
-        await io.api(`${prefix}/refs/heads/main`, 'PATCH', {
+        await io.api(`${prefix}/refs/heads/${githubBranchPath(seed.targetBranch)}`, 'PATCH', {
           sha: commit,
           force: false,
         });

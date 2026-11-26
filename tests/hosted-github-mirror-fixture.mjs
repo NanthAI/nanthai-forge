@@ -22,6 +22,7 @@ export function mirrorFixture({
   imported = false,
   /** The GitHub repository has no commit yet: its Git Data API answers 409 until one exists. */
   empty = false,
+  targetBranch = 'main',
 } = {}) {
   const objects = new Map(),
     states = new Map(),
@@ -89,6 +90,7 @@ export function mirrorFixture({
   const branches = new Map();
   const seed = {
     repository: 'synthetic/mirror',
+    ...(targetBranch !== 'main' ? { targetBranch } : {}),
     state: head,
     previous,
     acceptanceId: randomUUID(),
@@ -129,7 +131,7 @@ export function mirrorFixture({
     else if (path === '/repos/synthetic/mirror/branches?per_page=1') result = remote === null ? [] : [{}];
     else if (path.startsWith('/repos/synthetic/mirror/contents/') && method === 'PUT') {
       assert.equal(remote, null, 'the Contents API only seeds an empty repository');
-      assert.equal(body.branch, 'main');
+      assert.equal(body.branch, targetBranch);
       const file = { path: path.slice('/repos/synthetic/mirror/contents/'.length), mode: 'file' };
       const bytes = Buffer.from(body.content, 'base64');
       file.sha = gitHash('blob', bytes);
@@ -139,7 +141,7 @@ export function mirrorFixture({
       remote = digest(body.message).slice(0, 40);
       commits.set(remote, { tree, message: body.message, parent: null });
       result = { commit: { sha: remote, tree: { sha: tree } } };
-    } else if (route === 'ref/heads/main') result = { object: { sha: remote } };
+    } else if (route === `ref/heads/${targetBranch}`) result = { object: { sha: remote } };
     else if (route.startsWith('ref/heads/')) {
       const sha = branches.get(route.slice(10));
       if (!sha) throw new GithubMirrorApiError(404, 'GET ref', 0);
@@ -214,7 +216,7 @@ export function mirrorFixture({
       const sha = githubCommit(entry, body.parents[1]);
       commits.set(sha, entry);
       result = { sha };
-    } else if (route === 'refs/heads/main') {
+    } else if (route === `refs/heads/${targetBranch}`) {
       assert.equal(body.force, false);
       const pending = [body.sha];
       const ancestors = new Set();

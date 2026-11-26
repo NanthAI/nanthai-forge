@@ -3,6 +3,8 @@
 // Two-way sync protection (owner decision A1, Issue 0b481f5f): Forge never writes a ruleset
 // and the App holds no Administration. This reads what GitHub enforces on main (Metadata read)
 // and prints the ruleset a repository admin imports once.
+import { effectivePolicy } from '../src/autonomy-policy';
+import { githubBranch } from '../src/github-branch';
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { action } from './cliServer';
@@ -17,16 +19,24 @@ import { report } from './errors';
 /** The project's binding for this repository: proof it is connected and the connecting role. */
 export const binding = internalQuery({
   args: { projectId: v.id('hostedProjects'), actor: v.string(), repository: v.string() },
-  returns: v.union(v.null(), v.object({ role: v.union(v.null(), v.string()) })),
+  returns: v.union(
+    v.null(),
+    v.object({ role: v.union(v.null(), v.string()), targetBranch: v.optional(v.string()) }),
+  ),
   handler: async (ctx, input) => {
-    await accessibleProject(ctx, input.projectId, input.actor);
+    const project = await accessibleProject(ctx, input.projectId, input.actor);
     const row = await ctx.db
       .query('projectGithubBindings')
       .withIndex('by_project_and_name', q =>
         q.eq('projectId', input.projectId).eq('fullName', input.repository),
       )
       .unique();
-    return row ? { role: row.role ?? null } : null;
+    const mirror = effectivePolicy(project).githubMirror;
+    const targetBranch =
+      mirror?.repo.toLowerCase() === input.repository.toLowerCase() ? mirror.branch : undefined;
+    return row || targetBranch
+      ? { role: row?.role ?? null, ...(targetBranch ? { targetBranch } : {}) }
+      : null;
   },
 });
 /** Rulesets read per check; a repository rarely has more on main. */
@@ -42,7 +52,7 @@ export const check = action({
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read GitHub protection.');
       const repository = input.repository.toLowerCase();
       assertRepositoryName(repository);
-      const bound: { role: string | null } | null = await ctx.runQuery(
+      const bound: { role: string | null; targetBranch?: string } | null = await ctx.runQuery(
         makeFunctionReference<'query'>('githubProtection:binding'),
         { projectId: input.projectId, actor: user.subject, repository },
       );
@@ -51,7 +61,7 @@ export const check = action({
       const mint = await installationTokenMinter(ctx, input.projectId, repository);
       const api = githubRequest(await mint({ metadata: 'read' }));
       const rules = await api<{ type?: unknown; parameters?: unknown; ruleset_id?: unknown }[]>(
-        `/repos/${repository}/rules/branches/main`,
+        `/repos/${repository}/rules/branches/${encodeURIComponent(githubBranch(bound?.targetBranch))}`,
       );
       invariant(Array.isArray(rules), 'GITHUB_RESPONSE', 'GitHub returned unexpected branch rules.');
       const ids = [...new Set(rules.map(rule => rule.ruleset_id).filter(Number.isSafeInteger))].slice(
@@ -71,9 +81,10 @@ export const check = action({
         repository,
         appId,
         role,
+        ...(bound?.targetBranch ? { targetBranch: bound.targetBranch } : {}),
         ...findings,
-        advice: protectionAdvice(repository, findings, role),
-        ruleset: findings.protected ? null : forgeRuleset(appId),
+        advice: protectionAdvice(repository, findings, role, bound?.targetBranch),
+        ruleset: findings.protected ? null : forgeRuleset(appId, bound?.targetBranch),
       });
     } catch (error) {
       return report(error);

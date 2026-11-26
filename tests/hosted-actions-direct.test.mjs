@@ -385,6 +385,47 @@ test('dispatch retains custom and array runner labels, and self-hosted OIDC comp
     );
   }
 });
+test('dispatch, webhook and OIDC bind to the configured non-main control branch', async t => {
+  variables(t, {
+    GITHUB_APP_ID: '12345',
+    GITHUB_APP_PRIVATE_KEY: privateKey.export({ type: 'pkcs8', format: 'pem' }),
+  });
+  const controlBranch = 'release/trunk';
+  const s = await fixture(t, 2, 'ubuntu-latest', null, { controlBranch });
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    if (url.endsWith('/installation')) return Response.json({ id: 9 });
+    if (url.endsWith('/access_tokens')) return Response.json({ token: 'synthetic-token' });
+    const read = repositoryRead(url);
+    if (read) return read;
+    assert(url.endsWith('/forge-check.yml/dispatches'));
+    assert.equal(JSON.parse(init.body).ref, controlBranch);
+    return Response.json({ workflow_run_id: 123 });
+  });
+  await direct.dispatch._handler(
+    { runMutation: (ref, input) => s.raw(direct, getFunctionName(ref).split(':')[1], input) },
+    s.id,
+  );
+  assert.equal((await s.status(s.run.id)).executionId, '123');
+  const ref = `refs/heads/${controlBranch}`;
+  const oidcClaims = claims({ ref, workflow_ref: `${repository}/.github/workflows/forge-check.yml@${ref}` });
+  assert.equal((await verifyActionsOidc(oidc(oidcClaims), audience, async () => jwks())).ref, ref);
+  await assert.rejects(
+    s.call(sessions, 'session', s.input({ claims: JSON.stringify(claims()) })),
+    code('EVIDENCE_CHANGED'),
+  );
+  await assert.rejects(
+    s.call(webhooks, 'receive', { payload: JSON.stringify(webhook(s, 'requested', null)) }),
+    code('EVIDENCE_CHANGED'),
+  );
+  await s.call(webhooks, 'receive', {
+    payload: JSON.stringify(webhook(s, 'requested', null, { head_branch: controlBranch })),
+  });
+  assert.equal(
+    (await s.call(sessions, 'session', s.input({ claims: JSON.stringify(oidcClaims) }))).executionId,
+    '123',
+  );
+});
+
 function webhook(s, action = 'completed', conclusion = 'cancelled', overrides = {}) {
   return {
     action,

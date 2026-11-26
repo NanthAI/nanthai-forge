@@ -151,6 +151,7 @@ export const autonomyPolicy = v.object({
   githubMirror: v.optional(
     v.object({
       repo: v.string(),
+      branch: v.optional(v.string()),
       autoPush: v.boolean(),
       laneRefs: v.literal(false),
       inbound: v.optional(v.boolean()),

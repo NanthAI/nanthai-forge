@@ -101,7 +101,7 @@ http.route({
           repoIds: invalidation.repoIds.slice(offset, offset + 100),
         });
     }
-    // Two-way GitHub sync: a PR head into main gets a Forge check-only run and forge/verify.
+    // The two-way queue checks PRs targeting the project’s configured mirror branch.
     if (event === 'pull_request') {
       if (pull)
         await ctx.runMutation(makeFunctionReference<'mutation'>('projectGithubPullQueue:receive'), pull);

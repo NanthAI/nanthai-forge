@@ -334,6 +334,12 @@ Hosted policy is independent of uploaded local policy. Source exchange/return pr
 
 New hosted projects, including GitHub imports, receive the supervised preset.
 
+### GitHub mirror branch
+
+Forge's accepted Channel is `main`. To mirror it to a different GitHub branch,
+set `githubMirror.branch` on the project policy. Existing mirror settings use
+GitHub `main`. Changing the GitHub branch starts a new mapping for that target.
+
 ## Checks
 
 In hosted Review, select a check and a connected computer you own, then request the run. Other people's runners are disabled. Current project owners and contributors may queue on their own runners; the project owner cannot queue on a contributor's runner. To check a contributor's proposal on the owner's computer, the runner owner queues it. The requester, runner owner or project owner can cancel or update a request while they retain project write access. Revoked contributors cannot act on retained requests. Retries keep the original operation UUID and pins. The canonical owner's **Re-check on latest main** path remains project-owner-only.

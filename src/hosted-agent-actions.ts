@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
+import { githubBranch } from './github-branch.js';
 import { recoverLocalApply } from './hosted-apply-recovery.js';
 import { commandScopeProposal } from './check-command-scope.js';
 import { retainSyncHandoff, clearSyncHandoff } from './hosted-sync-handoff.js';
@@ -227,6 +228,7 @@ const currentSettings = z.object({
       machineId: z.string().optional(),
       repository: z.string().optional(),
       runsOn: githubActionsRunsOnSchema.optional(),
+      controlBranch: z.string().optional(),
       concurrencyBudget: z.number().safe().int().min(2).optional(),
       publicLogs: z.literal(true).optional(),
       submodules: z.array(submoduleAllowSchema).optional(),
@@ -258,7 +260,7 @@ function actionsRunnerSettings(configuration: z.infer<typeof currentSettings>['c
     mode: direct ? ('app-direct' as const) : ('legacy-credential' as const),
     repository: configuration.repository ?? null,
     workflow: '.github/workflows/forge-check.yml',
-    ref: 'main',
+    ref: githubBranch(configuration.controlBranch),
     runsOn: configuration.runsOn ?? 'ubuntu-latest',
     concurrencyBudget: configuration.concurrencyBudget ?? 12,
     runner: githubActionsRunnerDescription(configuration.runsOn ?? 'ubuntu-latest'),
@@ -403,12 +405,13 @@ async function configureRunnerRequest(
       !(command.labels && !['mac', 'self-hosted'].includes(command.provider ?? '')) &&
       !(command.repository && command.provider !== 'github-actions') &&
       !(command.runsOn !== undefined && command.provider !== 'github-actions') &&
+      !(command.controlBranch !== undefined && command.provider !== 'github-actions') &&
       !(command.concurrencyBudget !== undefined && command.provider !== 'github-actions') &&
       !(command.publicLogs !== undefined && command.provider !== 'github-actions') &&
       !(command.submodules !== undefined && command.provider !== 'github-actions') &&
       !(command.isolation !== undefined && command.provider !== 'github-actions'),
     'BAD_ARGUMENT',
-    'Choose provider:"self-hosted" (optional machineId and labels; mac is a legacy alias), provider:"github-actions" (repository, optional runsOn, concurrencyBudget, publicLogs, submodules and isolation), or a full configuration for another provider.',
+    'Choose provider:"self-hosted" (optional machineId and labels; mac is a legacy alias), provider:"github-actions" (repository, optional controlBranch, runsOn, concurrencyBudget, publicLogs, submodules and isolation), or a full configuration for another provider.',
   );
   const current = parseHostedResponse(
     currentSettings,
@@ -425,6 +428,9 @@ async function configureRunnerRequest(
       'BAD_ARGUMENT',
       'Pass repository:"OWNER/NAME" for the github-actions runner.',
     );
+    const controlBranch =
+      command.controlBranch ??
+      (currentActions?.repository === repository ? currentActions.controlBranch : undefined);
     // The owner's public-logs acceptance names one repository: it carries over only
     // while the repository stays the same, and publicLogs:false withdraws it.
     const publicLogs =
@@ -449,6 +455,7 @@ async function configureRunnerRequest(
         expected: command.expected !== undefined ? command.expected : current.configurationDigest,
         repository,
         runsOn: command.runsOn ?? 'ubuntu-latest',
+        ...(controlBranch ? { controlBranch } : {}),
         ...((command.concurrencyBudget ?? current.configuration?.concurrencyBudget) !== undefined
           ? { concurrencyBudget: command.concurrencyBudget ?? current.configuration?.concurrencyBudget }
           : {}),

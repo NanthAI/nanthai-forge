@@ -3656,6 +3656,10 @@
                   "type": "string",
                   "pattern": "^[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+$"
                 },
+                "controlBranch": {
+                  "type": "string",
+                  "minLength": 1
+                },
                 "installationId": {
                   "type": "string",
                   "minLength": 1

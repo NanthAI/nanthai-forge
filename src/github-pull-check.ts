@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
+import { githubBranch, githubBranchSchema } from './github-branch.js';
 import { z } from 'zod';
 import { checkInfrastructure } from './check-run-state.js';
 
@@ -44,10 +45,10 @@ export function pullOperationId() {
 }
 export const isPullOperation = (id: string) => id[14] === '8';
 const pullActions = new Set(['opened', 'synchronize', 'reopened']);
-/** The PR events that start a check: opened, synchronize (a new head) and reopened, into main.
+/** The PR events that start a check: opened, synchronize (a new head) and reopened, into the configured mirror branch.
  * A fork head (head repository is another one) is read like any other, but its check-only run
  * waits for a project owner's grant (GitHub's approve-and-run norm, Issue f7793473). Null for
- * every other action or base branch. Throws on a malformed payload (the webhook answers 400). */
+ * every other action. The queue selects the matching branch. Throws on a malformed payload (the webhook answers 400). */
 export function pullRequestEvent(payload: Record<string, unknown>) {
   const pr = payload.pull_request as
     | {
@@ -62,7 +63,8 @@ export function pullRequestEvent(payload: Record<string, unknown>) {
     throw new Error('Invalid repository');
   if (typeof payload.action !== 'string' || !pullActions.has(payload.action)) return null;
   if (!pr || typeof pr !== 'object') throw new Error('Invalid pull request');
-  if (pr.base?.ref !== 'main') return null;
+  const base = githubBranchSchema.safeParse(pr.base?.ref);
+  if (!base.success) throw new Error('Invalid pull request base branch');
   const number = pr.number,
     head = pr.head?.sha;
   if (
@@ -77,6 +79,7 @@ export function pullRequestEvent(payload: Record<string, unknown>) {
   return {
     repository,
     number: number as number,
+    ...(base.data !== 'main' ? { baseBranch: base.data } : {}),
     head,
     ...(payload.action === 'reopened' ? { reopened: true } : {}),
     // A deleted fork has no head repository; it is still not this repository.
@@ -165,12 +168,13 @@ export const pullStatus = (state: PullStatus['state'], description: string): Pul
  * changes reach main only through a pull request, and the Forge App alone may bypass (its
  * mirror publishes Forge main directly). Import once: GitHub Settings > Rules > Rulesets >
  * New ruleset > Import a ruleset, or `gh api -X POST repos/OWNER/REPO/rulesets --input FILE`. */
-export function forgeRuleset(appId: number) {
+export function forgeRuleset(appId: number, targetBranch?: string) {
+  const branch = githubBranch(targetBranch);
   return {
-    name: 'Forge two-way main',
+    name: `Forge two-way ${branch}`,
     target: 'branch',
     enforcement: 'active',
-    conditions: { ref_name: { include: ['refs/heads/main'], exclude: [] } },
+    conditions: { ref_name: { include: [`refs/heads/${branch}`], exclude: [] } },
     bypass_actors: [{ actor_id: appId, actor_type: 'Integration', bypass_mode: 'always' }],
     rules: [
       { type: 'deletion' },
@@ -241,15 +245,16 @@ export function protectionAdvice(
   repository: string,
   findings: ProtectionFindings,
   role: 'admin' | 'maintain' | null,
+  targetBranch?: string,
 ) {
   if (findings.protected)
-    return `${repository} main is protected: GitHub merges only after ${pullStatusContext} passes.${findings.bypass === null ? ' Forge cannot see bypass actors; confirm the Forge App is the only one.' : ''}`;
+    return `${repository} ${githubBranch(targetBranch)} is protected: GitHub merges only after ${pullStatusContext} passes.${findings.bypass === null ? ' Forge cannot see bypass actors; confirm the Forge App is the only one.' : ''}`;
   const steps = `Save the printed ruleset as forge-ruleset.json and import it once: GitHub ${repository} > Settings > Rules > Rulesets > New ruleset > Import a ruleset, or gh api -X POST repos/${repository}/rulesets --input forge-ruleset.json.`;
   const who =
     role === 'admin'
       ? ''
       : ` This needs the repository Admin role (or organization owner)${role === 'maintain' ? '; you connected with Maintain' : ''}: send the ruleset and these steps to an admin.`;
-  return `${repository} main is not protected for two-way sync; missing: ${findings.missing.join(', ')}. ${steps}${who}`;
+  return `${repository} ${githubBranch(targetBranch)} is not protected for two-way sync; missing: ${findings.missing.join(', ')}. ${steps}${who}`;
 }
 /** The PR check Lane's message, by public fields only. */
 export function pullMessage(input: { number: number; head: string; message: string; repository: string }) {

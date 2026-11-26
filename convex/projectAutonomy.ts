@@ -153,11 +153,11 @@ async function writePolicy(
     project.sourceAuthority?.mode === 'server' &&
     canonicalPayload(previous.githubMirror ?? null) !== canonicalPayload(mirror)
   )
-    await ensureMirrorRow(ctx, project._id, mirror.repo);
+    await ensureMirrorRow(ctx, project._id, mirror.repo, mirror.branch);
   // A mirror pointed at another repository re-points its queue row now, off the landing path
   // (one indexed read, only when this edit sets the mirror).
   if (command.githubMirror && policy.githubMirror?.autoPush)
-    await retargetGithubMirror(ctx, project._id, policy.githubMirror.repo);
+    await retargetGithubMirror(ctx, project._id, policy.githubMirror.repo, policy.githubMirror.branch);
   if (mirror?.autoPush && mirror.push === 'every-landing' && previous.githubMirror?.push !== mirror.push) {
     const queue = await mirrorRow(ctx, project._id);
     if (queue?.hold && !queue.hold.red) await wakeHeldMirror(ctx, queue, Date.now(), 'every');

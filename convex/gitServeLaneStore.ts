@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
+import { githubBranch } from '../src/github-branch';
 import { v } from 'convex/values';
 import { internalMutation, internalQuery } from './server';
 import type { MutationCtx, QueryCtx } from './_generated/server';
@@ -97,19 +98,18 @@ type Parent = {
 /** The parent of a Lane commit on a project whose main has a GitHub mirror: main's Git commit for
  * the Lane's base, as the mirror published it (the exact receipt first, else another publication
  * of that State). */
+type MirrorTarget = Pick<Doc<'projectGithubMirrors'>, 'mapping' | 'repository' | 'targetBranch'>;
 async function mirrorParent(
   ctx: Ctx,
   projectId: Id<'hostedProjects'>,
   lane: Doc<'projectHostedOverlapLanes'>,
-  mapping: string | null,
-  repository: string,
+  mirror: MirrorTarget,
 ): Promise<Parent | null> {
   const value = await mirroredBase(
     ctx,
     projectId,
     { head: lane.baseHead, receiptId: lane.baseReceiptId },
-    mapping,
-    repository,
+    mirror,
   );
   return value
     ? { commit: value.commit, tree: value.tree, legacy: value.publication !== 'tracked', listing: null }
@@ -122,8 +122,7 @@ export async function mirroredBase(
   ctx: Ctx,
   projectId: Id<'hostedProjects'>,
   base: { head: string; receiptId: string },
-  mapping: string | null,
-  repository: string,
+  mirror: MirrorTarget,
   onPending?: (job: Doc<'projectGithubMirrorJobs'>) => Promise<boolean>,
 ) {
   const lane = { baseHead: base.head, baseReceiptId: base.receiptId };
@@ -145,11 +144,15 @@ export async function mirroredBase(
       .order('desc')
       .take(8)),
   ];
-  const currentJobs = jobs.filter(job => job.repository.toLowerCase() === repository.toLowerCase());
+  const currentJobs = jobs.filter(
+    job =>
+      job.repository.toLowerCase() === mirror.repository.toLowerCase() &&
+      githubBranch(job.targetBranch) === githubBranch(mirror.targetBranch),
+  );
   let value = null;
   for (const job of currentJobs)
     if (!value && job.status === 'done' && !job.inbound) value = parse(job.mapping);
-  const baseCommit = value ?? parse(mapping);
+  const baseCommit = value ?? parse(mirror.mapping);
   if (!baseCommit && onPending) {
     for (const job of currentJobs)
       if (!job.inbound && job.state === base.head && ['queued', 'running', 'retrying'].includes(job.status))
@@ -212,7 +215,7 @@ export const plan = internalQuery({
     const mirrored =
       !!mirror?.mapping && mirror.repository.toLowerCase() === history?.repository.toLowerCase();
     const parent = mirrored
-      ? await mirrorParent(ctx, projectId, lane, mirror.mapping, mirror.repository)
+      ? await mirrorParent(ctx, projectId, lane, mirror)
       : history
         ? await forgeParent(ctx, projectId, lane.baseHead, history, packs)
         : null;

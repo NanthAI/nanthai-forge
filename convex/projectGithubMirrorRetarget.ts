@@ -3,6 +3,7 @@
 // The mirror repository changed (Issue 68361cd5, SM-E): re-point the queue row, off the landing
 // hot path. `projectGithubMirrors.repository` was written only at insert, so every later publish
 // became a failed job that never became active and no surface showed it.
+import { githubBranch } from '../src/github-branch';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { clearMirrorStop, mirrorRow } from './projectGithubMirrorRows';
@@ -28,10 +29,17 @@ const superseded = (repo: string) =>
 /** Point the queue at `repo`, drop what belonged to the old repository (its mapping and its open or
  * stranded publish jobs, marked done with this reason) and leave the queue ready for recovery
  * to queue current main, or for the next accepted State to enqueue a normal job. A case-only change keeps the mapping. Returns whether it changed. */
-export async function retargetGithubMirror(ctx: MutationCtx, projectId: Id<'hostedProjects'>, repo: string) {
+export async function retargetGithubMirror(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  repo: string,
+  targetBranch?: string,
+) {
   const queue = await mirrorRow(ctx, projectId);
-  if (!queue || queue.repository === repo) return false;
-  if (queue.repository.toLowerCase() === repo.toLowerCase()) {
+  if (!queue) return false;
+  const sameBranch = githubBranch(queue.targetBranch) === githubBranch(targetBranch);
+  if (sameBranch && queue.repository === repo) return false;
+  if (sameBranch && queue.repository.toLowerCase() === repo.toLowerCase()) {
     await ctx.db.patch(queue._id, { repository: repo, repositoryKey: repo.toLowerCase() });
     return true;
   }
@@ -43,12 +51,17 @@ export async function retargetGithubMirror(ctx: MutationCtx, projectId: Id<'host
   open.push(...(await queuedJobs(ctx, projectId, 100)).filter(job => job._id !== queue.activeId));
   open.push(...(await strandedMirrorJobs(ctx, projectId, null)));
   for (const job of open)
-    await ctx.db.patch(job._id, { status: 'done', step: job.step + 1, detail: superseded(repo) });
+    await ctx.db.patch(job._id, {
+      status: 'done',
+      step: job.step + 1,
+      detail: superseded(sameBranch ? repo : `${repo}:${githubBranch(targetBranch)}`),
+    });
   // The new repository starts unstopped; an old stop must not name it (friction 28e84c06).
   await clearMirrorStop(ctx, projectId);
   await ctx.db.patch(queue._id, {
     repository: repo,
     repositoryKey: repo.toLowerCase(),
+    targetBranch: targetBranch === 'main' ? undefined : targetBranch,
     activeId: null,
     mapping: null,
     mirroredAt: undefined,

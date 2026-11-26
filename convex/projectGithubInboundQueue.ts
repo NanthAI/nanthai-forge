@@ -221,6 +221,7 @@ export async function ensureInbound(
     receiptId: `inbound:${crypto.randomUUID()}`,
     sequence: 0,
     repository: queue.repository,
+    ...(queue.targetBranch ? { targetBranch: queue.targetBranch } : {}),
     authorityEpoch: project.sourceAuthority!.epoch,
     status: 'queued',
     step: 0,
@@ -243,12 +244,15 @@ export const receive = internalMutation({
   args: { repository: v.string(), ref: v.string(), after: v.string() },
   returns: v.null(),
   handler: async (ctx, input) => {
-    if (input.ref !== 'refs/heads/main' || !/^[0-9a-f]{40}$/.test(input.after)) return null;
+    if (!input.ref.startsWith('refs/heads/') || !/^[0-9a-f]{40}$/.test(input.after)) return null;
     const key = input.repository.toLowerCase();
+    const branch = input.ref.slice('refs/heads/'.length);
     // A repository has one stored binding; operator overrides may name it for a few projects.
     for (const queue of await ctx.db
       .query('projectGithubMirrors')
-      .withIndex('by_repository_key', q => q.eq('repositoryKey', key))
+      .withIndex('by_repository_and_target_branch', q =>
+        q.eq('repositoryKey', key).eq('targetBranch', branch === 'main' ? undefined : branch),
+      )
       .take(8)) {
       const mapping = queue.mapping ? githubSyncCommitSchema.parse(JSON.parse(queue.mapping)) : null;
       if (mapping?.commit === input.after) continue;

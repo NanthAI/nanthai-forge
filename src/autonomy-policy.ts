@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
+import { githubBranchSchema } from './github-branch.js';
 import { auditCadencePolicySchema, landingModeSchema } from './landing-mode.js';
 import { z } from 'zod';
 import { deploySettingsSchema } from './deploy-targets.js';
@@ -30,6 +31,7 @@ export const autonomyPolicySchema = z.object({
         .string()
         .regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/)
         .refine(value => value.split('/').every(part => part !== '.' && part !== '..')),
+      branch: githubBranchSchema.optional(),
       autoPush: z.boolean(),
       laneRefs: z.literal(false),
       /** Two-way sync: a push to GitHub main comes back in as a Forge landing (needs autoPush). */
@@ -366,6 +368,7 @@ export function editedPolicy(previous: AutonomyPolicy, command: PolicyWrite): Au
   if (policy.githubMirror) {
     const old = previous.githubMirror;
     if (old?.repo.toLowerCase() === policy.githubMirror.repo.toLowerCase()) {
+      if (old.branch !== undefined) policy.githubMirror.branch ??= old.branch;
       if (old.push !== undefined) policy.githubMirror.push ??= old.push;
       if (old.pushNowPaths !== undefined) policy.githubMirror.pushNowPaths ??= old.pushNowPaths;
     }
