@@ -61,15 +61,15 @@ test('format scripts: the conventional check and its fixer', () => {
 });
 
 test('only bench-owned files are formatted, into a deterministic derived base commit', async () => {
-  const f = fixture({ '.github/workflows/bench-ci.yml': 'on: UGLY\n', 'src/a.js': 'ok\n' });
+  const f = fixture({ '.bench/settings.yml': 'setting: UGLY\n', 'src/a.js': 'ok\n' });
   try {
     const run = () => baseStatic({ ...f, env });
     const out = await run();
     assert.notEqual(out.sha, f.baseSha);
-    assert.deepEqual(out.fixed, ['.github/workflows/bench-ci.yml']);
+    assert.deepEqual(out.fixed, ['.bench/settings.yml']);
     assert.equal(out.check, 'fmt:check');
     assert.equal(git(f.meta, 'rev-parse', `${out.sha}^`), f.baseSha);
-    assert.equal(git(f.meta, 'show', `${out.sha}:.github/workflows/bench-ci.yml`), 'on: pretty');
+    assert.equal(git(f.meta, 'show', `${out.sha}:.bench/settings.yml`), 'setting: pretty');
     assert.equal(git(f.meta, 'show', `${out.sha}:src/a.js`), 'ok');
     assert.deepEqual(git(f.meta, 'diff', '--name-only', f.baseSha, out.sha).split('\n'), out.fixed);
     assert.equal((await run()).sha, out.sha, 'same base, same derived commit');
@@ -80,9 +80,24 @@ test('only bench-owned files are formatted, into a deterministic derived base co
 });
 
 test('an upstream file that fails the check is refused, never edited', async () => {
-  const f = fixture({ '.bench/ci.sh': 'UGLY\n', 'src/a.js': 'UGLY\n' });
+  const f = fixture({ '.bench/settings.yml': 'UGLY\n', 'src/a.js': 'UGLY\n' });
   try {
-    await assert.rejects(baseStatic({ ...f, env }), /outside bench-owned files \(src\/a\.js\)/);
+    await assert.rejects(baseStatic({ ...f, env }), /outside unprotected bench-owned files \(src\/a\.js\)/);
+  } finally {
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test('base-static cannot derive a protected workflow or check entry point into a reset that needs owner approval', async () => {
+  const f = fixture({ '.github/workflows/bench-ci.yml': 'on: UGLY\n', '.bench/ci.sh': 'UGLY\n' });
+  try {
+    await assert.rejects(baseStatic({ ...f, env }), error => {
+      assert.match(error.message, /\.github\/workflows\/bench-ci\.yml/);
+      assert.match(error.message, /\.bench\/ci\.sh/);
+      return true;
+    });
+    assert.equal(git(f.baseCheckout, 'status', '--porcelain'), '');
+    assert.equal(git(f.meta, 'fsck', '--no-reflogs', '--unreachable'), '', 'no derived commit was written');
   } finally {
     rmSync(f.dir, { recursive: true, force: true });
   }

@@ -55,6 +55,12 @@ import { oracleBranchRecord } from './oracle-branches.mjs';
 import { parseReplayKey, replayBatch, replayBatches } from './replay-cells.mjs';
 import { coordinationBatch, coordinationBatches, parseCoordinationKey } from './cells.mjs';
 import { orphanResult } from './cell-outcome.mjs';
+import {
+  validationEvidence,
+  validationQueues,
+  validationRegistration,
+  validationSelection,
+} from './validation-proof.mjs';
 
 let B, FREEZE;
 const flags = process.argv.slice(2);
@@ -63,6 +69,7 @@ const dry = flags.includes('--dry');
 const reps = Number(flag('--reps') ?? DESIGN.reps);
 const only = flag('--only');
 const coordination = flags.includes('--coordination');
+const validationRelease = flag('--record-validation');
 const replay = parseReplayKey(only);
 const fakeChange = dry && flags.includes('--fake-version-change');
 // Convex list-price stop for the whole run (lead: report before going past $5).
@@ -117,6 +124,7 @@ export function staleBenchFreeze(text) {
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) await main();
 
 async function main() {
+  if (flags.includes('--record-validation')) validationSelection(validationRelease, only, dry);
   B = benchRootOrExit();
   const config = readJson(join(B, 'config.json'));
   const cli = benchCli({ config });
@@ -162,7 +170,7 @@ async function main() {
   mkdirSync(batchRoot, { recursive: true });
   const suffix = dry ? '-dry' : '';
   const ids = loadTasks(B).map(t => t.id);
-  plan(B); // fails loudly on a changed task list
+  const registeredPlan = plan(B); // fails loudly on a changed task list
 
   /** Results of a cell id; a cell process gone without one is closed as interrupted. */
   function cellResult(cellId) {
@@ -191,18 +199,40 @@ async function main() {
         // Cells outlive a killed driver: wait for them, then close the batch.
         // A coordination batch names its cell slots (arm-stack) in arms.json.
         const slots = existsSync(join(dir, 'arms.json')) ? readJson(join(dir, 'arms.json')) : DESIGN.arms;
+        const registration = existsSync(join(dir, 'validation.json'))
+          ? readJson(join(dir, 'validation.json'))
+          : null;
+        const interruptedCells = [];
         for (const arm of slots) {
           const idFile = join(dir, `${arm}.cell`);
-          if (!existsSync(idFile)) continue;
-          for (let r; (r = cellResult(readFileSync(idFile, 'utf8').trim()))?.running;) {
+          const key = registration?.cells.find(cell => cell.slot === arm)?.key ?? arm;
+          if (!existsSync(idFile)) {
+            if (registration) interruptedCells.push({ key, cellId: null, voided: ['cell did not start'] });
+            continue;
+          }
+          const cellId = readFileSync(idFile, 'utf8').trim();
+          let r;
+          while ((r = cellResult(cellId))?.running) {
             say(`WAIT ${d}: cell pid ${r.running} still running after the driver stopped`);
             await wait(30_000);
           }
+          if (registration)
+            interruptedCells.push({
+              key,
+              cellId,
+              voided: r?.voided ?? ['no result'],
+            });
         }
         writeFileSync(
           file,
           JSON.stringify(
-            { key, batchId: d, interrupted: true, voided: ['interrupted (driver gone)'] },
+            {
+              key,
+              batchId: d,
+              interrupted: true,
+              voided: ['interrupted (driver gone)'],
+              ...(registration && { validation: validationEvidence(B, interruptedCells) }),
+            },
             null,
             1,
           ) + '\n',
@@ -331,6 +361,16 @@ async function main() {
         await wait(RETRY_MS);
         continue;
       }
+      const validation = validationRelease
+        ? validationRegistration(
+            validationRelease,
+            b,
+            start,
+            registeredPlan,
+            config,
+            await validationQueues(config, B),
+          )
+        : null;
       mkdirSync(dir);
       writeFileSync(
         join(dir, 'driver.json'),
@@ -338,6 +378,10 @@ async function main() {
       );
       writeFileSync(join(dir, 'arms.json'), JSON.stringify(b.cells.map(c => c.slot ?? c.arm)) + '\n');
       writeFileSync(join(dir, 'mode.json'), JSON.stringify(b.mode) + '\n');
+      if (validation)
+        writeFileSync(join(dir, 'validation.json'), JSON.stringify(validation, null, 2) + '\n', {
+          flag: 'wx',
+        });
       if (b.diagnostic)
         writeFileSync(
           join(dir, 'diagnostic-plan.json'),
@@ -417,6 +461,7 @@ async function main() {
         cells,
         runner,
         voided,
+        ...(validation && { validation: validationEvidence(B, cells) }),
         // Every cell crashed or was refused before any agent ran: not an attempt (plan.mjs nextBatch).
         setupOnly: cells.length > 0 && cells.every(c => c.setupCrash || c.refused),
       };

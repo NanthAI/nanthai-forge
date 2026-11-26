@@ -2,9 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 // B1.5d pinned harness (B3): a clean checkout of one landed commit of nanthai-forge, outside
-// every Lane root, that the driver and cells run from. The Convex meter needs the convex
-// package, so node_modules links to the installed CLI build's dependencies (read-only), found
-// through the product installation (cli-install.mjs), never a machine path.
+// every Lane root, that the driver and cells run from. The pin owns the installed CLI
+// modules and dependencies so the updater can retire the donor without breaking a cell.
 //   node scripts/bench-t3code/pin.mjs [STATE_HEAD | GIT_SHA]   -> prints the checkout path
 // Forge main is the authority (its State heads are 64 hex; the CLI's `.commit` is one). The
 // checkout itself is a Git commit of the GitHub mirror, so the pin maps the State head to
@@ -13,7 +12,20 @@
 // State head it exits with BENCH_PIN_WAITS_FOR_MIRROR and says exactly what it waits for.
 // No argument pins the CLI build's own commit, which is what the version record compares.
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, realpathSync, symlinkSync } from 'node:fs';
+import {
+  constants,
+  cpSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readlinkSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+} from 'node:fs';
 import { join, dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { benchRootOrExit } from './bench-root.mjs';
@@ -106,6 +118,61 @@ export function cliCommit(donor) {
   }
 }
 
+const RUNTIME = join('.git', 'bench-runtime');
+const RUNTIME_DIRS = ['dist', 'node_modules'];
+const ownsRuntime = dir =>
+  RUNTIME_DIRS.every(name => lstatSync(join(dir, RUNTIME, name), { throwIfNoEntry: false })?.isDirectory());
+const hasBinding = (dir, name) => {
+  try {
+    return readlinkSync(join(dir, name)) === join(RUNTIME, name);
+  } catch {
+    return false;
+  }
+};
+
+function materializeRuntime(dir, donor, expectedSha, donorCommit, mirror) {
+  const runtime = join(dir, RUNTIME);
+  if (!ownsRuntime(dir)) {
+    const source = resolvePin({ wanted: donorCommit, mirror });
+    if (!source.ok || source.gitSha !== expectedSha)
+      throw Error('BENCH_PIN_DONOR_MISMATCH: select an installed CLI build for this exact Git commit');
+    const staging = mkdtempSync(runtime + '-');
+    try {
+      for (const name of RUNTIME_DIRS)
+        cpSync(realpathSync(join(donor, name)), join(staging, name), {
+          recursive: true,
+          verbatimSymlinks: true,
+          mode: constants.COPYFILE_FICLONE,
+        });
+      if (cliCommit(donor) !== donorCommit)
+        throw Error('BENCH_PIN_DONOR_CHANGED: retry with the exact build');
+      try {
+        renameSync(staging, runtime);
+      } catch (error) {
+        if (!ownsRuntime(dir)) throw error;
+      }
+    } finally {
+      rmSync(staging, { force: true, recursive: true });
+    }
+  }
+  for (const name of RUNTIME_DIRS) {
+    if (hasBinding(dir, name)) continue;
+    const binding = join(dir, name);
+    const info = lstatSync(binding, { throwIfNoEntry: false });
+    if (info && !info.isSymbolicLink())
+      throw Error(`BENCH_PIN_RUNTIME_PATH: move the existing ${name} out of the pinned checkout and retry`);
+    // Rename a link into place so an existing (including broken) updater link is replaced atomically.
+    const staging = mkdtempSync(join(dir, '.git', 'bench-link-'));
+    try {
+      const link = join(staging, name);
+      symlinkSync(join(RUNTIME, name), link);
+      renameSync(link, binding);
+    } finally {
+      rmSync(staging, { force: true, recursive: true });
+    }
+  }
+}
+
 /** Materialise the pin. `git`/`forgeCapabilities` are injectable for tests. */
 export function pinHarness({
   benchRoot,
@@ -133,7 +200,8 @@ export function pinHarness({
       encoding: 'utf8',
     }).trim(),
 }) {
-  const want = wanted ?? cliCommit(donor);
+  const donorCommit = cliCommit(donor);
+  const want = wanted ?? donorCommit;
   if (!want)
     throw Object.assign(Error('BENCH_PIN_NO_CLI_COMMIT: no argument and the CLI build has no .commit'), {
       code: 'BENCH_PIN_NO_CLI_COMMIT',
@@ -150,11 +218,12 @@ export function pinHarness({
     git(dir, 'checkout', '-q', 'FETCH_HEAD');
   }
   if (git(dir, 'rev-parse', 'HEAD') !== r.gitSha) throw Error('BENCH_PIN_MISMATCH');
-  if (!existsSync(join(dir, 'node_modules')))
-    symlinkSync(realpathSync(join(donor, 'node_modules')), join(dir, 'node_modules'));
-  // The cells run the checkout's scripts, which import the built CLI; dist is the donor build of this commit.
-  if (!existsSync(join(dir, 'dist')) && existsSync(join(donor, 'dist')))
-    symlinkSync(realpathSync(join(donor, 'dist')), join(dir, 'dist'));
+  const donorMirror =
+    mirror ??
+    (!ownsRuntime(dir) && STATE_HEAD.test(donorCommit ?? '')
+      ? parseMirror(forgeCapabilities(forgeRoot))
+      : null);
+  materializeRuntime(dir, donor, r.gitSha, donorCommit, donorMirror);
   return { dir, gitSha: r.gitSha, stateHead: STATE_HEAD.test(want) ? want : null, via: r.via };
 }
 
@@ -166,7 +235,7 @@ export function existingPin({ benchRoot, wanted, donor, mirror }) {
   if (!r.ok) return { done: false, reason: r.message, waitsFor: r.waitsFor, code: r.code };
   const dir = join(benchRoot, 'harness', r.gitSha.slice(0, 12));
   return {
-    done: existsSync(join(dir, '.git')) && existsSync(join(dir, 'node_modules')),
+    done: ownsRuntime(dir) && RUNTIME_DIRS.every(name => hasBinding(dir, name)),
     dir,
     gitSha: r.gitSha,
   };

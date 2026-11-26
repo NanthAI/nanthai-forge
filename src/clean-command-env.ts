@@ -9,6 +9,22 @@ import type { Check } from './work-types.js';
 /** No declared passthrough: these commands are chosen by the repository, not by a check definition. */
 const NO_PASSTHROUGH = { env: [], credentials: [] } as Pick<Check, 'env' | 'credentials'> as Check;
 
+/** A cancelled command's descendants can still be exiting as their scratch is removed. */
+export function removeCommandScratch(directory: string) {
+  const remove = { recursive: true, force: true } as const;
+  try {
+    rmSync(directory, remove);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOTEMPTY') throw error;
+    try {
+      rmSync(directory, { ...remove, maxRetries: 4, retryDelay: 50 });
+    } catch (retry) {
+      if ((retry as NodeJS.ErrnoException).code !== 'ENOTEMPTY') throw retry;
+      process.stderr.write('Forge scratch cleanup was interrupted (ENOTEMPTY); private scratch retained.\n');
+    }
+  }
+}
+
 /**
  * The clean check environment for a repository-chosen command Forge runs on the agent's machine
  * outside a check: start-time dependency installs and local preflight. Private HOME, XDG and temp
@@ -25,9 +41,9 @@ export function cleanCommandEnvironment(label: string) {
     const env: NodeJS.ProcessEnv = { ...built.env };
     const corepack = join(homedir(), '.cache', 'node', 'corepack');
     if (existsSync(corepack)) env.COREPACK_HOME = corepack;
-    return { env, dispose: () => rmSync(directory, { recursive: true, force: true }) };
+    return { env, dispose: () => removeCommandScratch(directory) };
   } catch (error) {
-    rmSync(directory, { recursive: true, force: true });
+    removeCommandScratch(directory);
     throw error;
   }
 }

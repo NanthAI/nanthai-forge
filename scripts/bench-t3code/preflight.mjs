@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-// B1.5d preflight: local watcher signals, one Convex read (meter), one commit status
-// on the fixed base commit (GitHub clock offset), and otherwise read-only checks.
-//   node scripts/bench-t3code/preflight.mjs [--dry]
+// B1.5d preflight: local watcher signals, a Convex meter probe and a GitHub clock probe.
+//   node scripts/bench-t3code/preflight.mjs [--dry] [--read-only]
 // Prints one OK / WARN / NO-GO line per check, then GO or NO-GO with the reasons; exit 0 = GO.
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, mkdirSync } from 'node:fs';
@@ -47,6 +46,7 @@ export async function main({ benchRoot, filesystemProbe = probeFilesystemEvents,
     return 1;
   }
   const dry = process.argv.includes('--dry');
+  const readOnly = process.argv.includes('--read-only');
   let config;
   try {
     config = JSON.parse(readFileSync(join(B, 'config.json'), 'utf8'));
@@ -241,15 +241,17 @@ export async function main({ benchRoot, filesystemProbe = probeFilesystemEvents,
     },
     setupHint('fork'),
   );
-  await tryRun('GitHub clock', async () => {
-    const c = await measureSkew(config.github.mainBase);
-    check(
-      'GitHub clock',
-      Math.abs(c.skewMs) < 5000,
-      `stored timestamps ${(c.skewMs / 1000).toFixed(1)} s from real time (round trip ${c.roundTripMs} ms); every cell measures and corrects it, and voids if it moves`,
-      true,
-    );
-  });
+  if (readOnly) check('GitHub clock', false, 'commit status write skipped in read-only mode', true);
+  else
+    await tryRun('GitHub clock', async () => {
+      const c = await measureSkew(config.github.mainBase);
+      check(
+        'GitHub clock',
+        Math.abs(c.skewMs) < 5000,
+        `stored timestamps ${(c.skewMs / 1000).toFixed(1)} s from real time (round trip ${c.roundTripMs} ms); every cell measures and corrects it, and voids if it moves`,
+        true,
+      );
+    });
   await tryRun('runners', async () => {
     const res = await networkFetch('https://www.githubstatus.com/api/v2/components.json');
     const actions = (await res.json()).components.find(c => c.name === 'Actions');

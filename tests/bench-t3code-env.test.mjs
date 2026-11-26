@@ -3,7 +3,15 @@
 // Bench environment setup/teardown (Issue e082f30a). Fakes only: no GitHub, no Forge, no installs.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, existsSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  existsSync,
+  readFileSync,
+  writeFileSync,
+  rmSync,
+  symlinkSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -22,7 +30,7 @@ import {
 } from '../scripts/bench-t3code/env.mjs';
 import { parseArgs } from '../scripts/bench-t3code/setup.mjs';
 import { repository, rulesetName } from '../scripts/bench-t3code/github-arm.mjs';
-import { parseMirror, pinHarness, resolvePin } from '../scripts/bench-t3code/pin.mjs';
+import { existingPin, parseMirror, pinHarness, resolvePin } from '../scripts/bench-t3code/pin.mjs';
 import { cliGitCommit, snapshotProblems } from '../scripts/bench-t3code/versions.mjs';
 import { setupHint } from '../scripts/bench-t3code/preflight.mjs';
 import { importProject } from '../scripts/bench-t3code/forge-import.mjs';
@@ -468,6 +476,29 @@ test('pinHarness: fetches the mapped Git commit into harness/<12>, and refuses a
     e => e.code === 'BENCH_PIN_WAITS_FOR_MIRROR' && /contain State/.test(e.waitsFor),
   );
   assert.equal(existsSync(join(B2, 'harness')), false);
+});
+
+test('a pin repairs old CLI links and keeps the qualified runtime when the updater removes the donor', () => {
+  const B = bench();
+  const donor = join(B, 'builds', GIT);
+  const dir = join(B, 'harness', GIT.slice(0, 12));
+  mkdirSync(join(dir, '.git'), { recursive: true });
+  for (const name of ['dist', 'node_modules']) {
+    const source = join(donor, name === 'node_modules' ? 'dependencies' : name);
+    mkdirSync(source, { recursive: true });
+    writeFileSync(join(source, 'file.js'), name);
+    if (name === 'node_modules') symlinkSync(source, join(donor, name));
+    symlinkSync(join(donor, name), join(dir, name));
+  }
+  writeFileSync(join(donor, '.commit'), GIT);
+  const options = { benchRoot: B, wanted: GIT, donor, git: () => GIT };
+  assert.equal(existingPin(options).done, false, 'legacy build links do not qualify as a stable pin');
+  pinHarness(options);
+  rmSync(donor, { recursive: true });
+  pinHarness(options);
+  assert.equal(existingPin(options).done, true);
+  assert.equal(readFileSync(join(dir, 'dist', 'file.js'), 'utf8'), 'dist');
+  assert.equal(readFileSync(join(dir, 'node_modules', 'file.js'), 'utf8'), 'node_modules');
 });
 
 test('version record: a State-head CLI commit matches GitHub main through the mirror mapping', () => {

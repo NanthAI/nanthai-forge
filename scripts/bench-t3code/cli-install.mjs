@@ -3,7 +3,7 @@
 // Where the installed Forge CLI lives, found the way the product installs it (Issue 7af26482,
 // docs/operations/cli-update.md): an installation DIR whose `current` selects one build
 // (DIR/builds/HEAD), entered by the PATH launcher `nforge` (`exec NODE 'DIR/launcher.mjs'`).
-// The bench links the pinned harness's node_modules to that build and holds landings with the
+// The pinned harness copies its runtime from that build. The bench holds landings with the
 // product's measurement hold, DIR/.freeze. The bench runs on an installation of its own
 // (`benchCli`, setup step bench-cli), never on the builders'. Reads only; no network.
 //   1. FORGE_CLI_HOME: an installation DIR (has `current`) or one build (has dist/cli-entry.js)

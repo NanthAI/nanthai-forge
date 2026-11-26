@@ -25,7 +25,7 @@ import { taskIdentity } from './task-identity.mjs';
 import { launchAgent, agentOf, killAgents, claudeTokenFile, claudeTokenProblem } from './agent.mjs';
 import { prompt } from './prompt.mjs';
 import * as github from './github-arm.mjs';
-import { forgeArm, readCalls, openLanes } from './forge-arm.mjs';
+import { forgeArm, readCalls } from './forge-arm.mjs';
 import { convexMeter } from './meter.mjs';
 import { landingFields, cellSummary } from './score.mjs';
 import { oracleCommit, runOracle, grade } from './oracle.mjs';
@@ -317,21 +317,7 @@ try {
 // Lanes an earlier cell left open (a crash while a landing was in flight) would raise notices
 // and hold files in this one: close them first; one that will not close voids the cell.
 if (forge) {
-  result.leftoverLanes = [];
-  for (const l of openLanes(ledger)) {
-    const prior =
-      l.callLog && l.task ? forgeArm(config.forge, { callLog: l.callLog, ws, ledger, cellDir: dir }) : null;
-    const landing = prior ? await prior.landing(l.task, l.laneId, { deadlineMs: 0 }) : null;
-    const r = landing?.inFlight?.length
-      ? { error: 'Earlier task landing still in flight; Lane kept' }
-      : await forge.abandonById(l.laneId, 'bench: Lane left open by an earlier cell');
-    result.leftoverLanes.push({
-      laneId: l.laneId,
-      since: l.at,
-      closed: !r.error,
-      error: r.error?.slice(-200),
-    });
-  }
+  result.leftoverLanes = await forge.recoverLeftoverLanes();
   const stuck = result.leftoverLanes.filter(l => !l.closed);
   if (stuck.length)
     await crash(`Lanes left open by an earlier cell would not close: ${stuck.map(l => l.laneId).join(',')}`);

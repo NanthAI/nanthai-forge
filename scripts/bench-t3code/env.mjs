@@ -26,7 +26,7 @@ import { dirname, join, relative, isAbsolute, resolve } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { checkPlan, planPath } from './plan.mjs';
 import { sharedDeps, buildSharedDeps, linkDepsAsync, toolchainEnv } from './deps.mjs';
-import { baseStatic } from './base-static.mjs';
+import { baseRepairPath, baseStatic } from './base-static.mjs';
 import { repository, rulesetName } from './github-arm.mjs';
 import { pinHarness, existingPin, cliDonor, cliCommit, parseMirror } from './pin.mjs';
 import { benchCli, builderInstallations } from './cli-install.mjs';
@@ -501,7 +501,7 @@ export function buildSteps(ctx) {
     commands: () => [
       'nforge agent <forge root> capabilities  # githubMirror.mirroredHead -> gitHead',
       'git fetch --depth 1 https://github.com/NanthAI/nanthai-forge <gitHead>',
-      'link node_modules to the CLI build',
+      'copy dist and node_modules from the matching CLI build into the pinned checkout',
     ],
     isDone: async () => {
       const want = cliCommit(donor());
@@ -694,17 +694,17 @@ export function buildSteps(ctx) {
 
   step({
     id: 'base-static',
-    title: "Base passes the repository's own format check (bench-owned files only)",
+    title: "Base passes the repository's own format check (unprotected bench files only)",
     outward: false,
     cost: {
       ...COST0,
       diskGb: 0.05,
       minutes: 1,
-      note: 'one APFS clone of the base checkout with deps linked; the fixer touches only .bench/ and bench-* workflows',
+      note: 'one APFS clone of the base checkout with deps linked; only unprotected .bench/ changes can go into a derived base',
     },
     commands: () => [
       `npm run -s <fmt:check|format:check> in a clone of ${L().baseCheckout} (bench toolchain)`,
-      'if only bench-owned files fail: npm run -s <fmt|format>, then a derived base commit (parent = base) and config github/forge.mainBase = it',
+      'if only unprotected bench-owned files fail: npm run -s <fmt|format>, then a derived base commit (parent = base) and config github/forge.mainBase = it',
     ],
     isDone: async () => {
       const done = cfgSafe().baseStatic;
@@ -713,12 +713,18 @@ export function buildSteps(ctx) {
         done:
           Boolean(L().baseSha) &&
           done?.sha === L().baseSha &&
+          Array.isArray(done.fixed) &&
+          done.fixed.every(baseRepairPath) &&
           (!fork || done.sha === done.from || Boolean(done.published)),
       };
     },
     run: async () => {
       const prior = cfgSafe().baseStatic;
       if (prior?.sha === L().baseSha && prior.sha !== prior.from) {
+        if (!Array.isArray(prior.fixed) || !prior.fixed.every(baseRepairPath))
+          throw Error(
+            'BENCH_SETUP_BASE_STATIC: restore the registered base before reusing a derivation that changed protected files',
+          );
         publishDerived(prior);
         return;
       }

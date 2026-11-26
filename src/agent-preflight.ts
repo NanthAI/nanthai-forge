@@ -116,7 +116,7 @@ import {
   type PreflightTimeSettings,
 } from './preflight-time-settings.js';
 export { PREFLIGHT_LOCAL_BUDGET_SECONDS, PREFLIGHT_RUN_CEILING_SECONDS } from './preflight-time-settings.js';
-import { cleanCommandEnvironment } from './clean-command-env.js';
+import { cleanCommandEnvironment, removeCommandScratch } from './clean-command-env.js';
 import {
   packageCommandLine,
   packageCommandUnit,
@@ -1997,7 +1997,7 @@ export function runPreflight(
           secondsPerFile = observed;
           testMs = Date.now() - testStarted;
         } finally {
-          rmSync(directory, { recursive: true, force: true });
+          removeCommandScratch(directory);
         }
         if (exitCode !== 0) {
           const health = preflightRuntime.filesystemEventHealth(root);

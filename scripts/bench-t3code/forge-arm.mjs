@@ -65,6 +65,23 @@ export function inProgressCalls(callLog) {
   return [...active.values()];
 }
 
+function processAlive(pid) {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code !== 'ESRCH';
+  }
+}
+
+function interruptedCallIsLive(call, callLog) {
+  if (call.pid) return processAlive(call.pid);
+  // Journals from older harnesses recorded only the cell's PID.
+  const file = join(dirname(callLog), 'cell.json');
+  return existsSync(file) && processAlive(JSON.parse(readFileSync(file, 'utf8')).pid);
+}
+
 /** Lanes a sync conflict opened for this workspace (<root>.forge-client/lanes/<id>). */
 export function resolveLanes(root) {
   const lanesDir = `${root}.forge-client/lanes`;
@@ -164,13 +181,14 @@ export function forgeArm(config, { callLog, ws, ledger = null, cellDir = dirname
     async landing(
       task,
       laneId,
-      { deadlineMs = 20 * 60_000, pollMs = 20_000, agentExitedAt = Date.now() } = {},
+      { deadlineMs = 20 * 60_000, pollMs = 20_000, agentExitedAt = Date.now(), interrupted = false } = {},
     ) {
       const until = Date.now() + deadlineMs;
       for (;;) {
-        // No Lane-filtered submission read exists in the hosted CLI. Wait for ALL
-        // task calls (including resolve Lanes/source prep), then re-read server handles.
-        const calls = inProgressCalls(callLog).filter(c => c.task === task);
+        // Wait for all live task calls (including resolution and source prep), then read server handles.
+        const calls = inProgressCalls(callLog).filter(
+          c => c.task === task && (!interrupted || interruptedCallIsLive(c, callLog)),
+        );
         if (calls.length) {
           if (Date.now() >= until)
             return {
@@ -249,15 +267,20 @@ export function forgeArm(config, { callLog, ws, ledger = null, cellDir = dirname
       const calls = inProgressCalls(callLog).filter(c => c.root === root);
       if (calls.length) return { skipped: 'calls in flight', inFlight: calls.map(c => `call:${c.callId}`) };
       const ids = [...new Set([laneId, ...resolveLanes(root).map(r => r.laneId)].filter(Boolean))];
-      for (const id of ids.slice(1)) log('open', id, { resolveOf: laneId });
+      for (const id of ids.slice(1)) log('open', id, { resolveOf: laneId, root, callLog });
       const out = {};
       for (const id of ids) out[id] = await arm.abandonById(id, 'bench cell cleanup', dirname(root));
       return out;
     },
-    async abandonById(laneId, reason = 'bench cell cleanup', near = ws) {
+    async abandonById(laneId, reason = 'bench cell cleanup', near = ws, interrupted = false) {
       // A later cell must also preserve calls left running by abnormal cleanup.
       const opened = openLanes(ledger).find(l => l.laneId === laneId);
-      if (opened?.callLog && inProgressCalls(opened.callLog).some(c => c.root === opened.root))
+      if (
+        opened?.callLog &&
+        inProgressCalls(opened.callLog).some(
+          c => c.root === opened.root && (!interrupted || interruptedCallIsLive(c, opened.callLog)),
+        )
+      )
         return { error: 'Task CLI call still in flight; Lane kept' };
       const empty = join(near, '.abandon');
       await mkdir(empty, { recursive: true });
@@ -271,6 +294,80 @@ export function forgeArm(config, { callLog, ws, ledger = null, cellDir = dirname
         const { code, message } = cliError(error);
         return { error: `${code}: ${message}`.slice(-500), code, message };
       }
+    },
+    async recoverLeftoverLanes() {
+      const opened = openLanes(ledger);
+      const records = new Map(opened.map(lane => [lane.laneId, lane]));
+      const observations = new Map();
+      for (const lane of opened) {
+        if (!lane.root) continue;
+        for (const { laneId } of resolveLanes(lane.root)) {
+          if (!records.get(laneId)?.callLog) records.set(laneId, { ...lane, laneId, resolveOf: lane.laneId });
+        }
+      }
+      let queue;
+      const results = [];
+      for (const lane of records.values()) {
+        const { laneId, at, root, callLog: priorLog, task } = lane;
+        let error;
+        if (priorLog && task) {
+          const key = JSON.stringify([priorLog, task]);
+          if (!observations.has(key)) {
+            const prior = forgeArm(config, { callLog: priorLog, ws });
+            const landing = await prior.landing(task, laneId, { deadlineMs: 0, interrupted: true });
+            const orphaned = inProgressCalls(priorLog).some(call => call.task === task);
+            observations.set(key, { landing, orphaned });
+          }
+          const { landing, orphaned } = observations.get(key);
+          if (landing.inFlight?.length) error = 'Earlier task landing still in flight; Lane kept';
+          if (!error && orphaned) {
+            await mkdir(anchor, { recursive: true });
+            const hosted = await arm
+              .nf(anchor, 'status', { ...X, laneId }, ['--detail'])
+              .then(r => r.result ?? {})
+              .catch(failure => ({ code: cliError(failure).code }));
+            if (['completed', 'abandoned'].includes(hosted.state) || hosted.code === 'NOT_FOUND') {
+              const state = hosted.state ?? 'not-found';
+              log('closed', laneId, { reconciled: state });
+              results.push({ laneId, since: at, closed: true, reconciled: state });
+              continue;
+            }
+            if (hosted.inFlight) {
+              results.push({
+                laneId,
+                since: at,
+                closed: false,
+                error: 'Earlier task landing still in flight; Lane kept',
+              });
+              continue;
+            }
+            // A dead relay may have sent the landing before writing its operation receipt.
+            // Read the current project queue once for the whole cleanup, including source prep.
+            queue ??= await arm.nf(anchor, 'queue', X, ['--detail']).catch(() => ({}));
+            const page = queue.result;
+            if (!Array.isArray(page?.entries) || page.more !== false)
+              error = 'Earlier task landing could not be verified; Lane kept';
+            else if (
+              page.entries.some(
+                entry =>
+                  !entry.laneId ||
+                  entry.moreLanes ||
+                  [...records.values()].some(
+                    related => related.root === root && related.laneId === entry.laneId,
+                  ),
+              )
+            )
+              error = 'Earlier task landing still in flight; Lane kept';
+          }
+        }
+        if (!error) {
+          if (lane.resolveOf)
+            log('open', laneId, { resolveOf: lane.resolveOf, root, callLog: priorLog, task });
+          error = (await arm.abandonById(laneId, 'bench: Lane left open by an earlier cell', ws, true)).error;
+        }
+        results.push({ laneId, since: at, closed: !error, error: error?.slice(-200) });
+      }
+      return results;
     },
     async removeRoot(root, reason = 'remove-root') {
       return archiveThenRemove({

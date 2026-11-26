@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
-import {
+import fs, {
   existsSync,
   mkdirSync,
   readdirSync,
@@ -15,7 +15,8 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { syncBuiltinESMExports } from 'node:module';
+import { basename, join } from 'node:path';
 import { getFunctionName } from 'convex/server';
 import { queueProofPaths, REGISTRY } from '../scripts/core-queue-paths.mjs';
 import { REFRESH_QUEUE_PROOF, verifyQueueProof } from '../scripts/test-queue-proof.mjs';
@@ -489,6 +490,53 @@ test('incidents a1a8505b and 99b4062c: a timed-out first quick group stops new g
   assert.equal(replayed.preflight.reason, 'inline quick preflight reached its local budget');
   assert.equal(readFileSync(log, 'utf8').trim().split('\n').length, 1, 'the replay starts no test');
   assert.deepEqual(readPreflightReceipt(s.root, s.lane.laneId), receipt);
+});
+
+test('frictions 9d8b9ae2 and b533147b: a scratch cleanup race after quick cancellation preserves the original landing', async t => {
+  const { s, restore } = await quickCapFixture(t);
+  const operationId = randomUUID();
+  const remove = fs.rmSync;
+  const interrupted = new Set();
+  const pending = new Set();
+  const mock = t.mock.method(fs, 'rmSync', (path, options) => {
+    if (
+      typeof path === 'string' &&
+      /^forge-preflight-[a-z0-9]{6}$/i.test(basename(path)) &&
+      existsSync(path)
+    ) {
+      // Model the late writer disappearing before the modules scratch retry, while the clean environment
+      // is still busy for the entire bounded retry. Leave the latter for the fixture to clean up.
+      if (!interrupted.has(path)) {
+        if (existsSync(join(path, 'runtime', 'home'))) pending.add(path);
+        interrupted.add(path);
+        throw Object.assign(new Error('late child wrote in scratch'), { code: 'ENOTEMPTY' });
+      }
+      if (pending.has(path)) throw Object.assign(new Error('child still exiting'), { code: 'ENOTEMPTY' });
+    }
+    return remove(path, options);
+  });
+  syncBuiltinESMExports();
+  let result;
+  try {
+    result = await submitHostedLand(
+      s.root,
+      { operationId, message: 'Quick scratch race' },
+      s.address,
+      s.transport(),
+    );
+  } finally {
+    restore();
+    mock.mock.restore();
+    syncBuiltinESMExports();
+    for (const path of pending) remove(path, { recursive: true, force: true });
+  }
+  assert.equal(interrupted.size, 2, 'exercises both the test and private environment scratch paths');
+  assert.equal(pending.size, 1, 'the clean environment outlasts the bounded retry');
+  for (const path of interrupted) assert.equal(existsSync(path), false);
+  const receipt = readPreflightReceipt(s.root, s.lane.laneId);
+  assert(receipt.stoppedForTime > 0, 'retains the capped-run receipt');
+  assert.equal(result.result.submission.operationId, operationId);
+  assert.equal(result.result.submission.phase, 'landed');
 });
 
 test('Item 99b4062c: a quick group that edits a saved file before the cap stops the land as LANE_DIRTY, not submitted', async t => {

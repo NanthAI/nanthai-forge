@@ -178,11 +178,10 @@ export function startBroker(cli, callLog, { now = () => new Date().toISOString()
       const env = withTaskIdentity(process.env, assigned);
       const execStartedAt = now();
       const callId = randomUUID();
-      // Separate journal keeps completed-call scoring unchanged. Persist before exec:
+      // Separate journal keeps completed-call scoring unchanged. Record the child's PID on spawn:
       // the caller can die while the relay's CLI continues saving or landing.
       const progress = entry =>
         appendFileSync(callLog + '.progress.jsonl', JSON.stringify({ callId, ...entry }) + '\n');
-      progress({ task: agent.task, root: agent.root, startedAt: execStartedAt });
       res.setHeader('Content-Type', 'application/x-ndjson');
       res.flushHeaders();
       const child = execFile(
@@ -244,6 +243,12 @@ export function startBroker(cli, callLog, { now = () => new Date().toISOString()
           reply({ code });
         },
       );
+      progress({
+        task: agent.task,
+        root: agent.root,
+        startedAt: execStartedAt,
+        pid: child.pid ?? process.pid,
+      });
       running.add(child);
       // Keep execFile's existing audit capture/buffer budget; forward the same bytes now,
       // including partial lines, instead of withholding progress until the callback.

@@ -130,6 +130,88 @@ test('unknown server observation and missing cleanup evidence preserve the Lane'
   assert.deepEqual(failed.inFlight, [], 'known terminal errors must not masquerade as pending');
 });
 
+test('a stopped driver reconciles orphaned relay records against Forge before closing task Lanes', async t => {
+  const dir = fixture(t);
+  const root = join(dir, 'task');
+  const ledger = join(dir, 'lanes.jsonl');
+  const log = join(dir, 'calls.jsonl');
+  const queue = join(dir, 'queue.json');
+  const accepted = join(dir, 'accepted');
+  const actions = join(dir, 'actions.jsonl');
+  const cli = join(dir, 'cli.mjs');
+  const resolution = join(root + '.forge-client', 'lanes', 'resolution', '.forge');
+  mkdirSync(resolution, { recursive: true });
+  writeFileSync(
+    join(resolution, 'hosted-lane.json'),
+    JSON.stringify({ selection: { laneId: 'resolution' } }),
+  );
+  writeFileSync(
+    ledger,
+    JSON.stringify({ op: 'open', laneId: 'original', root, callLog: log, task: 'task' }) + '\n',
+  );
+  writeFileSync(
+    log,
+    JSON.stringify({
+      task: 'task',
+      operations: [
+        { action: 'land', operationId: 'known-op' },
+        { action: 'land', operationId: 'unknown-op' },
+      ],
+    }) + '\n',
+  );
+  writeFileSync(
+    cli,
+    `import { appendFileSync, existsSync, readFileSync } from 'node:fs';
+const action = process.argv[4];
+const args = JSON.parse(process.argv.at(-1));
+appendFileSync(${JSON.stringify(actions)}, JSON.stringify([action, args.laneId]) + '\\n');
+if (action === 'observe' && args.operationId === 'unknown-op') {
+  console.error(JSON.stringify({error:{code:'NOT_FOUND'}}));
+  process.exit(1);
+}
+const result = action === 'queue' ? JSON.parse(readFileSync(${JSON.stringify(queue)}, 'utf8')) :
+  action === 'status' ? {state: args.laneId === 'original' && existsSync(${JSON.stringify(accepted)}) ? 'completed' : 'active'} :
+  action === 'observe' ? {submission:{phase:'landed'}} : {};
+console.log(JSON.stringify({result}));`,
+  );
+  const arm = forgeArm({ cli }, { callLog: join(dir, 'next.jsonl'), ws: dir, ledger });
+  const progress = pid =>
+    writeFileSync(
+      log + '.progress.jsonl',
+      JSON.stringify({ callId: 'lost', root, task: 'task', pid }) + '\n',
+    );
+  progress(process.pid);
+  assert((await arm.recoverLeftoverLanes()).every(lane => /still in flight/.test(lane.error)));
+
+  // Historical ledgers have no PID and never got a terminal entry. The next cell must use the server.
+  progress(undefined);
+  writeFileSync(queue, JSON.stringify({ more: false, entries: [{ laneId: 'resolution' }] }));
+  assert((await arm.recoverLeftoverLanes()).every(lane => /still in flight/.test(lane.error)));
+  writeFileSync(queue, JSON.stringify({ more: true, entries: [] }));
+  assert((await arm.recoverLeftoverLanes()).every(lane => /could not be verified/.test(lane.error)));
+  writeFileSync(queue, JSON.stringify({ more: false, entries: [] }));
+  writeFileSync(accepted, '');
+  writeFileSync(actions, '');
+  const recovered = await arm.recoverLeftoverLanes();
+  assert.deepEqual(
+    recovered.map(({ laneId, closed }) => [laneId, closed]),
+    [
+      ['original', true],
+      ['resolution', true],
+    ],
+  );
+  assert.deepEqual(readCalls(actions), [
+    ['observe', null],
+    ['observe', null],
+    ['status', 'original'],
+    ['status', 'resolution'],
+    ['queue', null],
+    ['abandon', 'resolution'],
+  ]);
+  assert.equal(recovered[0].reconciled, 'completed', 'an already-landed Lane needs no abandonment');
+  assert.deepEqual(await arm.recoverLeftoverLanes(), [], 'the ledger does not keep already closed Lanes');
+});
+
 test('capacity stops use CLI errors or stderr for both providers, never agent prose', () => {
   for (const message of [
     'Selected model is at capacity. Please try a different model.',

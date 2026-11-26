@@ -2,15 +2,15 @@
 // Copyright 2026 Ferdinando Valsecchi
 // Setup hygiene (Item 5e3c3a3c, 2026-11-17): every arm starts from a base that passes the
 // repository's own conventional format check, the static check `land --save` runs inline.
-// Only bench-owned files (the bench's check script and workflow) may be rewritten, and only by
-// the repository's own fixer script; an upstream file that fails is refused, never edited.
+// Only unprotected bench-owned files may be rewritten, using the repository's own fixer.
+// Workflows and the configured check entry point need owner approval during the Forge reset.
 // The fix becomes a derived base commit on the base (deterministic: fixed identity and dates).
 import { execFileSync } from 'node:child_process';
 import { cpSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
-/** Paths the bench adds to the upstream tree; nothing else is ever rewritten. */
-export const BENCH_OWNED = [/^\.bench\//, /^\.github\/workflows\/bench-[^/]+$/];
+/** Bench-owned paths the Forge reset can land under the benchmark's check policy. */
+export const baseRepairPath = path => path.startsWith('.bench/') && path !== '.bench/ci.sh';
 const CHECKS = [
   ['format:check', 'format'],
   ['check:format', 'format'],
@@ -65,10 +65,10 @@ export async function baseStatic({ meta, baseCheckout, baseSha, work, env, prepa
     execFileSync('npm', ['run', '-s', scripts.fix], { ...at, stdio: ['ignore', 'pipe', 'pipe'] });
     const changed = git(root, 'diff', '--name-only').split('\n').filter(Boolean);
     const added = git(root, 'ls-files', '--others', '--exclude-standard').split('\n').filter(Boolean);
-    const foreign = [...changed, ...added].filter(path => !BENCH_OWNED.some(re => re.test(path)));
-    if (foreign.length || added.length)
+    const outside = changed.filter(path => !baseRepairPath(path));
+    if (outside.length || added.length)
       throw Error(
-        `BENCH_SETUP_BASE_STATIC: ${scripts.check} fails outside bench-owned files (${[...foreign, ...added].slice(0, 5).join(', ')}); the base is not repaired`,
+        `BENCH_SETUP_BASE_STATIC: ${scripts.check} fails outside unprotected bench-owned files (${[...outside, ...added].slice(0, 5).join(', ')}); use the registered base with its protected files intact`,
       );
     if (!passes('npm', ['run', '-s', scripts.check], at))
       throw Error(`BENCH_SETUP_BASE_STATIC: ${scripts.check} still fails after ${scripts.fix}`);
