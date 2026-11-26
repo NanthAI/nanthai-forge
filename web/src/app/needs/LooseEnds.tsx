@@ -453,7 +453,7 @@ export function LooseEndsView({
   const handNow = (rows: ScreenRow[]) => {
     const lanes = rows.flatMap(row => (row.laneId ? [{ laneId: row.laneId, title: row.title }] : []));
     if (!lanes.length) return;
-    const text = handText(lanes, project);
+    const text = handText(lanes, project, location.origin);
     const words = `Copied ${lanes.length === 1 ? 'a prompt that hands this Lane' : `one prompt that hands ${count(lanes.length, 'Lane')}`} to an agent. Paste it into the agent app you use.`;
     copy(text).then(
       () => {

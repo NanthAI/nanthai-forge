@@ -5,6 +5,7 @@
 // passkey yet, the next page offers one (FirstPasskey).
 //
 // Lifecycle rule 2: passkey autofill runs only while this tab is visible and active (awake.tsx).
+import { publicProjectLogin } from '../../../src/public-project-commands';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useOauth, useSignInWithGithub } from '@convex-dev/auth/methods/github/react';
 import { useSignInWithUsernamePasskey } from '@convex-dev/auth/methods/username-passkey/react';
@@ -158,7 +159,7 @@ export function SignIn() {
         </span>
         <span>New here? Type the handle you want.</span>
         <span>
-          From a terminal: <code>nforge login</code>
+          From a terminal: <code>{publicProjectLogin(location.origin)}</code>
         </span>
       </p>
     </PublicFrame>

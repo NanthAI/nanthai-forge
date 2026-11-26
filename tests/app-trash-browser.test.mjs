@@ -148,7 +148,10 @@ test('trash: forms per phase, restore with Undo, typed delete, owner-only menu a
       typed: 'tidepool-site-old',
     });
     await page.keyboard.press('c');
-    assert.match(await page.locator('.cli-out').textContent(), /nforge host \. --delete-projects --trash/);
+    assert.match(
+      await page.locator('.cli-out').textContent(),
+      /nforge host \. --delete-projects --site '[^']+' --trash/,
+    );
     assert.deepEqual(errors, []);
     await context.close();
   }

@@ -107,19 +107,19 @@ test('empty Projects starts at Quickstart’s first landing and gives the agent 
     prompt.split('\n')[0],
     'Read First landing in https://forge.example/docs/quickstart.md#first-landing',
   );
-  assert.ok(prompt.includes('`nforge login`'), 'sign-in uses the built-in site');
-  assert.ok(prompt.includes('nforge import OWNER/REPO'));
-  assert.ok(prompt.includes('nforge host FOLDER'));
-  assert.ok(prompt.includes('nforge clone OWNER/PROJECT DIR'));
+  assert.ok(prompt.includes("`nforge login 'https://forge.example'`"), 'sign-in uses this instance');
+  assert.ok(prompt.includes("nforge import OWNER/REPO --site 'https://forge.example'"));
+  assert.ok(prompt.includes("nforge host FOLDER --site 'https://forge.example'"));
+  assert.ok(prompt.includes('clone the full project URL'));
   assert.ok(prompt.includes('nforge connect <app>'));
   const loginAt = prompt.indexOf('nforge login');
   const importAt = prompt.indexOf('nforge import OWNER/REPO');
-  const cloneAt = prompt.indexOf('nforge clone OWNER/PROJECT DIR');
+  const cloneAt = prompt.indexOf('clone the full project URL');
   const connectAt = prompt.indexOf('nforge connect <app>');
   assert.ok(loginAt > 0 && loginAt < importAt && importAt < cloneAt && cloneAt < connectAt, 'real CLI order');
   assert.doesNotMatch(
     prompt,
-    /npm (install|i) -g|npx nforge|tool server|local Git clone with history|project settings|--deployment|--site/,
+    /npm (install|i) -g|npx nforge|tool server|local Git clone with history|project settings|--deployment/,
     'no unbuilt or overpromised capabilities',
   );
   assert.equal(

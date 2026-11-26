@@ -136,7 +136,7 @@ test('nforge import starts once, waits on one progress subscription (no polling)
   assert.equal(report.projectId, 'project-1');
   assert.equal(report.commit, 'a'.repeat(40));
   assert.deepEqual(report.githubRequests, { user: 2, app: 5, server: 0, anonymous: 1 });
-  assert.equal(report.next, 'nforge clone project-1 DIR --deployment https://forge.example');
+  assert.equal(report.next, "nforge clone project-1 DIR --deployment 'https://forge.example'");
   assert.deepEqual(
     calls.map(([name]) => name),
     ['projectGithubImport:start', 'watch', 'close', 'projectGithubImport:status'],
@@ -295,7 +295,7 @@ test('nforge import --preview makes one read and starts nothing (a488af2a)', asy
     ['projectGithubImportPreview:preview'],
   );
   assert.match(report.summary, /60,000 files/);
-  assert.equal(report.next, 'nforge import example/repo [--private]');
+  assert.equal(report.next, "nforge import 'example/repo' --deployment 'https://forge.example'");
   assert.deepEqual(readdirSync(directory), [], 'no journal: nothing was started');
 });
 

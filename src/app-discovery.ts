@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
+import { existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { readAuth } from './auth-store.js';
 import { deploymentUrl } from './deployment-origin.js';
 import { ForgeError, invariant } from './errors.js';
 import { networkFetch, networkTimeout } from './network-fetch.js';
-import { cliDiscoveryPath, defaultForgeSite } from './forge-site.js';
+import { cliDiscoveryPath, distributionForgeSite } from './forge-site.js';
 
 type Auth = ReturnType<typeof readAuth>;
 
@@ -18,6 +20,10 @@ export function appUrl(value: string) {
 
 export function savedApp(deployment: string, store: Auth = readAuth()) {
   return Object.entries(store.sites ?? {}).find(([, backend]) => backend === deployment)?.[0];
+}
+
+export function savedAppForDefault(store: Auth = readAuth()) {
+  return store.defaultDeployment ? savedApp(store.defaultDeployment, store) : undefined;
 }
 
 async function discover(site: string) {
@@ -91,6 +97,24 @@ export async function serviceTarget(
   if (options.deployment) return { deployment: deploymentUrl(options.deployment), site: undefined };
   const store = readAuth();
   if (options.site) return appTarget(options.site, store, refresh);
-  const deployment = bound ?? process.env.FORGE_DEPLOYMENT_URL;
-  return deployment ? backendTarget(deployment, store) : appTarget(defaultForgeSite, store, refresh);
+  const deployment = bound ?? process.env.FORGE_DEPLOYMENT_URL ?? store.defaultDeployment;
+  return deployment ? backendTarget(deployment, store) : appTarget(distributionForgeSite(), store, refresh);
+}
+
+/** Walk only local checkout markers, stopping at a repository boundary. No discovery or network call. */
+export async function folderAddress() {
+  let root = process.cwd();
+  for (;;) {
+    if (
+      ['.forge/hosted-lane.json', '.forge/hosted-main.json', '.git', '.forge/native.json'].some(path =>
+        existsSync(join(root, path)),
+      )
+    ) {
+      const { hostedAgentAddress } = await import('./hosted-agent-address.js');
+      return hostedAgentAddress(root, {});
+    }
+    const parent = dirname(root);
+    if (parent === root) return null;
+    root = parent;
+  }
 }

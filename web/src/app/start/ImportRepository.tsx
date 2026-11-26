@@ -186,7 +186,7 @@ function Choose() {
             <summary>From a terminal</summary>
             <CommandBlock
               label="The import command"
-              text={`${importCommand(url.trim(), ref.trim(), null)} --preview`}
+              text={`${importCommand(url.trim(), ref.trim(), null, location.origin)} --preview`}
             />
           </details>
         </Region>
@@ -315,6 +315,7 @@ function Choose() {
                   url.trim(),
                   ref.trim(),
                   visibility === preview.origin ? null : visibility,
+                  location.origin,
                 )}
               />
             </details>

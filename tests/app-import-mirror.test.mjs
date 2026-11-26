@@ -64,10 +64,13 @@ test('the address forms the import accepts name one repository; the CLI line mat
   ])
     assert.equal(model.repositoryOf(url), 'example/repo', url);
   assert.equal(
-    model.importCommand('https://github.com/example/repo', 'v1', 'private'),
-    'nforge import https://github.com/example/repo --ref v1 --private',
+    model.importCommand('https://github.com/example/repo', 'v1', 'private', 'https://forge.example'),
+    "nforge import 'https://github.com/example/repo' --ref 'v1' --private --site 'https://forge.example'",
   );
-  assert.equal(model.importCommand('', '', null), 'nforge import https://github.com/OWNER/REPO');
+  assert.equal(
+    model.importCommand('', '', null, 'https://forge.example'),
+    "nforge import 'https://github.com/OWNER/REPO' --site 'https://forge.example'",
+  );
   assert.match(model.visibilityWords('private', ['private']), /^Private on GitHub, so private here\.$/);
   assert.match(model.visibilityWords('public', ['public', 'private']), /Private here/);
 });

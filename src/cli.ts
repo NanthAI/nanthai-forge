@@ -38,7 +38,7 @@ Usage:
   nforge github connect|status|disconnect|resume ROOT [--repo OWNER/NAME] [--operation-id UUID] [--no-mirror] [--no-browser]
   nforge github-sync ROOT [--repo OWNER/NAME] [--branch main] [--dry-run | --push] [--operation-id UUID] [--rebind] [--wait-audit] [--audit-timeout-ms MS]
   nforge host ROOT [--name NAME] [--visibility private|public] [--status | --new]
-  nforge login [--name NAME] [--scope cli|coordination] [--no-browser]
+  nforge login [--url URL] [--name NAME] [--scope cli|coordination] [--no-browser]
   nforge logout
   nforge auth status
   nforge maintenance check-logs ROOT --dry-run|--apply --plan FILE [--hosted]

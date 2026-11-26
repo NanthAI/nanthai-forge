@@ -125,7 +125,7 @@ nforge auth status
 
 Open the printed link in a browser signed in to Forge, verify the
 code and approve your terminal. Return to the terminal for the completed sign-in.
-Forge remembers your sign-in. If it expires, run `nforge login` again and
+Forge remembers your sign-in and uses the selected instance for unqualified commands. To sign in to a specific instance, run `nforge login --url 'https://forge.example'`. If it expires, run `nforge login` again and
 approve the new code.
 
 ## Import from GitHub in the app
@@ -195,7 +195,7 @@ Clone the project into a new directory from the terminal you signed in with.
 Use the project's `OWNER/PROJECT` name or the import or host receipt's clone command.
 
 ```sh
-nforge clone OWNER/PROJECT /absolute/path/to/project
+nforge clone https://forge.example/OWNER/PROJECT /absolute/path/to/project
 ```
 
 Cloning materializes hosted `main` for your tools. Keep the clone and its

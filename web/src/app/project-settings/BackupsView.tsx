@@ -2,6 +2,7 @@
 // Copyright 2026 Ferdinando Valsecchi
 // The backups regions of Settings > Project as one view over what the page read (Item 966cb821). Rows, keys, notices and
 // states are the design system's; the words are the old project screen's, tightened.
+import { shellQuote } from '../../../../src/shell-quote';
 import { Key, Region, Row, State } from '../../ds';
 import { ArchivePicker } from './ArchivePicker';
 import type { Backup, Selected, Upload } from './backup-actions';
@@ -170,7 +171,9 @@ export function BackupsView({
             <code translate="no">
               nforge exchange NEW_DIRECTORY restore --command-file forge-restore.json
             </code>
-            . For current work use <code translate="no">nforge clone PROJECT_ID NEW_DIRECTORY</code>.
+            . For current work use{' '}
+            <code translate="no">{`nforge clone PROJECT_ID NEW_DIRECTORY --site ${shellQuote(location.origin)}`}</code>
+            .
           </p>
         ) : null}
         {message ? (

@@ -4,6 +4,7 @@
 // a repository yourself (Items 6beca32b, c3e4a838). The agent explains first and installs nothing until its person says
 // so; Forge never starts an agent. The connection step reads this account’s confirmation once. The import
 // door opens the import page (`/new/import`).
+import { shellQuote } from '../../../../src/shell-quote';
 import type { ConvexReactClient } from 'convex/react';
 import { Region } from '../../ds';
 import { A } from '../frames';
@@ -40,8 +41,8 @@ export default function Start({ connectionClient }: { connectionClient?: Pick<Co
             <CommandBlock label="The prompt" text={prompt} />
           </details>
           <p className="quietline">
-            When you say “set it up”, it stops where only you can act: approving its device and allowing Forge
-            on GitHub.
+            When you say “set it up”, it stops where only you can act: approving its device and, if you import
+            from GitHub, authorizing access to the repository.
           </p>
         </Region>
         <Region title="Import it yourself">
@@ -56,7 +57,8 @@ export default function Start({ connectionClient }: { connectionClient?: Pick<Co
             </div>
           </div>
           <p className="quietline">
-            Not on GitHub? Run <code translate="no">nforge host .</code> in the folder
+            Not on GitHub? Run{' '}
+            <code translate="no">{`nforge host . --site ${shellQuote(location.origin)}`}</code> in the folder
           </p>
         </Region>
       </div>

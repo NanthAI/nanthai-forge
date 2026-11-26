@@ -4,6 +4,7 @@
 // FORGE_SECRETS_KEY, carries the roster it was added in (its pin) and the head floor; a machine has no other memory.
 import { randomBytes } from 'node:crypto';
 import { x25519 } from '@noble/curves/ed25519.js';
+import { deploymentUrl } from './deployment-origin.js';
 import { ForgeError, invariant } from './errors.js';
 import { deriveKey, equalBytes, fixed, frame } from './sealed-format.js';
 import { recipientId, type RandomBytes } from './sealed-keys.js';
@@ -12,6 +13,25 @@ import { displayText, rosterBytes, type Entry, type Roster } from './sealed-reco
 import { machineReaderVerifier } from './sealed-portable.js';
 
 const PREFIX = 'fsk1_';
+const SCOPED_PREFIX = 'fsk2_';
+
+export function scopeMachineBundle(bundle: string, deployment: string) {
+  return SCOPED_PREFIX + Buffer.from(deploymentUrl(deployment)).toString('base64url') + '.' + bundle;
+}
+
+export function machineBundleLocation(text: string): { bundle: string; deployment?: string } {
+  if (!text.startsWith(SCOPED_PREFIX)) return { bundle: text };
+  const value = /^fsk2_([A-Za-z0-9_-]+)\.(fsk1_[A-Za-z0-9_-]+)$/.exec(text);
+  if (!value) throw malformed();
+  try {
+    return {
+      bundle: value[2]!,
+      deployment: deploymentUrl(Buffer.from(value[1]!, 'base64url').toString('utf8')),
+    };
+  } catch {
+    throw malformed();
+  }
+}
 const LABEL = 'forge/secrets/v1/';
 export type MachineKeys = { id: Buffer; enc: Buffer; encPub: Buffer };
 export type MachineBundle = {
@@ -175,7 +195,8 @@ function roster(bytes: Buffer): Roster {
   };
 }
 /** Strict: the decoded bundle must re-encode to exactly its own bytes, and its key must be the roster's machine. */
-export function decodeMachineBundle(text: string): MachineBundle {
+export function decodeMachineBundle(input: string): MachineBundle {
+  const { bundle: text } = machineBundleLocation(input);
   invariant(
     text.startsWith(PREFIX) && /^[A-Za-z0-9_-]+$/.test(text.slice(PREFIX.length)),
     'SECRETS_FORMAT_REFUSED',

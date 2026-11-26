@@ -56,7 +56,7 @@ nforge secret machine add "Verification CI" --set checks
 
 Enter the Checks value at the hidden prompt. Keep the machine ID from the add result. The key appears once in the terminal. Select and copy it from that terminal into your CI provider's masked secret field as `FORGE_SECRETS_KEY`. Avoid pasting the key into a shell command or an agent conversation.
 
-Give the key only to the trusted check step. If that step runs from a Git mirror, set `FORGE_PROJECT_ID` to the project's ID. Install the Forge CLI on the runner and keep the selected names in the checkout's `.env.example`. Run your command through:
+Give the key only to the trusted check step. Outside a Forge checkout, set `FORGE_PROJECT_ID` to the project's ID. New machine keys carry the backend origin. For a legacy key on a custom instance, set `FORGE_DEPLOYMENT_URL` to the backend origin or `FORGE_SITE_URL` to the web origin for discovery. Install the Forge CLI on the runner and keep the selected names in the checkout's `.env.example`. Run your command through:
 
 ```sh
 nforge run --set checks --only SERVICE_API_KEY -- node -e "process.exit(process.env.SERVICE_API_KEY ? 0 : 1)"

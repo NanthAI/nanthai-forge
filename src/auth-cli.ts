@@ -5,19 +5,20 @@ import { devicePost, deviceRefusal } from './device-endpoint.js';
 import { browserApproval } from './browser-approval.js';
 export { openBrowser } from './browser-approval.js';
 import { localDevice, signedDevice, deviceCode, renewDevice } from './device-key.js';
-import { authStatus, folderAddress } from './auth-status.js';
+import { authStatus } from './auth-status.js';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { neutralDeviceName } from './neutral-names.js';
 import { makeFunctionReference } from 'convex/server';
 import { coordinationClient } from './coordination-client.js';
 import { readAuth, writeAuth, type SavedCredential, httpOrigin } from './auth-store.js';
-import { appTarget, authTarget, backendTarget } from './app-discovery.js';
-import { defaultForgeSite } from './forge-site.js';
+import { appTarget, authTarget, backendTarget, folderAddress } from './app-discovery.js';
+import { distributionForgeSite } from './forge-site.js';
 import { ForgeError, invariant } from './errors.js';
-const help = `nforge login [--name NAME] [--scope cli|coordination] [--no-browser]
+const help = `nforge login [--url URL] [--name NAME] [--scope cli|coordination] [--no-browser]
 nforge logout
 nforge auth rename NAME
 nforge auth status [--json [fields]]
+Bare login uses the current instance or the hosted Forge app on a fresh install. Pass --url URL to select a Forge app explicitly.
 Auth status checks the hosted project in your current folder or the Forge app. A device is named device-xxxx unless you pass --name; auth rename changes it later. Login uses a signed-in Forge browser approval and stores a revocable 30-day credential. Collaborators and agents see you by your Forge handle; change it on the web in Settings → Account. FORGE_AUTH_TOKEN overrides stored credentials for hosted commands.\n`;
 export { httpOrigin } from './auth-store.js';
 async function request(origin: string, operation: string, input: unknown) {
@@ -82,7 +83,15 @@ export async function authCli(command: string, args: string[]): Promise<unknown>
       const value = args[++i];
       invariant(value === 'cli' || value === 'coordination', 'BAD_ARGUMENT', help);
       scope = value;
-    } else if (arg === '--deployment' && args[i + 1] && !override) override = args[++i]!;
+    } else if (
+      command === 'login' &&
+      arg === '--url' &&
+      !selected &&
+      args[i + 1] &&
+      !args[i + 1]!.startsWith('-')
+    )
+      selected = args[++i]!;
+    else if (arg === '--deployment' && args[i + 1] && !override) override = args[++i]!;
     else if (arg === '--no-browser') browser = false;
     else {
       invariant(!arg.startsWith('-') && !selected, 'BAD_ARGUMENT', help);
@@ -90,18 +99,14 @@ export async function authCli(command: string, args: string[]): Promise<unknown>
     }
   }
   const store = readAuth();
-  const folder = command === 'login' ? folderAddress() : null;
+  const folder = command === 'login' && !selected && !override ? await folderAddress() : null;
   invariant(!selected || !override, 'BAD_ARGUMENT', 'Select one Forge app URL.');
-  const implicit =
-    override ??
-    folder?.url ??
-    process.env.FORGE_DEPLOYMENT_URL ??
-    (command === 'logout' ? store.defaultDeployment : undefined);
+  const implicit = override ?? folder?.url ?? process.env.FORGE_DEPLOYMENT_URL ?? store.defaultDeployment;
   const { deployment, site } = selected
     ? await authTarget(selected, store, command === 'login')
     : implicit
       ? backendTarget(implicit, store)
-      : await appTarget(defaultForgeSite, store, command === 'login');
+      : await appTarget(distributionForgeSite(), store, command === 'login');
   const address = site ? { site } : { deployment };
   const saved = store.deployments[deployment];
   if (command === 'logout') {

@@ -7,6 +7,7 @@
 // paging `accountData.owned` and `accountData.shared` into the exact before-list and the token that binds the cleanup to it;
 // the cleanup is accountActions.begin + advance. Removals that run on elsewhere are followed by the reactive
 // `accountData.watch` (only while the tab is shown), never by a timer. Person-only on the server.
+import { shellQuote } from '../../../../src/shell-quote';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useConvex, useQuery } from 'convex/react';
 import { api } from '../../../../convex/_generated/api';
@@ -414,7 +415,7 @@ export function YourDataView(props: {
         <div className="clone">
           <b>Project source, Work and history</b>
           <span className="meta">Clone each project you want to keep, with its address from its page:</span>
-          <CodeBox label="Clone a project">nforge clone OWNER/PROJECT FOLDER</CodeBox>
+          <CodeBox label="Clone a project">{`nforge clone OWNER/PROJECT FOLDER --site ${shellQuote(location.origin)}`}</CodeBox>
         </div>
       </Region>
       <DeleteRegion {...props} />

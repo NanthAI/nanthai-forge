@@ -12,6 +12,7 @@ import { hostedAgentAddress } from './hosted-agent-address.js';
 import { coordinationClient, coordinationCredentials } from './coordination-client.js';
 import { deadlineConvexSubscription } from './network-convex-client.js';
 import { networkTimeout } from './network-fetch.js';
+import { appTarget } from './app-discovery.js';
 import { shellQuote } from './shell-quote.js';
 import { ForgeError, invariant } from './errors.js';
 import type { HostedRunSubscription } from './hosted-agent-observe.js';
@@ -39,10 +40,10 @@ export type DeleteRequest = {
 };
 type Selection = { glob: string } | { ids: string[] } | { trash: true };
 type Parsed =
-  | { kind: 'prepare'; select: Selection; deployment?: string }
-  | { kind: 'wait' | 'withdraw'; id: string; deployment?: string };
+  | { kind: 'prepare'; select: Selection; deployment?: string; site?: string }
+  | { kind: 'wait' | 'withdraw'; id: string; deployment?: string; site?: string };
 
-export const DELETE_PROJECTS_HELP = `nforge host ROOT --delete-projects 'PATTERN' | --ids ID,ID… | --trash [--deployment URL] [--json]
+export const DELETE_PROJECTS_HELP = `nforge host ROOT --delete-projects 'PATTERN' | --ids ID,ID… | --trash [--site URL | --deployment URL] [--json]
 nforge host ROOT --delete-projects --wait REQUEST_ID | --withdraw REQUEST_ID
   Prepares one request to delete many projects for good (at most 100): prints the exact list and the owner's approval
   link, and exits. Nothing is deleted until the owner person approves it once, signed in on the web; a project that
@@ -52,15 +53,12 @@ nforge host ROOT --delete-projects --wait REQUEST_ID | --withdraw REQUEST_ID
 
 export function parseDeleteProjects(flags: string[]): Parsed {
   const rest = flags.filter(flag => flag !== '--delete-projects');
-  const deploymentAt = rest.indexOf('--deployment');
-  const deployment = deploymentAt >= 0 ? rest[deploymentAt + 1] : undefined;
-  if (deploymentAt >= 0) {
-    invariant(
-      deployment && !deployment.startsWith('--'),
-      'BAD_ARGUMENT',
-      'Provide a value for --deployment.',
-    );
-    rest.splice(deploymentAt, 2);
+  const selector = rest.findIndex(flag => flag === '--site' || flag === '--deployment');
+  const targetFlag = rest[selector];
+  const target = selector < 0 ? undefined : rest[selector + 1];
+  if (selector >= 0) {
+    invariant(target && !target.startsWith('--'), 'BAD_ARGUMENT', 'Provide a Forge instance URL.');
+    rest.splice(selector, 2);
   }
   const at = (flag: string) => rest.indexOf(flag);
   const value = (flag: string) => {
@@ -68,7 +66,7 @@ export function parseDeleteProjects(flags: string[]): Parsed {
     invariant(next && !next.startsWith('--') && rest.length === 2, 'BAD_ARGUMENT', DELETE_PROJECTS_HELP);
     return next;
   };
-  const extra = deployment ? { deployment } : {};
+  const extra = target ? (targetFlag === '--site' ? { site: target } : { deployment: target }) : {};
   if (at('--wait') >= 0) return { kind: 'wait', id: value('--wait'), ...extra };
   if (at('--withdraw') >= 0) return { kind: 'withdraw', id: value('--withdraw'), ...extra };
   if (at('--trash') >= 0) {
@@ -131,7 +129,7 @@ function forgeError(error: unknown): never {
 export async function deleteProjects(root: string, flags: string[], json: boolean) {
   const parsed = parseDeleteProjects(flags);
   const selected =
-    parsed.deployment ??
+    (parsed.site ? (await appTarget(parsed.site)).deployment : parsed.deployment) ??
     hostedAgentAddress(root, {})?.url ??
     process.env.FORGE_DEPLOYMENT_URL ??
     readAuth().defaultDeployment;

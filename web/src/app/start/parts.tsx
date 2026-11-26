@@ -130,7 +130,7 @@ export function ConnectSteps({
     setApp(next);
     rememberApp(next);
   };
-  const shared = sharedSteps(project);
+  const shared = sharedSteps(location.origin, project);
   const last = app ? appStep(app) : null;
   return (
     <>

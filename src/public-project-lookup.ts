@@ -6,7 +6,7 @@ import { deploymentOriginSchema } from './hosted-address.js';
 import { ForgeError, invariant } from './errors.js';
 import { networkFetch, networkTimeout } from './network-fetch.js';
 import { publicProjectClone, publicProjectLogin } from './public-project-commands.js';
-import { defaultForgeSite } from './forge-site.js';
+import { distributionForgeSite } from './forge-site.js';
 import {
   collectPublicSearch,
   orderSearchRows,
@@ -26,7 +26,7 @@ const explorePage = z.object({
   projects: z.array(projectEntry).max(200),
 });
 
-export function publicProjectSite(site = defaultForgeSite) {
+export function publicProjectSite(site = distributionForgeSite()) {
   try {
     return deploymentUrl(site);
   } catch {

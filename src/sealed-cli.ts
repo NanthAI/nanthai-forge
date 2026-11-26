@@ -251,13 +251,16 @@ export async function sealedCli(args: string[]) {
         'A person adds a machine on a terminal: the key is shown once, there.',
       );
       const { addMachine } = await import('./sealed-checks.js');
+      const { scopeMachineBundle } = await import('./sealed-machine.js');
+      const address = hostedAgentAddress(runRoot, {});
+      invariant(address, 'PROJECT_UNAVAILABLE', 'Use a hosted Forge project or Lane.');
       const added = await addMachine(
         client as import('./sealed-checks.js').ChecksClient,
         label!,
         operationId ? { operationId } : {},
       );
       process.stdout.write(
-        `Machine ${safeLabel(label!)} (id ${added.machineId.slice(0, 8)}) can now open Checks. Operation ${added.operationId}. Its key is shown once. Store it as the CI secret FORGE_SECRETS_KEY, given only to the step that runs nforge run:\n\n${added.bundle}\n\nIf the step runs from a Git mirror, set FORGE_PROJECT_ID to the project's ID. Run: nforge run --set checks --only NAME,NAME -- COMMAND\nWhoever holds this key opens every Checks value. Never give it to a step that runs untrusted code, such as a pull request from a fork.\n`,
+        `Machine ${safeLabel(label!)} (id ${added.machineId.slice(0, 8)}) can now open Checks. Operation ${added.operationId}. Its key is shown once. Store it as the CI secret FORGE_SECRETS_KEY, given only to the step that runs nforge run:\n\n${scopeMachineBundle(added.bundle, address.url)}\n\nIf the step runs outside a Forge checkout, set FORGE_PROJECT_ID to the project's ID. This machine key carries the project's Forge backend. Run: nforge run --set checks --only NAME,NAME -- COMMAND\nWhoever holds this key opens every Checks value. Never give it to a step that runs untrusted code, such as a pull request from a fork.\n`,
       );
       const hint = checksMachineSetupHint(runRoot, added.valueNames);
       if (hint) process.stdout.write(hint);

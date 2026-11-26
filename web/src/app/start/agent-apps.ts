@@ -4,6 +4,8 @@
 // before it sets anything up, and the commands that connect each app today. Forge works with any agent app and any
 // CI and never starts an agent itself: these are words to paste and commands to run, nothing more. Every command here
 // is one the CLI ships now (tests/app-getting-started.test.mjs checks each against the CLI's usage).
+import { publicProjectClone, publicProjectLogin } from '../../../../src/public-project-commands';
+import { shellQuote } from '../../../../src/shell-quote';
 import { hrefFor } from '../paths';
 
 export const agentApps = ['claude-code', 'codex', 'cursor', 'opencode', 'pi', 'other'] as const;
@@ -72,7 +74,7 @@ export function onboardingPrompt(origin: string) {
   return [
     `Read First landing in ${origin}${agentSetupHref}${firstLandingSection}`,
     '',
-    'I already signed in to Forge in my browser. Help me set Forge up in this order: 1) install the nforge CLI from the guide if it is not installed, 2) run `nforge login` so I can approve this device once in my browser, 3) ask me whether to import a GitHub repository (`nforge import OWNER/REPO`) or host a plain local folder (`nforge host FOLDER`), 4) clone the hosted project (`nforge clone OWNER/PROJECT DIR`), and 5) optionally connect this agent app from inside the clone (`nforge connect <app>` or `nforge mcp-config . --agent`). Tell me before changing anything on my machine.',
+    `I already signed in to Forge in my browser. Help me set Forge up in this order: 1) install the nforge CLI from the guide if it is not installed, 2) run \`${publicProjectLogin(origin)}\` so I can approve this device once in my browser, 3) ask me whether to import a GitHub repository (\`nforge import OWNER/REPO --site ${shellQuote(origin)}\`) or host a plain local folder (\`nforge host FOLDER --site ${shellQuote(origin)}\`), 4) clone the full project URL returned by Forge, and 5) optionally connect this agent app from inside the clone (\`nforge connect <app>\` or \`nforge mcp-config . --agent\`). Tell me before changing anything on my machine.`,
   ].join('\n');
 }
 
@@ -92,7 +94,7 @@ export const guidanceDocs: DocsLink = {
 
 /** The steps every agent app shares: after these an agent runs nforge commands in its terminal and needs nothing
  * more. With a project, clone it; otherwise the agent imports first. */
-export function sharedSteps(project?: string): SetupStep[] {
+export function sharedSteps(origin: string, project?: string): SetupStep[] {
   const name = project ? new URL(project).pathname.split('/').filter(Boolean).slice(0, 2).join('/') : null;
   return [
     {
@@ -104,19 +106,22 @@ export function sharedSteps(project?: string): SetupStep[] {
       title: 'Sign this machine in',
       detail:
         'It prints a code and a link to the approval page here. Check that the code matches, name the device and approve; the agent waits until you do. It then shows with the same name and code under',
-      commands: ['nforge login'],
+      commands: [publicProjectLogin(origin)],
       needsPerson: true,
       link: { label: 'Account, Sign-in and devices.', href: hrefFor({ frame: 'account', place: 'devices' }) },
       docs: [{ label: 'Devices and sign-ins', href: '/docs/guides/access/' }],
     },
-    name
+    name && project
       ? {
           title: 'Clone the project',
-          commands: [`nforge clone ${name} ./${name.split('/').at(-1)}`],
+          commands: [publicProjectClone(project, `./${name.split('/').at(-1)}`)],
         }
       : {
           title: 'Bring the repository across',
-          commands: ['nforge import OWNER/REPO'],
+          commands: [
+            `nforge import OWNER/REPO --site ${shellQuote(origin)}`,
+            `nforge host FOLDER --site ${shellQuote(origin)}`,
+          ],
         },
   ];
 }
@@ -148,8 +153,8 @@ export function appStep(app: AgentApp): SetupStep {
 }
 
 /** Every step for one app, in order. */
-export const setupSteps = (app: AgentApp, project?: string): SetupStep[] => [
-  ...sharedSteps(project),
+export const setupSteps = (app: AgentApp, origin: string, project?: string): SetupStep[] => [
+  ...sharedSteps(origin, project),
   appStep(app),
 ];
 

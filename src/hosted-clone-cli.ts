@@ -15,7 +15,7 @@ import { z } from 'zod';
 import { resolveAuthToken } from './auth-store.js';
 import { publicProjectLogin } from './public-project-commands.js';
 import { shellQuote } from './shell-quote.js';
-import { appTarget, serviceTarget } from './app-discovery.js';
+import { appTarget, folderAddress, savedAppForDefault, serviceTarget } from './app-discovery.js';
 import { ConvexExchange } from './exchange-client.js';
 import { checkoutHostedMain, type MainTransport } from './hosted-main-checkout.js';
 import { HostedCheckoutDownloads } from './hosted-checkout-downloads.js';
@@ -108,7 +108,8 @@ export async function hostedCloneCli(
       CLONE_HELP,
     );
     const { findPublicProjects, publicProjectSite } = await import('./public-project-lookup.js');
-    return findPublicProjects(name, publicProjectSite(lookupSite));
+    const selected = explicitLookup || lookupSite ? lookupSite : savedAppForDefault();
+    return findPublicProjects(name, publicProjectSite(selected));
   }
   if (args.includes('--help')) {
     await beforeLocal?.();
@@ -151,10 +152,13 @@ export async function hostedCloneCli(
   const target =
     origin && !flags.length
       ? await appTarget(origin)
-      : await serviceTarget({
-          ...(site ? { site } : {}),
-          ...(flags[0] === '--deployment' ? { deployment: flags[1]! } : {}),
-        });
+      : await serviceTarget(
+          {
+            ...(site ? { site } : {}),
+            ...(flags[0] === '--deployment' ? { deployment: flags[1]! } : {}),
+          },
+          flags.length ? undefined : (await folderAddress())?.url,
+        );
   const url = target.deployment;
   if (!dependencies && !resolveAuthToken(url)) {
     const app = target.site ?? origin;

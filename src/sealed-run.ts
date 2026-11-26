@@ -4,12 +4,13 @@ import { ForgeError, invariant } from './errors.js';
 import { forgeSecretId, equalBytes } from './sealed-format.js';
 import { sealedClientForRoot } from './sealed-cli.js';
 import type { SealedClient } from './sealed-client.js';
-import { decodeMachineBundle, machineReadToken } from './sealed-machine.js';
+import { decodeMachineBundle, machineBundleLocation, machineReadToken } from './sealed-machine.js';
 import { sealedRead, type MachineSealedTransport } from './sealed-transport.js';
 import { verifySealedReply } from './sealed-verify.js';
 import { hostedAgentAddress } from './hosted-agent-address.js';
 import { appTarget } from './app-discovery.js';
-import { defaultForgeSite } from './forge-site.js';
+import { distributionForgeSite } from './forge-site.js';
+import { deploymentUrl } from './deployment-origin.js';
 import type { RunSecretProvider } from './secret-run.js';
 
 /** `nforge run` for one device: a verified cached read. A joining device posts its own request and waits
@@ -79,8 +80,8 @@ export async function machineRunFor(input: {
     b.enc.fill(0);
   }
 }
-/** A Git mirror has no Forge marker. Its project ID selects the project on the built-in site. */
-async function machineAddress(root: string, source: NodeJS.ProcessEnv) {
+/** An unbound CI checkout can pin the backend directly or discover it from the configured service site. */
+async function machineAddress(root: string, source: NodeJS.ProcessEnv, deployment: string | undefined) {
   let address: { url: string; projectId: string } | null = null;
   try {
     address = hostedAgentAddress(root, {});
@@ -93,10 +94,11 @@ async function machineAddress(root: string, source: NodeJS.ProcessEnv) {
     'PROJECT_UNAVAILABLE',
     'Run inside a Forge checkout, or give this step FORGE_PROJECT_ID.',
   );
-  const url =
-    source.FORGE_DEPLOYMENT_URL ??
-    address?.url ??
-    (await appTarget(defaultForgeSite, { deployments: {} })).deployment;
+  const url = source.FORGE_DEPLOYMENT_URL
+    ? deploymentUrl(source.FORGE_DEPLOYMENT_URL)
+    : (deployment ??
+      address?.url ??
+      (await appTarget(distributionForgeSite(source.FORGE_SITE_URL ?? ''), { deployments: {} })).deployment);
   return { url, projectId };
 }
 export const sealedRunSecrets: RunSecretProvider = async input => {
@@ -108,10 +110,11 @@ export const sealedRunSecrets: RunSecretProvider = async input => {
       'SECRETS_NOT_SET_UP',
       'Checks runs with a machine key: give this step FORGE_SECRETS_KEY (nforge secret machine add LABEL --set checks).',
     );
-    const { url, projectId } = await machineAddress(input.root, source);
+    const key = machineBundleLocation(bundle);
+    const { url, projectId } = await machineAddress(input.root, source, key.deployment);
     const { machineSealedTransport } = await import('./sealed-transport.js');
     return machineRunFor({
-      bundle,
+      bundle: key.bundle,
       forgeProjectId: projectId,
       transport: machineSealedTransport(url, projectId),
     });

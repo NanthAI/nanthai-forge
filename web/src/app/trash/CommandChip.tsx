@@ -2,14 +2,16 @@
 // Copyright 2026 Ferdinando Valsecchi
 // The command chip of the Trash (SPEC-01-trash): what an agent runs for the same request, and what it may do alone.
 // It opens with `c` and closes with `c` or Esc. The output is the documented commands (docs/operations.md); no new flag.
+import { shellQuote } from '../../../../src/shell-quote';
 import { useEffect, useId, useState } from 'react';
 import { Key } from '../../ds';
 
-const OUTPUT = `$ nforge host . --delete-projects --trash
+const trashCommand = (site: string) => `nforge host . --delete-projects --site ${shellQuote(site)}`;
+const output = (command: string) => `$ ${command} --trash
 request ID  every project in the trash, the list fixed when it is made, good for 30 minutes
 approve   a person only, in the browser: /account?request=ID
-withdraw  nforge host . --delete-projects --withdraw ID
-wait      nforge host . --delete-projects --wait ID      one subscription, no polling
+withdraw  ${command} --withdraw ID
+wait      ${command} --wait ID      one subscription, no polling
 
 The same actions, for an agent
 move to trash   allowed for a device of the owner. See docs/operations.md, "Project retention and restore".
@@ -21,6 +23,7 @@ empty trash     a person only. The same request, with --trash.`;
 export function useCommandChip() {
   const [open, setOpen] = useState(false);
   const id = useId();
+  const command = trashCommand(location.origin);
   useEffect(() => {
     const press = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
@@ -40,12 +43,12 @@ export function useCommandChip() {
         title="What an agent runs  c"
         onClick={() => setOpen(!open)}
       >
-        <span className="mono">nforge host . --delete-projects --trash</span>
+        <span className="mono">{command} --trash</span>
       </Key>
     ),
     output: open ? (
       <pre className="cli-out mono" id={id} tabIndex={0}>
-        {OUTPUT}
+        {output(command)}
       </pre>
     ) : null,
   };

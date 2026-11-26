@@ -13,9 +13,8 @@ import { parseArgs } from 'node:util';
 import { makeFunctionReference } from 'convex/server';
 import { z } from 'zod';
 import { deploymentUrl, resolveAuthToken } from './auth-store.js';
-import { appUrl, serviceTarget } from './app-discovery.js';
+import { appUrl, folderAddress, serviceTarget } from './app-discovery.js';
 import { shellQuote } from './shell-quote.js';
-import { defaultForgeSite } from './forge-site.js';
 import { deadlineConvexClient, deadlineConvexSubscription } from './network-convex-client.js';
 import { hostedActionError } from './hosted-action-error.js';
 import { durableReplace } from './state/durability.js';
@@ -217,14 +216,14 @@ export async function waitForImport(
   }
 }
 
+function importTargetFlags(target: { deployment: string; site?: string | undefined }) {
+  return target.site
+    ? ` --site ${shellQuote(target.site)}`
+    : ` --deployment ${shellQuote(target.deployment)}`;
+}
+
 export function importReport(journal: ImportJournal, status: Status) {
   const ready = status.phase === 'ready';
-  const target =
-    journal.site === defaultForgeSite
-      ? ''
-      : journal.site
-        ? ` --site ${shellQuote(journal.site)}`
-        : ` --deployment ${journal.deployment}`;
   return {
     operationId: journal.operationId,
     importId: journal.jobId,
@@ -245,7 +244,7 @@ export function importReport(journal: ImportJournal, status: Status) {
     migrationSummary: migrationSummary(status.migration),
     error: status.error,
     next: ready
-      ? `nforge clone ${status.projectId} DIR${target}`
+      ? `nforge clone ${status.projectId} DIR${importTargetFlags(journal)}`
       : status.phase === 'paused' && status.error?.resumeAt
         ? `nothing: Forge resumes this import at ${new Date(status.error.resumeAt).toISOString()}`
         : status.error?.retryAt && status.error.retryAt > Date.now()
@@ -272,7 +271,7 @@ const previewSchema = z.object({
 export async function previewGithubImport(
   client: ImportClient,
   input: { url: string; ref?: string },
-  site?: string,
+  target: { deployment: string; site?: string | undefined },
 ) {
   let value: unknown;
   try {
@@ -285,7 +284,10 @@ export async function previewGithubImport(
   return {
     summary: importPreviewLine(preview),
     ...preview,
-    next: `nforge import ${input.url}${input.ref ? ` --ref ${input.ref}` : ''}${site && site !== defaultForgeSite ? ` --site ${shellQuote(site)}` : ''}${preview.origin === 'public' ? ' [--private]' : ''}`,
+    ...(target.site ? { site: target.site } : {}),
+    deployment: target.deployment,
+    // The import starts on the service that produced this preview, even if the site's mapping changes.
+    next: `nforge import ${shellQuote(input.url)}${input.ref ? ` --ref ${shellQuote(input.ref)}` : ''}${importTargetFlags({ deployment: target.deployment })}`,
   };
 }
 
@@ -421,7 +423,7 @@ export async function githubImportCli(
           ...(values.site ? { site: values.site } : {}),
           ...(values.deployment ? { deployment: values.deployment } : {}),
         },
-        undefined,
+        values.site || values.deployment ? undefined : (await folderAddress())?.url,
         !values.preview,
       );
   if (values.preview) {
@@ -432,7 +434,7 @@ export async function githubImportCli(
         url: positionals[0]!.trim(),
         ...(values.ref ? { ref: values.ref.trim() } : {}),
       },
-      target.site,
+      target,
     );
   }
   const directory = dependencies.directory ?? importJournalDirectory();

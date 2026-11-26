@@ -4,6 +4,7 @@
 // which re-runs only when a grant or an invitation changes; no timer and no poll. The screen shows the server's
 // answers and never decides access: every change below is refused by the server unless the owner person makes it.
 // Devices inside each person arrive with the device record (df06081d); teams with team grants (1e474c35, b6588425).
+import { publicProjectLogin } from '../../../../src/public-project-commands';
 import { useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useAction, useMutation, useQuery } from 'convex/react';
 import { api } from '../../../../convex/_generated/api';
@@ -176,7 +177,7 @@ export default function PeopleAccess({ route, projectId, projectName: name }: Pl
                 <h3>Nobody else yet</h3>
                 <p>
                   Invite a person. Your own agents need no invitation: they act through a device you approve
-                  with <code>nforge login</code>.
+                  with <code>{publicProjectLogin(location.origin)}</code>.
                 </p>
               </div>
             ) : null}

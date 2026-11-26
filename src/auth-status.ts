@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-import { existsSync } from 'node:fs';
-import { dirname, join } from 'node:path';
 import { makeFunctionReference } from 'convex/server';
 import { coordinationClient } from './coordination-client.js';
 import { AUTH_STATE_NEXT_STEP, authState, readAuth, writeAuth } from './auth-store.js';
-import { appTarget, authTarget, backendTarget } from './app-discovery.js';
-import { defaultForgeSite } from './forge-site.js';
+import { appTarget, authTarget, backendTarget, folderAddress } from './app-discovery.js';
+import { distributionForgeSite } from './forge-site.js';
+import { shellQuote } from './shell-quote.js';
 import { publicProjectLogin } from './public-project-commands.js';
-import { hostedAgentAddress } from './hosted-agent-address.js';
 import { ForgeError, invariant } from './errors.js';
 import { parseGhOptions, projectGh } from './gh-cli-options.js';
 import { cliBuildIdentity } from './cli-installation.js';
@@ -25,19 +23,16 @@ export async function authStatus(args: string[]): Promise<unknown> {
     'Select one Forge app URL or --hostname HOST.',
   );
   // The folder's service is authoritative for this read; explicit selectors still win.
-  const project = !options.positional.length ? folderAddress() : null;
-  const implicit = project?.url ?? process.env.FORGE_DEPLOYMENT_URL;
+  const project = !options.positional.length ? await folderAddress() : null;
+  const implicit = project?.url ?? process.env.FORGE_DEPLOYMENT_URL ?? store.defaultDeployment;
   const selected =
     options.positional[0] ??
     (requested &&
       (requested.includes('://')
         ? requested
-        : ([
-            implicit,
-            store.defaultDeployment,
-            ...Object.keys(store.sites ?? {}),
-            ...Object.keys(store.deployments),
-          ].find(url => url && new URL(url).host === requested) ?? `https://${requested}`)));
+        : ([implicit, ...Object.keys(store.sites ?? {}), ...Object.keys(store.deployments)].find(
+            url => url && new URL(url).host === requested,
+          ) ?? `https://${requested}`)));
   const target = selected
     ? selected === project?.url
       ? backendTarget(selected, store)
@@ -45,8 +40,8 @@ export async function authStatus(args: string[]): Promise<unknown> {
     : implicit
       ? backendTarget(implicit, store)
       : Object.keys(store.deployments).length || process.env.FORGE_AUTH_TOKEN
-        ? await appTarget(defaultForgeSite, store)
-        : { site: defaultForgeSite, deployment: undefined };
+        ? await appTarget(distributionForgeSite(), store)
+        : { site: distributionForgeSite(), deployment: undefined };
   const { deployment, site } = target;
   const address = site ? { site } : { deployment };
   const host = new URL(site ?? deployment!).host;
@@ -74,9 +69,14 @@ export async function authStatus(args: string[]): Promise<unknown> {
         host,
         authenticated: false,
         state: state.kind,
-        nextStep: site
-          ? AUTH_STATE_NEXT_STEP[state.kind].replace('nforge login', publicProjectLogin(site))
-          : AUTH_STATE_NEXT_STEP[state.kind],
+        nextStep: AUTH_STATE_NEXT_STEP[state.kind].replace(
+          'nforge login',
+          deployment
+            ? site
+              ? publicProjectLogin(site)
+              : `nforge login --deployment ${shellQuote(deployment)}`
+            : 'nforge login',
+        ),
         account: null,
         source: null,
         tokenSource: null,
@@ -206,21 +206,5 @@ function hintLegacyDeviceName(deployment: string) {
     writeAuth(store);
   } catch {
     /* The hint is advice only. */
-  }
-}
-
-/** Walk only local checkout markers, stopping at a repository boundary. No discovery/network call. */
-export function folderAddress() {
-  let root = process.cwd();
-  for (;;) {
-    if (
-      ['.forge/hosted-lane.json', '.forge/hosted-main.json', '.git', '.forge/native.json'].some(path =>
-        existsSync(join(root, path)),
-      )
-    )
-      return hostedAgentAddress(root, {});
-    const parent = dirname(root);
-    if (parent === root) return null;
-    root = parent;
   }
 }

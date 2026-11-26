@@ -1276,6 +1276,7 @@ test('fc1831eb hand to an agent: one prompt for every picked Lane through the ex
       { laneId: lid(4), title: 'Docs: migration guide v3' },
     ],
     project,
+    'https://forge.example',
   );
   assert.match(
     text,
@@ -1283,7 +1284,7 @@ test('fc1831eb hand to an agent: one prompt for every picked Lane through the ex
   );
   assert.match(
     text,
-    /an existing checkout of that project \(ROOT below\), or make one with nforge clone proj-1 NEW_DIRECTORY\./,
+    /an existing checkout of that project \(ROOT below\), or make one with nforge clone 'proj-1' NEW_DIRECTORY --site 'https:\/\/forge\.example'\./,
     'an agent opened anywhere finds or makes the checkout',
   );
   assert.match(
@@ -1295,7 +1296,7 @@ test('fc1831eb hand to an agent: one prompt for every picked Lane through the ex
     /\n- Fix flaky retry timer \(5d1c7a0e-0000-4000-8000-000000000001\)\n- Docs: migration guide v3 \(/,
   );
   assert.match(
-    handText([{ laneId: lid(1), title: 'x' }], project),
+    handText([{ laneId: lid(1), title: 'x' }], project, 'https://forge.example'),
     /^Take over this Lane of the Forge project "tidepool" \(project ID proj-1\) from Loose ends and finish it\./,
   );
 });

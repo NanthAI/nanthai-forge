@@ -2,6 +2,7 @@
 // Copyright 2026 Ferdinando Valsecchi
 // The import screen's words and stages (Items a488af2a, 2abda01f): what one progress read means for the person, said
 // from the recorded facts. `now` is the render's clock, never a query argument.
+import { shellQuote } from '../../../../src/shell-quote';
 import type { ImportVisibility } from '../../../../src/github-import-report';
 
 export type ImportProgress = {
@@ -75,12 +76,13 @@ export function repositoryOf(url: string) {
 }
 
 /** The command a person or agent would run for the same import. */
-export function importCommand(url: string, ref: string, visibility: ImportVisibility | null) {
+export function importCommand(url: string, ref: string, visibility: ImportVisibility | null, site: string) {
   return [
     'nforge import',
-    url || 'https://github.com/OWNER/REPO',
-    ref ? `--ref ${ref}` : '',
+    shellQuote(url || 'https://github.com/OWNER/REPO'),
+    ref ? `--ref ${shellQuote(ref)}` : '',
     visibility === 'private' ? '--private' : '',
+    `--site ${shellQuote(site)}`,
   ]
     .filter(Boolean)
     .join(' ');

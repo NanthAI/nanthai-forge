@@ -5,6 +5,7 @@
 // approved order, each with its rows, its next page cursor, or why it is not reported, plus pages the reader asked for
 // merged once per group. `setAsideWord` says what happened to each Lane the owner set aside, `trashWord` to each
 // project moved to the trash, and `handText` is the one prompt that hands Lanes to an agent. Pure.
+import { shellQuote } from '../../../../src/shell-quote';
 import { laneTitle, waited, whoOf } from './model';
 import type { IntentPin, IntentRow } from './loose-intents';
 
@@ -503,11 +504,12 @@ export function trashWord(result: 'trashed' | 'changed' | 'failed' | 'restored')
 export function handText(
   lanes: { laneId: string; title: string }[],
   project: { name: string; projectId: string },
+  origin: string,
 ) {
   const list = lanes.map(lane => `- ${lane.title.replace(/\s+/g, ' ').trim()} (${lane.laneId})`).join('\n');
   return (
     `Take over ${lanes.length === 1 ? 'this Lane' : `these ${lanes.length} Lanes`} of the Forge project ${JSON.stringify(project.name)} (project ID ${project.projectId}) from Loose ends and finish ${lanes.length === 1 ? 'it' : 'them'}. ` +
-    `Work in an existing checkout of that project (ROOT below), or make one with nforge clone ${project.projectId} NEW_DIRECTORY. ` +
+    `Work in an existing checkout of that project (ROOT below), or make one with nforge clone ${shellQuote(project.projectId)} NEW_DIRECTORY --site ${shellQuote(origin)}. ` +
     `For each Lane run nforge agent ROOT start --open '{"laneId":"LANE_ID","takeover":true,"reason":"Handed over from Loose ends"}', ` +
     'work in the Lane path it returns, read its Item and saves, then land it with nforge agent ROOT land --save, or abandon it with a reason if the work is no longer needed. Every save is kept either way.\n' +
     list

@@ -26,10 +26,10 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const cli = readFileSync(new URL('../src/cli.ts', import.meta.url), 'utf8');
 const verbs = readFileSync(new URL('../src/agent-verbs.ts', import.meta.url), 'utf8');
 const commands = new Set([...cli.matchAll(/^ {2}nforge ([a-z][a-z-]*)/gm)].map(match => match[1]));
-test('every agent app shows a URL-free sign-in and commands the CLI ships', () => {
+test('every agent app shows an instance-bound sign-in and commands the CLI ships', () => {
   for (const app of apps.agentApps)
     for (const project of [undefined, 'https://forge.example/someone/shop']) {
-      const steps = apps.setupSteps(app, project);
+      const steps = apps.setupSteps(app, location.origin, project);
       assert.equal(steps.filter(step => step.needsPerson).length, 1, 'the person acts once: the device');
       for (const line of steps.flatMap(step => step.commands)) {
         assert.doesNotMatch(line, /npm (install|i) -g|npx nforge/, 'no published package yet');
@@ -42,11 +42,21 @@ test('every agent app shows a URL-free sign-in and commands the CLI ships', () =
             `only the source install runs other tools: ${line}`,
           );
       }
-      assert.ok(steps.some(step => step.commands.includes('nforge login')));
-      if (project) assert.ok(steps.some(step => step.commands.includes('nforge clone someone/shop ./shop')));
+      assert.ok(steps.some(step => step.commands.includes("nforge login 'https://forge.example'")));
+      if (project)
+        assert.ok(
+          steps.some(step =>
+            step.commands.includes("nforge clone 'https://forge.example/someone/shop' './shop'"),
+          ),
+        );
+      else
+        assert.deepEqual(steps.at(-2).commands, [
+          "nforge import OWNER/REPO --site 'https://forge.example'",
+          "nforge host FOLDER --site 'https://forge.example'",
+        ]);
     }
   assert.ok(verbs.includes("'check-settings'"), 'the checks page names a verb agents have');
-  assert.match(apps.setupSteps('other').at(-1).detail, /Any app with a terminal/);
+  assert.match(apps.setupSteps('other', location.origin).at(-1).detail, /Any app with a terminal/);
 });
 
 test('no agent app is preselected: the shared steps show at once and the app is chosen in the last, optional step', () => {
@@ -57,8 +67,8 @@ test('no agent app is preselected: the shared steps show at once and the app is 
   assert.doesNotMatch(html, /mcp-config|nforge connect/, 'no app’s tools step before the person picks');
   for (const app of apps.agentApps) {
     assert.deepEqual(
-      apps.setupSteps(app).slice(0, -1),
-      apps.sharedSteps(),
+      apps.setupSteps(app, location.origin).slice(0, -1),
+      apps.sharedSteps(location.origin),
       'apps differ only in the last step',
     );
     const last = apps.appStep(app);
@@ -68,7 +78,7 @@ test('no agent app is preselected: the shared steps show at once and the app is 
     ]);
   }
   assert.doesNotMatch(
-    JSON.stringify(apps.sharedSteps().filter(step => !step.needsPerson)),
+    JSON.stringify(apps.sharedSteps(location.origin).filter(step => !step.needsPerson)),
     /"detail"/,
     'a step the person only copies carries no standing explainer; its docs link explains',
   );
@@ -103,14 +113,14 @@ test('the steps link the install guide, hooks, MCP and guidance, each to a docs 
 });
 
 test('Cursor gets the one-step command and its project file for manual setup', () => {
-  const last = apps.setupSteps('cursor').at(-1);
+  const last = apps.setupSteps('cursor', location.origin).at(-1);
   assert.deepEqual(last.commands, ['nforge connect cursor']);
   assert.match(last.detail, /\.cursor\/mcp\.json/);
 });
 
 test('the sign-in step sends the person to the devices page where the same code and name show', () => {
   for (const app of apps.agentApps) {
-    const signIn = apps.setupSteps(app).find(step => step.needsPerson);
+    const signIn = apps.setupSteps(app, location.origin).find(step => step.needsPerson);
     assert.equal(signIn.link.href, '/account/devices');
     assert.match(signIn.detail, /code matches/);
   }

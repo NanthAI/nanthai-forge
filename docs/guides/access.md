@@ -32,7 +32,7 @@ A refusal should name what did not save and where the local changes remain. Keep
 Open **Explore** to find public projects and browse a project's source and history. To find the project's address from a terminal, use:
 
 ```sh
-nforge clone --find OWNER/PROJECT
+nforge clone --find OWNER/PROJECT --site 'https://forge.example'
 ```
 
 To download the source with `nforge clone`, sign in first. Opening public pages in a browser works signed out.

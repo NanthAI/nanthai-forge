@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
+import { publicProjectLogin } from '../../../src/public-project-commands';
 import { DeviceSettings } from './DeviceSettings';
 import type { DeviceSettings as Settings } from './access-contract';
 import { useState, type ReactNode } from 'react';
@@ -162,7 +163,8 @@ export function YouView({
             <div className="empty">
               <h3>No device yet</h3>
               <p>
-                Run <code>nforge login</code> where your agent works, then approve the code it prints.
+                Run <code>{publicProjectLogin(location.origin)}</code> where your agent works, then approve
+                the code it prints.
               </p>
             </div>
           ) : (
