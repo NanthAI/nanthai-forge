@@ -1,0 +1,4 @@
+{
+  "actions": ["reportByoci"],
+  "reason": "A CI runner can record a terminal outcome for a declared target with the current project owner's Forge credential. The write verifies the reported State and sequence against accepted main."
+}

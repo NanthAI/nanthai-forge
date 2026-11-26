@@ -19,6 +19,7 @@ function landingPolicy(policy: AutonomyPolicy) {
   delete kept.agentDefaults;
   delete kept.notify;
   delete kept.githubMirror;
+  delete kept.deploys;
   delete kept.mainAudit;
   delete kept.autoCreatePlanningItem;
   delete kept.rollUpPlanningStatus;
@@ -51,6 +52,7 @@ export const acceptancePolicyDigest = (policy: AutonomyPolicy) =>
 const legacyDigest = (policy: AutonomyPolicy) => {
   const legacy: Partial<AutonomyPolicy> = { ...policy, acceptance: pinnedAcceptance(policy) };
   delete legacy.agentDefaults;
+  delete legacy.deploys;
   delete legacy.mainAudit;
   delete legacy.autoCreatePlanningItem;
   delete legacy.rollUpPlanningStatus;
@@ -117,6 +119,8 @@ export const OWNER_GATE: Readonly<Record<string, GateClass>> = {
   rollUpPlanningStatus: 'gated',
   agentsWriteItemText: 'gated',
   preset: { exempt: 'a label: an edit that changes behaviour also changes a gated field' },
+  'deploys.targets': 'gated',
+  'deploys.needsAttentionAfterMinutes': { exempt: 'deploy attention timing only' },
   'githubMirror.repo': 'gated',
   'githubMirror.autoPush': 'gated',
   'githubMirror.laneRefs': 'gated',

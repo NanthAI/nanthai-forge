@@ -9,6 +9,7 @@ import { heldState, heldWhyState } from '../lane-state';
 import {
   approvalsTruncated,
   blockedRequestIds,
+  deployRequests,
   laneRequests,
   parkHolder,
   parkShown,
@@ -231,7 +232,7 @@ const noticeTags = {
   reverted: 'Reverted from main',
   'needs-fix': 'Fix needed',
   mirror: 'GitHub mirror',
-  deploy: 'Deploy failed',
+  deploy: 'Deploy needs attention',
   secrets: 'Secrets',
 } as const;
 const noticeFallback = {
@@ -255,7 +256,7 @@ export function takenHead(taken: Taken, mine: boolean) {
 function noticeRow(notice: Notice): NoticeRow {
   return {
     ...notice,
-    word: notice.kind === 'reverted' || notice.kind === 'deploy' ? 'Check failed' : 'Needs you',
+    word: notice.kind === 'reverted' ? 'Check failed' : 'Needs you',
     tag: noticeTags[notice.kind],
     head: notice.taken
       ? takenHead(notice.taken, false)
@@ -330,6 +331,8 @@ export function needsView(read: NeedsRead, now = Date.now()): NeedsView {
     .filter(request => request.needsOwner && (request.kind !== 'lane' || !heldLanes.has(request.laneId)));
   const ahead = listed.filter(request => !blockedIds.has(request.laneId)).map(aheadRow);
   const blocked = listed.filter(request => blockedIds.has(request.laneId)).map(aheadRow);
+  const deploys = deployRequests(read, now);
+  const notices = (read.notices ?? []).filter(notice => notice.kind !== 'deploy');
   return {
     now: waiting,
     asks,
@@ -339,7 +342,8 @@ export function needsView(read: NeedsRead, now = Date.now()): NeedsView {
     // Sealed secrets that wait on the reader (Item 41a0df87): one row that points at Settings, Secrets, where each is.
     tookOut: [...(read.tookOut ?? [])],
     notices: [
-      ...(read.notices ?? []).map(noticeRow),
+      ...notices.map(noticeRow),
+      ...deploys.map(noticeRow),
       ...(read.secrets
         ? [
             noticeRow({
@@ -359,7 +363,8 @@ export function needsView(read: NeedsRead, now = Date.now()): NeedsView {
       asks.length +
       parked.length +
       blocked.length +
-      (read.notices?.length ?? 0) +
+      notices.length +
+      deploys.length +
       (read.secrets ?? 0),
     atLeast: read.more > 0 || read.parkedMore === true || read.asksMore === true,
     countAtLeast:
@@ -397,14 +402,22 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString
 export function needsSentence(view: NeedsView): { bold: string; rest: string } {
   // A taken-out change offered to its owner is a choice, not a hold: nothing waits on it (J08).
   const offers = view.notices.filter(notice => notice.taken).length;
-  const holds = view.count - offers;
+  const deploys = view.notices.filter(notice => notice.kind === 'deploy').length;
+  const holds = view.count - offers - deploys;
   const lanes = `${view.countAtLeast ? 'At least ' : ''}${plural(holds, 'thing')}`;
   const aheadCount = view.ahead.length + (view.askedAhead?.length ?? 0);
   const ahead = aheadCount
     ? `${plural(aheadCount, 'request')} asked ahead ${aheadCount === 1 ? 'holds' : 'hold'} nothing yet.`
     : '';
+  const deploySentence = deploys
+    ? `${deploys === 1 ? 'A deploy needs' : `${deploys} deploys need`} someone to look into ${deploys === 1 ? 'it' : 'them'}.`
+    : '';
   if (holds > 0)
-    return { bold: `${lanes} ${holds === 1 ? 'holds' : 'hold'} work until you decide.`, rest: ahead };
+    return {
+      bold: `${lanes} ${holds === 1 ? 'holds' : 'hold'} work until you decide.`,
+      rest: deploySentence || ahead,
+    };
+  if (deploySentence) return { bold: deploySentence, rest: ahead };
   if (offers)
     return {
       bold: `${offers === 1 ? 'A change' : `${offers.toLocaleString()} changes`} you own ${offers === 1 ? 'was' : 'were'} taken out of main.`,

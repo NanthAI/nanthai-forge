@@ -1264,9 +1264,10 @@ pinned with its own lockfile in `site/deploy/`, so only the deploy job downloads
 
 The Worker's `PUBLIC_PAGES` R2 binding (the public snapshot bucket that site/public-read.ts reads, so a signed-out or crawler cache miss makes no Convex call) comes from the repository variable `FORGE_PUBLIC_PAGES_BUCKET`, which the dev web deploy passes to `build-site.mjs` (`scripts/site-worker-env.mjs`). The variable holds the same bucket the Convex snapshot writer writes to; the repo never names it. Unset or empty leaves the binding off and the Worker keeps its Convex read; a malformed name fails the build without printing it. Setting or changing the variable takes effect on the next web deploy, because the binding is part of the build's digest.
 
-**When it deploys.** Both `.github/workflows/convex-deploy.yml` and `.github/workflows/web-deploy.yml` start straight from
-Forge main landings via `workflow_dispatch` (`convex/projectDeployDispatch.ts`, called from `enqueueGithubMirror` ahead of the
-mirror queue so a stopped or paused mirror never blocks dev deploys); neither workflow triggers on GitHub pushes. Each run
+**When it deploys.** Forge's two dev targets are declared in [deploy-targets.json](../.nforge/deploy-targets.json).
+Their workflows start straight from accepted Forge main landings via the configured adapter
+(`convex/projectDeployDispatch.ts`). The landing schedules them independently of the GitHub mirror.
+Neither workflow triggers on GitHub pushes. Each run
 authenticates to `/deploy/actions` with GitHub Actions OIDC (`id-token: write`), reads Forge `main`'s newest `(head, sequence)`
 and changed paths since the last recorded deploy, and overlays only the changed blobs from R2 (`scripts/forge-deploy-ci.mjs`),
 keeping one deploy running and one queued per target (`cancel-in-progress: false`). Both workflows also keep a 3-hour disaster
@@ -1295,10 +1296,11 @@ For the dev site, `scripts/site-deploy-plan.mjs` gates every build:
    `Build #<seq> · <head8>` into `index.html` and `app.html` (`data-build-version`), so unchanged
    builds keep the same digest and skip Cloudflare upload. Every attempted deploy reports its outcome (`succeeded`, `failed`,
    or `smoke-failed`, keyed per `${run_id}:${run_attempt}`) back to `projectDeploys` via `/deploy/actions` (authorized only
-   for enrolled projects matching the CI adapter repository), so `landings {receiptId}` and `lane-history` show the first
+   for the declared target and its configured CI adapter repository), so `landings {receiptId}` and `lane-history` show the first
    successful deploy whose head contains a landing (`deploy.sequence >= landing.sequence`, or the prior successful deploy
    marked `unchanged: true` when no paths affecting that target changed), `wait {"deploy": ...}` subscribes reactively
-   without polling, and any deploy or smoke failure surfaces as a **Needs you** notice until a newer deploy passes.
+   without polling, and **Now** shows any deploy or smoke failure until the next attempt succeeds.
+   An unowned failure becomes a **Needs you** request after the project's attention threshold.
 
 Measured on the 100 landings of 2026-11-22 14:38 to 2026-11-23 04:45 UTC (85 of them changed a served file), which
 reached GitHub in 56 pushes: the old push-per-landing rule made **56 deploys per 100 landings** (89 billed runner minutes, 61 actual);

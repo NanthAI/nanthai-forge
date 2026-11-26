@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-// OIDC-authenticated HTTP boundary for CI deploy workflows (Item 8b6efb50). Allows convex-deploy.yml
-// and web-deploy.yml on refs/heads/main to read Forge main + R2 source deltas and report deploy
-// outcomes (including post-deploy smoke failures) without waiting on the GitHub mirror.
+// GitHub Actions adapter. The live target declaration authorizes the signed workflow on main
+// before it can access source or record an outcome.
 import { makeFunctionReference } from 'convex/server';
 import { z } from 'zod';
 import { httpAction } from './_generated/server';
@@ -10,7 +9,7 @@ import type { Id } from './_generated/dataModel';
 import { verifyDeployActionsOidc } from '../src/github-actions-oidc';
 import { directSourceBatch } from '../src/hosted-actions-direct';
 import { invariant } from '../src/errors';
-import { deployWorkflows } from './projectDeployDispatch';
+import { deployTargetName } from '../src/deploy-targets';
 import { stateSourceGrants } from './projectStateSourceGrants';
 import { RUNNER_SOURCE_READ_BUDGET_MS } from './projectStateSourceApi';
 
@@ -32,7 +31,7 @@ const smokeCheckSchema = z
 const deployRequestSchema = z
   .object({
     projectId: z.string().min(1).max(128),
-    target: z.enum(['convex', 'web']),
+    target: deployTargetName,
     command: z.discriminatedUnion('kind', [
       z.object({ kind: z.literal('main') }).strict(),
       z
@@ -62,6 +61,7 @@ const deployRequestSchema = z
           status: z.enum(['succeeded', 'failed', 'smoke-failed']),
           url: z.string().max(400).optional(),
           summary: z.string().max(4096).optional(),
+          cause: z.string().max(240).optional(),
           smoke: z
             .object({
               ok: z.boolean(),
@@ -81,8 +81,6 @@ const deployRequestSchema = z
   })
   .strict();
 
-const allowedWorkflows = Object.values(deployWorkflows);
-
 export const handle = httpAction(async (ctx, request) => {
   try {
     const site = process.env.CONVEX_SITE_URL;
@@ -91,11 +89,7 @@ export const handle = httpAction(async (ctx, request) => {
       'EVIDENCE_CHANGED',
       'GitHub OIDC authorization required.',
     );
-    const claims = await verifyDeployActionsOidc(
-      request.headers.get('authorization')!.slice(7),
-      site,
-      allowedWorkflows,
-    );
+    const claims = await verifyDeployActionsOidc(request.headers.get('authorization')!.slice(7), site);
     const reader = request.body?.getReader();
     invariant(reader, 'BAD_ARGUMENT', 'A JSON body is required.');
     let size = 0;
@@ -177,7 +171,7 @@ export const handle = httpAction(async (ctx, request) => {
         log: message => console.log('FORGE_DEPLOY_SOURCE ' + JSON.stringify({ message })),
       });
     } else {
-      const { state, sequence, status, url, summary, smoke, unchanged, liveSequence, liveHead } =
+      const { state, sequence, status, url, summary, cause, smoke, unchanged, liveSequence, liveHead } =
         parsed.command;
       const clampedSummary = clampDiagnostic(summary);
       const clampedSmoke = smoke
@@ -200,6 +194,7 @@ export const handle = httpAction(async (ctx, request) => {
           runId: `${claims.run_id}:${claims.run_attempt}`,
           ...(url ? { url } : {}),
           ...(clampedSummary ? { summary: clampedSummary } : {}),
+          ...(cause ? { cause } : {}),
           ...(clampedSmoke ? { smoke: clampedSmoke } : {}),
           ...(unchanged ? { unchanged } : {}),
           ...(liveSequence !== undefined ? { liveSequence } : {}),

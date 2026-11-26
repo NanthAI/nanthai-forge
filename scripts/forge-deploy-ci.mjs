@@ -24,18 +24,14 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, matchesGlob, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { SITE_RECORD, buildFiles, deployPlan, liveRecord } from './site-deploy-plan.mjs';
 
-const CONVEX_PATHS = [
-  /^convex\//,
-  /^src\//,
-  /^package(?:-lock)?\.json$/,
-  /^\.github\/workflows\/convex-deploy\.yml$/,
-  /^scripts\/forge-deploy-ci\.mjs$/,
-];
+const deployTargets = JSON.parse(
+  readFileSync(new URL('../.nforge/deploy-targets.json', import.meta.url), 'utf8'),
+).targets;
 const SKIP_DIRS = new Set(['.git', 'node_modules', 'site-output', 'hosted-web-dist']);
 const DOWNLOAD_BATCH = 200;
 const DOWNLOAD_CONCURRENCY = 12;
@@ -67,7 +63,8 @@ export function planConvexDeploy({ head, sequence, alreadyLive, newestFailed, la
       reason: `retrying Convex deploy at main #${sequence} after prior failure`,
     };
   if (Array.isArray(changedPaths)) {
-    const matched = changedPaths.filter(path => CONVEX_PATHS.some(re => re.test(path)));
+    const triggerPaths = deployTargets.find(target => target.name === 'convex').triggerPaths;
+    const matched = changedPaths.filter(path => triggerPaths.some(glob => matchesGlob(path, glob)));
     if (!matched.length)
       return {
         deploy: false,

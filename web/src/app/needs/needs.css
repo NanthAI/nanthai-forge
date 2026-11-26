@@ -51,3 +51,28 @@
     .loose-ends .row.le > :nth-child(5) { grid-column: 3; grid-row: 1; }
   }
 }
+
+[data-ds] .deploy-status-lines {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--fx-text-3);
+  font-size: 12px;
+}
+
+[data-ds] .deploy-status-line,
+[data-ds] .deploy-status-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+[data-ds] .deploy-status-line {
+  padding: 8px 0;
+  border-top: 1px solid var(--fx-line);
+}
+
+[data-ds] .deploy-status-title strong {
+  color: var(--fx-text);
+}

@@ -173,7 +173,7 @@ export const deploy = query({
     projectId: v.id('hostedProjects'),
     receiptId: v.optional(v.string()),
     sequence: v.optional(v.number()),
-    target: v.optional(v.union(v.literal('convex'), v.literal('web'), v.literal('all'))),
+    target: v.optional(v.string()),
   },
   returns: v.string(),
   handler: async (rawCtx, input) => {
@@ -181,7 +181,7 @@ export const deploy = query({
       const ctx = finishReadReader(rawCtx);
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to wait for a deploy.');
-      await activeProject(ctx, input.projectId, user.subject);
+      const project = await activeProject(ctx, input.projectId, user.subject);
       let sequence = input.sequence;
       let receiptId: string | undefined;
       if (input.receiptId !== undefined) {
@@ -226,7 +226,7 @@ export const deploy = query({
         'Select a positive landing sequence or receipt id.',
       );
       const target = input.target ?? 'all';
-      const status = await deployWaitStatus(rawCtx, input.projectId, sequence, target);
+      const status = await deployWaitStatus(rawCtx, project, sequence, target);
       return canonicalPayload({
         deploy: {
           sequence,

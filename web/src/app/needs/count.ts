@@ -7,6 +7,7 @@
 // for the one it depends on ask nobody. Those go to FYI. A question with choices addressed to the reader waits on
 // the reader, and so does a Lane parked for the reader (Item e1633718); work reverted from main and a stopped mirror
 // are shared-state decisions (Item 12fde646). Pure and small: the frame imports it eagerly.
+import type { DeployStatusRead } from '../../../../src/deploy-status';
 import type { Id } from '../../../../convex/_generated/dataModel';
 import { makeFunctionReference } from 'convex/server';
 
@@ -116,6 +117,7 @@ export type NeedsRead = {
   parked?: readonly ParkedLane[];
   parkedMore?: boolean;
   notices?: readonly Notice[];
+  deployStatus?: DeployStatusRead;
   noticesMore?: true;
   /** What waits on a person in sealed secrets (convex/projectNeedsMe.ts `secrets`); write members only. */
   secrets?: number;
@@ -175,6 +177,21 @@ export function laneRequests(payload: string): ReadonlySet<string> {
   }
 }
 
+export function deployRequests(read: NeedsRead, now: number): Notice[] {
+  return (read.deployStatus?.targets ?? []).flatMap(target => {
+    const failure = target.failure;
+    if (failure?.attentionAt === undefined || failure.attentionAt > now) return [];
+    return [
+      {
+        kind: 'deploy',
+        id: target.target,
+        summary: `Find someone to look at the ${target.label} deploy in ${target.environment}.`,
+        next: `It has been failing for at least ${failure.attentionMinutes} minutes.`,
+      },
+    ];
+  });
+}
+
 /** The "Needs you" count: held Lanes that wait on a person, questions for the reader and Lanes parked for the
  * reader that show at `now`. Held or parked Lanes past the read's limit are not classified, so with any the count is
  * a lower bound. */
@@ -191,7 +208,14 @@ export function needsCount(
   const asks = (read.asks ?? []).filter(row => !row.ahead && !row.recipientSession).length;
   const blocked = blockedRequestIds(read.approvals, now, read.canDecide).size;
   return {
-    n: held + asks + parked + blocked + (read.notices?.length ?? 0) + (read.secrets ?? 0),
+    n:
+      held +
+      asks +
+      parked +
+      blocked +
+      (read.notices?.filter(notice => notice.kind !== 'deploy').length ?? 0) +
+      deployRequests(read, now).length +
+      (read.secrets ?? 0),
     atLeast:
       read.more > 0 ||
       read.parkedMore === true ||

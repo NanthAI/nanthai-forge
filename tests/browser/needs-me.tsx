@@ -33,7 +33,7 @@ const calm = params.get('data') === 'calm' || stall;
 const variant = params.get('data');
 const stress = variant === 'stress';
 const worst = stress || variant === 'worst' || variant === 'over';
-const quiet = variant === 'quiet' || variant === 'empty';
+const quiet = variant === 'quiet' || variant === 'empty' || variant === 'deploys';
 const unavailable = variant === 'loading' || variant === 'error';
 const writes: unknown[] = [];
 (window as unknown as { writes: unknown[] }).writes = writes;
@@ -509,7 +509,7 @@ const endedAskRead: NeedsRead = {
     },
   ],
 };
-const read: NeedsRead =
+const initialRead: NeedsRead =
   variant === 'ended-ask'
     ? endedAskRead
     : variant === 'notices'
@@ -599,7 +599,7 @@ const flow: NonNullable<LineFeed['flow']> = {
       }),
 };
 const busyLanes: Mark[] = [
-  ...read.held.map(row => ({
+  ...initialRead.held.map(row => ({
     laneId: row.laneId,
     stage: (heldAt[row.why as keyof typeof heldAt] ?? 'saved') as Mark['stage'],
     held: true,
@@ -731,7 +731,29 @@ const queryFixture = {
   },
 } as unknown as ConvexReactClient;
 
+const deployStatus: NeedsRead['deployStatus'] = {
+  mainSequence: 32142,
+  targets: [
+    {
+      target: 'api',
+      label: 'API',
+      environment: 'staging',
+      liveSequence: 32139,
+      failure: {
+        key: 'fixture-deploy-cause',
+        since: new Date(ago(90)).toISOString(),
+        sinceSequence: 32140,
+        runUrl: 'https://ci.example.test/runs/32140',
+        attentionAt: ago(30),
+        attentionMinutes: 60,
+      },
+    },
+    { target: 'website', label: 'Website', environment: 'dev', liveSequence: 32142 },
+  ],
+};
+
 function Fixture() {
+  const [read, setRead] = useState(variant === 'deploys' ? { ...initialRead, deployStatus } : initialRead);
   const [feed, setFeed] = useState(variant === 'loading' ? undefined : fixtureFeed);
   Object.assign(window, {
     drawerReads,
@@ -779,6 +801,16 @@ function Fixture() {
           )
         }
         read={read}
+        seeDeploy={async (target, key) => {
+          writes.push(['seenDeploy', { target, key }]);
+          setRead({
+            ...read,
+            deployStatus: {
+              ...deployStatus,
+              targets: deployStatus.targets.filter(deploy => deploy.target !== target),
+            },
+          });
+        }}
         fyi={fyi}
         counts={{
           exact: true,

@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 // Deploy records, OIDC-authenticated CI queries/callbacks, ancestry lookups for receipts &
-// lane-history, reactive wait status, and Needs you failure notices (Item 8b6efb50).
-import { v } from 'convex/values';
+// lane-history, reactive wait status, and CI-independent outcome recording.
+import { v, type ObjectType } from 'convex/values';
 import type { Doc, Id } from './_generated/dataModel';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import { internalMutation, internalQuery } from './server';
+import { mutation } from './cliServer';
+import { activeOwnedProject } from './projectAuthority';
+import { report } from './errors';
 import { invariant } from '../src/errors';
 import { hostedStartMain } from './projectHostedChannels';
 import { MAIN_LOG_WINDOW, overlapMainSince } from './projectHostedOverlapMainLog';
@@ -13,16 +16,11 @@ import { findStoredObject as findObject, readablePhysical } from './projectObjec
 import { isStored } from './projectObjectFields';
 import { sourceObjectLocation } from './projectSourceBeginReads';
 import { describeObjects } from './projectObjectDownloads';
-import { deploySmoke, deployStatus, deployTarget } from './projectDeployFields';
-import {
-  DEPLOY_COALESCE_MS,
-  WEB_DEPLOY_WINDOW_MS,
-  deployWorkflows,
-  pathsAffectTarget,
-  queueDeployDispatch,
-  resolveDeployRepository,
-  type DeployTarget,
-} from './projectDeployDispatch';
+import { deployOutcome, deploySmoke, deployTarget } from './projectDeployFields';
+import { deployTargetName, type DeployTarget } from '../src/deploy-targets';
+import { liveSequence, newestCompletedRow, newestSuccesses, pathsAffectTarget } from './projectDeployRows';
+import { failureDetails, lastVerifiedLive, readFailure } from './projectDeployFailure';
+import { DEPLOY_COALESCE_MS, queueDeployDispatch, resolveDeployRepository } from './projectDeployDispatch';
 
 export type DeployEntry = {
   sequence: number;
@@ -37,12 +35,8 @@ export type DeployEntry = {
   /** Actual live deploy Forge State currently served when `unchanged` is true and differs from `head`. */
   liveHead?: string;
 };
-export type LandingDeploys = {
-  convex: DeployEntry | null;
-  web: DeployEntry | null;
-};
+type LandingDeploys = Record<string, DeployEntry | null>;
 
-const TARGETS: readonly DeployTarget[] = ['convex', 'web'];
 const SUMMARY_CHARS = 240;
 
 const toEntry = (row: Doc<'projectDeploys'>, unchangedOverride?: true): DeployEntry => {
@@ -64,36 +58,35 @@ const clampText = (value: string | undefined) => {
   return clean ? clean.slice(0, SUMMARY_CHARS) : undefined;
 };
 
-/** Verify that a verified GitHub OIDC token belongs to an enrolled dev-deploy project, its
- * configured CI repository (or mirror fallback), and the matching workflow filename. */
-async function authorizedDeployProject(
+function configuredTarget(project: Doc<'hostedProjects'>, name: string) {
+  const target = project.autonomyPolicy?.deploys?.targets.find(target => target.name === name);
+  invariant(target, 'EVIDENCE_CHANGED', 'This deploy target is not declared by the project.');
+  return target;
+}
+
+/** Verify the signed CI identity against the live project declaration. */
+async function authorizedDeployTarget(
   ctx: QueryCtx | MutationCtx,
   projectId: Id<'hostedProjects'>,
-  target: DeployTarget,
+  name: string,
   repository: string,
   workflow: string,
 ) {
   const project = await ctx.db.get(projectId);
   invariant(project && !project.removal, 'PROJECT_UNAVAILABLE', 'This Forge project is unavailable.');
+  const target = configuredTarget(project, name);
   invariant(
-    project.sourceAuthority?.mode === 'server' && workflow === deployWorkflows[target],
+    project.sourceAuthority?.mode === 'server' && target.githubActions?.workflow === workflow,
     'EVIDENCE_CHANGED',
-    'Deploy workflow does not match this project.',
+    'Deploy workflow does not match this project target.',
   );
-  // Enrollment gate: only projects enrolled in automated release/deploy workflows (matching
-  // scheduleReleaseSign) may use /deploy/actions, never ordinary projects that only mirror.
-  const enrolled = await ctx.db
-    .query('projectReleaseSignatures')
-    .withIndex('by_project_and_head', q => q.eq('projectId', projectId))
-    .take(1);
-  invariant(enrolled.length > 0, 'EVIDENCE_CHANGED', 'Dev deploys are not enabled for this project.');
   const expectedRepo = await resolveDeployRepository(ctx, project);
   invariant(
     expectedRepo && expectedRepo.toLowerCase() === repository.toLowerCase(),
     'EVIDENCE_CHANGED',
     'Deploy workflow repository does not match this project CI adapter.',
   );
-  return project;
+  return target;
 }
 
 const oidcArgs = {
@@ -102,31 +95,6 @@ const oidcArgs = {
   repository: v.string(),
   workflow: v.string(),
 };
-
-/** Latest non-queued deploy row for `(projectId, target)`. */
-async function newestCompletedRow(ctx: QueryCtx, projectId: Id<'hostedProjects'>, target: DeployTarget) {
-  const rows = await ctx.db
-    .query('projectDeploys')
-    .withIndex('by_project_and_target_and_sequence', q => q.eq('projectId', projectId).eq('target', target))
-    .order('desc')
-    .take(4);
-  return rows.find(row => row.status !== 'queued') ?? null;
-}
-
-/** Latest succeeded row and latest actually-uploaded succeeded row (`!row.unchanged`). */
-async function newestSuccesses(ctx: QueryCtx, projectId: Id<'hostedProjects'>, target: DeployTarget) {
-  const rows = await ctx.db
-    .query('projectDeploys')
-    .withIndex('by_project_and_target_and_status_and_sequence', q =>
-      q.eq('projectId', projectId).eq('target', target).eq('status', 'succeeded'),
-    )
-    .order('desc')
-    .take(12);
-  return {
-    last: rows[0] ?? null,
-    lastUploaded: rows.find(row => !row.unchanged) ?? null,
-  };
-}
 
 /** True ONLY when per-landing overlap log rows strictly within `(afterSequence, toSequence]` are
  * complete, contiguous, non-null and contain zero paths affecting `target`. */
@@ -160,7 +128,7 @@ export const mainContext = internalQuery({
   args: oidcArgs,
   returns: v.string(),
   handler: async (ctx, input) => {
-    await authorizedDeployProject(ctx, input.projectId, input.target, input.repository, input.workflow);
+    await authorizedDeployTarget(ctx, input.projectId, input.target, input.repository, input.workflow);
     const main = await hostedStartMain(ctx, input.projectId);
     const [{ last, lastUploaded }, newest] = await Promise.all([
       newestSuccesses(ctx, input.projectId, input.target),
@@ -194,11 +162,34 @@ export const mainContext = internalQuery({
   },
 });
 
+async function workflowForDispatch(
+  ctx: QueryCtx | MutationCtx,
+  input: { projectId: Id<'hostedProjects'>; target: string; repository?: string },
+) {
+  const project = await ctx.db.get(input.projectId);
+  if (!project || project.removal || project.sourceAuthority?.mode !== 'server') return null;
+  const workflow = project.autonomyPolicy?.deploys?.targets.find(
+    target => target.name === input.target,
+  )?.githubActions;
+  if (!workflow) return null;
+  if (input.repository) {
+    const repository = await resolveDeployRepository(ctx, project);
+    if (repository?.toLowerCase() !== input.repository.toLowerCase()) return null;
+  }
+  return workflow;
+}
+
+export const dispatchWorkflow = internalQuery({
+  args: { projectId: v.id('hostedProjects'), target: deployTarget, repository: v.string() },
+  returns: v.union(v.string(), v.null()),
+  handler: async (ctx, input) => (await workflowForDispatch(ctx, input))?.workflow ?? null,
+});
+
 /** Atomically claim the coalesced pending dispatch for `(projectId, target)`. For web, if an upload
  * just succeeded inside the 5-minute window while this dispatch was waiting, keeps the marker alive
  * and returns `{ action: 'defer', delayMs }` so the caller reschedules once when the window opens. */
 export const claimQueued = internalMutation({
-  args: { projectId: v.id('hostedProjects'), target: deployTarget },
+  args: { projectId: v.id('hostedProjects'), target: deployTarget, repository: v.optional(v.string()) },
   returns: v.string(),
   handler: async (ctx, input) => {
     const row = await ctx.db
@@ -208,26 +199,35 @@ export const claimQueued = internalMutation({
       )
       .unique();
     if (!row) return JSON.stringify({ action: 'none' });
-    if (input.target === 'web') {
-      const { lastUploaded } = await newestSuccesses(ctx, input.projectId, 'web');
+    const workflow = await workflowForDispatch(ctx, input);
+    if (!workflow) {
+      await ctx.db.delete(row._id);
+      return JSON.stringify({ action: 'none' });
+    }
+    if (workflow.minimumIntervalMs) {
+      const { lastUploaded } = await newestSuccesses(ctx, input.projectId, input.target);
       if (lastUploaded && lastUploaded.sequence >= row.sequence) {
         await ctx.db.delete(row._id);
         return JSON.stringify({ action: 'none' });
       }
-      const lastMs = lastUploaded ? Date.parse(lastUploaded.at) : NaN;
-      const now = Date.now();
-      if (Number.isFinite(lastMs) && now - lastMs < WEB_DEPLOY_WINDOW_MS) {
-        const delayMs = Math.max(DEPLOY_COALESCE_MS, lastMs + WEB_DEPLOY_WINDOW_MS - now + 1_000);
+      const remaining = lastUploaded
+        ? Date.parse(lastUploaded.at) + workflow.minimumIntervalMs - Date.now()
+        : 0;
+      if (remaining > 0)
         return JSON.stringify({
           action: 'defer',
-          delayMs,
+          delayMs: Math.max(DEPLOY_COALESCE_MS, remaining + 1_000),
           state: row.head,
           sequence: row.sequence,
         });
-      }
     }
     await ctx.db.delete(row._id);
-    return JSON.stringify({ action: 'dispatch', state: row.head, sequence: row.sequence });
+    return JSON.stringify({
+      action: 'dispatch',
+      state: row.head,
+      sequence: row.sequence,
+      workflow: workflow.workflow,
+    });
   },
 });
 
@@ -246,7 +246,7 @@ export const selectState = internalMutation({
   },
   returns: v.string(),
   handler: async (ctx, input) => {
-    await authorizedDeployProject(ctx, input.projectId, input.target, input.repository, input.workflow);
+    await authorizedDeployTarget(ctx, input.projectId, input.target, input.repository, input.workflow);
     invariant(/^[a-f0-9]{64}$/.test(input.state), 'SOURCE_UNAVAILABLE', 'Select a valid State.');
     const main = await hostedStartMain(ctx, input.projectId);
     if (main.head !== input.state) {
@@ -319,7 +319,7 @@ export const catalog = internalMutation({
   },
   returns: v.any(),
   handler: async (ctx, input) => {
-    await authorizedDeployProject(ctx, input.projectId, input.target, input.repository, input.workflow);
+    await authorizedDeployTarget(ctx, input.projectId, input.target, input.repository, input.workflow);
     return describeObjects(
       ctx,
       { projectId: input.projectId, digests: input.digests, signed: true, runs: input.runs },
@@ -331,160 +331,224 @@ export const catalog = internalMutation({
 const safeUrl = (value: string | undefined) =>
   value && /^https:\/\/[^\s]{1,400}$/.test(value) ? value : undefined;
 
+const deployReportArgs = {
+  state: v.string(),
+  sequence: v.number(),
+  status: deployOutcome,
+  runId: v.string(),
+  url: v.optional(v.string()),
+  summary: v.optional(v.string()),
+  cause: v.optional(v.string()),
+  smoke: v.optional(deploySmoke),
+  unchanged: v.optional(v.literal(true)),
+  liveSequence: v.optional(v.number()),
+  liveHead: v.optional(v.string()),
+};
+const deployReportArgsForProject = {
+  projectId: v.id('hostedProjects'),
+  target: deployTarget,
+  ...deployReportArgs,
+};
+type DeployReport = ObjectType<typeof deployReportArgsForProject>;
+
 /** Record a deploy run outcome from an OIDC-authenticated deploy workflow. Keyed by verified
  * `${run_id}:${run_attempt}` so retries of the same callback are idempotent while re-runs never
  * overwrite an earlier successful attempt's record. */
 export const record = internalMutation({
-  args: {
-    ...oidcArgs,
-    state: v.string(),
-    sequence: v.number(),
-    status: deployStatus,
-    runId: v.string(),
-    url: v.optional(v.string()),
-    summary: v.optional(v.string()),
-    smoke: v.optional(deploySmoke),
-    unchanged: v.optional(v.literal(true)),
-    liveSequence: v.optional(v.number()),
-    liveHead: v.optional(v.string()),
-  },
+  args: { ...oidcArgs, ...deployReportArgs },
   returns: v.string(),
   handler: async (ctx, input) => {
-    await authorizedDeployProject(ctx, input.projectId, input.target, input.repository, input.workflow);
-    invariant(input.status !== 'queued', 'BAD_ARGUMENT', 'Report a terminal deploy status.');
-    invariant(/^[a-f0-9]{64}$/.test(input.state), 'BAD_ARGUMENT', 'State must be a full 64-hex hash.');
-    invariant(
-      Number.isSafeInteger(input.sequence) && input.sequence > 0,
-      'BAD_ARGUMENT',
-      'Sequence must be a positive integer.',
+    const target = await authorizedDeployTarget(
+      ctx,
+      input.projectId,
+      input.target,
+      input.repository,
+      input.workflow,
     );
     invariant(
       /^[1-9][0-9]*(?::[1-9][0-9]*)?$/.test(input.runId),
       'BAD_ARGUMENT',
-      'Run id must be positive digits (optional :attempt).',
+      'Invalid signed CI run id.',
     );
-    if (input.liveHead !== undefined)
-      invariant(
-        /^[a-f0-9]{64}$/.test(input.liveHead),
-        'BAD_ARGUMENT',
-        'liveHead must be a full 64-hex hash.',
-      );
-    if (input.liveSequence !== undefined)
-      invariant(
-        Number.isSafeInteger(input.liveSequence) && input.liveSequence > 0,
-        'BAD_ARGUMENT',
-        'liveSequence must be a positive integer.',
-      );
-    // Verify the reported (sequence, state) is a real main revision on this project.
-    const main = await hostedStartMain(ctx, input.projectId);
-    if (main.sourceRevision !== input.sequence || main.head !== input.state) {
-      const [row] = await ctx.db
-        .query('projectHostedAcceptances')
-        .withIndex('by_project_and_sequence', q =>
-          q.eq('projectId', input.projectId).eq('sequence', input.sequence),
-        )
-        .take(1);
-      const head = row ? (JSON.parse(row.value) as { candidate?: { head?: string } }).candidate?.head : null;
-      invariant(head === input.state, 'EVIDENCE_CHANGED', 'Reported deploy head differs from hosted main.');
-    }
-    const existing = await ctx.db
-      .query('projectDeploys')
-      .withIndex('by_project_and_target_and_run', q =>
-        q.eq('projectId', input.projectId).eq('target', input.target).eq('runId', input.runId),
-      )
-      .unique();
-    // Never erase or downgrade an already-recorded successful deploy for the same run attempt.
-    if (
-      existing &&
-      existing.status === 'succeeded' &&
-      (input.status !== 'succeeded' || existing.head !== input.state)
-    ) {
-      return JSON.stringify({
-        recorded: false,
-        preserved: true,
-        target: input.target,
-        sequence: existing.sequence,
-        status: existing.status,
-      });
-    }
-    const clampedSmoke = input.smoke
-      ? {
-          ok: input.smoke.ok,
-          checks: input.smoke.checks.slice(0, 16).map(check => ({
-            name: check.name.slice(0, 64),
-            ok: check.ok,
-            ...(check.status !== undefined ? { status: check.status } : {}),
-            ...(clampText(check.detail) ? { detail: clampText(check.detail) } : {}),
-          })),
-        }
-      : undefined;
-    const summary = clampText(input.summary);
-    const unchanged: true | undefined = input.status === 'succeeded' && input.unchanged ? true : undefined;
-    const now = Date.now();
-    const doc = {
-      projectId: input.projectId,
-      target: input.target,
-      workflow: input.workflow,
-      sequence: input.sequence,
-      head: input.state,
-      status: input.status,
-      runId: input.runId,
-      at: new Date(now).toISOString(),
-      ...(safeUrl(input.url) ? { url: safeUrl(input.url) } : {}),
-      ...(summary ? { summary } : {}),
-      ...(clampedSmoke ? { smoke: clampedSmoke } : {}),
-      ...(unchanged ? { unchanged } : {}),
-      ...(unchanged && input.liveSequence !== undefined ? { liveSequence: input.liveSequence } : {}),
-      ...(unchanged && input.liveHead ? { liveHead: input.liveHead } : {}),
-    };
-    if (existing) await ctx.db.patch(existing._id, doc);
-    else await ctx.db.insert('projectDeploys', doc);
-    // If a newer web-affecting landing arrived while this web upload was in flight, schedule one
-    // trailing flush when the 5-minute window opens so it never waits for the 3-hour catch-up.
-    let trailingFlushScheduled = false;
-    if (
-      input.target === 'web' &&
-      input.status === 'succeeded' &&
-      !unchanged &&
-      main.sourceRevision > input.sequence
-    ) {
-      const unchangedAfter = await provenUnchangedBetween(
-        ctx,
-        input.projectId,
-        'web',
-        input.sequence,
-        main.sourceRevision,
-      );
-      if (!unchangedAfter) {
-        trailingFlushScheduled = await queueDeployDispatch(ctx, {
-          projectId: input.projectId,
-          repository: input.repository,
-          target: 'web',
-          head: main.head,
-          sequence: main.sourceRevision,
-          delayMs: WEB_DEPLOY_WINDOW_MS + 1_000,
-          now,
-        });
-      }
-    }
-    return JSON.stringify({
-      recorded: true,
-      target: input.target,
-      sequence: input.sequence,
-      status: input.status,
-      ...(unchanged ? { unchanged: true } : {}),
-      ...(trailingFlushScheduled ? { trailingFlushScheduled: true } : {}),
-    });
+    return recordDeploy(ctx, input, target, input.repository, input.workflow);
   },
 });
 
-/** True when this project has at least one recorded deploy (one 0-doc index seek when empty). */
-async function hasDeploys(ctx: QueryCtx, projectId: Id<'hostedProjects'>) {
-  const rows = await ctx.db
+/** A project owner can report the same outcome from a CI system using Forge account/device authorization. */
+export const reportByoci = mutation({
+  args: deployReportArgsForProject,
+  returns: v.string(),
+  handler: async (ctx, input) => {
+    try {
+      const user = await ctx.auth.getUserIdentity();
+      invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to report deploy evidence.');
+      const project = await activeOwnedProject(ctx, input.projectId, user.subject);
+      const target = configuredTarget(project, input.target);
+      invariant(deployTargetName.safeParse(input.target).success, 'BAD_ARGUMENT', 'Invalid deploy target.');
+      invariant(
+        /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(input.runId),
+        'BAD_ARGUMENT',
+        'Invalid CI run id.',
+      );
+      return await recordDeploy(ctx, { ...input, runId: `ci:${input.runId}` }, target);
+    } catch (error) {
+      return report(error);
+    }
+  },
+});
+
+async function recordDeploy(
+  ctx: MutationCtx,
+  input: DeployReport,
+  target: DeployTarget,
+  repository?: string,
+  workflow?: string,
+) {
+  invariant(/^[a-f0-9]{64}$/.test(input.state), 'BAD_ARGUMENT', 'State must be a full 64-hex hash.');
+  invariant(
+    Number.isSafeInteger(input.sequence) && input.sequence > 0,
+    'BAD_ARGUMENT',
+    'Sequence must be a positive integer.',
+  );
+  if (input.liveHead !== undefined)
+    invariant(/^[a-f0-9]{64}$/.test(input.liveHead), 'BAD_ARGUMENT', 'liveHead must be a full 64-hex hash.');
+  if (input.liveSequence !== undefined)
+    invariant(
+      Number.isSafeInteger(input.liveSequence) && input.liveSequence > 0,
+      'BAD_ARGUMENT',
+      'liveSequence must be a positive integer.',
+    );
+  // Verify the reported (sequence, state) is a real main revision on this project.
+  const main = await hostedStartMain(ctx, input.projectId);
+  if (main.sourceRevision !== input.sequence || main.head !== input.state) {
+    const [row] = await ctx.db
+      .query('projectHostedAcceptances')
+      .withIndex('by_project_and_sequence', q =>
+        q.eq('projectId', input.projectId).eq('sequence', input.sequence),
+      )
+      .take(1);
+    const head = row ? (JSON.parse(row.value) as { candidate?: { head?: string } }).candidate?.head : null;
+    invariant(head === input.state, 'EVIDENCE_CHANGED', 'Reported deploy head differs from hosted main.');
+  }
+  const existing = await ctx.db
     .query('projectDeploys')
-    .withIndex('by_project_and_target_and_sequence', q => q.eq('projectId', projectId))
-    .take(1);
-  return rows.length > 0;
+    .withIndex('by_project_and_target_and_run', q =>
+      q.eq('projectId', input.projectId).eq('target', input.target).eq('runId', input.runId),
+    )
+    .unique();
+  // Never erase or downgrade an already-recorded successful deploy for the same run attempt.
+  if (
+    existing &&
+    existing.status === 'succeeded' &&
+    (input.status !== 'succeeded' || existing.head !== input.state)
+  ) {
+    return JSON.stringify({
+      recorded: false,
+      preserved: true,
+      target: input.target,
+      sequence: existing.sequence,
+      status: existing.status,
+    });
+  }
+  if (existing?.head !== undefined) {
+    invariant(
+      existing.head === input.state && existing.sequence === input.sequence,
+      'EVIDENCE_CHANGED',
+      'The CI run id already names a different landing.',
+    );
+    if (existing.status === input.status)
+      return JSON.stringify({
+        recorded: true,
+        target: input.target,
+        sequence: input.sequence,
+        status: input.status,
+      });
+  }
+  const clampedSmoke = input.smoke
+    ? {
+        ok: input.smoke.ok,
+        checks: input.smoke.checks.slice(0, 16).map(check => ({
+          name: check.name.slice(0, 64),
+          ok: check.ok,
+          ...(check.status !== undefined ? { status: check.status } : {}),
+          ...(clampText(check.detail) ? { detail: clampText(check.detail) } : {}),
+        })),
+      }
+    : undefined;
+  const summary = clampText(input.summary);
+  const unchanged: true | undefined = input.status === 'succeeded' && input.unchanged ? true : undefined;
+  const now = Date.now();
+  const doc = {
+    projectId: input.projectId,
+    target: input.target,
+    ...(workflow ? { workflow } : {}),
+    sequence: input.sequence,
+    head: input.state,
+    status: input.status,
+    runId: input.runId,
+    at: new Date(now).toISOString(),
+    ...(safeUrl(input.url) ? { url: safeUrl(input.url) } : {}),
+    ...(summary ? { summary } : {}),
+    ...(clampedSmoke ? { smoke: clampedSmoke } : {}),
+    ...(unchanged ? { unchanged } : {}),
+    ...(unchanged && input.liveSequence !== undefined ? { liveSequence: input.liveSequence } : {}),
+    ...(unchanged && input.liveHead ? { liveHead: input.liveHead } : {}),
+  };
+  let failure: Doc<'projectDeploys'>['failure'];
+  if (doc.status !== 'succeeded') {
+    const newest = await newestCompletedRow(ctx, input.projectId, input.target);
+    const previous =
+      newest && newest.sequence <= input.sequence && newest.status !== 'succeeded'
+        ? await readFailure(ctx, newest)
+        : null;
+    const lastLive = previous
+      ? previous.liveSequence
+      : newest?.status === 'succeeded'
+        ? liveSequence(newest)
+        : await lastVerifiedLive(ctx, input.projectId, input.target);
+    failure = failureDetails({ ...doc, cause: clampText(input.cause) }, previous, lastLive);
+  }
+  if (existing) await ctx.db.patch(existing._id, { ...doc, failure });
+  else await ctx.db.insert('projectDeploys', { ...doc, ...(failure ? { failure } : {}) });
+  // If a newer web-affecting landing arrived while this web upload was in flight, schedule one
+  // trailing flush when the 5-minute window opens so it never waits for the 3-hour catch-up.
+  let trailingFlushScheduled = false;
+  if (
+    repository &&
+    workflow &&
+    target.githubActions?.minimumIntervalMs &&
+    input.status === 'succeeded' &&
+    !unchanged &&
+    main.sourceRevision > input.sequence
+  ) {
+    const unchangedAfter = await provenUnchangedBetween(
+      ctx,
+      input.projectId,
+      target,
+      input.sequence,
+      main.sourceRevision,
+    );
+    if (!unchangedAfter) {
+      trailingFlushScheduled = await queueDeployDispatch(ctx, {
+        projectId: input.projectId,
+        repository,
+        workflow,
+        target: input.target,
+        head: main.head,
+        sequence: main.sourceRevision,
+        delayMs: target.githubActions.minimumIntervalMs + 1_000,
+        now,
+      });
+    }
+  }
+  return JSON.stringify({
+    recorded: true,
+    target: input.target,
+    sequence: input.sequence,
+    status: input.status,
+    ...(unchanged ? { unchanged: true } : {}),
+    ...(trailingFlushScheduled ? { trailingFlushScheduled: true } : {}),
+  });
 }
 
 /** When no deploy at/after `sequence` has succeeded yet, check whether the latest prior successful
@@ -500,7 +564,11 @@ async function unchangedPriorDeploy(
   const [prior] = await ctx.db
     .query('projectDeploys')
     .withIndex('by_project_and_target_and_status_and_sequence', q =>
-      q.eq('projectId', projectId).eq('target', target).eq('status', 'succeeded').lt('sequence', sequence),
+      q
+        .eq('projectId', projectId)
+        .eq('target', target.name)
+        .eq('status', 'succeeded')
+        .lt('sequence', sequence),
     )
     .order('desc')
     .take(1);
@@ -514,30 +582,38 @@ async function unchangedPriorDeploy(
  * Returns null when the project has no deploy records at all, so projects without deploys stay untouched. */
 export async function deploysForSequence(
   ctx: QueryCtx,
-  projectId: Id<'hostedProjects'>,
+  project: Doc<'hostedProjects'>,
   sequence: number,
 ): Promise<LandingDeploys | null> {
-  if (!(await hasDeploys(ctx, projectId))) return null;
+  const targets = project.autonomyPolicy?.deploys?.targets ?? [];
+  if (!targets.length) return null;
+  const projectId = project._id;
   const resolved = await Promise.all(
-    TARGETS.map(async target => {
+    targets.map(async target => {
       const [firstSuccess] = await ctx.db
         .query('projectDeploys')
         .withIndex('by_project_and_target_and_status_and_sequence', q =>
           q
             .eq('projectId', projectId)
-            .eq('target', target)
+            .eq('target', target.name)
             .eq('status', 'succeeded')
             .gte('sequence', sequence),
         )
         .take(1);
-      if (firstSuccess) return toEntry(firstSuccess);
-      return unchangedPriorDeploy(ctx, projectId, target, sequence);
+      return [
+        target.name,
+        firstSuccess ? toEntry(firstSuccess) : await unchangedPriorDeploy(ctx, projectId, target, sequence),
+      ] as const;
     }),
   );
-  return {
-    convex: resolved[0] ?? null,
-    web: resolved[1] ?? null,
-  };
+  if (!resolved.some(([, entry]) => entry)) {
+    const newest = await ctx.db
+      .query('projectDeploys')
+      .withIndex('by_project_and_target_and_sequence', q => q.eq('projectId', projectId))
+      .first();
+    if (!newest) return null;
+  }
+  return Object.fromEntries(resolved);
 }
 
 /** Reactive wait read for `wait {"deploy": ...}`: checks ancestry (`sequence >= targetSequence`)
@@ -545,11 +621,15 @@ export async function deploysForSequence(
  * deployed (`unchanged: true`) so single-target or test-only landings never hang waiting forever. */
 export async function deployWaitStatus(
   ctx: QueryCtx,
-  projectId: Id<'hostedProjects'>,
+  project: Doc<'hostedProjects'>,
   sequence: number,
-  requested: DeployTarget | 'all',
+  requested: string,
 ) {
-  const targets: readonly DeployTarget[] = requested === 'all' ? TARGETS : [requested];
+  const targets =
+    requested === 'all'
+      ? (project.autonomyPolicy?.deploys?.targets ?? [])
+      : [configuredTarget(project, requested)];
+  const projectId = project._id;
   const entries = await Promise.all(
     targets.map(async target => {
       const [firstSuccess] = await ctx.db
@@ -557,24 +637,24 @@ export async function deployWaitStatus(
         .withIndex('by_project_and_target_and_status_and_sequence', q =>
           q
             .eq('projectId', projectId)
-            .eq('target', target)
+            .eq('target', target.name)
             .eq('status', 'succeeded')
             .gte('sequence', sequence),
         )
         .take(1);
       if (firstSuccess)
-        return [target, { state: 'deployed' as const, deploy: toEntry(firstSuccess) }] as const;
+        return [target.name, { state: 'deployed' as const, deploy: toEntry(firstSuccess) }] as const;
       const recent = await ctx.db
         .query('projectDeploys')
         .withIndex('by_project_and_target_and_sequence', q =>
-          q.eq('projectId', projectId).eq('target', target).gte('sequence', sequence),
+          q.eq('projectId', projectId).eq('target', target.name).gte('sequence', sequence),
         )
         .order('desc')
         .take(4);
       const newest = recent.find(row => row.status !== 'queued');
       if (newest && newest.status !== 'succeeded')
         return [
-          target,
+          target.name,
           {
             state: 'failed' as const,
             deploy: {
@@ -586,36 +666,17 @@ export async function deployWaitStatus(
           },
         ] as const;
       const unchanged = await unchangedPriorDeploy(ctx, projectId, target, sequence);
-      if (unchanged) return [target, { state: 'deployed' as const, deploy: unchanged }] as const;
-      return [target, { state: 'pending' as const, deploy: null }] as const;
+      if (unchanged) return [target.name, { state: 'deployed' as const, deploy: unchanged }] as const;
+      return [target.name, { state: 'pending' as const, deploy: null }] as const;
     }),
   );
-  const byTarget = Object.fromEntries(entries.map(([target, info]) => [target, info.deploy]));
+  const byTarget = Object.fromEntries(entries.map(([name, info]) => [name, info.deploy]));
   const states = entries.map(([, info]) => info.state);
-  const state = states.every(s => s === 'deployed')
-    ? 'deployed'
-    : states.some(s => s === 'failed')
-      ? 'failed'
-      : 'pending';
+  const state =
+    states.length > 0 && states.every(s => s === 'deployed')
+      ? 'deployed'
+      : states.some(s => s === 'failed')
+        ? 'failed'
+        : 'pending';
   return { state, deploys: byTarget } as const;
-}
-
-/** Needs you notices for failed dev deploys or post-deploy smoke failures (Item 8b6efb50).
- * Reads only the newest non-queued row per target; clears automatically once a newer deploy succeeds. */
-export async function failedDeployNotices(ctx: QueryCtx, projectId: Id<'hostedProjects'>) {
-  const notices: { kind: 'deploy'; id: string; summary: string; next: string | null }[] = [];
-  for (const target of TARGETS) {
-    const newest = await newestCompletedRow(ctx, projectId, target);
-    if (!newest || newest.status === 'succeeded') continue;
-    const label = target === 'web' ? 'Dev web' : 'Dev Convex';
-    const what = newest.status === 'smoke-failed' ? 'post-deploy smoke failed' : 'deploy failed';
-    const detail = newest.summary ? `: ${newest.summary}` : '';
-    notices.push({
-      kind: 'deploy',
-      id: `deploy:${target}`,
-      summary: `${label} ${what} at main #${newest.sequence}${detail}`.slice(0, SUMMARY_CHARS),
-      next: newest.url ?? `Inspect ${newest.workflow} run ${newest.runId} and fix or re-run.`,
-    });
-  }
-  return notices;
 }

@@ -3,6 +3,25 @@
 import { v } from 'convex/values';
 import { defineTable } from 'convex/server';
 export const autonomyPolicy = v.object({
+  deploys: v.optional(
+    v.object({
+      targets: v.array(
+        v.object({
+          name: v.string(),
+          label: v.string(),
+          environment: v.string(),
+          triggerPaths: v.optional(v.array(v.string())),
+          githubActions: v.optional(
+            v.object({
+              workflow: v.string(),
+              minimumIntervalMs: v.optional(v.number()),
+            }),
+          ),
+        }),
+      ),
+      needsAttentionAfterMinutes: v.optional(v.number()),
+    }),
+  ),
   mainAudit: v.optional(
     v.union(
       v.object({ cadence: v.literal('automatic') }),

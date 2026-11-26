@@ -97,6 +97,34 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
   }
   const region = (page, name) => page.locator(`section.region[aria-label="${name}"]`);
   try {
+    await t.test('deploy failure sits beside main status and an overdue failure asks for work', async t => {
+      for (const viewport of [DESK, PHONE]) {
+        const page = await open(t, viewport, 'deploys');
+        const status = page.getByRole('list', { name: 'Deploy status' });
+        const needs = region(page, 'Needs you');
+        await status.waitFor();
+        assert.match(await status.innerText(), /failing since #32140/);
+        assert.match(await status.innerText(), /Live at #32139 · main #32142/);
+        assert.match(await status.innerText(), /Clears itself when the next deploy succeeds/);
+        assert.match(await status.innerText(), /Live at #32142/);
+        const run = page.getByRole('link', { name: 'Open the run', exact: true });
+        assert.equal(await run.count(), 1);
+        assert.equal(await run.getAttribute('href'), 'https://ci.example.test/runs/32140');
+        assert.match(await needs.innerText(), /Find someone to look at the API deploy in staging/);
+        assert.doesNotMatch(await needs.innerText(), /Holding work now|https?:/);
+        assert.doesNotMatch(await status.innerText(), /https?:/);
+        if (shots)
+          await page.screenshot({ path: join(shots, `deploy-status-${viewport.width}.png`), fullPage: true });
+        await status.getByRole('button', { name: 'Seen', exact: true }).click();
+        await needs.getByText('Nothing waits on you. Agents go on without you.').waitFor();
+        assert.doesNotMatch(await status.innerText(), /failing since|API/);
+        assert.deepEqual(await page.evaluate(() => window.writes), [
+          ['seenDeploy', { target: 'api', key: 'fixture-deploy-cause' }],
+        ]);
+        assert.equal(await page.evaluate(() => window.intervals), 0);
+      }
+    });
+
     await t.test(
       'Getting started: skip and undo in place, hide and restore without a hidden setup read',
       async t => {

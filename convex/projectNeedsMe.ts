@@ -13,7 +13,7 @@ import type { Doc, Id } from './_generated/dataModel';
 import { accessibleProject, coordinationAccess } from './projectAuthority';
 import { hasWriteRole } from './projectRole';
 import { githubMirrorStatus } from './projectGithubMirrorStatus.idle';
-import { failedDeployNotices } from './projectDeployStore';
+import { deployStatusForViewer } from './projectDeployStatus';
 import { effectivePolicy } from '../src/autonomy-policy';
 import { mirrorSummary } from '../src/github-mirror-sentence';
 import { needsFix } from '../src/culprit-bisect';
@@ -134,12 +134,7 @@ export const needsMeResult = v.object({
   notices: v.optional(
     v.array(
       v.object({
-        kind: v.union(
-          v.literal('reverted'),
-          v.literal('needs-fix'),
-          v.literal('mirror'),
-          v.literal('deploy'),
-        ),
+        kind: v.union(v.literal('reverted'), v.literal('needs-fix'), v.literal('mirror')),
         /** The reverted Intent's id, `mirror`, or `deploy:<target>`. */
         id: v.string(),
         summary: v.string(),
@@ -148,6 +143,36 @@ export const needsMeResult = v.object({
         taken: v.optional(v.object(takenOutShape)),
       }),
     ),
+  ),
+  deployStatus: v.optional(
+    v.object({
+      mainSequence: v.number(),
+      targets: v.array(
+        v.object({
+          target: v.string(),
+          label: v.string(),
+          environment: v.string(),
+          liveSequence: v.union(v.number(), v.null()),
+          failure: v.optional(
+            v.object({
+              key: v.string(),
+              since: v.string(),
+              sinceSequence: v.number(),
+              runUrl: v.optional(v.string()),
+              work: v.optional(
+                v.object({
+                  kind: v.union(v.literal('lane'), v.literal('item')),
+                  id: v.string(),
+                  who: v.string(),
+                }),
+              ),
+              attentionAt: v.optional(v.number()),
+              attentionMinutes: v.number(),
+            }),
+          ),
+        }),
+      ),
+    }),
   ),
   noticesMore: v.optional(v.literal(true)),
   /** What waits on a person in the project's sealed secrets (Item 41a0df87): removed people still listed, names to
@@ -270,7 +295,7 @@ async function dependencyLane(ctx: QueryCtx, projectId: Id<'hostedProjects'>, su
 }
 
 type Notice = {
-  kind: 'reverted' | 'needs-fix' | 'mirror' | 'deploy';
+  kind: 'reverted' | 'needs-fix' | 'mirror';
   id: string;
   summary: string;
   next: string | null;
@@ -448,12 +473,12 @@ export const read = query({
       }
       const mirror = team && owner ? await stoppedMirror(ctx, project) : null;
       if (mirror) notices.push(mirror);
-      if (team && owner && effectivePolicy(project).githubMirror?.repo)
-        notices.push(...(await failedDeployNotices(ctx, projectId)));
+      const deployStatus = await deployStatusForViewer(ctx, project, user.subject);
       return {
         held,
         parked,
         ...(notices.length ? { notices } : {}),
+        ...(deployStatus ? { deployStatus } : {}),
         ...(tookOut.length ? { tookOut } : {}),
         ...(noticesMore ? { noticesMore: true as const } : {}),
         ...(secrets ? { secrets } : {}),

@@ -10,6 +10,7 @@ import test from 'node:test';
 import { SITE_INPUTS, buildFiles } from '../scripts/site-deploy-plan.mjs';
 import { moduleUrl } from './convex-module.mjs';
 
+const { targets } = JSON.parse(readFileSync('.nforge/deploy-targets.json'));
 const deployDispatch = await import(moduleUrl('../convex/projectDeployDispatch.ts'));
 const workflow = readFileSync('.github/workflows/web-deploy.yml', 'utf8');
 const step = name => workflow.indexOf(name);
@@ -32,7 +33,8 @@ test('Item 8b6efb50: dev web deploys from Forge workflow_dispatch and catch-up s
 });
 
 test('Item 8b6efb50: the Forge dispatch path filter covers everything the site deploy plan counts as served', () => {
-  const covered = path => deployDispatch.WEB_DEPLOY_PATHS.some(re => re.test(path));
+  const covered = path =>
+    deployDispatch.selectDeployTargets(targets, [path]).some(target => target.name === 'web');
   // Every whole input, every file the build imports, and every folder a bundle may contain.
   const samples = [
     'web/x',

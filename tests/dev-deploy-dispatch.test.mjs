@@ -9,6 +9,7 @@ import { readFileSync } from 'node:fs';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 
+const deploys = JSON.parse(readFileSync('.nforge/deploy-targets.json'));
 const deployModule = await import(moduleUrl('../convex/projectDeployDispatch.ts'));
 const prior = Object.fromEntries(Object.keys(synthetic).map(k => [k, process.env[k]]));
 test.before(() => Object.assign(process.env, synthetic));
@@ -46,7 +47,11 @@ async function landWithRefusedMirror(t, options, autoPush) {
   f.insert('projectGithubMirrorStops', { projectId: f.projectId, jobId });
   const policy = f.tables.hostedProjects.get(f.projectId).autonomyPolicy;
   f.patch('hostedProjects', f.projectId, {
-    autonomyPolicy: { ...policy, githubMirror: { repo: 'synthetic/mirror', autoPush, laneRefs: false } },
+    autonomyPolicy: {
+      ...policy,
+      deploys,
+      githubMirror: { repo: 'synthetic/mirror', autoPush, laneRefs: false },
+    },
   });
   f.insert('projectReleaseSignatures', {
     projectId: f.projectId,
@@ -121,6 +126,7 @@ test('Item 8b6efb50: dispatch uses configured CI adapter repository over mirror 
   f.patch('hostedProjects', f.projectId, {
     autonomyPolicy: {
       ...policy,
+      deploys,
       githubMirror: { repo: 'retargeted/mirror-only', autoPush: false, laneRefs: false },
     },
   });
@@ -168,7 +174,7 @@ test('Item 8b6efb50: a test-only landing dispatches zero dev deploys', async t =
   assert.equal(dispatches.length, 0);
 });
 
-test('Item 8b6efb50: a project with no stored release signature dispatches no dev deploys', async t => {
+test('Item 8b6efb50: a project with no target declarations dispatches nothing', async t => {
   const f = await batchesFixture(t, { count: 1, batching: false });
   const policy = f.tables.hostedProjects.get(f.projectId).autonomyPolicy;
   f.patch('hostedProjects', f.projectId, {
@@ -189,28 +195,30 @@ test('Item 8b6efb50: a project with no stored release signature dispatches no de
 });
 
 test('Item 8b6efb50: selectDeployTargets routes only affected workflows and skips test-only landings', () => {
-  assert.deepEqual(deployModule.selectDeployTargets(['tests/a.test.mjs']), []);
-  assert.deepEqual(deployModule.selectDeployTargets(['web/src/app/App.tsx']), ['web']);
-  assert.deepEqual(deployModule.selectDeployTargets(['docs/development.md']), ['web']);
-  assert.deepEqual(deployModule.selectDeployTargets(['convex/schema.ts']), ['convex', 'web']);
-  assert.deepEqual(deployModule.selectDeployTargets(['src/cli.ts']), ['convex', 'web']);
-  assert.deepEqual(deployModule.selectDeployTargets(null), ['convex', 'web']);
+  const selected = paths =>
+    deployModule.selectDeployTargets(deploys.targets, paths).map(target => target.name);
+  assert.deepEqual(selected(['tests/a.test.mjs']), []);
+  assert.deepEqual(selected(['web/src/app/App.tsx']), ['web']);
+  assert.deepEqual(selected(['docs/development.md']), ['web']);
+  assert.deepEqual(selected(['convex/schema.ts']), ['convex', 'web']);
+  assert.deepEqual(selected(['src/cli.ts']), ['convex', 'web']);
+  assert.deepEqual(selected(null), ['convex', 'web']);
 });
 
 test('Item 8b6efb50: dispatch inputs match both deploy workflows so GitHub never refuses with 422', () => {
-  for (const target of ['convex', 'web']) {
+  for (const {
+    name: target,
+    githubActions: { workflow: file },
+  } of deploys.targets) {
     const request = deployModule.deployDispatchRequest({
       repository: 'o/r',
-      target,
+      workflow: file,
       state: 'c'.repeat(64),
       sequence: 42,
     });
-    assert.equal(
-      request.path,
-      `repos/o/r/actions/workflows/${deployModule.deployWorkflows[target]}/dispatches`,
-    );
+    assert.equal(request.path, `repos/o/r/actions/workflows/${file}/dispatches`);
     assert.deepEqual(request.body, { ref: 'main', inputs: { state: 'c'.repeat(64), sequence: '42' } });
-    const workflow = readFileSync(`.github/workflows/${deployModule.deployWorkflows[target]}`, 'utf8');
+    const workflow = readFileSync(`.github/workflows/${file}`, 'utf8');
     const block = workflow.match(/^ {4}inputs:\n((?: {6}.*\n)+)/m);
     assert(block, `${target} workflow declares workflow_dispatch inputs`);
     const declared = [...block[1].matchAll(/^ {6}([\w-]+):$/gm)].map(m => m[1]);

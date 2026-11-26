@@ -5,6 +5,7 @@
 // for deploy / post-deploy smoke failures (including negative authorization tests).
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';
 import { acceptMirrorReceipt } from './github-mirror-catchup-fixture.mjs';
@@ -14,6 +15,8 @@ import { observeDeploy, deployWaitResult } from '../dist/hosted-deploy-wait.js';
 import { hostedWaitSchema } from '../dist/hosted-wait-schema.js';
 import { landingsHostedSource } from '../dist/hosted-agent-landings.js';
 
+const dogfoodDeploys = JSON.parse(readFileSync('.nforge/deploy-targets.json'));
+const deployStatus = await import(moduleUrl('../convex/projectDeployStatus.ts'));
 const deployStore = await import(moduleUrl('../convex/projectDeployStore.ts'));
 const boardWait = await import(moduleUrl('../convex/projectBoardWait.ts'));
 const laneHistory = await import(moduleUrl('../convex/projectHostedLaneHistory.ts'));
@@ -36,6 +39,7 @@ function makeProject({ enrolled = true, runnerRepo } = {}) {
     autonomyPolicy: {
       ...policyPreset('supervised'),
       githubMirror: { repo: 'NanthAI/nanthai-forge', autoPush: false, laneRefs: false },
+      ...(enrolled ? { deploys: dogfoodDeploys } : {}),
     },
   });
   if (enrolled) {
@@ -69,8 +73,8 @@ function makeProject({ enrolled = true, runnerRepo } = {}) {
   return { s, projectId, accept };
 }
 
-test('Item 8b6efb50: deploy record refuses unenrolled projects, wrong repo/workflow/head, and preserves succeeded attempts across re-runs', async () => {
-  // Negative auth: mirror-only project without dev-deploy enrollment is refused.
+test('Item 8b6efb50: deploy record refuses undeclared targets, wrong repo/workflow/head, and preserves succeeded attempts across re-runs', async () => {
+  // Negative auth: mirror-only project without a deploy declaration is refused.
   const unenrolled = makeProject({ enrolled: false });
   unenrolled.accept(1, hex('a'));
   await assert.rejects(
@@ -244,7 +248,11 @@ test('Item 8b6efb50: ancestry picks the first successful deploy >= sequence in l
 
   // Landing #10: first successful convex is #11, first successful web is #12 (skips failed #10).
   const readDeploys = seq =>
-    s.call('deploys', { _handler: ctx => deployStore.deploysForSequence(ctx, projectId, seq) }, {});
+    s.call(
+      'deploys',
+      { _handler: ctx => deployStore.deploysForSequence(ctx, s.tables.hostedProjects.get(projectId), seq) },
+      {},
+    );
   const d10 = await readDeploys(10);
   assert.equal(d10.convex.sequence, 11);
   assert.equal(d10.web.sequence, 12);
@@ -500,46 +508,192 @@ test('Item 8b6efb50: a landing arriving during an in-flight web deploy gets a tr
   assert.equal(rec42Unchanged.trailingFlushScheduled, undefined);
 });
 
-test('Item 8b6efb50: failed deploy or post-deploy smoke creates a Needs you notice that clears on next success', async () => {
+test('main #32140 schema rejection reports the last verified version, survives retry, and clears after a successful deploy', async () => {
   const { s, projectId, accept } = makeProject();
-  accept(20, hex('a'));
-  accept(21, hex('b'));
-
-  await s.call('deploy', deployStore.record, {
+  const now = Date.parse('2026-11-26T10:45:00.000Z');
+  accept(32139, hex('a'));
+  accept(32140, hex('b'));
+  s.insert('projectReaders', { projectId, reader: 'collaborator' });
+  const common = {
     projectId,
-    target: 'web',
+    target: 'convex',
     repository: 'NanthAI/nanthai-forge',
-    workflow: 'web-deploy.yml',
-    state: hex('a'),
-    sequence: 20,
-    status: 'smoke-failed',
-    runId: '301',
-    url: 'https://github.com/NanthAI/nanthai-forge/actions/runs/301',
-    summary: 'old-redirect: HTTP 404 location=none',
-  });
-  const failing = await s.call('needs', needsMe.read, { projectId }, 'owner');
-  const notice = failing.notices?.find(n => n.kind === 'deploy' && n.id === 'deploy:web');
-  assert(notice, 'smoke failure surfaces as a Needs you notice');
-  assert.match(notice.summary, /Dev web post-deploy smoke failed at main #20.*old-redirect/);
-  assert.equal(notice.next, 'https://github.com/NanthAI/nanthai-forge/actions/runs/301');
-
-  // Next successful deploy clears the notice automatically.
-  await s.call('deploy', deployStore.record, {
+    workflow: 'convex-deploy.yml',
+  };
+  // A retained pre-change success and the failure payload of the 11-26 incident, with a synthetic run link.
+  s.insert('projectDeploys', {
     projectId,
-    target: 'web',
-    repository: 'NanthAI/nanthai-forge',
-    workflow: 'web-deploy.yml',
-    state: hex('b'),
-    sequence: 21,
+    target: common.target,
+    workflow: common.workflow,
+    head: hex('a'),
+    sequence: 32139,
     status: 'succeeded',
-    runId: '302',
+    runId: '920',
+    at: '2026-11-26T09:42:00.000Z',
   });
-  const recovered = await s.call('needs', needsMe.read, { projectId }, 'owner');
-  assert.equal(
-    (recovered.notices ?? []).some(n => n.kind === 'deploy'),
-    false,
-    'notice clears once a newer deploy succeeds',
+  const failureRun = 'https://ci.example.test/runs/921';
+  s.insert('projectDeploys', {
+    projectId,
+    target: common.target,
+    workflow: common.workflow,
+    head: hex('b'),
+    sequence: 32140,
+    status: 'failed',
+    runId: '921:1',
+    at: new Date(now).toISOString(),
+    url: failureRun,
+    summary: 'Dev Convex deploy failed (see workflow run).',
+  });
+  const read = actor => s.call('needs', needsMe.read, { projectId }, actor);
+  const ownerView = await read('owner');
+  assert.equal(ownerView.notices, undefined);
+  assert.equal(ownerView.deployStatus.mainSequence, 32140);
+  const [behind] = ownerView.deployStatus.targets;
+  assert.equal(behind.label, 'Convex');
+  assert.equal(behind.environment, 'dev');
+  assert.equal(behind.liveSequence, 32139);
+  assert.equal(behind.failure.sinceSequence, 32140);
+  assert.equal(behind.failure.attentionAt, now + 60 * 60_000);
+  assert.equal(behind.failure.runUrl, failureRun);
+
+  const marked = { projectId, target: 'convex', key: behind.failure.key };
+  assert.equal(JSON.parse(await s.call('seen', deployStatus.seen, marked)).changed, true);
+  assert.equal(JSON.parse(await s.call('seen', deployStatus.seen, marked)).changed, false);
+  assert.deepEqual((await read('owner')).deployStatus.targets, []);
+  assert.equal((await read('collaborator')).deployStatus.targets[0].failure.key, behind.failure.key);
+  await assert.rejects(read('stranger'), error => error.data?.code === 'PROJECT_UNAVAILABLE');
+
+  const sameCause = {
+    ...common,
+    state: hex('b'),
+    sequence: 32140,
+    status: 'failed',
+    runId: '921:2',
+    summary: 'Dev Convex deploy failed (see workflow run).',
+  };
+  await s.call('deploy', deployStore.record, sameCause);
+  assert.deepEqual((await read('owner')).deployStatus.targets, []);
+
+  await s.call('deploy', deployStore.record, {
+    ...sameCause,
+    runId: '921:3',
+    summary: 'Provider capacity unavailable.',
+  });
+  const [different] = (await read('owner')).deployStatus.targets;
+  assert.notEqual(different.failure.key, behind.failure.key);
+  assert.equal(different.failure.sinceSequence, 32140);
+
+  accept(32141, hex('c'));
+  await s.call('deploy', deployStore.record, {
+    ...common,
+    state: hex('c'),
+    sequence: 32141,
+    status: 'succeeded',
+    runId: '922',
+  });
+  const [recovered] = (await read('owner')).deployStatus.targets;
+  assert.equal(recovered.liveSequence, 32141);
+  assert.equal(recovered.failure, undefined);
+});
+
+test('a second CI adapter reports a declared target without a mirror or release, with current work ownership', async () => {
+  const { s, projectId, accept } = makeProject({ enrolled: false });
+  accept(40, hex('a'));
+  const original = s.tables.hostedProjects.get(projectId).autonomyPolicy;
+  s.patch('hostedProjects', projectId, {
+    autonomyPolicy: {
+      ...original,
+      githubMirror: undefined,
+      deploys: {
+        targets: [
+          { name: 'smoke', label: 'Smoke', environment: 'staging' },
+          { name: 'images', label: 'Image service', environment: 'preview' },
+          { name: 'docs', label: 'Docs', environment: 'preview' },
+        ],
+        needsAttentionAfterMinutes: 30,
+      },
+    },
+  });
+  const read = () => s.call('needs', needsMe.read, { projectId });
+  assert.equal((await read()).deployStatus, undefined);
+
+  const input = {
+    projectId,
+    target: 'smoke',
+    state: hex('a'),
+    sequence: 40,
+    status: 'smoke-failed',
+    runId: 'buildkite:example:40',
+    url: 'https://ci.example.test/builds/40',
+    cause: 'schema-validation',
+  };
+  s.insert('projectContributors', { projectId, contributor: 'collaborator' });
+  await assert.rejects(
+    s.call('report', deployStore.reportByoci, input, 'collaborator'),
+    error => error.data?.code === 'PROJECT_UNAVAILABLE',
   );
+  await assert.rejects(
+    s.call('report', deployStore.reportByoci, { ...input, target: 'undeclared' }),
+    error => error.data?.code === 'EVIDENCE_CHANGED',
+  );
+  await assert.rejects(
+    s.call('report', deployStore.reportByoci, { ...input, state: hex('f') }),
+    error => error.data?.code === 'EVIDENCE_CHANGED',
+  );
+  const result = JSON.parse(await s.call('report', deployStore.reportByoci, input));
+  assert.equal(result.target, 'smoke');
+  await s.call('report', deployStore.reportByoci, input);
+  assert.equal(s.tables.projectDeploys.size, 1);
+  await s.call('report', deployStore.reportByoci, {
+    ...input,
+    target: 'images',
+    runId: 'buildkite:images:40',
+  });
+
+  const status = (await read()).deployStatus;
+  assert.deepEqual(
+    status.targets.map(deploy => deploy.target),
+    ['smoke', 'images'],
+  );
+  const [smoke] = status.targets;
+  assert.equal(smoke.failure.attentionMinutes, 30);
+  const laneId = randomUUID();
+  const intentId = randomUUID();
+  const lane = s.insert('projectHostedPresence', {
+    projectId,
+    laneId,
+    intentId,
+    actor: 'collaborator',
+    agent: 'steady-deer',
+    goal: 'Fix smoke',
+    paths: [],
+    pathCount: 0,
+    at: 10,
+  });
+  const target = { projectId, target: 'smoke', key: smoke.failure.key };
+  await s.call('link', deployStatus.linkWork, { ...target, work: { kind: 'lane', id: laneId } });
+  const [assigned] = (await read()).deployStatus.targets;
+  assert.equal(assigned.failure.work.who, 'steady-deer');
+  assert.equal(assigned.failure.attentionAt, undefined);
+
+  s.tables.projectHostedPresence.delete(lane);
+  const [unowned] = (await read()).deployStatus.targets;
+  assert.equal(unowned.failure.work, undefined);
+  assert(unowned.failure.attentionAt);
+  s.insert('projectHostedRecordHeads', {
+    projectId,
+    key: intentId,
+    kind: 'issue',
+    parent: '',
+    status: 'in-progress',
+    version: 1,
+    recordId: 'projectHostedRecords-1',
+    value: JSON.stringify({ status: 'in-progress', owner: '@collaborator/steady-deer' }),
+  });
+  await s.call('link', deployStatus.linkWork, { ...target, work: { kind: 'item', id: intentId } });
+  const [itemOwned] = (await read()).deployStatus.targets;
+  assert.equal(itemOwned.failure.work.kind, 'item');
+  assert.equal(itemOwned.failure.attentionAt, undefined);
 });
 
 test('Item 8b6efb50: observeDeploy subscribes reactively without polling and settles on deployed or failed', async () => {

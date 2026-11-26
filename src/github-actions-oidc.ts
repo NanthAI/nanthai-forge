@@ -164,7 +164,6 @@ export type DeployActionsClaims = z.infer<typeof deployActionsClaimsSchema> & { 
 export async function verifyDeployActionsOidc(
   token: string,
   audience: string,
-  allowedWorkflows: readonly string[],
   request = networkFetch,
   now = Date.now(),
 ): Promise<DeployActionsClaims> {
@@ -177,11 +176,18 @@ export async function verifyDeployActionsOidc(
     .object({ alg: z.literal('RS256'), kid: z.string() })
     .parse(JSON.parse(new TextDecoder().decode(decode(parts[0]!))));
   const c = deployActionsClaimsSchema.parse(JSON.parse(new TextDecoder().decode(decode(parts[1]!))));
-  const workflow = allowedWorkflows.find(
-    name => c.workflow_ref === `${c.repository}/.github/workflows/${name}@refs/heads/main`,
-  );
+  const prefix = `${c.repository}/.github/workflows/`;
+  const suffix = '@refs/heads/main';
+  const workflow =
+    c.workflow_ref.startsWith(prefix) && c.workflow_ref.endsWith(suffix)
+      ? c.workflow_ref.slice(prefix.length, -suffix.length)
+      : '';
   invariant(
-    c.aud === audience && c.exp > now / 1000 && c.nbf <= now / 1000 && c.iat <= now / 1000 && workflow,
+    c.aud === audience &&
+      c.exp > now / 1000 &&
+      c.nbf <= now / 1000 &&
+      c.iat <= now / 1000 &&
+      /^[A-Za-z0-9_-][A-Za-z0-9_.-]*\.ya?ml$/.test(workflow),
     'EVIDENCE_CHANGED',
     'GitHub OIDC claims differ from an authorized deploy workflow on main.',
   );

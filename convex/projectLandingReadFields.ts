@@ -44,6 +44,7 @@ export const landingReadTables = {
     through: v.number(),
     read: v.array(v.number()),
     at: v.number(),
+    deploySeen: v.optional(v.record(v.string(), v.string())),
     setup: v.optional(v.object({ ...setupPreferenceFields, operationId: v.string() })),
     fyi: v.optional(
       v.object({

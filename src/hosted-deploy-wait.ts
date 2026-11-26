@@ -27,7 +27,7 @@ const deploySchema = z.object({
   deploy: z.looseObject({
     sequence: z.number(),
     receiptId: z.string().optional(),
-    target: z.enum(['convex', 'web', 'all']),
+    target: z.string().min(1),
     state: z.enum(['deployed', 'failed', 'pending']),
     deploys: z.record(z.string(), deployEntrySchema),
   }),
@@ -38,7 +38,7 @@ export type DeployWaitSelection =
   | {
       receiptId?: string | undefined;
       sequence?: number | undefined;
-      target?: 'convex' | 'web' | 'all' | undefined;
+      target?: string | undefined;
     };
 
 export type DeployWaitOutcome = {

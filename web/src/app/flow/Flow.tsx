@@ -34,6 +34,7 @@ export function FlowRegion({
   error,
   readAt,
   mainCheckedAt,
+  deployStatus,
   stop,
   onOpen,
   laneHref,
@@ -50,6 +51,7 @@ export function FlowRegion({
   error?: boolean;
   readAt?: number;
   mainCheckedAt?: number | undefined;
+  deployStatus?: ReactNode;
   stop: DrawerStop | null;
   onOpen: (stop: DrawerStop) => void;
   laneHref: (id: string) => string;
@@ -204,6 +206,7 @@ export function FlowRegion({
           </div>
         ) : null}
       </FlowMotion>
+      {deployStatus}
       <FlowLegend />
       {feed ? (
         <>

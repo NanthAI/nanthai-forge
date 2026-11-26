@@ -11,7 +11,7 @@ import { ensureMirrorRow } from './projectGithubMirrorRows';
 import { mirrorAudit, startMirrorPublish, wakeHeldMirror } from './projectGithubMirrorCadence';
 import { notifyMirrorCoverage } from './projectGithubMirrorVerify';
 import { scheduleReleaseSign } from './projectReleaseSignDispatch';
-import { scheduleDevDeploys } from './projectDeployDispatch';
+import { scheduleDeploys } from './projectDeployDispatch';
 export { ensureMirrorRow, mirrorJob, mirrorRow, scheduleMirror } from './projectGithubMirrorRows';
 /** Publication and wake are one transaction. No watcher, timer or idle job. */
 export async function enqueueGithubMirror(
@@ -26,7 +26,11 @@ export async function enqueueGithubMirror(
   },
 ) {
   const policy = effectivePolicy(project).githubMirror;
-  if (project.sourceAuthority?.mode !== 'server' || !policy) return;
+  if (project.sourceAuthority?.mode !== 'server') return;
+  if (!policy) {
+    await scheduleDeploys(ctx, project, receipt, evidence?.paths);
+    return;
+  }
   const old = await ctx.db
     .query('projectGithubMirrorJobs')
     .withIndex('by_project_and_receipt', q => q.eq('projectId', project._id).eq('receiptId', receipt.id))
@@ -36,11 +40,9 @@ export async function enqueueGithubMirror(
   // receipt's latest target; a retry for that target reuses it, including case-only renames.
   if (old?.repository.toLowerCase() === policy.repo.toLowerCase())
     return { jobId: old._id, scheduled: false };
-  // Release signing and dev deploys start from the landing, before and whatever the mirror does:
-  // paused (no auto-push), held, failing or refused (Items 17ce38ba, 8b6efb50). A retry of a queued
-  // publish returned above. Dev deploys reuse scheduleReleaseSign's opt-in read (zero added reads).
-  if (await scheduleReleaseSign(ctx, project, receipt))
-    await scheduleDevDeploys(ctx, project, receipt, evidence?.paths);
+  // Release signing and configured deployments start from the landing even when the mirror is paused or failing.
+  await scheduleReleaseSign(ctx, project, receipt);
+  await scheduleDeploys(ctx, project, receipt, evidence?.paths);
   if (!policy.autoPush) return;
   let queue = await ensureMirrorRow(ctx, project._id, policy.repo);
   if (queue.repositoryKey !== queue.repository.toLowerCase())

@@ -167,3 +167,37 @@ on the exact run; it can arrive after landing, and the immutable receipt stays u
 proof off there is no proof output, job, artifact data or call. With it on, budget one optional
 job (roughly 2–4 runner-minutes plus tests), one mutation and one small run-side metadata field.
 Public runners are paid for by their repository's existing CI arrangement; no new service is used.
+
+## Deploy status
+
+An owner declares deploy targets in `set-policy` under `deploys.targets`. Each target has a
+stable `name`, a display `label`, an `environment` and optional repository-relative
+`triggerPaths` globs. Omitted paths match any source change. An empty list matches none
+when the changed paths are known. `githubActions.workflow` optionally binds a target to
+a workflow on the configured adapter repository. `githubActions.minimumIntervalMs`
+sets an upload interval for that target. Forge's own [dev target configuration](../../.nforge/deploy-targets.json)
+uses the same shape. The rollout owner can supply that file as the value of `deploys`
+in a project `set-policy` command.
+
+A CI system can call the Convex mutation `projectDeployStore:reportByoci` with the
+Forge project ID, target name, exact accepted main `state` and `sequence`, a stable
+`runId` for the attempt and `status` (`succeeded`, `failed` or `smoke-failed`).
+It uses the existing owner account or owner-authorized project-write device credential.
+Use the same run ID on a retry and a new ID for a new attempt. Optional fields include
+`url` (the run link), `cause` (a stable category for retries of the same failure),
+`summary`, `smoke`, and the unchanged-upload evidence. The GitHub OIDC adapter
+writes the same deploy record using its signed run identity. Existing target strings
+and reports are valid in that record format.
+
+Now shows the last verified live version and the start of a failure. A successful
+deploy clears the failure, including a successful retry at the same main version.
+**Seen** hides the current cause for the viewer. A new cause, a new failing target,
+or a failure after a successful deploy appears again.
+
+A project writer can attach an active Lane or an in-progress Item to the current failure
+using `projectDeployStatus:linkWork` with the target, the failure key and a `work`
+reference (`kind`: `lane` or `item`, `id`: its identifier). Passing `null` removes the
+link. Now names the person or agent on the linked work. The owner gets a request in
+**Needs you** when the failure has no one on it and reaches the project threshold.
+`deploys.needsAttentionAfterMinutes` overrides the automatic one-hour threshold.
+The browser uses the recorded deadline with no polling.

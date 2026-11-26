@@ -221,7 +221,8 @@ export async function journalLaneHistoryRead(
           )
           .unique()
       : null;
-    const deploys = acceptance ? await deploysForSequence(ctx, input.projectId, acceptance.sequence) : null;
+    const deploys =
+      acceptance && project ? await deploysForSequence(ctx, project, acceptance.sequence) : null;
     // Version 0 is the record written at start: its time is the open time, its base the first main.
     const first = lane.version === 0 ? current : await readHostedRecord(ctx, { ...key, version: 0 });
     const opened = first ? hostedLaneSchema.parse(JSON.parse(first.value)) : null;

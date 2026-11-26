@@ -1,0 +1,39 @@
+{
+  "targets": [
+    {
+      "name": "convex",
+      "label": "Convex",
+      "environment": "dev",
+      "triggerPaths": [
+        "convex/**",
+        "src/**",
+        "package.json",
+        "package-lock.json",
+        ".nforge/deploy-targets.json",
+        ".github/workflows/convex-deploy.yml",
+        "scripts/forge-deploy-ci.mjs"
+      ],
+      "githubActions": { "workflow": "convex-deploy.yml" }
+    },
+    {
+      "name": "web",
+      "label": "Web",
+      "environment": "dev",
+      "triggerPaths": [
+        "web/**",
+        "site/**",
+        "src/**",
+        "convex/**",
+        "scripts/**",
+        "docs/**",
+        "skills/**",
+        "README.md",
+        "package.json",
+        "package-lock.json",
+        ".nforge/deploy-targets.json",
+        ".github/workflows/web-deploy.yml"
+      ],
+      "githubActions": { "workflow": "web-deploy.yml", "minimumIntervalMs": 300000 }
+    }
+  ]
+}

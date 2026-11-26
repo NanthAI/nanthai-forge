@@ -2,6 +2,7 @@
 // Copyright 2026 Ferdinando Valsecchi
 import { auditCadencePolicySchema, landingModeSchema } from './landing-mode.js';
 import { z } from 'zod';
+import { deploySettingsSchema } from './deploy-targets.js';
 import { checkLogsSchema } from './check-log-policy.js';
 import { invariant } from './errors.js';
 import { SNAPSHOT_INTERVAL_MINUTES } from './lane-snapshot-interval.js';
@@ -36,6 +37,7 @@ export const autonomyPolicySchema = z.object({
     })
     .refine(value => !value.inbound || value.autoPush, 'Two-way sync needs autoPush.')
     .optional(),
+  deploys: deploySettingsSchema.optional(),
   mainAudit: auditCadencePolicySchema.optional(),
   autoExchange: autoExchangeSchema.optional(),
   checkLogs: checkLogsSchema.optional(),
@@ -257,6 +259,7 @@ export const policyWriteObject = z
     lifecycle: autonomyPolicySchema.shape.lifecycle.partial().optional(),
     notify: autonomyPolicySchema.shape.notify.partial().optional(),
     githubMirror: autonomyPolicySchema.shape.githubMirror,
+    deploys: autonomyPolicySchema.shape.deploys,
     trust: trustConfigSchema.optional(),
     agentDefaults: agentDefaultsSchema.optional(),
     autoExchange: z
@@ -301,11 +304,14 @@ export function editedPolicy(previous: AutonomyPolicy, command: PolicyWrite): Au
     command.lifecycle ||
     command.notify ||
     command.githubMirror ||
+    command.deploys ||
     command.trust ||
     command.agentDefaults;
   const githubMirror = command.githubMirror ?? previous.githubMirror;
+  const deploys = command.deploys ?? previous.deploys;
   const policy = autonomyPolicySchema.parse({
     ...base,
+    ...(deploys ? { deploys } : {}),
     ...(githubMirror ? { githubMirror } : {}),
     ...((command.trust ?? previous.trust) ? { trust: command.trust ?? previous.trust } : {}),
     ...((command.agentDefaults ?? previous.agentDefaults)
@@ -369,6 +375,7 @@ export function editedPolicy(previous: AutonomyPolicy, command: PolicyWrite): Au
     ...policy.acceptance.protectedPaths,
     ...(policy.acceptance.ownerApprovalPaths ?? []),
     ...(policy.githubMirror?.pushNowPaths ?? []),
+    ...(policy.deploys?.targets.flatMap(target => target.triggerPaths ?? []) ?? []),
   ])
     globPattern(glob);
   return policy;

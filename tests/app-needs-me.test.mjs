@@ -472,24 +472,39 @@ test('12fde646: a blocked agent that gave up drops out of the count (mark cleare
   assert.equal(needsCount({ ...read([], [blocked]), canDecide: false }, now).n, 0);
 });
 
-test('8b6efb50: a failed deploy or post-deploy smoke notice counts in Needs you and formats with Check failed', () => {
+test('a failed deploy becomes a request after the configured time and only if unowned', () => {
+  const now = Date.parse('2026-11-26T11:00:00Z');
+  const failure = {
+    key: 'failure',
+    since: '2026-11-26T10:00:00Z',
+    sinceSequence: 32140,
+    attentionAt: now,
+    attentionMinutes: 60,
+    runUrl: 'https://ci.example.test/builds/32140',
+  };
   const input = {
     ...read([], []),
-    notices: [
-      {
-        kind: 'deploy',
-        id: 'deploy:web',
-        summary: 'Dev web post-deploy smoke failed at main #42: sitemap HTTP 502',
-        next: 'https://github.com/NanthAI/nanthai-forge/actions/runs/99',
-      },
-    ],
+    deployStatus: {
+      mainSequence: 32142,
+      targets: [
+        { target: 'api', label: 'API', environment: 'staging', liveSequence: 32139, failure },
+        { target: 'web', label: 'Web', environment: 'preview', liveSequence: 32142 },
+      ],
+    },
   };
-  const view = needsView(input);
+  assert.equal(needsCount(input, now - 1).n, 0);
+  assert.equal(needsView(input, now - 1).count, 0);
+  assert.equal(needsCount(input, now).n, 1);
+  const view = needsView(input, now);
   assert.equal(view.count, 1);
-  assert.equal(needsCount(input).n, 1);
-  assert.equal(view.notices[0].tag, 'Deploy failed');
-  assert.equal(view.notices[0].word, 'Check failed');
-  assert.match(view.notices[0].head, /Dev web post-deploy smoke failed/);
+  const [notice] = view.notices;
+  assert.equal(notice.word, 'Needs you');
+  assert.equal(notice.head, 'Find someone to look at the API deploy in staging.');
+  assert.equal(notice.next, 'It has been failing for at least 60 minutes.');
+  assert.doesNotMatch(JSON.stringify(notice), /https/);
+  delete failure.attentionAt;
+  assert.equal(needsView(input, now).count, 0);
+  assert.equal(needsCount(input, now).n, 0);
 });
 
 test('a1e71a48: session-directed and ended-session questions stay out of actionable asks and count; AnswerKeys maps error codes to plain words', async () => {
@@ -621,7 +636,11 @@ test('J08: a card is worded for a person, never from the board text: no raw id o
       'A change was taken out of main.',
       'a bare summary falls back to plain words',
     );
-    assert.equal(view.notices[4].head, 'sample-two/quiet-otter took “Retry the upload” out of main.');
+    assert.equal(
+      view.notices.some(row => row.kind === 'deploy'),
+      false,
+    );
+    assert.equal(view.notices.at(-1).head, 'sample-two/quiet-otter took “Retry the upload” out of main.');
     const fyi = fyiView(
       {
         owner: true,
@@ -647,7 +666,7 @@ test('J08: a card is worded for a person, never from the board text: no raw id o
     );
     assert.deepEqual(fyi.rows[0].taken, { laneId: uuid(12), intentId: uuid(11), title: uuid(13) });
     for (const row of fyi.rows) assert.doesNotMatch(`${row.title} ${row.fact}`, RAW);
-    assert.equal(view.count, 5, 'the five Needs you notices count; the FYI row does not');
+    assert.equal(view.count, 4, 'only the four current Needs you notices count');
   });
 });
 

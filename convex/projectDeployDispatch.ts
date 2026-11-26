@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-// Starts the dev Convex and web deploy workflows straight after a main landing (Item 8b6efb50),
-// through the configured CI adapter repository (falling back to the mirror repo only when no CI
-// adapter repository is set). Coalesces rapid bursts per target via one queued marker row and
-// schedules a single trailing web flush when a landing arrives inside the 5-minute deploy window.
-// Zero polling; zero idle cost.
+// Configured GitHub Actions targets dispatch straight after a main landing. One queued marker
+// coalesces rapid changes and an optional target-specific interval defers the next dispatch.
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import type { Doc } from './_generated/dataModel';
@@ -17,55 +14,16 @@ import { convexFetch } from './networkFetch';
 import { checkSetting } from './projectHostedCheckStore';
 import { deployTarget } from './projectDeployFields';
 
-export type DeployTarget = 'convex' | 'web';
-export const deployWorkflows: Record<DeployTarget, string> = {
-  convex: 'convex-deploy.yml',
-  web: 'web-deploy.yml',
-};
+import type { DeployTarget } from '../src/deploy-targets';
+import { newestSuccesses, pathsAffectTarget } from './projectDeployRows';
+
 /** Coalesce window for rapid landings before posting workflow_dispatch. */
 export const DEPLOY_COALESCE_MS = 10_000;
-/** Minimum spacing between dev web deploys (matches scripts/site-deploy-plan.mjs). */
-export const WEB_DEPLOY_WINDOW_MS = 5 * 60_000;
-/** Backoff delays for explicitly unaccepted transient statuses (429/502/503/504 or token mint). */
+/** Backoff for explicitly unaccepted transient statuses or token mint. */
 export const deployRetryMs = [60_000, 5 * 60_000, 15 * 60_000] as const;
 
-export const CONVEX_DEPLOY_PATHS = [
-  /^convex\//,
-  /^src\//,
-  /^package(?:-lock)?\.json$/,
-  /^\.github\/workflows\/convex-deploy\.yml$/,
-  /^scripts\/forge-deploy-ci\.mjs$/,
-] as const;
-
-export const WEB_DEPLOY_PATHS = [
-  /^web\//,
-  /^site\//,
-  /^src\//,
-  /^convex\//,
-  /^scripts\//,
-  /^docs\//,
-  /^skills\//,
-  /^README\.md$/,
-  /^package(?:-lock)?\.json$/,
-  /^\.github\/workflows\/web-deploy\.yml$/,
-] as const;
-
-const matches = (paths: readonly string[], patterns: readonly RegExp[]) =>
-  paths.some(path => patterns.some(re => re.test(path)));
-
-/** True when any path in `paths` affects `target`. */
-export const pathsAffectTarget = (target: DeployTarget, paths: readonly string[]) =>
-  matches(paths, target === 'convex' ? CONVEX_DEPLOY_PATHS : WEB_DEPLOY_PATHS);
-
-/** Which dev deploy targets a landing's changed paths affect. Unknown/absent paths dispatch both
- * so a deploy-relevant change is never missed; test-only landings dispatch nothing. */
-export function selectDeployTargets(paths?: readonly string[] | null): DeployTarget[] {
-  if (!paths) return ['convex', 'web'];
-  const selected: DeployTarget[] = [];
-  if (matches(paths, CONVEX_DEPLOY_PATHS)) selected.push('convex');
-  if (matches(paths, WEB_DEPLOY_PATHS)) selected.push('web');
-  return selected;
-}
+export const selectDeployTargets = (targets: readonly DeployTarget[], paths?: readonly string[] | null) =>
+  targets.filter(target => !paths || pathsAffectTarget(target, paths));
 
 /** Resolve the repository hosting CI workflows: configured CI adapter first (`github-actions` or
  * `ci-status` with `github-actions` adapter), falling back to `githubMirror.repo` when absent. */
@@ -91,12 +49,12 @@ export async function resolveDeployRepository(
   return effectivePolicy(project).githubMirror?.repo ?? null;
 }
 
-type DispatchInput = { repository: string; target: DeployTarget; state: string; sequence: number };
+type DispatchInput = { repository: string; workflow: string; state: string; sequence: number };
 
 /** The workflow_dispatch request. Its inputs must match both workflows' declared inputs (a contract
  * test checks them against .github/workflows/*.yml), or GitHub refuses with 422. */
 export const deployDispatchRequest = (input: DispatchInput) => ({
-  path: `repos/${input.repository}/actions/workflows/${deployWorkflows[input.target]}/dispatches`,
+  path: `repos/${input.repository}/actions/workflows/${input.workflow}/dispatches`,
   body: { ref: 'main', inputs: { state: input.state, sequence: String(input.sequence) } },
 });
 
@@ -115,7 +73,8 @@ export async function queueDeployDispatch(
   input: {
     projectId: Doc<'hostedProjects'>['_id'];
     repository: string;
-    target: DeployTarget;
+    target: string;
+    workflow: string;
     head: string;
     sequence: number;
     delayMs: number;
@@ -141,7 +100,7 @@ export async function queueDeployDispatch(
   await ctx.db.insert('projectDeploys', {
     projectId: input.projectId,
     target: input.target,
-    workflow: deployWorkflows[input.target],
+    workflow: input.workflow,
     sequence: input.sequence,
     head: input.head,
     status: 'queued',
@@ -163,59 +122,45 @@ export async function queueDeployDispatch(
   return true;
 }
 
-/** Called from enqueueGithubMirror when scheduleReleaseSign already confirmed this project is a
- * server-authority project enrolled with release signatures. Coalesces rapid bursts per target
- * into one queued marker row and schedules at most one action per target per burst/window. */
-export async function scheduleDevDeploys(
+export async function scheduleDeploys(
   ctx: MutationCtx,
   project: Doc<'hostedProjects'>,
   receipt: HostedAcceptance,
   paths?: readonly string[] | null,
 ) {
-  if (project.sourceAuthority?.mode !== 'server') return false;
-  const targets = selectDeployTargets(paths);
-  if (!targets.length) return false;
+  if (project.sourceAuthority?.mode !== 'server') return;
+  const targets = selectDeployTargets(project.autonomyPolicy?.deploys?.targets ?? [], paths);
+  if (!targets.some(target => target.githubActions)) return;
   const repository = await resolveDeployRepository(ctx, project);
-  if (!repository) return false;
+  if (!repository) return;
 
   const now = Date.now();
-  let scheduledAny = false;
-  for (const target of targets) {
+  for (const { name, githubActions } of targets) {
+    if (!githubActions) continue;
     let delayMs = DEPLOY_COALESCE_MS;
-    if (target === 'web') {
-      // Measure the 5-minute window from the newest actual upload, never an unchanged-skip record.
-      const recentWeb = await ctx.db
-        .query('projectDeploys')
-        .withIndex('by_project_and_target_and_status_and_sequence', q =>
-          q.eq('projectId', project._id).eq('target', 'web').eq('status', 'succeeded'),
-        )
-        .order('desc')
-        .take(12);
-      const lastWeb = recentWeb.find(row => !row.unchanged);
-      const lastMs = lastWeb ? Date.parse(lastWeb.at) : NaN;
-      if (Number.isFinite(lastMs) && now - lastMs < WEB_DEPLOY_WINDOW_MS) {
-        // Schedule one trailing flush right when the 5-minute window opens (zero polling, zero idle cost).
-        delayMs = Math.max(DEPLOY_COALESCE_MS, lastMs + WEB_DEPLOY_WINDOW_MS - now + 1_000);
+    const interval = githubActions.minimumIntervalMs ?? 0;
+    if (interval) {
+      const { lastUploaded } = await newestSuccesses(ctx, project._id, name);
+      if (lastUploaded) {
+        delayMs = Math.max(delayMs, Date.parse(lastUploaded.at) + interval - now + 1_000);
       }
     }
     await queueDeployDispatch(ctx, {
       projectId: project._id,
       repository,
-      target,
+      target: name,
+      workflow: githubActions.workflow,
       head: receipt.candidate.head,
       sequence: receipt.snapshot.revision,
       delayMs,
       now,
     });
-    scheduledAny = true;
   }
-  return scheduledAny;
 }
 
 /** One workflow_dispatch for one target on the configured CI repository's main. Claims the newest
- * coalesced head before calling GitHub so rapid bursts produce one dispatch at the tip. If a web
- * upload finished while this dispatch was waiting in its coalesce window, defers once until the
- * 5-minute window opens instead of dispatching into a closed window. */
+ * coalesced head before calling GitHub so rapid bursts produce one dispatch at the tip.
+ * When an upload closes the configured interval, the claim can defer until it opens. */
 export const dispatch = internalAction({
   args: {
     projectId: v.id('hostedProjects'),
@@ -230,16 +175,18 @@ export const dispatch = internalAction({
     const attempt = input.attempt ?? 0;
     let state = input.state;
     let sequence = input.sequence;
+    let workflow: string;
     if (attempt === 0) {
       const claimed = JSON.parse(
         await ctx.runMutation(makeFunctionReference<'mutation'>('projectDeployStore:claimQueued'), {
           projectId: input.projectId,
           target: input.target,
+          repository: input.repository,
         }),
       ) as
         | { action: 'none' }
         | { action: 'defer'; delayMs: number; state: string; sequence: number }
-        | { action: 'dispatch'; state: string; sequence: number };
+        | { action: 'dispatch'; state: string; sequence: number; workflow: string };
       if (claimed.action === 'none') return null;
       if (claimed.action === 'defer') {
         await ctx.scheduler.runAfter(
@@ -251,6 +198,14 @@ export const dispatch = internalAction({
       }
       state = claimed.state;
       sequence = claimed.sequence;
+      workflow = claimed.workflow;
+    } else {
+      const current = (await ctx.runQuery(
+        makeFunctionReference<'query'>('projectDeployStore:dispatchWorkflow'),
+        { projectId: input.projectId, target: input.target, repository: input.repository },
+      )) as string | null;
+      if (!current) return null;
+      workflow = current;
     }
 
     let token: string;
@@ -284,7 +239,7 @@ export const dispatch = internalAction({
     try {
       const request = deployDispatchRequest({
         repository: input.repository,
-        target: input.target,
+        workflow,
         state,
         sequence,
       });

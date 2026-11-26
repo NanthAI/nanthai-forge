@@ -3,12 +3,12 @@
 import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
 
-export const deployTarget = v.union(v.literal('convex'), v.literal('web'));
-export const deployStatus = v.union(
-  v.literal('queued'),
-  v.literal('succeeded'),
-  v.literal('failed'),
-  v.literal('smoke-failed'),
+export const deployTarget = v.string();
+export const deployOutcome = v.union(v.literal('succeeded'), v.literal('failed'), v.literal('smoke-failed'));
+export const deployStatus = v.union(v.literal('queued'), deployOutcome);
+export const deployFailureWork = v.union(
+  v.object({ kind: v.literal('lane'), id: v.string() }),
+  v.object({ kind: v.literal('item'), id: v.string() }),
 );
 export const deploySmokeCheck = v.object({
   name: v.string(),
@@ -28,7 +28,7 @@ export const deployTables = {
   projectDeploys: defineTable({
     projectId: v.id('hostedProjects'),
     target: deployTarget,
-    workflow: v.string(),
+    workflow: v.optional(v.string()),
     sequence: v.number(),
     head: v.string(),
     status: deployStatus,
@@ -37,6 +37,16 @@ export const deployTables = {
     url: v.optional(v.string()),
     summary: v.optional(v.string()),
     smoke: v.optional(deploySmoke),
+    failure: v.optional(
+      v.object({
+        key: v.string(),
+        cause: v.string(),
+        since: v.string(),
+        sinceSequence: v.number(),
+        liveSequence: v.union(v.number(), v.null()),
+        work: v.optional(deployFailureWork),
+      }),
+    ),
     /** True when CI verified served bytes did not change (skipped upload or no served files changed). */
     unchanged: v.optional(v.literal(true)),
     /** Actual live deploy sequence currently served when `unchanged` is true. */

@@ -51,6 +51,8 @@ import { AnswerKeys, HandBackDetails } from '../discussion/ConversationEntry';
 import { answerFailureReason, type Answer, type DismissAsk } from '../discussion/conversation';
 import { useAnswer, useDismissAsk } from '../discussion/useConversation';
 import { needsRead } from './count';
+import { DeployStatusLines, deployStatusId } from './DeployStatus';
+import { useDeployAttentionClock } from './deploy-attention-clock';
 import { focusHref, fyiView, type FyiRead, type FyiState } from './fyi';
 import { Capped, CAP } from './Capped';
 import { fyiDismiss, fyiRead } from './fyi-reads';
@@ -75,6 +77,11 @@ import { AheadKeys, DecisionKeys } from './DecisionKeys';
 import './needs.css';
 
 type ProjectRoute = PlaceProps['route'];
+const markDeploySeen = makeFunctionReference<
+  'mutation',
+  { projectId: Id<'hostedProjects'>; target: string; key: string },
+  string
+>('projectDeployStatus:seen');
 const dormantAbandon = makeFunctionReference<
   'mutation',
   { projectId: Id<'hostedProjects'>; authorityEpoch: number; abandon: string[] },
@@ -127,6 +134,10 @@ function NeedsMeScreen({
   viewerHandle,
 }: PlaceProps) {
   const read = useQuery(needsRead, { projectId });
+  const markSeen = useMutation(markDeploySeen);
+  const seeDeploy = async (target: string, key: string) => {
+    await markSeen({ projectId, target, key });
+  };
   const fyiLive = useQuery(fyiRead, { projectId });
   const fyi = useMemo(
     () => (fyiLive === undefined ? undefined : (JSON.parse(fyiLive) as FyiRead)),
@@ -167,6 +178,7 @@ function NeedsMeScreen({
         drawer={props => <StationDrawer {...props} projectId={projectId} />}
         conflicts={conflicts}
         read={read}
+        seeDeploy={seeDeploy}
         fyi={fyi}
         counts={counts}
         decide={decide}
@@ -246,6 +258,7 @@ export function NeedsMeView({
   setupPinned,
   setupHelp,
   settingDetail,
+  seeDeploy,
   conflicts,
   now,
 }: Pick<PlaceProps, 'route' | 'projectName' | 'feed' | 'feedError' | 'feedReadAt'> & {
@@ -268,6 +281,7 @@ export function NeedsMeView({
   setupHelp?: ReactNode;
   /** A held settings change, readable (Item 16093ed1); read only while its row is open. */
   settingDetail?: (laneId: string) => ReactNode;
+  seeDeploy?: (target: string, key: string) => Promise<void>;
   /** Each Conflict Lane's open notices, for its hover on the picture. */
   conflicts?: ReadonlyMap<string, readonly ConflictNote[] | undefined>;
   /** The drawing time, for tests; otherwise the time the reads arrived (nothing ticks). */
@@ -276,7 +290,8 @@ export function NeedsMeView({
   // Drawn times are relative to when the view was drawn; nothing ticks (idle costs nothing). A Lane parked with no one
   // named shows once 4 h idle by this same time (count.ts parkShown).
   // The line feed draws the picture's day, so a new landing redraws against a new time too.
-  const drawnAt = useMemo(() => now ?? Date.now(), [read, fyi, feed, now]);
+  const readAt = useMemo(() => now ?? Date.now(), [read, fyi, feed, now]);
+  const drawnAt = useDeployAttentionClock(now === undefined ? read?.deployStatus : undefined, readAt);
   const view = useMemo(() => (read ? needsView(read, drawnAt) : null), [read, drawnAt]);
   const items = progressOf(counts);
   const phone = useSyncExternalStore(
@@ -322,7 +337,7 @@ export function NeedsMeView({
   // Shared-state decisions (work reverted from main, a stopped mirror) carry no hold time and come first.
   const heldRows: (NoticeRow | NowRow | AskRow | ParkedRow | AheadRow)[] = view
     ? [
-        ...view.notices,
+        ...view.notices.filter(row => row.kind !== 'deploy'),
         ...[...view.now, ...view.asks, ...view.parked, ...view.blocked].sort(
           (a, b) => activityAt(a) - activityAt(b),
         ),
@@ -361,6 +376,7 @@ export function NeedsMeView({
     });
   const sentence = view ? needsSentence(view) : null;
   const lanesOpen = feed ? feed.lanes.length + feed.more : null;
+  const deployRequests = view?.notices.filter(row => row.kind === 'deploy') ?? [];
   const waiting = heldRows.length;
 
   // The picture's column is wide (1.6 : 1) until something waits on the reader, then gives Needs you the width
@@ -368,8 +384,7 @@ export function NeedsMeView({
   const flowZone = layout.a.includes('flow') ? 'a' : layout.b.includes('flow') ? 'b' : null;
   const held = !!view?.count;
   // Only offers of taken-out changes wait on the reader: nothing is held (J08).
-  const holdsNothing =
-    !!view && view.count > 0 && view.count === view.notices.filter(row => row.taken).length;
+  const holdsNothing = waiting > 0 && waiting === view?.notices.filter(row => row.taken).length;
   const ratio = flowZone
     ? ({
         [`--col-${flowZone}`]: held ? '1fr' : '1.6fr',
@@ -386,6 +401,7 @@ export function NeedsMeView({
           error={feedError}
           readAt={feedReadAt}
           mainCheckedAt={fyi?.mainCheckedAt}
+          deployStatus={<DeployStatusLines status={read?.deployStatus} route={route} seen={seeDeploy} />}
           stop={stop}
           onOpen={showStation}
           laneHref={laneHref}
@@ -425,7 +441,7 @@ export function NeedsMeView({
             }
             count={view ? view.count : undefined}
             handle={handle}
-            hint="what holds work; requests asked ahead are listed under it and not counted"
+            hint="what waits on you"
           >
             {!view ? (
               <div className="quietline" aria-busy="true">
@@ -437,7 +453,7 @@ export function NeedsMeView({
                   <div className="grp" data-weight="act">
                     <Band
                       title={holdsNothing ? 'Yours to decide' : 'Holding work now'}
-                      count={view.count}
+                      count={Math.max(0, view.count - deployRequests.length)}
                       needs
                       hint="longest held first"
                     />
@@ -463,11 +479,7 @@ export function NeedsMeView({
                                     ? at({ place: 'settings', section: 'mirror' })
                                     : row.kind === 'secrets'
                                       ? at({ place: 'settings', section: 'secrets' })
-                                      : row.kind === 'deploy'
-                                        ? row.next?.startsWith('https://')
-                                          ? row.next
-                                          : at({ place: 'settings', section: 'checks' })
-                                        : at({ place: 'plan', rest: row.id })
+                                      : at({ place: 'plan', rest: row.id })
                               }
                             />
                           ) : 'question' in row ? (
@@ -555,6 +567,21 @@ export function NeedsMeView({
                     </Capped>
                   </div>
                 ) : null}
+                {deployRequests.length ? (
+                  <div className="grp" data-weight="act">
+                    <Band title="Deploy requests" count={deployRequests.length} needs />
+                    {deployRequests.map(row => (
+                      <NoticeCard
+                        key={row.id}
+                        row={row}
+                        href={`#${deployStatusId(row.id)}`}
+                        taken={taken}
+                        announce={announce}
+                        drawnAt={drawnAt}
+                      />
+                    ))}
+                  </div>
+                ) : null}
                 {view.ahead.length || asksAhead.length ? (
                   <div className="grp" data-weight="watch">
                     <Band
@@ -615,6 +642,7 @@ export function NeedsMeView({
                   </div>
                 ) : null}
                 {!waiting &&
+                !deployRequests.length &&
                 !view.ahead.length &&
                 !asksAhead.length &&
                 !sessionAsks.length &&
@@ -870,7 +898,7 @@ function NoticeCard({
         </p>
       ) : row.next ? (
         <p className="why" dir="auto">
-          Next: {row.next}
+          {row.kind === 'deploy' ? row.next : `Next: ${row.next}`}
         </p>
       ) : null}
       <div className="btns">
@@ -886,9 +914,9 @@ function NoticeCard({
               Open the Lane
             </A>
           </>
-        ) : row.kind === 'deploy' && href.startsWith('https://') ? (
-          <a className="btn ghost sm" href={href} target="_blank" rel="noreferrer">
-            Open workflow run
+        ) : row.kind === 'deploy' ? (
+          <a className="btn ghost sm" href={href}>
+            View deploy status
           </a>
         ) : (
           <A className="btn ghost sm" href={href}>
@@ -896,9 +924,7 @@ function NoticeCard({
               ? 'Open the mirror'
               : row.kind === 'secrets'
                 ? 'Open Secrets'
-                : row.kind === 'deploy'
-                  ? 'Open checks'
-                  : 'Open the Item'}
+                : 'Open the Item'}
           </A>
         )}
       </div>

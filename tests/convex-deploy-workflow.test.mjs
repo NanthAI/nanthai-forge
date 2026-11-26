@@ -7,6 +7,7 @@ import test from 'node:test';
 import { planConvexDeploy } from '../scripts/forge-deploy-ci.mjs';
 import { moduleUrl } from './convex-module.mjs';
 
+const { targets } = JSON.parse(readFileSync('.nforge/deploy-targets.json'));
 const deployDispatch = await import(moduleUrl('../convex/projectDeployDispatch.ts'));
 const workflow = readFileSync('.github/workflows/convex-deploy.yml', 'utf8');
 
@@ -35,9 +36,17 @@ test('Item 8b6efb50: backend and shared source changes dispatch dev Convex deplo
     '.github/workflows/convex-deploy.yml',
     'scripts/forge-deploy-ci.mjs',
   ])
-    assert.deepEqual(deployDispatch.selectDeployTargets([path]).includes('convex'), true, path);
+    assert.deepEqual(
+      deployDispatch.selectDeployTargets(targets, [path]).some(target => target.name === 'convex'),
+      true,
+      path,
+    );
   for (const path of ['docs/a.md', 'tests/b.mjs', 'web/src/app/App.tsx'])
-    assert.deepEqual(deployDispatch.selectDeployTargets([path]).includes('convex'), false, path);
+    assert.deepEqual(
+      deployDispatch.selectDeployTargets(targets, [path]).some(target => target.name === 'convex'),
+      false,
+      path,
+    );
 });
 
 // Forge main sequence and changed-path planning replaces the old GitHub compare job and works even when the mirror stops.

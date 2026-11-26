@@ -130,25 +130,27 @@ export async function githubMirrorStatus(
 /** Only an explicit receipt read selects its mirror job. Reading a landing window stays batched. */
 export async function mirrorReceipt(ctx: QueryCtx, project: Doc<'hostedProjects'>, receiptId: string) {
   const policy = effectivePolicy(project).githubMirror;
-  if (!policy) return;
-  const job = await ctx.db
-    .query('projectGithubMirrorJobs')
-    .withIndex('by_project_and_receipt', q => q.eq('projectId', project._id).eq('receiptId', receiptId))
-    .order('desc')
-    .first();
+  if (!policy && !project.autonomyPolicy?.deploys?.targets.length) return;
+  const job = policy
+    ? await ctx.db
+        .query('projectGithubMirrorJobs')
+        .withIndex('by_project_and_receipt', q => q.eq('projectId', project._id).eq('receiptId', receiptId))
+        .order('desc')
+        .first()
+    : null;
   if (!job) {
     const acceptance = await ctx.db
       .query('projectHostedAcceptances')
       .withIndex('by_project_and_receipt', q => q.eq('projectId', project._id).eq('receiptId', receiptId))
       .unique();
-    const deploys = acceptance ? await deploysForSequence(ctx, project._id, acceptance.sequence) : null;
+    const deploys = acceptance ? await deploysForSequence(ctx, project, acceptance.sequence) : null;
     if (!deploys) return;
     // Carry deploy ancestry without inventing a synthetic mirror status when no mirror job exists.
     return { deploys };
   }
   const [queue, deploys] = await Promise.all([
     mirrorRow(ctx, project._id),
-    deploysForSequence(ctx, project._id, job.sequence),
+    deploysForSequence(ctx, project, job.sequence),
   ]);
   const push = await mirrorCadenceRead(ctx, project, queue);
   const burst = job.burstJobId ? await ctx.db.get(job.burstJobId) : null;

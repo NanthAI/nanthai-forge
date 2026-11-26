@@ -37,7 +37,7 @@ export const hostedWaitSchema = z
               .regex(/^[0-9a-fA-F]{8}[0-9a-fA-F-]{0,56}$/, 'a receipt id or 8+ character prefix')
               .optional(),
             sequence: z.number().int().positive().optional(),
-            target: z.enum(['convex', 'web', 'all']).optional(),
+            target: z.string().min(1).optional(),
           })
           .strict(),
       ])
