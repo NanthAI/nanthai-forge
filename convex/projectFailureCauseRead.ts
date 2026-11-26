@@ -166,8 +166,8 @@ async function submittedLane(ctx: QueryCtx, projectId: Project, state: HostedLan
 }
 
 /**
- * The agent-reply field (`failureCause`, src/check-failure-cause.ts failureCauseField) for one landing, or
- * nothing. Healthy path: 0 reads. A landing with a cause adds its Lane's compose selection and overlap row (2,
+ * The bound run and, for a failed landing, the agent-reply `failureCause`. The run ID comes from
+ * the selected landing row. Healthy path: 0 additional reads. A landing with a cause adds its Lane's compose selection and overlap row (2,
  * skipped when the Lane is known), the attempt and run (2-3, plus at most 64 job summaries for a failed run
  * with no test file) and main's audit row (1). No writes, no log fetch.
  */
@@ -178,7 +178,8 @@ export async function failureCauseReply(
   state: HostedLandingState,
   knownLane?: { laneId: string; lane: { paths: string[]; complete: boolean } | null },
 ) {
-  if (!explainable(state, knownLane?.laneId)) return {};
+  const boundRunId = row.runId ?? state.acceptance?.proofRunId;
+  if (!explainable(state, knownLane?.laneId)) return boundRunId ? { checkRunId: boundRunId } : {};
   const laneId = knownLane?.laneId ?? (await submittedLane(ctx, projectId, state));
   const lane = knownLane
     ? knownLane.lane
@@ -190,5 +191,9 @@ export async function failureCauseReply(
   const field = failureCauseField(
     causeFrom({ state, laneId: laneId ?? undefined, summary, step, lane, main, reDefers }),
   );
-  return field ? { failureCause: field } : {};
+  const checkRunId = summary?.runId ?? boundRunId;
+  return {
+    ...(checkRunId ? { checkRunId } : {}),
+    ...(field ? { failureCause: field } : {}),
+  };
 }

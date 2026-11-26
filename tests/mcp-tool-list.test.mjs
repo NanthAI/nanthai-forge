@@ -97,7 +97,8 @@ test('the hosted tool list stays inside its context budget', async t => {
   // 340 -> 320 (Item 687d1eda): forge_wait drops 'under tool timeout' (its help says it), paying for the
   // wait's new `main=green` field (friction 1e94d000).
   // 365 -> 353 (Item 843dc73a): the shorter overview description pays for the selection field.
-  assert.equal(descriptionBytes, 353, 'short descriptions keep the check selection field within budget');
+  // 353 -> 340 (Item 3abaec5e): the shorter check description pays for observe's report selector.
+  assert.equal(descriptionBytes, 340, 'short descriptions keep the report selector within budget');
   assert(listBytes <= LIST_CHARS, 'tool list UTF-8 byte budget');
   t.diagnostic(`tools/list ${chars} chars (~${Math.ceil(chars / 4)} tokens); descriptions ${descriptions}`);
   assert(chars <= LIST_CHARS, `tool list characters: ${chars}`);

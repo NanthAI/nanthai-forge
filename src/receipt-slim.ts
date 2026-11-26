@@ -258,6 +258,7 @@ function briefLanded(result: Json): Json | undefined {
           ? { testFiles }
           : {}),
     },
+    ...(typeof result.checkRunId === 'string' ? { checkRunId: result.checkRunId } : {}),
     ...(obj(result.localPreflight) ? { localPreflight: result.localPreflight } : {}),
     // A landing that does not reach GitHub says so in the brief reply too (friction 28e84c06).
     ...(obj(result.mirrorStopped) ? { mirrorStopped: result.mirrorStopped } : {}),
@@ -465,8 +466,7 @@ function briefObserved(result: Json, operationId: unknown): Json | undefined {
     return undefined;
   const landed = result.submissions.map(entry => {
     const entryJson = obj(entry);
-    const brief =
-      entryJson && briefLanded({ submission: entryJson.submission, mirrorStopped: entryJson.mirrorStopped });
+    const brief = entryJson && briefLanded(entryJson);
     if (!brief) return undefined;
     return entryJson.operationId === operationId ? brief : { operationId: entryJson.operationId, ...brief };
   });

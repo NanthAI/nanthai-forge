@@ -34,7 +34,7 @@
 | `x abandon-dormant` | `apply?, limit?, operationId?` |
 | `start --reopen` | `laneId?, target?, operationId?` |
 | `status` | `laneId?, whoami?, kind?, operationId?, submissionId?, runId?, version?, summary?, reports?, selection?, cursor?, main?, files?` |
-| `observe` | `kind?, operationId?, submissionId?, runId?, version?` |
+| `observe` | `kind?, operationId?, submissionId?, runId?, version?, reports?, cursor?` |
 | `metrics` | `from?, to?, limit?, cursor?, contextDays?, operationId?` |
 | `capabilities` | `operationId?` |
 | `x configure-check` | `name?, checkId?, command?, expected?, operationId?` |

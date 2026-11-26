@@ -48,6 +48,7 @@ export const hostedSubmissionWaitSchema = z
 const approvalFields = { approver: z.string().optional(), url: z.string().optional() };
 const eventSchema = z.object({
   submission: hostedLandingStateSchema.extend(approvalFields),
+  checkRunId: z.uuid().optional(),
   providerDelay: z.string().optional(),
   reviewState: z.enum(['held', 'approved', 'approved-carried', 'needs-reapproval']).optional(),
   /** Why a failed check did not pass and the one next step (src/check-failure-cause.ts failureCauseField). */
@@ -165,6 +166,7 @@ export async function observeHostedSubmissions(
               // cursor per operation (which would retain quadratic metadata).
               const {
                 submission,
+                checkRunId,
                 providerDelay,
                 reviewState,
                 failureCause,
@@ -181,6 +183,7 @@ export async function observeHostedSubmissions(
               } = event;
               current.set(event.operationId, {
                 submission,
+                ...(checkRunId ? { checkRunId } : {}),
                 ...(providerDelay ? { providerDelay } : {}),
                 ...(reviewState ? { reviewState } : {}),
                 ...(failureCause ? { failureCause } : {}),
@@ -564,6 +567,7 @@ async function observeHostedSubmissionsOnce(
                 ...(page.approver ? { approver: page.approver } : {}),
                 ...(page.url ? { url: page.url } : {}),
               },
+              ...(page.checkRunId ? { checkRunId: page.checkRunId } : {}),
               ...(page.providerDelay ? { providerDelay: page.providerDelay } : {}),
               ...(page.reviewState ? { reviewState: page.reviewState } : {}),
               ...(page.failureCause ? { failureCause: page.failureCause } : {}),

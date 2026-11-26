@@ -39,6 +39,7 @@ export function waitEventLine(event: unknown): { line: Json; key: string } | und
       phase: submission.phase,
       state: observation.state,
       reason: observation.pendingReason ?? undefined,
+      checkRunId: e.checkRunId,
       providerDelay: e.providerDelay,
       reviewState: e.reviewState,
       position: queue.position,

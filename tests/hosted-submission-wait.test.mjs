@@ -761,11 +761,16 @@ test('acceptance wait stays live at ready until the canonical landing settles', 
   const reads = s.counts().reads;
   await turn();
   assert.equal(s.counts().reads, reads, 'ready creates no idle reads');
-  await s.update(a.state.id, 'landed');
+  const checkRunId = randomUUID();
+  await s.update(a.state.id, 'landed', {
+    acceptance: { receiptId: randomUUID(), head: 'a'.repeat(64), proofRunId: checkRunId },
+  });
   s.wake();
   const result = await waiting;
   assert.equal(result.result.successful, true);
   assert.equal(result.result.submissions[0].submission.phase, 'landed');
+  assert.equal(result.result.submissions[0].checkRunId, checkRunId);
+  assert.equal(s.events.findLast(event => event.terminal).checkRunId, checkRunId);
   assert.equal(s.counts().closes, 1);
 });
 

@@ -26,11 +26,26 @@ import { hostedAgentRoot } from '../dist/hosted-agent-journal.js';
 import { readHostedCliStatus } from '../dist/hosted-cli-status.js';
 import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
 import { slimReceipt } from '../dist/receipt-slim.js';
+import { pageCheckReports } from '../dist/check-report-detail.js';
 import { readLaneEntry, recordLane } from '../dist/lane-registry.js';
 import { laneCheckoutRoot, laneSuccessor } from '../dist/hosted-lane-location.js';
 import { LAND_HELD_MS_ENV } from '../dist/land-timing.js';
 import { MAX_CONTRACT_FEATURES } from '../dist/hosted-contract-features.js';
 const errorCode = expected => error => error.code === expected;
+
+test('observe reads exact CI time for a selected file from the check report', async t => {
+  const s = agentFixture(t);
+  const runId = randomUUID();
+  const file = 'tests/selected.test.mjs';
+  const contractReports = {
+    [file]: { failed: false, durationMs: 231 },
+    'tests/other.test.mjs': { failed: false, durationMs: 387 },
+  };
+  s.exchange.client.action = (_ref, { runId: selected, files }) =>
+    JSON.stringify(pageCheckReports(selected === runId ? contractReports : {}, { files }));
+  const { result } = await s.transport().dispatch('observe', { runId, reports: { files: [file] } });
+  assert.deepEqual(result.contractReports, { [file]: { failed: false, durationMs: 231 } });
+});
 
 test('hosted Lane status reports local disk usage without a new hosted query', async t => {
   const s = agentFixture(t);

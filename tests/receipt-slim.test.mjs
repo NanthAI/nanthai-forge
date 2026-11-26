@@ -333,6 +333,16 @@ const waited = envelope(
 );
 healthy.wait = waited;
 
+test('compact land and wait receipts preserve the exact check run for report lookup', () => {
+  const checkRunId = randomUUID();
+  const land = structuredClone(healthy.land);
+  land.result.checkRunId = checkRunId;
+  assert.equal(slimReceipt(land).result.checkRunId, checkRunId);
+  const wait = structuredClone(healthy.wait);
+  wait.result.submissions[0].checkRunId = checkRunId;
+  assert.equal(slimReceipt(wait).result.submissions[0].checkRunId, checkRunId);
+});
+
 test('a healthy start, save, sync, wait and landing print about 300 characters each', t => {
   const sizes = Object.fromEntries(
     Object.entries(healthy).map(([name, full]) => [name, payloadChars(slimReceipt(full))]),

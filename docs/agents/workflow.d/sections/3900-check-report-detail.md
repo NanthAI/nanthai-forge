@@ -1,5 +1,13 @@
 ### Check report detail
 
+Landing receipts, `wait`, `observe` and `status` show `checkRunId` when a
+check is bound to the selected landing. Use it with `log {runId}` for the
+check log. To read one file's CI time, use
+`status {runId,reports:{files:[FILE]}}` or the same selection with `observe`.
+The report's `durationMs` is the time recorded for that file by the runner.
+The landing ledger's `attemptReplay` already gives recorded run IDs, start
+and end times, and outcomes for the attempts in a page.
+
 Capable check status readers send `check-report-detail`: the status response carries a bounded
 file summary and no `contractReports`. `status {runId,reports:"failed"}` reads failed and flaky
 files with retained excerpts through a server action. `reports:true` pages every report;

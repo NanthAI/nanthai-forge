@@ -192,6 +192,9 @@ const planningStatuses = [
 const uuid = z.uuid(),
   hash = z.string().regex(/^[0-9a-f]{64}$/);
 const lane = { laneId: uuid.optional() };
+const checkReports = z
+  .union([z.literal('failed'), z.object({ files: z.array(z.string()).max(256) }).strict(), z.literal(true)])
+  .optional();
 const message = { message: noteSchema.default('Agent change') };
 const selection = {
   ...lane,
@@ -502,13 +505,7 @@ export const hostedAgentCommandSchemas = {
         .describe(
           'Requires runId; returns the selected check run summary. For a Lane summary pass laneId without summary.',
         ),
-      reports: z
-        .union([
-          z.literal('failed'),
-          z.object({ files: z.array(z.string()).max(256) }).strict(),
-          z.literal(true),
-        ])
-        .optional(),
+      reports: checkReports,
       selection: z
         .union([z.literal(true), z.literal('timing-history')])
         .optional()
@@ -529,6 +526,8 @@ export const hostedAgentCommandSchemas = {
       submissionId: uuid.optional(),
       runId: uuid.optional(),
       version: z.number().int().nonnegative().optional(),
+      reports: checkReports,
+      cursor: z.string().nullable().optional(),
     })
     .strict(),
   metrics: z

@@ -8,3 +8,7 @@ Check status also reads the retained test selection, ordered shard groups and
 pool cuts on demand. New Actions plans pin the exact timing snapshot used to
 balance their shards. The snapshot stays in R2 until check-log expiry. The run's
 selection and recipe remain available.
+
+Landing status, observation, waits and compact receipts carry the bound check
+run ID. Status and observation use that ID to read the exact CI duration of a
+named test file from its retained report.

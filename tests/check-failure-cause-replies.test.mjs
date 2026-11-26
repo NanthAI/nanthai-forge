@@ -38,7 +38,8 @@ async function submitted(t) {
     await f.execute();
   }
   const [row] = f.tables.projectHostedCheckRuns.values();
-  const active = await f.rawChecks.activate(JSON.parse(row.value).id);
+  const runId = JSON.parse(row.value).id;
+  const active = await f.rawChecks.activate(runId);
   const landing = () =>
     JSON.parse(
       [...f.tables.projectHostedLandingRequests.values()].find(r => r.operationId === command.operationId)
@@ -59,11 +60,11 @@ async function submitted(t) {
       await f.tx('causeScreen', screen.forLane, { projectId: f.projectId, laneId: f.lane.laneId }),
     ),
   });
-  return { f, active, landing, replies };
+  return { f, active, runId, landing, replies };
 }
 
 test('a failed check names the same cause and next step in status and the land wait as the Failed check screen', async t => {
-  const { f, active, landing, replies } = await submitted(t);
+  const { f, active, runId, landing, replies } = await submitted(t);
   for (let i = 0; i < active.plan.shardCount; i++)
     await f.rawChecks.callback(f.rawChecks.shard(active, i, i === 0 ? 'failed' : 'passed'));
   await f.rawChecks.callback(f.rawChecks.complete(active, 'failed'));
@@ -73,17 +74,22 @@ test('a failed check names the same cause and next step in status and the land w
   assert(read.cause, 'the screen explains the failed check');
   const expected = failureCauseField(read.cause);
   assert.deepEqual(status.failureCause, expected);
+  assert.equal(status.checkRunId, runId);
   assert.deepEqual(page.failureCause, expected);
+  assert.equal(page.checkRunId, runId);
+  assert.equal(page.events.at(-1).checkRunId, runId);
   assert.deepEqual(page.events.at(-1).failureCause, expected, 'the wait event an agent receives carries it');
   assert.equal(Object.keys(expected.suspects).join(), 'change,test,main,ci');
   assert.equal(read.expected, null, 'a settled check states no expected answer time');
 });
 
 test('a check still running carries no cause in any agent reply and the screen states its usual time honestly', async t => {
-  const { replies } = await submitted(t);
+  const { replies, runId } = await submitted(t);
   const { status, page, screen: read } = await replies();
   assert.equal(status.failureCause, undefined);
+  assert.equal(status.checkRunId, runId);
   assert.equal(page.failureCause, undefined);
+  assert.equal(page.checkRunId, runId);
   assert.equal(read.cause, null);
   // No settled landing has reported a check time yet: not reported, never a guess.
   assert.equal(read.expected, null);
