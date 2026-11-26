@@ -23,4 +23,4 @@ Read the saved files in the Lane before deciding. [Review and land](review.md) e
 
 ## Where to go next
 
-Use [Plan](plan.md) to order work and [oversight](oversight.md) to find what needs you. If setup stops, retain its operation id and follow the receipt's next command rather than starting a second import. The [quickstart](../quickstart.md) includes recovery paths and the current deployment prerequisites.
+Use [Plan](plan.md) to order work and [oversight](oversight.md) to find what needs you. If setup stops, retain its operation id and follow the receipt's next command rather than starting a second import. The [quickstart](../quickstart.md) includes setup and recovery steps.

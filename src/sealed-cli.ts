@@ -240,7 +240,7 @@ export async function sealedCli(args: string[]) {
         operationId ? { operationId } : {},
       );
       process.stdout.write(
-        `Machine ${safeLabel(label!)} (id ${added.machineId.slice(0, 8)}) can now open Checks. Operation ${added.operationId}. Its key is shown once. Store it as the CI secret FORGE_SECRETS_KEY, given only to the step that runs nforge run:\n\n${added.bundle}\n\nThat step also needs FORGE_DEPLOYMENT_URL and FORGE_PROJECT_ID, and runs: nforge run --set checks --only NAME,NAME -- COMMAND\nWhoever holds this key opens every Checks value. Never give it to a step that runs untrusted code, such as a pull request from a fork.\n`,
+        `Machine ${safeLabel(label!)} (id ${added.machineId.slice(0, 8)}) can now open Checks. Operation ${added.operationId}. Its key is shown once. Store it as the CI secret FORGE_SECRETS_KEY, given only to the step that runs nforge run:\n\n${added.bundle}\n\nIf the step runs from a Git mirror, set FORGE_PROJECT_ID to the project's ID. Run: nforge run --set checks --only NAME,NAME -- COMMAND\nWhoever holds this key opens every Checks value. Never give it to a step that runs untrusted code, such as a pull request from a fork.\n`,
       );
     } else if (command === 'set' || command === 'rm') {
       const value = command === 'set' ? await readValue(file) : null;

@@ -127,6 +127,13 @@ test('plain-directory host without Git clones exact paths, modes, empty/binary b
     .filter(Boolean);
   assert.equal(words.shift(), 'nforge');
   assert.equal(words.shift(), 'clone');
+  const fetch = globalThis.fetch;
+  const discoveryUrl = new URL('/_forge/cli.json', hosted.projectUrl).href;
+  globalThis.fetch = async (url, options) =>
+    url === discoveryUrl ? Response.json({ deployment: hosted.deployment }) : fetch(url, options);
+  t.after(() => {
+    globalThis.fetch = fetch;
+  });
   await hostedCloneCli(
     words.map(word => (word === 'DIR' ? clone : word)),
     {

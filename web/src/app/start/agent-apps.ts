@@ -3,8 +3,7 @@
 // Connecting the agent app a person already uses (Items c3e4a838, 6beca32b): the prompt that makes an agent explain
 // before it sets anything up, and the commands that connect each app today. Forge works with any agent app and any
 // CI and never starts an agent itself: these are words to paste and commands to run, nothing more. Every command here
-// is one the CLI ships now (tests/app-getting-started.test.mjs checks each against the CLI's usage); the published package
-// and the bare `nforge login` are Phase 8 and do not appear.
+// is one the CLI ships now (tests/app-getting-started.test.mjs checks each against the CLI's usage).
 import { hrefFor } from '../paths';
 
 export const agentApps = ['claude-code', 'codex', 'cursor', 'opencode', 'pi', 'other'] as const;
@@ -67,13 +66,13 @@ export const agentSetupHref = '/docs/quickstart.md';
 export const manualSetupHref = `/docs/quickstart/${firstLandingSection}`;
 
 /** The prompt the empty Projects page copies (Items a0cf8c22, 45737a3b): the person has signed in and hands setup to
- * their own agent in the real CLI order (install, sign in with the deployment URL, import from GitHub or host a plain
+ * their own agent in the real CLI order (install, sign in, import from GitHub or host a plain
  * local folder, clone, optionally connect the agent app inside the clone). */
-export function onboardingPrompt(origin: string, deployment: string) {
+export function onboardingPrompt(origin: string) {
   return [
     `Read First landing in ${origin}${agentSetupHref}${firstLandingSection}`,
     '',
-    `I already signed in to Forge in my browser. Help me set Forge up in this order: 1) install the nforge CLI from the guide if it is not installed, 2) run \`nforge login ${deployment}\` so I can approve this device once in my browser, 3) ask me whether to import a GitHub repository (\`nforge import <github-url>\`) or host a plain local folder without .git (\`nforge host <folder> --deployment ${deployment}\`), 4) clone the hosted project (\`nforge clone <project-url> <dir>\`), and 5) optionally connect this agent app from inside the clone (\`nforge connect <app>\` or \`nforge mcp-config . --agent\`). Tell me before changing anything on my machine.`,
+    'I already signed in to Forge in my browser. Help me set Forge up in this order: 1) install the nforge CLI from the guide if it is not installed, 2) run `nforge login` so I can approve this device once in my browser, 3) ask me whether to import a GitHub repository (`nforge import OWNER/REPO`) or host a plain local folder (`nforge host FOLDER`), 4) clone the hosted project (`nforge clone OWNER/PROJECT DIR`), and 5) optionally connect this agent app from inside the clone (`nforge connect <app>` or `nforge mcp-config . --agent`). Tell me before changing anything on my machine.',
   ].join('\n');
 }
 
@@ -92,32 +91,32 @@ export const guidanceDocs: DocsLink = {
 };
 
 /** The steps every agent app shares: after these an agent runs nforge commands in its terminal and needs nothing
- * more. `deployment` is the backend address `nforge login` takes; `project` the project's address when there is one
- * (otherwise the agent imports first). */
-export function sharedSteps(deployment: string, project?: string): SetupStep[] {
+ * more. With a project, clone it; otherwise the agent imports first. */
+export function sharedSteps(project?: string): SetupStep[] {
+  const name = project ? new URL(project).pathname.split('/').filter(Boolean).slice(0, 2).join('/') : null;
   return [
     {
       title: 'Install the command line',
       commands: INSTALL,
-      docs: [{ label: 'Install guide', href: '/docs/quickstart/#install-the-development-cli' }],
+      docs: [{ label: 'Install guide', href: '/docs/quickstart/#install-the-cli' }],
     },
     {
       title: 'Sign this machine in',
       detail:
         'It prints a code and a link to the approval page here. Check that the code matches, name the device and approve; the agent waits until you do. It then shows with the same name and code under',
-      commands: [`nforge login ${deployment}`],
+      commands: ['nforge login'],
       needsPerson: true,
       link: { label: 'Account, Sign-in and devices.', href: hrefFor({ frame: 'account', place: 'devices' }) },
       docs: [{ label: 'Devices and sign-ins', href: '/docs/guides/access/' }],
     },
-    project
+    name
       ? {
           title: 'Clone the project',
-          commands: [`nforge clone ${project} ./${project.split('/').at(-1) ?? 'project'}`],
+          commands: [`nforge clone ${name} ./${name.split('/').at(-1)}`],
         }
       : {
           title: 'Bring the repository across',
-          commands: ['nforge import https://github.com/OWNER/REPO'],
+          commands: ['nforge import OWNER/REPO'],
         },
   ];
 }
@@ -149,14 +148,10 @@ export function appStep(app: AgentApp): SetupStep {
 }
 
 /** Every step for one app, in order. */
-export const setupSteps = (app: AgentApp, deployment: string, project?: string): SetupStep[] => [
-  ...sharedSteps(deployment, project),
+export const setupSteps = (app: AgentApp, project?: string): SetupStep[] => [
+  ...sharedSteps(project),
   appStep(app),
 ];
-
-/** The address `nforge login` takes: this build's backend (public: the browser already talks to it). */
-export const deploymentUrl = () =>
-  (import.meta.env?.VITE_CONVEX_URL as string | undefined) ?? 'https://YOUR_DEPLOYMENT.convex.cloud';
 
 const STORE = 'forge.start.app';
 /** The app this browser picked last, a per-viewer convenience. Nothing is picked until the person picks: every app is

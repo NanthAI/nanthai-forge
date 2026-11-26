@@ -30,6 +30,12 @@ For the vocabulary used below (Intent, Lane, Candidate, Channel, State), see [co
 | Site Worker       | Serves the web app, cached public reads and device sign-in at the edge (no records of its own)       | `site/`                                                   |
 | Git compatibility | Import, export, projections and publication                                                          | `src/native-git*.ts`, `src/work-git*.ts`                  |
 
+The web build writes the public backend origin to `/_forge/cli.json`, served by
+the same static asset storage as the docs. CLI discovery sends one unauthenticated
+GET to the app. Sign-in remembers the association locally and credentials stay
+keyed to the backend. Discovery makes zero Convex calls and database reads or
+writes. There is no idle work.
+
 The site has an unbound R2 discovery reader for project, Explore and profile
 snapshots. When bound, a discovery miss reads at most one bounded snapshot from
 R2, with no Convex fallback. The document includes crawlable facts and inert

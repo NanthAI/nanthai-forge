@@ -28,7 +28,6 @@ import { ProjectReadme, RecentLandings, projectCode } from './Overview';
 import { stopWords } from '../app/lane-state';
 import { lineStops, type LineStage } from '../app/Line';
 import { hrefFor, publicProjectHref, type AppRoute } from '../app/paths';
-import { shellQuote } from '../../../src/shell-quote';
 import { explorePagePath, explorePageSize, orderSearchRows } from '../../../src/public-explore-pages';
 import { publicProjectClone, publicProjectLogin } from '../../../src/public-project-commands';
 import { flowDuration } from '../../../src/flow-text';
@@ -928,12 +927,7 @@ function Project({
         />
       ) : null}
       {sheet === 'clone' && signedIn ? (
-        <CloneProject
-          project={project}
-          link={workspace}
-          deployment={read.data.deployment}
-          onClose={() => setSheet(null)}
-        />
+        <CloneProject project={project} link={workspace} onClose={() => setSheet(null)} />
       ) : null}
       {sheet === 'stargazers' && owner && id ? <Stargazers id={id} onClose={() => setSheet(null)} /> : null}
       {sheet === 'share' ? (
@@ -969,12 +963,10 @@ function Project({
 function CloneProject({
   project,
   link,
-  deployment,
   onClose,
 }: {
   project: ProjectPage['project'];
   link: string;
-  deployment?: string;
   onClose: () => void;
 }) {
   return (
@@ -988,25 +980,14 @@ function CloneProject({
         </button>
       }
     >
-      {deployment ? (
-        <>
-          <p>If this device needs approval, run:</p>
-          <div className="cmd mono">
-            <code>{publicProjectLogin(deployment)}</code>
-          </div>
-          <p>Clone the project:</p>
-          <div className="cmd mono">
-            <code>{publicProjectClone(link, project.slug, deployment)}</code>
-          </div>
-        </>
-      ) : (
-        <>
-          <p>Find the clone and device approval commands for this site:</p>
-          <div className="cmd mono">
-            <code>{`nforge clone --find ${shellQuote(`${project.handle}/${project.slug}`)} --site ${shellQuote(location.origin)}`}</code>
-          </div>
-        </>
-      )}
+      <p>If this device needs approval, run:</p>
+      <div className="cmd mono">
+        <code>{publicProjectLogin(location.origin)}</code>
+      </div>
+      <p>Clone the project:</p>
+      <div className="cmd mono">
+        <code>{publicProjectClone(link, project.slug)}</code>
+      </div>
     </Sheet>
   );
 }

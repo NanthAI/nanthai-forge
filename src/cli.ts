@@ -15,9 +15,9 @@ Start here: nforge docs quickstart (hosted project to first landing).
 Browse packaged documentation: nforge docs
 
 Usage:
-  nforge clone [--find] NAME [--site URL]   # find public projects by name or handle/slug
-  nforge clone <project-url|project-id> DIR [--deployment URL]
-  nforge import <github-url|OWNER/NAME> [--ref REF] [--name NAME] [--deployment URL] [--operation-id UUID] [--no-wait]
+  nforge clone [--find] NAME   # find public projects by name or handle/slug
+  nforge clone <OWNER/PROJECT|PROJECT_ID> DIR
+  nforge import <github-url|OWNER/NAME> [--ref REF] [--name NAME] [--operation-id UUID] [--no-wait]
   nforge import --resume OPERATION_UUID   # resume a pinned GitHub source import; reports project and readiness
   nforge pull [ROOT]           # refresh a clean clone to accepted main (ROOT: cwd clone)
   nforge update [FORGE_CHECKOUT] [--directory DIR] [--channel main|stable] [--pin STATE | --unpin | --state STATE]
@@ -37,10 +37,10 @@ Usage:
   nforge queue list|cancel OPERATION|prioritize OPERATION   # local command recovery
   nforge github connect|status|disconnect|resume PROJECT [--url DEPLOYMENT] [--repo OWNER/NAME] [--operation-id UUID] [--no-mirror] [--no-browser]
   nforge github-sync ROOT [--repo OWNER/NAME] [--branch main] [--dry-run | --push] [--operation-id UUID] [--rebind] [--wait-audit] [--audit-timeout-ms MS]
-  nforge host ROOT [--deployment URL] [--name NAME] [--visibility private|public] [--status | --new]
-  nforge login [DEPLOYMENT_URL] [--name NAME] [--scope cli|coordination] [--no-browser]
-  nforge logout [DEPLOYMENT_URL]
-  nforge auth status [DEPLOYMENT_URL]
+  nforge host ROOT [--name NAME] [--visibility private|public] [--status | --new]
+  nforge login [--name NAME] [--scope cli|coordination] [--no-browser]
+  nforge logout
+  nforge auth status
   nforge maintenance check-logs ROOT --dry-run|--apply --plan FILE [--hosted]
   nforge hosted-work <deployment-url> <project-id> JSON
   nforge make-editable <deployment-url> <project-id> [operation-uuid]

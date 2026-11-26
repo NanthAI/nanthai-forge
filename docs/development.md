@@ -1497,6 +1497,23 @@ filters page titles, copies code and remembers the theme. The public page and
 sign-in help link here. Cloudflare serves the built files from static storage.
 Reading a page, Markdown twin or discovery file makes zero Convex calls and
 database reads or writes. An idle tab makes zero calls.
+The same build emits `/_forge/cli.json` when `VITE_CONVEX_URL` is set. It contains
+only that public backend origin and ships with the site's static assets.
+The CLI's built-in site is set in `src/forge-site.ts`. Current development builds
+use the development site. Set the canonical public origin there when production
+opens. For another site, use `nforge login APP_URL` and `nforge auth status APP_URL`;
+`nforge host ROOT --site APP_URL`, `nforge import OWNER/REPO --site APP_URL`, and
+`nforge clone OWNER/PROJECT DIR --site APP_URL` select it explicitly. A full project
+URL selects its own site for clone. Existing backend-bound automation can keep
+`--deployment` or `FORGE_DEPLOYMENT_URL`; a Checks job on a non-default mirror
+can use `FORGE_DEPLOYMENT_URL` with its project ID.
+
+### Scoped MCP source grants
+
+For a scoped source grant issued by a Forge operator, start `nforge mcp-agent BACKEND_URL`
+with the grant in `FORGE_AGENT_TOKEN`. Use the backend that issued the grant.
+
+### Documentation pages
 
 The existing explicit `packageDocuments` inventory supplies both HTML pages and
 raw Markdown. New guides need a manifest under `scripts/package-documents/`, as
@@ -1515,9 +1532,9 @@ Setup and how-to pages use `DocsAgentPrompt`. Put new guides under
 reference in that module. The shared prompt sends the agent to the page's Markdown twin
 and asks it to use real IDs, keep secrets private and ask before external or
 irreversible changes. Keep task steps and command examples in the guide. The
-static build renders the prompt above the guide. With scripts enabled, it
-uses the reader's current origin. The manual-copy fallback links to the Forge
-development docs. The static docs check catches a guide without a prompt or
+static build renders the prompt above the guide. The copy button uses the reader's
+current origin, and the manual-copy fallback links to the Markdown on that same site.
+The static docs check catches a guide without a prompt or
 Markdown twin. Both discovery files list every guide. `/llms-full.txt`
 links to guides beyond its curated full-text chapters. `robots.txt` allows the
 guide pages, Markdown twins and both discovery files.

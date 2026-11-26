@@ -12,8 +12,10 @@ import { join, resolve } from 'node:path';
 import { lstatSync, readdirSync } from 'node:fs';
 import { makeFunctionReference } from 'convex/server';
 import { z } from 'zod';
-import { deploymentUrl, readAuth, resolveAuthToken } from './auth-store.js';
+import { resolveAuthToken } from './auth-store.js';
 import { publicProjectLogin } from './public-project-commands.js';
+import { shellQuote } from './shell-quote.js';
+import { appTarget, serviceTarget } from './app-discovery.js';
 import { ConvexExchange } from './exchange-client.js';
 import { checkoutHostedMain, type MainTransport } from './hosted-main-checkout.js';
 import { HostedCheckoutDownloads } from './hosted-checkout-downloads.js';
@@ -23,7 +25,7 @@ import { durableReplace } from './state/durability.js';
 import { workLocked } from './work-lock.js';
 import { ForgeError, invariant } from './errors.js';
 export const CLONE_HELP =
-  'nforge clone [--find] NAME [--site URL]   # find public projects by name or handle/slug\nnforge clone <project-url|project-id> DIR [--deployment URL]\nSign in with nforge login to clone any Forge project, including public projects.\n';
+  'nforge clone [--find] NAME   # find public projects by name or handle/slug\nnforge clone <OWNER/PROJECT|PROJECT_ID> DIR\nSign in with nforge login to clone any Forge project, including public projects.\n';
 type Client = Pick<ConvexExchange['client'], 'query'>;
 /** Root binding is the same private address used by CLI/MCP; no native owner is created. */
 export async function cloneHostedProject(
@@ -92,7 +94,7 @@ export async function hostedCloneCli(
 ) {
   const explicitLookup = args[0] === '--find';
   const lookupArgs = explicitLookup ? args.slice(1) : args;
-  const [name, siteFlag, site] = lookupArgs;
+  const [name, siteFlag, lookupSite] = lookupArgs;
   if (
     explicitLookup ||
     (name &&
@@ -101,12 +103,12 @@ export async function hostedCloneCli(
       (args.length === 1 || siteFlag === '--site'))
   ) {
     invariant(
-      name && (lookupArgs.length === 1 || (lookupArgs.length === 3 && siteFlag === '--site' && site)),
+      name && (lookupArgs.length === 1 || (lookupArgs.length === 3 && siteFlag === '--site' && lookupSite)),
       'BAD_ARGUMENT',
       CLONE_HELP,
     );
     const { findPublicProjects, publicProjectSite } = await import('./public-project-lookup.js');
-    return findPublicProjects(name, publicProjectSite(site));
+    return findPublicProjects(name, publicProjectSite(lookupSite));
   }
   if (args.includes('--help')) {
     await beforeLocal?.();
@@ -118,7 +120,8 @@ export async function hostedCloneCli(
     source &&
       root &&
       !root.startsWith('-') &&
-      (flags.length === 0 || (flags.length === 2 && flags[0] === '--deployment' && flags[1])),
+      (flags.length === 0 ||
+        (flags.length === 2 && ['--deployment', '--site'].includes(flags[0]!) && flags[1])),
     'BAD_ARGUMENT',
     CLONE_HELP,
   );
@@ -138,11 +141,28 @@ export async function hostedCloneCli(
       'BAD_ARGUMENT',
       'Use the hosted project URL or project ID.',
     );
+  } else if (source.includes('/')) {
+    const [handle, slug, extra] = source.split('/');
+    invariant(handle && slug && extra === undefined, 'BAD_ARGUMENT', 'Use OWNER/PROJECT or a project ID.');
+    route = { handle, slug };
   }
-  const selected = flags[1] ?? process.env.FORGE_DEPLOYMENT_URL ?? readAuth().defaultDeployment ?? origin;
-  const url = selected ? deploymentUrl(selected) : undefined;
-  if (!url || (!dependencies && !resolveAuthToken(url))) {
-    const next = url ? publicProjectLogin(url) : 'nforge login';
+  const site = flags[0] === '--site' ? flags[1] : undefined;
+  invariant(!origin || !site, 'BAD_ARGUMENT', 'Use the project URL alone to select its Forge app.');
+  const target =
+    origin && !flags.length
+      ? await appTarget(origin)
+      : await serviceTarget({
+          ...(site ? { site } : {}),
+          ...(flags[0] === '--deployment' ? { deployment: flags[1]! } : {}),
+        });
+  const url = target.deployment;
+  if (!dependencies && !resolveAuthToken(url)) {
+    const app = target.site ?? origin;
+    const next = app
+      ? publicProjectLogin(app)
+      : flags[0] === '--deployment'
+        ? `nforge login --deployment ${shellQuote(url)}`
+        : 'nforge login';
     throw new ForgeError('SIGN_IN_REQUIRED', `Nothing was copied. Run ${next} before cloning.`, undefined, {
       nothingChanged: true,
       next,

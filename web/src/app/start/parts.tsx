@@ -107,11 +107,9 @@ function DocsLinks({ docs }: { docs?: readonly DocsLink[] }) {
 /** One connection flow for every agent app: the steps all apps share, then the one optional step that differs, where
  * the app is chosen. No app is pressed until this browser picks one; picking changes only that step. */
 export function ConnectSteps({
-  deployment,
   project,
   connectionClient,
 }: {
-  deployment: string;
   project?: string;
   connectionClient?: Pick<ConvexReactClient, 'query'> | undefined;
 }) {
@@ -132,7 +130,7 @@ export function ConnectSteps({
     setApp(next);
     rememberApp(next);
   };
-  const shared = sharedSteps(deployment, project);
+  const shared = sharedSteps(project);
   const last = app ? appStep(app) : null;
   return (
     <>

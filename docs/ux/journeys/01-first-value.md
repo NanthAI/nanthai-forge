@@ -54,6 +54,6 @@ Walked: the public landing source, `nforge --help`, `nforge docs`, `nforge statu
 
 - Activation is sign-up followed by creating, importing or cloning a project. Cloning someone else's public project counts. A landing is not required and there is no gamified checklist (Item 8edd3157).
 - `nforge login` is to default to the Forge hosted service; `--url` stays for self-hosting (Item f3f45a41).
-- Advisory hooks install on the first command and say so in one line. The [quickstart](../../quickstart.md#install-the-development-cli) lists the edits and Undo (Items e6f4b0a6 and 7b74e67b).
+- Advisory hooks install on the first command and say so in one line. The [quickstart](../../quickstart.md#install-the-cli) lists the edits and Undo (Items e6f4b0a6 and 7b74e67b).
 - A public project leads with its README, with recent landings beside it and the code map one click away (Item 8947a779).
 - The core work terms are Item, Lane and landing, as in [concepts](../../concepts.md#core-model).

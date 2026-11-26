@@ -21,9 +21,9 @@ Use separate values when a provider offers development and test credentials. A C
 
 ## Sign in and check the device
 
-1. In a regular terminal, run `nforge login DEPLOYMENT_URL --name "Development laptop"`. Use the deployment URL for your project. Open the printed link in the signed-in browser and approve the terminal.
+1. In a regular terminal, run `nforge login --name "My laptop"`. Open the printed link in the signed-in browser and approve the terminal.
 2. For the device that sets up and manages the sets, use the project owner's account. In the approval or the device's settings, choose **Every project you can reach** and **May write and land with a check**. A device limited to one project or folder cannot manage the sealed sets. This device setting uses your existing project access.
-3. Run `nforge auth status DEPLOYMENT_URL` and check the account and service. Run the remaining commands from the hosted clone or its Lane. Use the person's terminal for owner operations, outside the agent session.
+3. Run `nforge auth status` and check the account. Run the remaining commands from the hosted clone or its Lane. Use the person's terminal for owner operations, outside the agent session.
 
 ## Set, run, change and remove Development values
 
@@ -56,7 +56,7 @@ nforge secret machine add "Verification CI" --set checks
 
 Enter the Checks value at the hidden prompt. Keep the machine ID from the add result. The key appears once in the terminal. Select and copy it from that terminal into your CI provider's masked secret field as `FORGE_SECRETS_KEY`. Avoid pasting the key into a shell command or an agent conversation.
 
-Give the key only to the trusted check step. If that step runs from a Git mirror, also pass the project's addresses as `FORGE_DEPLOYMENT_URL` and `FORGE_PROJECT_ID`. Install the Forge CLI on the runner and keep the selected names in the checkout's `.env.example`. Run your command through:
+Give the key only to the trusted check step. If that step runs from a Git mirror, set `FORGE_PROJECT_ID` to the project's ID. Install the Forge CLI on the runner and keep the selected names in the checkout's `.env.example`. Run your command through:
 
 ```sh
 nforge run --set checks --only SERVICE_API_KEY -- node -e "process.exit(process.env.SERVICE_API_KEY ? 0 : 1)"

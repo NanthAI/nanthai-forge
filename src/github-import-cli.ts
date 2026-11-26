@@ -12,7 +12,10 @@ import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { makeFunctionReference } from 'convex/server';
 import { z } from 'zod';
-import { deploymentUrl, readAuth, resolveAuthToken } from './auth-store.js';
+import { deploymentUrl, resolveAuthToken } from './auth-store.js';
+import { appUrl, serviceTarget } from './app-discovery.js';
+import { shellQuote } from './shell-quote.js';
+import { defaultForgeSite } from './forge-site.js';
 import { deadlineConvexClient, deadlineConvexSubscription } from './network-convex-client.js';
 import { hostedActionError } from './hosted-action-error.js';
 import { durableReplace } from './state/durability.js';
@@ -20,8 +23,8 @@ import { migrationSummary } from './migration-ledger.js';
 import { ForgeError, invariant } from './errors.js';
 import { importPreviewLine } from './github-import-report.js';
 
-export const IMPORT_HELP = `nforge import <github-url|OWNER/NAME> [--ref BRANCH|TAG|SHA] [--name NAME] [--private] [--deployment URL] [--operation-id UUID] [--no-wait]
-nforge import <github-url|OWNER/NAME> --preview [--ref REF] [--deployment URL]
+export const IMPORT_HELP = `nforge import <github-url|OWNER/NAME> [--ref BRANCH|TAG|SHA] [--name NAME] [--private] [--operation-id UUID] [--no-wait]
+nforge import <github-url|OWNER/NAME> --preview [--ref REF]
 nforge import --resume OPERATION_UUID [--at-reset] [--no-wait]
 
 Imports one GitHub commit into a new hosted Forge project whose main is ready for Lanes.
@@ -80,6 +83,7 @@ const progressSchema = z.object({
 });
 const journalSchema = z.object({
   deployment: z.string(),
+  site: z.string().optional(),
   url: z.string(),
   ref: z.string().nullable(),
   name: z.string().nullable(),
@@ -130,6 +134,7 @@ export function selectImport(
     name?: string;
     visibility?: 'private';
     deployment?: string | undefined;
+    site?: string | undefined;
     operationId?: string;
   },
   now = () => new Date(),
@@ -144,11 +149,7 @@ export function selectImport(
     return journal;
   }
   invariant(input.url, 'BAD_ARGUMENT', IMPORT_HELP);
-  invariant(
-    input.deployment,
-    'AUTH_REQUIRED',
-    'Run nforge login DEPLOYMENT_URL first, or pass --deployment.',
-  );
+  invariant(input.deployment, 'AUTH_REQUIRED', 'Run nforge login first.');
   const request = {
     deployment: deploymentUrl(input.deployment),
     url: input.url.trim(),
@@ -170,7 +171,13 @@ export function selectImport(
     );
     return previous;
   }
-  const journal = { ...request, operationId, jobId: null, startedAt: now().toISOString() };
+  const journal = {
+    ...request,
+    ...(input.site ? { site: appUrl(input.site) } : {}),
+    operationId,
+    jobId: null,
+    startedAt: now().toISOString(),
+  };
   writeJournal(directory, journal);
   return journal;
 }
@@ -212,10 +219,16 @@ export async function waitForImport(
 
 export function importReport(journal: ImportJournal, status: Status) {
   const ready = status.phase === 'ready';
+  const target =
+    journal.site === defaultForgeSite
+      ? ''
+      : journal.site
+        ? ` --site ${shellQuote(journal.site)}`
+        : ` --deployment ${journal.deployment}`;
   return {
     operationId: journal.operationId,
     importId: journal.jobId,
-    deployment: journal.deployment,
+    ...(journal.site ? { site: journal.site } : { deployment: journal.deployment }),
     repository: journal.url,
     ref: journal.ref,
     projectId: status.projectId,
@@ -232,7 +245,7 @@ export function importReport(journal: ImportJournal, status: Status) {
     migrationSummary: migrationSummary(status.migration),
     error: status.error,
     next: ready
-      ? `nforge clone ${status.projectId} DIR --deployment ${journal.deployment}`
+      ? `nforge clone ${status.projectId} DIR${target}`
       : status.phase === 'paused' && status.error?.resumeAt
         ? `nothing: Forge resumes this import at ${new Date(status.error.resumeAt).toISOString()}`
         : status.error?.retryAt && status.error.retryAt > Date.now()
@@ -256,7 +269,11 @@ const previewSchema = z.object({
   githubRequests: requestsSchema,
 });
 /** The pre-import report: the reads an import makes first, returned instead of acted on. Creates nothing. */
-export async function previewGithubImport(client: ImportClient, input: { url: string; ref?: string }) {
+export async function previewGithubImport(
+  client: ImportClient,
+  input: { url: string; ref?: string },
+  site?: string,
+) {
   let value: unknown;
   try {
     value = await client.action('projectGithubImportPreview:preview', input);
@@ -268,7 +285,7 @@ export async function previewGithubImport(client: ImportClient, input: { url: st
   return {
     summary: importPreviewLine(preview),
     ...preview,
-    next: `nforge import ${input.url}${input.ref ? ` --ref ${input.ref}` : ''}${preview.origin === 'public' ? ' [--private]' : ''}`,
+    next: `nforge import ${input.url}${input.ref ? ` --ref ${input.ref}` : ''}${site && site !== defaultForgeSite ? ` --site ${shellQuote(site)}` : ''}${preview.origin === 'public' ? ' [--private]' : ''}`,
   };
 }
 
@@ -370,6 +387,7 @@ export async function githubImportCli(
       ref: { type: 'string' },
       name: { type: 'string' },
       deployment: { type: 'string' },
+      site: { type: 'string' },
       'operation-id': { type: 'string' },
       resume: { type: 'string' },
       'no-wait': { type: 'boolean' },
@@ -388,6 +406,7 @@ export async function githubImportCli(
       ? positionals.length === 0 &&
           !values.ref &&
           !values.name &&
+          !values.site &&
           !values['operation-id'] &&
           !values.private &&
           !values.preview
@@ -395,13 +414,26 @@ export async function githubImportCli(
     'BAD_ARGUMENT',
     IMPORT_HELP,
   );
+  const target = values.resume
+    ? undefined
+    : await serviceTarget(
+        {
+          ...(values.site ? { site: values.site } : {}),
+          ...(values.deployment ? { deployment: values.deployment } : {}),
+        },
+        undefined,
+        !values.preview,
+      );
   if (values.preview) {
-    const deployment = values.deployment ?? process.env.FORGE_DEPLOYMENT_URL ?? readAuth().defaultDeployment;
-    invariant(deployment, 'AUTH_REQUIRED', 'Run nforge login DEPLOYMENT_URL first, or pass --deployment.');
-    return previewGithubImport((dependencies.client ?? convexImportClient)(deploymentUrl(deployment)), {
-      url: positionals[0]!.trim(),
-      ...(values.ref ? { ref: values.ref.trim() } : {}),
-    });
+    invariant(target, 'AUTH_REQUIRED', 'Run nforge login first.');
+    return previewGithubImport(
+      (dependencies.client ?? convexImportClient)(target.deployment),
+      {
+        url: positionals[0]!.trim(),
+        ...(values.ref ? { ref: values.ref.trim() } : {}),
+      },
+      target.site,
+    );
   }
   const directory = dependencies.directory ?? importJournalDirectory();
   const journal = selectImport(directory, {
@@ -411,12 +443,13 @@ export async function githubImportCli(
     ...(values.name ? { name: values.name } : {}),
     ...(values.private ? { visibility: 'private' as const } : {}),
     ...(values['operation-id'] ? { operationId: values['operation-id'] } : {}),
-    deployment: values.deployment ?? process.env.FORGE_DEPLOYMENT_URL ?? readAuth().defaultDeployment,
+    deployment: target?.deployment,
+    site: target?.site,
   });
   invariant(
     !values.resume || !values.deployment || deploymentUrl(values.deployment) === journal.deployment,
     'WORK_OPERATION_CHANGED',
-    `Import ${journal.operationId} runs on ${journal.deployment}.`,
+    `Import ${journal.operationId} runs on ${journal.site ?? journal.deployment}.`,
   );
   const client = (dependencies.client ?? convexImportClient)(journal.deployment);
   const controller = new AbortController(),

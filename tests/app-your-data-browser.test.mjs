@@ -180,7 +180,7 @@ test('your data: holdings, take-out, the before-list behind the typed handle, an
       await main.locator('.head').textContent(),
       /Forge holds 2 projects, 1 agent access grant, 1 team and 1 watched repository for you\./,
     );
-    assert.match(await main.textContent(), /nforge clone PROJECT-URL FOLDER/);
+    assert.match(await main.textContent(), /nforge clone OWNER\/PROJECT FOLDER/);
     assert.equal(
       await page.getByRole('button', { name: 'Continue' }).count(),
       1,

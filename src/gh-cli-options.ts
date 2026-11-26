@@ -53,6 +53,7 @@ export const ghFields = {
     'cliCommit',
     'cliChannel',
     'cliPin',
+    'site',
     'deployment',
     'host',
     'authenticated',

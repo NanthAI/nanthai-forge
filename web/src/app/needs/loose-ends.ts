@@ -502,12 +502,12 @@ export function trashWord(result: 'trashed' | 'changed' | 'failed' | 'restored')
  * (or clones one). Nothing is sent; the reader pastes it into their own agent app. */
 export function handText(
   lanes: { laneId: string; title: string }[],
-  project: { name: string; projectId: string; backend: string },
+  project: { name: string; projectId: string },
 ) {
   const list = lanes.map(lane => `- ${lane.title.replace(/\s+/g, ' ').trim()} (${lane.laneId})`).join('\n');
   return (
     `Take over ${lanes.length === 1 ? 'this Lane' : `these ${lanes.length} Lanes`} of the Forge project ${JSON.stringify(project.name)} (project ID ${project.projectId}) from Loose ends and finish ${lanes.length === 1 ? 'it' : 'them'}. ` +
-    `Work in an existing checkout of that project (ROOT below), or make one with nforge clone ${project.projectId} NEW_DIRECTORY --deployment ${project.backend}. ` +
+    `Work in an existing checkout of that project (ROOT below), or make one with nforge clone ${project.projectId} NEW_DIRECTORY. ` +
     `For each Lane run nforge agent ROOT start --open '{"laneId":"LANE_ID","takeover":true,"reason":"Handed over from Loose ends"}', ` +
     'work in the Lane path it returns, read its Item and saves, then land it with nforge agent ROOT land --save, or abandon it with a reason if the work is no longer needed. Every save is kept either way.\n' +
     list

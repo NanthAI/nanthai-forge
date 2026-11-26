@@ -8,6 +8,9 @@ export function DocsAgentPrompt({ twin, text }: { twin: string; text: string }) 
       </button>
       <details>
         <summary>View prompt</summary>
+        <p>
+          For manual copy, include the <a href={twin}>Markdown guide</a> link.
+        </p>
         <pre tabIndex={0}>
           <code>{text}</code>
         </pre>

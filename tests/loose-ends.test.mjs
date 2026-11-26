@@ -1269,7 +1269,7 @@ test('fc1831eb trash: one owner call per project; a changed project is skipped, 
 });
 
 test('fc1831eb hand to an agent: one prompt for every picked Lane through the existing explicit takeover', () => {
-  const project = { name: 'tidepool', projectId: 'proj-1', backend: 'https://example.convex.cloud' };
+  const project = { name: 'tidepool', projectId: 'proj-1' };
   const text = handText(
     [
       { laneId: lid(1), title: 'Fix flaky\n retry timer' },
@@ -1283,7 +1283,7 @@ test('fc1831eb hand to an agent: one prompt for every picked Lane through the ex
   );
   assert.match(
     text,
-    /an existing checkout of that project \(ROOT below\), or make one with nforge clone proj-1 NEW_DIRECTORY --deployment https:\/\/example\.convex\.cloud\./,
+    /an existing checkout of that project \(ROOT below\), or make one with nforge clone proj-1 NEW_DIRECTORY\./,
     'an agent opened anywhere finds or makes the checkout',
   );
   assert.match(

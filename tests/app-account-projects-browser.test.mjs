@@ -184,10 +184,11 @@ test('account projects: the held project leads, rows link to projects, and every
       promptText.split('\n')[0],
       'Read First landing in https://forge.test/docs/quickstart.md#first-landing',
     );
-    assert.match(promptText, /nforge login https:\/\//);
-    assert.match(promptText, /nforge import <github-url>/);
-    assert.match(promptText, /nforge host <folder> --deployment https:\/\//);
-    assert.match(promptText, /nforge clone <project-url> <dir>/);
+    assert.match(promptText, /`nforge login`/);
+    assert.match(promptText, /nforge import OWNER\/REPO/);
+    assert.match(promptText, /nforge host FOLDER/);
+    assert.match(promptText, /nforge clone OWNER\/PROJECT DIR/);
+    assert.doesNotMatch(promptText, /--deployment|--site/);
     assert.match(promptText, /nforge connect <app>/);
     // Fallback when navigator.clipboard is missing (non-HTTPS / restricted webview), announced in a status live region.
     await page.evaluate(() => {

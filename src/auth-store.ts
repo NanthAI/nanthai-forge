@@ -42,6 +42,7 @@ type Store = {
   defaultDeployment?: string;
   deployments: Record<string, SavedCredential>;
   devices?: Record<string, SavedDevice>;
+  sites?: Record<string, string>;
 };
 export function authFile() {
   return join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'forge', 'auth.json');

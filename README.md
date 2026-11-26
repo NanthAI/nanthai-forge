@@ -23,9 +23,9 @@ npm ci --ignore-scripts
 npm run verify                      # format, typecheck, lint, tests
 ```
 
-Forge runs hosted projects only. To host a folder and browse it in the web app: `nforge login DEPLOYMENT_URL`, then `nforge host ./demo` (a Git folder or any directory). The browser UI is the hosted app; there is no local web UI. Lanes keep working offline and land once back online.
+Forge runs hosted projects only. To host a folder and browse it in the web app, run `nforge login`, then `nforge host ./demo` (a Git folder or any directory). Lanes keep working offline and land once back online.
 
-A plain directory gets a Forge-native source bootstrap without Git. Hosting selects verified source and server authority together; use `nforge clone PROJECT_URL DIR` to check it out and start Lanes. Existing hosted projects retain their authority.
+A plain directory gets a Forge-native source bootstrap without Git. Hosting selects verified source and server authority together; use `nforge clone OWNER/PROJECT DIR` to check it out and start Lanes. Existing hosted projects retain their authority.
 
 For agents: `nforge agent ./demo start '{"outcome":"…","model":"unknown"}'`, edit the returned Lane, then `nforge agent ./demo land --save '{"laneId":"…","message":"…"}'`. Supply your model ID in `model` or `FORGE_AGENT_MODEL` when known. See the [agent workflow](docs/agents/workflow.md). [Parallel-work defaults](docs/parallel-work-defaults.md) lists what Forge changes in agents' default behaviour so many can work at once, and how to change it.
 

@@ -68,7 +68,7 @@ const needsPrompt = path =>
 
 // The first check belongs to the task. Keep it to one sentence and leave commands in the guide.
 const firstChecks = {
-  'docs/quickstart.md': 'Check my target repository, Node version and Forge development access first.',
+  'docs/quickstart.md': 'Check my target repository, Node version and Forge sign-in first.',
   'docs/access.md': 'Check the project, my role and the current access settings first.',
   'docs/agents.md': 'Check my agent client, the project address and the access it already has first.',
   'docs/agents/hooks.md': 'Check the installed CLI and current hook settings first.',
@@ -77,13 +77,13 @@ const firstChecks = {
   'docs/agents/workflow.md': 'Check the hosted checkout, the current Item or Lane and its status first.',
   'docs/development.md': 'Check the Forge checkout, Node version and target environment first.',
   'docs/git-serving.md': 'Check the project URL, Git access and the ref I need first.',
-  'docs/guides/access.md': 'Check the deployment, signed-in account and current device or Lane holder first.',
+  'docs/guides/access.md': 'Check the Forge app, signed-in account and current device or Lane holder first.',
   'docs/guides/agents.md': 'Check the hosted checkout and current Item or Lane first.',
   'docs/guides/billing.md': 'Check the account and the billing period I want to understand first.',
   'docs/guides/event-feed.md': 'Check the project, event consumer and last recorded position first.',
   'docs/guides/export.md': 'Check the project, my access and which source and Work I need to keep first.',
   'docs/guides/oversight.md': 'Check the project and the live status of the work I need to inspect first.',
-  'docs/guides/people.md': 'Check the repository or folder, deployment and account access first.',
+  'docs/guides/people.md': 'Check the repository or folder, Forge app and account access first.',
   'docs/guides/plan.md': 'Check the project and search for an existing matching Item first.',
   'docs/guides/review.md': 'Check the Candidate, exact source and required check result first.',
   'docs/guides/secrets.md':
@@ -119,9 +119,7 @@ export const agentGuidePaths = Object.keys(firstChecks);
 
 export function agentGuidePrompt(path) {
   if (!Object.hasOwn(firstChecks, path)) return undefined;
-  // A standalone address for manual copy before scripts run. The copy
-  // enhancement uses the current origin to stay with the reader's build.
-  const twin = `https://dev.forge.nanthai.tech/${path}`;
+  const twin = `/${path}`;
   return {
     twin,
     text: [

@@ -4,7 +4,10 @@ import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { makeFunctionReference } from 'convex/server';
 import { coordinationClient } from './coordination-client.js';
-import { AUTH_STATE_NEXT_STEP, authState, deploymentUrl, readAuth, writeAuth } from './auth-store.js';
+import { AUTH_STATE_NEXT_STEP, authState, readAuth, writeAuth } from './auth-store.js';
+import { appTarget, authTarget, backendTarget } from './app-discovery.js';
+import { defaultForgeSite } from './forge-site.js';
+import { publicProjectLogin } from './public-project-commands.js';
 import { hostedAgentAddress } from './hosted-agent-address.js';
 import { ForgeError, invariant } from './errors.js';
 import { parseGhOptions, projectGh } from './gh-cli-options.js';
@@ -19,44 +22,61 @@ export async function authStatus(args: string[]): Promise<unknown> {
   invariant(
     options.positional.length <= 1 && !(requested && options.positional.length),
     'BAD_ARGUMENT',
-    'Select one deployment URL or --hostname HOST.',
+    'Select one Forge app URL or --hostname HOST.',
   );
   // The folder's service is authoritative for this read; explicit selectors still win.
-  const project = !options.positional.length && !requested ? folderAddress() : null;
-  let selected =
-    options.positional[0] ?? project?.url ?? process.env.FORGE_DEPLOYMENT_URL ?? store.defaultDeployment;
-  if (requested) {
-    if (requested.includes('://')) selected = deploymentUrl(requested);
-    else
-      selected =
-        [selected, ...Object.keys(store.deployments)].find(url => url && new URL(url).host === requested) ??
-        `https://${requested}`;
-  }
-  const deployment = selected ? deploymentUrl(selected) : null,
-    host = deployment ? new URL(deployment).host : null,
-    saved = deployment ? store.deployments[deployment] : undefined,
-    state = deployment ? authState(deployment) : ({ kind: 'none' } as const),
-    token = 'token' in state ? state.token : undefined;
+  const project = !options.positional.length ? folderAddress() : null;
+  const implicit = project?.url ?? process.env.FORGE_DEPLOYMENT_URL;
+  const selected =
+    options.positional[0] ??
+    (requested &&
+      (requested.includes('://')
+        ? requested
+        : ([
+            implicit,
+            store.defaultDeployment,
+            ...Object.keys(store.sites ?? {}),
+            ...Object.keys(store.deployments),
+          ].find(url => url && new URL(url).host === requested) ?? `https://${requested}`)));
+  const target = selected
+    ? selected === project?.url
+      ? backendTarget(selected, store)
+      : await authTarget(selected, store)
+    : implicit
+      ? backendTarget(implicit, store)
+      : Object.keys(store.deployments).length || process.env.FORGE_AUTH_TOKEN
+        ? await appTarget(defaultForgeSite, store)
+        : { site: defaultForgeSite, deployment: undefined };
+  const { deployment, site } = target;
+  const address = site ? { site } : { deployment };
+  const host = new URL(site ?? deployment!).host;
+  let saved = deployment ? store.deployments[deployment] : undefined;
+  let state = deployment ? authState(deployment) : ({ kind: 'none' } as const);
   if (
+    deployment &&
     state.kind === 'expired' &&
     saved?.deviceId &&
-    store.devices?.[deployment!]?.id === saved.deviceId &&
+    store.devices?.[deployment]?.id === saved.deviceId &&
     !process.env.FORGE_AUTH_TOKEN
   ) {
-    await (await import('./device-key.js')).renewDevice(deployment!);
-    return authStatus(args);
+    await (await import('./device-key.js')).renewDevice(deployment);
+    saved = readAuth().deployments[deployment];
+    state = authState(deployment);
   }
+  const token = 'token' in state ? state.token : undefined;
   if (!token) {
     // An expired login answers like a missing one, with its own state (SM-C M23), instead of throwing.
     process.exitCode = 1;
     return projectGh(
       {
         ...cli,
-        deployment,
+        ...address,
         host,
         authenticated: false,
         state: state.kind,
-        nextStep: AUTH_STATE_NEXT_STEP[state.kind],
+        nextStep: site
+          ? AUTH_STATE_NEXT_STEP[state.kind].replace('nforge login', publicProjectLogin(site))
+          : AUTH_STATE_NEXT_STEP[state.kind],
         account: null,
         source: null,
         tokenSource: null,
@@ -150,7 +170,7 @@ export async function authStatus(args: string[]): Promise<unknown> {
   return projectGh(
     {
       ...cli,
-      deployment,
+      ...address,
       host,
       authenticated: true,
       state: state.kind,
@@ -158,7 +178,7 @@ export async function authStatus(args: string[]): Promise<unknown> {
       account,
       source: environment ? 'environment' : 'saved',
       tokenSource,
-      hosts: { [host!]: [{ host, login: account, active: true, state: 'success', tokenSource }] },
+      hosts: { [host]: [{ host, login: account, active: true, state: 'success', tokenSource }] },
       ...(device ? { device } : {}),
       name:
         !environment && !(device?.name ?? saved?.name)?.startsWith('nforge on ')

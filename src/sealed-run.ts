@@ -8,6 +8,8 @@ import { decodeMachineBundle, machineReadToken } from './sealed-machine.js';
 import { sealedRead, type MachineSealedTransport } from './sealed-transport.js';
 import { verifySealedReply } from './sealed-verify.js';
 import { hostedAgentAddress } from './hosted-agent-address.js';
+import { appTarget } from './app-discovery.js';
+import { defaultForgeSite } from './forge-site.js';
 import type { RunSecretProvider } from './secret-run.js';
 
 /** `nforge run` for one device: a verified cached read. A joining device posts its own request and waits
@@ -28,7 +30,7 @@ export async function sealedRunFor(client: SealedClient, set: 'development' | 'c
   return { secrets: result.secrets };
 }
 /** Design 4.15: a CI machine verifies its set from its bundle's roster (its only memory) and the bundle's head floor,
- * then opens its own wrap. Any CI: the bundle, the deployment URL and the project id are all it needs. */
+ * then opens its own wrap. The machine needs its bundle and the project ID. */
 export async function machineRunFor(input: {
   bundle: string;
   forgeProjectId: string;
@@ -77,22 +79,24 @@ export async function machineRunFor(input: {
     b.enc.fill(0);
   }
 }
-/** Where a machine reads: the Forge checkout it runs in, else FORGE_DEPLOYMENT_URL and FORGE_PROJECT_ID (names, not
- * secrets; a CI checkout of a mirror has no Forge marker). */
-export function machineAddress(root: string, source: NodeJS.ProcessEnv) {
+/** A Git mirror has no Forge marker. Its project ID selects the project on the built-in site. */
+async function machineAddress(root: string, source: NodeJS.ProcessEnv) {
   let address: { url: string; projectId: string } | null = null;
   try {
     address = hostedAgentAddress(root, {});
   } catch {
     address = null;
   }
-  const url = source.FORGE_DEPLOYMENT_URL ?? address?.url,
-    projectId = source.FORGE_PROJECT_ID ?? address?.projectId;
+  const projectId = source.FORGE_PROJECT_ID ?? address?.projectId;
   invariant(
-    url && projectId,
+    projectId,
     'PROJECT_UNAVAILABLE',
-    'Run inside a Forge checkout, or give this step FORGE_DEPLOYMENT_URL and FORGE_PROJECT_ID.',
+    'Run inside a Forge checkout, or give this step FORGE_PROJECT_ID.',
   );
+  const url =
+    source.FORGE_DEPLOYMENT_URL ??
+    address?.url ??
+    (await appTarget(defaultForgeSite, { deployments: {} })).deployment;
   return { url, projectId };
 }
 export const sealedRunSecrets: RunSecretProvider = async input => {
@@ -104,7 +108,7 @@ export const sealedRunSecrets: RunSecretProvider = async input => {
       'SECRETS_NOT_SET_UP',
       'Checks runs with a machine key: give this step FORGE_SECRETS_KEY (nforge secret machine add LABEL --set checks).',
     );
-    const { url, projectId } = machineAddress(input.root, source);
+    const { url, projectId } = await machineAddress(input.root, source);
     const { machineSealedTransport } = await import('./sealed-transport.js');
     return machineRunFor({
       bundle,

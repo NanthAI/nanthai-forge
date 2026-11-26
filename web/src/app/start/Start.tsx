@@ -9,7 +9,7 @@ import { Region } from '../../ds';
 import { A } from '../frames';
 import { Head } from '../Place';
 import { hrefFor } from '../paths';
-import { agentAppsSummary, deploymentUrl, explainFirstPrompt } from './agent-apps';
+import { agentAppsSummary, explainFirstPrompt } from './agent-apps';
 import { CommandBlock, ConnectSteps, CopyKey, FirstRunLine } from './parts';
 import './start.css';
 
@@ -66,7 +66,7 @@ export default function Start({ connectionClient }: { connectionClient?: Pick<Co
         foldedByDefault
         sum={agentAppsSummary}
       >
-        <ConnectSteps deployment={deploymentUrl()} connectionClient={connectionClient} />
+        <ConnectSteps connectionClient={connectionClient} />
       </Region>
     </div>
   );

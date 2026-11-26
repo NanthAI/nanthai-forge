@@ -31,10 +31,14 @@ test('real CLI login, saved authentication, env override, denial, logout and sta
     envToken = 'synthetic-ci-override';
   let renewalToken;
   const server = createServer(async (request, response) => {
+    response.setHeader('Content-Type', 'application/json');
+    if (request.method === 'GET' && request.url === '/_forge/cli.json') {
+      response.end(JSON.stringify({ deployment }));
+      return;
+    }
     const chunks = [];
     for await (const chunk of request) chunks.push(chunk);
     const input = JSON.parse(Buffer.concat(chunks).toString());
-    response.setHeader('Content-Type', 'application/json');
     if (request.url.startsWith('/auth/device/start')) startUrls.push(request.url);
     if (request.url === '/auth/device/start-v2' && limited) {
       response.statusCode = 429;
@@ -111,8 +115,8 @@ test('real CLI login, saved authentication, env override, denial, logout and sta
       delete env.FORGE_HTTP_URL;
       delete env.FORGE_DEPLOYMENT_URL;
       if (override) env.FORGE_AUTH_TOKEN = override;
-      // Exercise the saved-login default outside a hosted checkout; a Lane's
-      // project binding intentionally selects its own deployment for auth status.
+      // Exercise the local app outside a hosted checkout, where a Lane binding
+      // cannot select its backend for us.
       const entry = tty
         ? [
             '--input-type=module',
@@ -140,10 +144,10 @@ test('real CLI login, saved authentication, env override, denial, logout and sta
   const file = join(directory, 'forge', 'auth.json');
   assert.equal(statSync(file).mode & 0o777, 0o600);
   assert.equal(JSON.parse(readFileSync(file, 'utf8')).deployments[deployment].token, token);
-  const status = await run(['auth', 'status']);
+  const status = await run(['auth', 'status', deployment]);
   assert.equal(status.code, 0);
   assert.equal(JSON.parse(status.stdout).authenticated, true);
-  const terminalStatus = await run(['auth', 'status'], undefined, true);
+  const terminalStatus = await run(['auth', 'status', deployment], undefined, true);
   assert.equal(JSON.parse(terminalStatus.stdout).authenticated, true);
   assert.match(terminalStatus.stderr, /Signed in as an account with no handle yet; expires .* UTC/);
   // A server from before the handle-only rule answers with `subject`; it is never printed.
@@ -153,7 +157,7 @@ test('real CLI login, saved authentication, env override, denial, logout and sta
   const coordination = await run(['coordination', deployment, 'synthetic-project', '{"action":"sessions"}']);
   assert.equal(coordination.code, 0);
   assert.equal(seenAuth, `Bearer ${token}`);
-  const ci = await run(['auth', 'status'], envToken);
+  const ci = await run(['auth', 'status', deployment], envToken);
   assert.equal(ci.code, 0);
   assert.equal(seenAuth, `Bearer ${envToken}`);
   assert.equal(ci.stdout.includes(envToken), false);
@@ -161,12 +165,12 @@ test('real CLI login, saved authentication, env override, denial, logout and sta
   const legacy = JSON.parse(readFileSync(file, 'utf8'));
   legacy.deployments[deployment].name = 'nforge on legacy-host';
   writeFileSync(file, JSON.stringify(legacy), { mode: 0o600 });
-  const hinted = await run(['auth', 'status']);
+  const hinted = await run(['auth', 'status', deployment]);
   assert.match(hinted.stderr, /nforge auth rename NAME/);
   assert.doesNotMatch(hinted.stdout + hinted.stderr, /legacy-host/);
   assert.equal(JSON.parse(hinted.stdout).name, null);
   assert.equal(JSON.parse(readFileSync(file, 'utf8')).deployments[deployment].name, 'nforge on legacy-host');
-  assert.doesNotMatch((await run(['auth', 'status'])).stderr, /rename/, 'the hint is shown once');
+  assert.doesNotMatch((await run(['auth', 'status', deployment])).stderr, /rename/, 'the hint is shown once');
   const rename = await run(['auth', 'rename', 'Desk', deployment]);
   assert.equal(rename.code, 0);
   assert.deepEqual(

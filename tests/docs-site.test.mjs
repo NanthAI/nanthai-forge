@@ -154,6 +154,11 @@ test('docs are static, contract-generated and usable without account or backend 
             .click();
           await page.locator('h1').waitFor();
           assert.equal(await page.locator('h1').innerText(), 'Review and land a change');
+          await page.getByRole('button', { name: 'Give this to your agent' }).click();
+          assert.match(
+            await page.evaluate(() => navigator.clipboard.readText()),
+            new RegExp(`^Read ${origin}/docs/guides/review\\.md\\.`),
+          );
           await page.getByRole('button', { name: 'Copy code' }).first().click();
           await page.waitForFunction(
             () => document.querySelector('.docs-copy [role="status"]')?.textContent === 'Copied',
@@ -180,6 +185,12 @@ test('docs are static, contract-generated and usable without account or backend 
       assert.equal(await quickstart.getAttribute('href'), '/docs/quickstart/');
       await quickstart.click();
       assert.equal(await page.locator('h1').innerText(), 'From a project to your first landing');
+      await page.getByText('View prompt', { exact: true }).click();
+      assert.ok(await page.getByText('For manual copy, include the Markdown guide link.').isVisible());
+      assert.equal(
+        await page.getByRole('link', { name: 'Markdown guide' }).getAttribute('href'),
+        '/docs/quickstart.md',
+      );
       await noJs.close();
     },
   );

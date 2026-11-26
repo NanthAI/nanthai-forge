@@ -3,10 +3,8 @@
 Bring a [GitHub repository](#import-from-github-in-the-app) or a [local folder](#host-a-local-folder) to Forge, then make a small change and see it land on hosted `main`.
 
 Forge is not published to npm or deployed as a public production service yet.
-For a development trial, get the app URL, account access and the CLI deployment
-URL from the person who invited you. Use the app URL in your browser and the CLI
-deployment URL in terminal commands that take `DEPLOYMENT_URL`. You can build the
-CLI and read its packaged guides while you wait for access.
+For a trial, get account access from the person who invited you. You can build
+the CLI and read its packaged guides while you wait for access.
 
 ## First landing
 
@@ -14,9 +12,9 @@ For a checked landing on a new project, confirm which [runner](#configure-the-fi
 you can use and who will [approve the first landing](#approve-the-first-landing).
 You can host and clone the project while arranging those.
 
-1. [Build and link the CLI](#install-the-development-cli) if you do not have it yet. [Check your terminal sign-in](#sign-in) and sign in if needed.
+1. [Build and link the CLI](#install-the-cli) if you do not have it yet. [Check your terminal sign-in](#sign-in) and sign in if needed.
 2. [Import committed GitHub source](#import-from-github-in-the-app), or [host a local folder](#host-a-local-folder). For a new project, start with a folder and a short README.
-3. [Clone the hosted project](#clone-the-project). Use the project URL from the web or the host or import receipt.
+3. [Clone the hosted project](#clone-the-project). Use the project name shown in the app or the command from the host or import receipt.
 4. [Choose a check and runner](#configure-the-first-hosted-check) if the project has none.
 5. [Start a Lane](#work-on-a-hosted-project) and edit its README. Run `nforge agent LANE_PATH land --save '{"message":"Improve the README"}'` with the returned Lane path. Follow the receipt through any [approval](#approve-the-first-landing). Open the accepted State in the project when the receipt says `LANDED`.
 
@@ -50,7 +48,7 @@ through a published package comes with npm publishing. That fresh-machine run
 with no Git on `PATH` has not been done yet; it joins the new-user walkthrough
 (Item adfa4c84-2873-48b0-829f-3da4a6b2a860).
 
-## Install the development CLI
+## Install the CLI
 
 Installing from source needs Node 24.22.1+ (24.x), npm and Git ([what you need installed](#what-you-need-installed) says why). In a new directory:
 
@@ -81,7 +79,7 @@ and prints changed files plus the exact undo command. It edits two files,
 entries: a `PreToolUse` first-write notice for file edits (`Edit`, `Write`,
 `MultiEdit`, `NotebookEdit`, `apply_patch`) and a `Stop` turn-end guard. It also
 removes an older Forge `UserPromptSubmit` entry. Other settings and other hooks
-stay as they are. Only the installed CLI writes them, never a dev build, and a
+stay as they are. Only the installed CLI writes them, and a
 run leaves alone hooks that point at another valid Forge install. To remove Forge hooks and
 persist user off: `nforge x . uninstall-hooks '{}'`; `install-hooks` reverses it.
 `nforge settings firstWriteHooks false` disables installed hooks too. For one
@@ -117,30 +115,27 @@ runner. Forge paths always use `/`. Differences from macOS and Linux:
 
 ## Sign in
 
-With the CLI already installed, `nforge auth status` shows the deployment for
-the current saved sign-in. Confirm the URL is your development deployment. If you
-know the exact deployment URL, pass it to `nforge auth status DEPLOYMENT_URL` to
-check that sign-in directly. If the CLI reports a current sign-in for your target,
-continue to hosting or import. Otherwise, sign in with the CLI deployment URL:
+Run `nforge auth status` to check whether this terminal is signed in. If it is,
+continue to hosting or import. Otherwise sign in:
 
 ```sh
-nforge login DEPLOYMENT_URL
-nforge auth status DEPLOYMENT_URL
+nforge login
+nforge auth status
 ```
 
-Open the printed link in a browser signed in to the development app, verify the
+Open the printed link in a browser signed in to Forge, verify the
 code and approve your terminal. Return to the terminal for the completed sign-in.
-An expired code names the command to request a new one. If a saved device sign-in
-expires, run `nforge login DEPLOYMENT_URL` again and approve the new code.
+Forge remembers your sign-in. If it expires, run `nforge login` again and
+approve the new code.
 
 ## Import from GitHub in the app
 
-1. Sign in to the development app and open **Projects → New project**.
+1. Sign in to Forge and open **Projects → New project**.
 2. Expand **Import from GitHub**. Enter a GitHub repository URL. Optionally enter
    a branch, tag or full commit; leaving it empty selects the default branch.
 3. Choose **Import from GitHub**. Progress reports files as source is acquired.
    The app opens the project when its complete hosted `main` is ready.
-4. Copy the project's URL for the CLI steps below.
+4. Note the project's `OWNER/PROJECT` name for the CLI steps below.
 
 This imports the selected committed snapshot, including binary files, executable
 modes and symlink targets. Submodules remain commit pointers. Git LFS files hold
@@ -160,12 +155,12 @@ refusal says so and names the install step. No Forge setting changes.
 The separate **Import from GitHub · read-only analysis** link opens an analysis
 tour; use **New project** for an editable project.
 
-Agents and scripts can import from a signed-in CLI. Pass the verified CLI deployment URL:
+Agents and scripts can import from a signed-in CLI:
 
 ```sh
-nforge import https://github.com/OWNER/REPO --deployment DEPLOYMENT_URL --ref v1.2.0 --name REPO
-nforge import https://github.com/OWNER/REPO --deployment DEPLOYMENT_URL --preview   # what comes across and which limits apply; creates nothing
-nforge import https://github.com/OWNER/REPO --deployment DEPLOYMENT_URL --private   # a public repository, private here
+nforge import OWNER/REPO --ref v1.2.0 --name REPO
+nforge import OWNER/REPO --preview   # what comes across and which limits apply; creates nothing
+nforge import OWNER/REPO --private   # a public repository, private here
 nforge import --resume OPERATION_UUID   # after an interruption
 nforge import --resume OPERATION_UUID --at-reset   # rate-limited: Forge resumes at GitHub's reset
 ```
@@ -186,7 +181,7 @@ To start from a folder with no GitHub repository, put a file such as `README.md`
 in it. From the terminal you signed in with, run:
 
 ```sh
-nforge host /absolute/path/to/folder --deployment DEPLOYMENT_URL
+nforge host /absolute/path/to/folder
 ```
 
 The folder can be a Git worktree or a plain directory. Hosting is private by
@@ -196,12 +191,11 @@ operation and pinned snapshot. See [hosting and recovery](workflows.md#hosted-pr
 
 ## Clone the project
 
-Clone the project URL into a new directory from the terminal you signed in with.
-Replace `PROJECT_URL` with the copied URL or use the import or host receipt's
-clone command.
+Clone the project into a new directory from the terminal you signed in with.
+Use the project's `OWNER/PROJECT` name or the import or host receipt's clone command.
 
 ```sh
-nforge clone PROJECT_URL /absolute/path/to/project
+nforge clone OWNER/PROJECT /absolute/path/to/project
 ```
 
 Cloning materializes hosted `main` for your tools. Keep the clone and its
@@ -233,7 +227,7 @@ an admin or maintainer. Use a prepared runner repository from your operator, or
 have the runner repository owner prepare one. For a new runner repository, use
 a copy of the operator's Forge source revision on the runner repository's
 `main` so `.github/workflows/forge-check.yml` and the runner code match. Enable
-Actions there and install the deployment's Forge GitHub App on that repository
+Actions there and install the Forge GitHub App on that repository
 with Actions permissions. For a private project, use a private runner to keep
 its check logs private.
 

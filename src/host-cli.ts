@@ -6,22 +6,23 @@ import { basename, join } from 'node:path';
 import { existsSync, realpathSync } from 'node:fs';
 import { initNative } from './native-work.js';
 import { nativeOwner } from './native-source.js';
-import { shellQuote } from './shell-quote.js';
+import { publicProjectClone } from './public-project-commands.js';
 import { randomUUID } from 'node:crypto';
 import { makeFunctionReference, type FunctionReference } from 'convex/server';
 import { ConvexError } from 'convex/values';
 import { WorkStore } from './work-store.js';
-import { deploymentUrl, readAuth, resolveAuthToken, savedCredential } from './auth-store.js';
+import { resolveAuthToken, savedCredential } from './auth-store.js';
+import { serviceTarget } from './app-discovery.js';
 import { coordinationClient } from './coordination-client.js';
 import { ConvexExchange } from './exchange-client.js';
 import type { ExchangeTransport } from './native-exchange.js';
 import { prepareHostedSeed, seedHostedProject } from './hosted-seed.js';
 import { readHostState, updateHostState, type HostState } from './host-binding.js';
 import { ForgeError, invariant } from './errors.js';
-export const HOST_HELP = `nforge host ROOT [--deployment URL] [--name NAME] [--visibility private|public] [--new] [--json] [--wait]
-nforge host ROOT --delete-project PROJECT_ID --confirm SLUG [--deployment URL] [--allow-bound-project] [--json]
-  (ROOT: a Git worktree, an nforge clone or Lane, or any directory with --deployment; Git is not needed. SLUG is printed by nforge clone.)
-nforge host ROOT --delete-projects 'PATTERN' | --ids ID,ID… | --trash | --wait REQUEST_ID | --withdraw REQUEST_ID [--deployment URL] [--json]
+export const HOST_HELP = `nforge host ROOT [--name NAME] [--visibility private|public] [--new] [--json] [--wait]
+nforge host ROOT --delete-project PROJECT_ID --confirm SLUG [--allow-bound-project] [--json]
+  (SLUG is printed by nforge clone.)
+nforge host ROOT --delete-projects 'PATTERN' | --ids ID,ID… | --trash | --wait REQUEST_ID | --withdraw REQUEST_ID [--json]
   (prepares one request to delete up to 100 projects for good; prints the exact list and the owner's approval link)
 nforge host ROOT --abandon-pending OPERATION_UUID --confirm OPERATION_UUID
 nforge host ROOT --status
@@ -41,6 +42,7 @@ export interface HostingClient {
 }
 export type HostOptions = {
   deployment?: string;
+  site?: string;
   name?: string;
   visibility?: 'private' | 'public';
   new?: boolean;
@@ -88,16 +90,12 @@ export async function hostProject(
       | 'snapshotBytes'
     >(root),
     original = readHostState(store);
-  const explicit = options.deployment ?? original.hosting?.deployment ?? original.binding?.deployment;
-  const selected = explicit ?? process.env.FORGE_DEPLOYMENT_URL ?? readAuth().defaultDeployment;
-  invariant(selected, 'AUTH_REQUIRED', 'Run nforge login DEPLOYMENT_URL with cli scope before hosting.');
-  const deployment = deploymentUrl(selected);
+  const bound = original.hosting?.deployment ?? original.binding?.deployment;
+  const { deployment, site } = await serviceTarget(options, bound, true);
   // A saved default or environment deployment can be the bench rather than the one the caller meant
   // (friction, Item 2b9549e5): say which one a new project is created on when no flag or binding named it.
-  if (!dependencies && !explicit)
-    process.stderr.write(
-      `Hosting on ${deployment} (from the saved default or FORGE_DEPLOYMENT_URL); pass --deployment URL to host elsewhere.\n`,
-    );
+  if (!dependencies && !options.deployment && !options.site && !bound)
+    process.stderr.write(`Hosting on ${site ?? deployment}.\n`);
   if (!dependencies) {
     invariant(
       resolveAuthToken(deployment),
@@ -258,7 +256,7 @@ export async function hostProject(
       nextSteps: pending.serverAuthority
         ? [
             'nforge host ROOT --status',
-            `nforge clone ${shellQuote(binding.projectUrl)} DIR --deployment ${shellQuote(deployment)}`,
+            publicProjectClone(binding.projectUrl, 'DIR'),
             'nforge agent DIR start',
             'nforge coordination DIR \'{"action":"sessions"}\'',
           ]

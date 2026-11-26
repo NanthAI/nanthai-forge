@@ -83,10 +83,14 @@ test('auth status signed out/in, hostname, hosts JSON and environment source nev
   assert.equal(status.json.account, 'synthetic-owner');
   assert.equal(status.json.hosts[new URL(deployment).host][0].state, 'success');
   assert.equal(status.json.tokenSource, 'saved');
-  const override = await run(['auth', 'status', '--json', 'tokenSource,authenticated'], directory, {
-    ...env,
-    FORGE_AUTH_TOKEN: 'synthetic-env-token',
-  });
+  const override = await run(
+    ['auth', 'status', deployment, '--json', 'tokenSource,authenticated'],
+    directory,
+    {
+      ...env,
+      FORGE_AUTH_TOKEN: 'synthetic-env-token',
+    },
+  );
   assert.equal(override.code, 0);
   assert.equal(override.json.tokenSource, 'FORGE_AUTH_TOKEN');
   for (const output of [status, override])
@@ -133,7 +137,7 @@ test('SM-C M23: an expired saved login answers authenticated:false with its own 
     { mode: 0o600 },
   );
   // Expired: the same JSON shape and exit as logged out, with the state and the one next step.
-  const expired = await run(['auth', 'status', '--json'], directory, env);
+  const expired = await run(['auth', 'status', deployment, '--json'], directory, env);
   assert.equal(expired.code, 1, expired.stderr);
   assert.equal(expired.json.authenticated, false);
   assert.equal(expired.json.state, 'expired');
@@ -185,6 +189,7 @@ test('auth status selects the folder service before last login, with explicit UR
   mkdirSync(join(directory, 'forge'));
   const folderService = 'http://127.0.0.1:9101',
     lastService = 'http://127.0.0.1:9102';
+  const { defaultForgeSite } = await import('../dist/forge-site.js');
   writeFileSync(
     join(project, '.forge', 'hosted-main.json'),
     JSON.stringify({ selection: { projectId: 'synthetic-project' } }),
@@ -196,7 +201,11 @@ test('auth status selects the folder service before last login, with explicit UR
   );
   writeFileSync(
     join(directory, 'forge', 'auth.json'),
-    JSON.stringify({ defaultDeployment: lastService, deployments: {} }),
+    JSON.stringify({
+      defaultDeployment: lastService,
+      deployments: {},
+      sites: { [defaultForgeSite]: lastService },
+    }),
     { mode: 0o600 },
   );
   const extra = { XDG_CONFIG_HOME: directory };
@@ -208,9 +217,9 @@ test('auth status selects the folder service before last login, with explicit UR
   const nested = await run(['auth', 'status', '--json'], join(project, 'src'), extra);
   assert.equal(nested.json.deployment, folderService);
   const explicit = await run(['auth', 'status', lastService, '--json'], project, extra);
-  assert.equal(explicit.json.deployment, lastService);
+  assert.equal(explicit.json.site, defaultForgeSite);
   const hostname = await run(['auth', 'status', '--hostname', folderService, '--json'], project, extra);
   assert.equal(hostname.json.deployment, folderService);
   const outside = await run(['auth', 'status', '--json'], directory, extra);
-  assert.equal(outside.json.deployment, lastService);
+  assert.equal(outside.json.site, defaultForgeSite);
 });

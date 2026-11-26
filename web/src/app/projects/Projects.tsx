@@ -17,7 +17,7 @@ import { MoveToTrash } from '../trash/MoveToTrash';
 import { Toasts, useToast } from '../trash/Toasts';
 import { useLifecycle } from '../trash/lifecycle';
 import { untilDay } from '../trash/trash-model';
-import { agentSetupHref, deploymentUrl, manualSetupHref, onboardingPrompt } from '../start/agent-apps';
+import { agentSetupHref, manualSetupHref, onboardingPrompt } from '../start/agent-apps';
 import { CopyKey } from '../start/parts';
 import { AccountStrip } from './AccountStrip';
 import type { AccountProps } from '../screen-route';
@@ -154,7 +154,7 @@ export function ProjectsView({
       </div>
     );
   if (!data.projects.length) {
-    const prompt = onboardingPrompt(typeof location === 'undefined' ? '' : location.origin, deploymentUrl());
+    const prompt = onboardingPrompt(typeof location === 'undefined' ? '' : location.origin);
     return (
       <div className="account-projects">
         <AccountStrip current="projects" />

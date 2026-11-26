@@ -13,7 +13,7 @@ import { Key, Region, Row, State, Who } from '../../ds';
 import { useSafeQuery } from '../../safe-query';
 import { A } from '../frames';
 import { hrefFor, type AppRoute } from '../paths';
-import { agentAppsSummary, deploymentUrl, joinPrompt, manualSetupHref } from './agent-apps';
+import { agentAppsSummary, joinPrompt, manualSetupHref } from './agent-apps';
 import { approvalWords, useApprovalWrite, type ApprovalMode } from './approvals';
 import { ConnectSteps, CopyKey } from './parts';
 import {
@@ -292,7 +292,7 @@ export default function GettingStarted({
           foldedByDefault
           sum={agentAppsSummary}
         >
-          <ConnectSteps deployment={deploymentUrl()} project={projectUrl} connectionClient={client} />
+          <ConnectSteps project={projectUrl} connectionClient={client} />
         </Region>
       ) : null}
     </>

@@ -51,6 +51,13 @@ function crawlable(robots, url) {
 
 test('the hosted Vite build emits linked LLM files, every packaged doc and crawler rules', async t => {
   const output = mkdtempSync(join(tmpdir(), 'forge-llm-build-'));
+  const previousBackend = process.env.VITE_CONVEX_URL;
+  const deployment = 'https://example.convex.cloud';
+  process.env.VITE_CONVEX_URL = deployment;
+  t.after(() => {
+    if (previousBackend === undefined) delete process.env.VITE_CONVEX_URL;
+    else process.env.VITE_CONVEX_URL = previousBackend;
+  });
   t.after(() => rmSync(output, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   await build({
     root: join(root, 'web'),
@@ -63,6 +70,7 @@ test('the hosted Vite build emits linked LLM files, every packaged doc and crawl
   const llms = readFileSync(join(output, 'llms.txt'), 'utf8');
   const full = readFileSync(join(output, 'llms-full.txt'), 'utf8');
   const robots = readFileSync(join(output, 'robots.txt'), 'utf8');
+  assert.deepEqual(JSON.parse(readFileSync(join(output, '_forge/cli.json'), 'utf8')), { deployment });
   assert.match(llms, /^# NanthAi:Forge\n\n> Forge/);
   assert.match(llms, /Keep this turn active on unfinished work/);
   assert.match(llms, /operationIds:\[ORIGINAL_UUID\],until:"acceptance"\}`; it blocks up to its budget/);
@@ -106,7 +114,8 @@ test('the hosted Vite build emits linked LLM files, every packaged doc and crawl
     const page = `/${path.slice(0, -3)}/`;
     const html = readFileSync(join(output, page, 'index.html'), 'utf8');
     assert.ok(html.includes('Give this to your agent'), page);
-    assert.ok(html.includes(`Read https://dev.forge.nanthai.tech/${path}.\n`), page);
+    assert.ok(html.includes(`Read /${path}.\n`), page);
+    assert.ok(html.includes(`href="/${path}">Markdown guide</a>`), page);
     assert.ok(llms.includes(`](/${path}): `), page);
     assert.ok(full.includes(`Source: /${path}\n\n`) || full.includes(`](/${path})`), page);
     assert.ok(crawlable(robots, page), page);

@@ -414,7 +414,7 @@ export function YourDataView(props: {
         <div className="clone">
           <b>Project source, Work and history</b>
           <span className="meta">Clone each project you want to keep, with its address from its page:</span>
-          <CodeBox label="Clone a project">nforge clone PROJECT-URL FOLDER</CodeBox>
+          <CodeBox label="Clone a project">nforge clone OWNER/PROJECT FOLDER</CodeBox>
         </div>
       </Region>
       <DeleteRegion {...props} />

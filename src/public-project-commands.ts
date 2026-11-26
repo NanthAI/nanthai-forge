@@ -1,9 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import { shellQuote } from './shell-quote.js';
+import { defaultForgeSite } from './forge-site.js';
 
-/** Clone and device approval use the backend of the site that listed the project. */
-export const publicProjectClone = (url: string, slug: string, deployment: string) =>
-  `nforge clone ${shellQuote(url)} ${shellQuote(slug)} --deployment ${shellQuote(deployment)}`;
+/** On the built-in site the project name is enough. Other sites keep their full address. */
+export function publicProjectClone(url: string, directory: string) {
+  const address = new URL(url);
+  const [owner, project] = address.pathname.split('/').filter(Boolean);
+  const source = address.origin === defaultForgeSite && owner && project ? `${owner}/${project}` : url;
+  return `nforge clone ${shellQuote(source)} ${shellQuote(directory)}`;
+}
 
-export const publicProjectLogin = (deployment: string) => `nforge login ${shellQuote(deployment)}`;
+export const publicProjectLogin = (site: string) =>
+  site === defaultForgeSite ? 'nforge login' : `nforge login ${shellQuote(site)}`;

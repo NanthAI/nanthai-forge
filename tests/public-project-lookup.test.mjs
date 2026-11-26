@@ -78,7 +78,9 @@ test('signed-out CLI and MCP find the same public projects with one request per 
   // An earlier, ranked partial address must not outrank the exact one.
   page.projects.unshift({ handle: 'ada', slug: 'atlas-tools', name: 'Atlas tools' });
   page.more = true;
-  const { site, requests } = await directory(t, page);
+  const { site, requests } = await directory(t, path =>
+    path === '/_forge/cli.json' ? { deployment: target.site } : page,
+  );
   const childEnv = mcpTestEnvironment(t);
   const { stdout } = await run(process.execPath, [cli, 'clone', ' @ADA/Atlas ', '--site', site], {
     env: childEnv,
@@ -90,18 +92,18 @@ test('signed-out CLI and MCP find the same public projects with one request per 
       slug: 'atlas',
       name: 'atlas',
       url: `${site}/ada/atlas`,
-      cloneCommand: `nforge clone '${site}/ada/atlas' 'atlas' --deployment '${target.site}'`,
+      cloneCommand: `nforge clone '${site}/ada/atlas' 'atlas'`,
     },
     {
       handle: 'ada',
       slug: 'atlas-tools',
       name: 'Atlas tools',
       url: `${site}/ada/atlas-tools`,
-      cloneCommand: `nforge clone '${site}/ada/atlas-tools' 'atlas-tools' --deployment '${target.site}'`,
+      cloneCommand: `nforge clone '${site}/ada/atlas-tools' 'atlas-tools'`,
     },
   ]);
   assert.equal(lookup.cloneRequiresSignIn, true);
-  assert.equal(lookup.loginCommand, `nforge login '${target.site}'`);
+  assert.equal(lookup.loginCommand, `nforge login '${site}'`);
   assert.equal(lookup.more, true);
 
   const client = new Client({ name: 'public-lookup-test', version: '1' });
@@ -162,6 +164,7 @@ test('signed-out CLI and MCP find the same public projects with one request per 
     error => JSON.parse(error.stderr).error.code === 'PROJECT_UNAVAILABLE',
   );
   assert.deepEqual(wrong.requests, []);
+  assert.deepEqual(requests.at(-1), ['GET', '/_forge/cli.json', null, null]);
   assert.deepEqual(
     target.posts.map(post => [post.path, post.args]),
     [['urlProjects:resolve', [{ handle: 'ada', slug: 'atlas' }]]],

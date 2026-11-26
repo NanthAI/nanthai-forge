@@ -52,7 +52,7 @@ if (prompt) {
   const disclosure = prompt.querySelector('details')!;
   const label = button.textContent;
   let reset: ReturnType<typeof setTimeout>;
-  const guideUrl = new URL(new URL(twin).pathname, location.origin);
+  const guideUrl = new URL(twin, location.origin);
   code.textContent = code.textContent!.replace(twin, guideUrl.href);
   copyText(button, code, () => {
     clearTimeout(reset);

@@ -10,13 +10,15 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { neutralDeviceName } from './neutral-names.js';
 import { makeFunctionReference } from 'convex/server';
 import { coordinationClient } from './coordination-client.js';
-import { deploymentUrl, readAuth, writeAuth, type SavedCredential, httpOrigin } from './auth-store.js';
+import { readAuth, writeAuth, type SavedCredential, httpOrigin } from './auth-store.js';
+import { appTarget, authTarget, backendTarget } from './app-discovery.js';
+import { defaultForgeSite } from './forge-site.js';
 import { ForgeError, invariant } from './errors.js';
-const help = `nforge login [DEPLOYMENT_URL] [--name NAME] [--scope cli|coordination] [--no-browser]
-nforge logout [DEPLOYMENT_URL]
-nforge auth rename NAME [DEPLOYMENT_URL]
-nforge auth status [DEPLOYMENT_URL] [--hostname HOST] [--json [fields]]
-auth status defaults to the hosted project in the current folder and reports its deployment/host; an explicit URL or --hostname wins. Outside a project it uses FORGE_DEPLOYMENT_URL or your most recent login. Other auth commands use that environment/login default. A device is named device-xxxx unless you pass --name; auth rename changes it later. Login uses a signed-in Forge browser approval and stores a revocable 30-day credential. Collaborators and agents see you by your Forge handle; change it on the web in Settings → Account. FORGE_AUTH_TOKEN overrides stored credentials for hosted commands.\n`;
+const help = `nforge login [--name NAME] [--scope cli|coordination] [--no-browser]
+nforge logout
+nforge auth rename NAME
+nforge auth status [--json [fields]]
+Auth status checks the hosted project in your current folder or the Forge app. A device is named device-xxxx unless you pass --name; auth rename changes it later. Login uses a signed-in Forge browser approval and stores a revocable 30-day credential. Collaborators and agents see you by your Forge handle; change it on the web in Settings → Account. FORGE_AUTH_TOKEN overrides stored credentials for hosted commands.\n`;
 export { httpOrigin } from './auth-store.js';
 async function request(origin: string, operation: string, input: unknown) {
   let response: Response;
@@ -66,6 +68,7 @@ export async function authCli(command: string, args: string[]): Promise<unknown>
     return authStatus(args);
   }
   let selected: string | undefined,
+    override: string | undefined,
     name = neutralDeviceName(),
     named = false,
     scope: 'cli' | 'coordination' = 'cli',
@@ -79,7 +82,8 @@ export async function authCli(command: string, args: string[]): Promise<unknown>
       const value = args[++i];
       invariant(value === 'cli' || value === 'coordination', 'BAD_ARGUMENT', help);
       scope = value;
-    } else if (arg === '--no-browser') browser = false;
+    } else if (arg === '--deployment' && args[i + 1] && !override) override = args[++i]!;
+    else if (arg === '--no-browser') browser = false;
     else {
       invariant(!arg.startsWith('-') && !selected, 'BAD_ARGUMENT', help);
       selected = arg;
@@ -87,12 +91,21 @@ export async function authCli(command: string, args: string[]): Promise<unknown>
   }
   const store = readAuth();
   const folder = command === 'login' ? folderAddress() : null;
-  selected ??= folder?.url ?? process.env.FORGE_DEPLOYMENT_URL ?? store.defaultDeployment;
-  invariant(selected, 'BAD_ARGUMENT', 'Provide a deployment URL or set FORGE_DEPLOYMENT_URL.');
-  const deployment = deploymentUrl(selected),
-    saved = store.deployments[deployment];
+  invariant(!selected || !override, 'BAD_ARGUMENT', 'Select one Forge app URL.');
+  const implicit =
+    override ??
+    folder?.url ??
+    process.env.FORGE_DEPLOYMENT_URL ??
+    (command === 'logout' ? store.defaultDeployment : undefined);
+  const { deployment, site } = selected
+    ? await authTarget(selected, store, command === 'login')
+    : implicit
+      ? backendTarget(implicit, store)
+      : await appTarget(defaultForgeSite, store, command === 'login');
+  const address = site ? { site } : { deployment };
+  const saved = store.deployments[deployment];
   if (command === 'logout') {
-    if (!saved) return { deployment, loggedOut: true };
+    if (!saved) return { ...address, loggedOut: true };
     // Logout always revokes this saved device, even when an environment override is set.
     let remoteRevoked = false;
     // The backend decides expiry; a local clock or cached expiry must not skip revocation.
@@ -108,10 +121,12 @@ export async function authCli(command: string, args: string[]): Promise<unknown>
       remoteRevoked = false;
     }
     delete store.deployments[deployment];
+    for (const [site, backend] of Object.entries(store.sites ?? {}))
+      if (backend === deployment) delete store.sites![site];
     if (store.defaultDeployment === deployment) delete store.defaultDeployment;
     writeAuth(store);
     return {
-      deployment,
+      ...address,
       loggedOut: true,
       remoteRevoked,
       ...(!remoteRevoked
@@ -252,6 +267,7 @@ export async function authCli(command: string, args: string[]): Promise<unknown>
       }
     }
     latest.defaultDeployment = deployment;
+    if (site) (latest.sites ??= {})[site] = deployment;
     writeAuth(latest);
     if (typeof result.deviceId === 'string') {
       const identity = await (
@@ -261,7 +277,7 @@ export async function authCli(command: string, args: string[]): Promise<unknown>
     }
     await askForHandleOnce(deployment, credential.token);
     return {
-      deployment,
+      ...address,
       loggedIn: true,
       name: credential.name,
       scope: credential.scope,
@@ -296,10 +312,12 @@ async function renameDevice(args: string[]) {
   const name = positional[0]!.trim();
   invariant(name.length > 0 && name.length <= 80, 'BAD_ARGUMENT', 'Use a device name of 1 to 80 characters.');
   const store = readAuth();
-  const selected = positional[1] ?? process.env.FORGE_DEPLOYMENT_URL ?? store.defaultDeployment;
-  invariant(selected, 'BAD_ARGUMENT', 'Provide a deployment URL or set FORGE_DEPLOYMENT_URL.');
-  const deployment = deploymentUrl(selected),
-    saved = store.deployments[deployment];
+  const implicit = process.env.FORGE_DEPLOYMENT_URL ?? store.defaultDeployment;
+  invariant(positional[1] || implicit, 'BAD_ARGUMENT', 'Provide the Forge app URL.');
+  const { deployment, site } = positional[1]
+    ? await authTarget(positional[1], store)
+    : backendTarget(implicit!, store);
+  const saved = store.deployments[deployment];
   invariant(saved, 'AUTH_REQUIRED', 'Run nforge login first; only a saved login device can be renamed.');
   // Renaming to the same name again is harmless, so a fresh operation id per run is safe.
   await coordinationClient(deployment, saved.token).mutation(
@@ -311,5 +329,5 @@ async function renameDevice(args: string[]) {
     latest.deployments[deployment].name = name;
     writeAuth(latest);
   }
-  return { deployment, renamed: true, name };
+  return { ...(site ? { site } : { deployment }), renamed: true, name };
 }

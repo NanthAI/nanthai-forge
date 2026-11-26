@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-import { defineConfig } from 'vite';
+import { defineConfig, type ResolvedConfig, type ViteDevServer } from 'vite';
 import react from '@vitejs/plugin-react';
 import optimizeLocales from '@react-aria/optimize-locales-plugin';
 import { builtinModules } from 'node:module';
@@ -9,6 +9,8 @@ import { docsSite } from '../scripts/docs-site.tsx';
 import { llmDocuments, llmsFullSizeReport } from '../scripts/llm-documents.mjs';
 import { LAYER_GZIP_BUDGET, layerBundleReport, layerImportViolation } from '../scripts/ds-build-guard.mjs';
 import { servedSources } from '../scripts/site-deploy-plan.mjs';
+import { cliDiscoveryPath } from '../src/forge-site.ts';
+import { deploymentUrl } from '../src/deployment-origin.ts';
 // Two pages: index.html is the static public page (no app code), app.html the signed-in app. On the dev and preview
 // servers every other page route serves app.html, as the site Worker does in production (site/worker.ts).
 type Middlewares = { middlewares: { use: (fn: AppRoute) => unknown } };
@@ -34,6 +36,7 @@ function appRoute(req: Parameters<AppRoute>[0], _res: unknown, next: () => void)
   if (page) req.url = `/app.html${url.search}`;
   next();
 }
+let cliDiscoveryJson: string | undefined;
 export default defineConfig({
   base: '/',
   envDir: '..',
@@ -63,6 +66,29 @@ export default defineConfig({
     },
     docsSite(fileURLToPath(new URL('../', import.meta.url))),
     appRoutes,
+    {
+      name: 'forge-cli-discovery',
+      configResolved(config: ResolvedConfig) {
+        const backend = config.env.VITE_CONVEX_URL;
+        cliDiscoveryJson = backend ? JSON.stringify({ deployment: deploymentUrl(backend) }) : undefined;
+      },
+      configureServer(server: ViteDevServer) {
+        server.middlewares.use((request, response, next) => {
+          if (request.url !== cliDiscoveryPath || request.method !== 'GET' || !cliDiscoveryJson)
+            return next();
+          response.setHeader('Content-Type', 'application/json');
+          response.end(cliDiscoveryJson);
+        });
+      },
+      generateBundle() {
+        if (cliDiscoveryJson)
+          this.emitFile({
+            type: 'asset',
+            fileName: cliDiscoveryPath.slice(1),
+            source: cliDiscoveryJson,
+          });
+      },
+    },
     {
       // Vite silently swaps a Node builtin for an empty stub in the browser; a chunk that then calls
       // createRequire() fails at load and the whole app shows "Could not load Forge." (2026-10-28).

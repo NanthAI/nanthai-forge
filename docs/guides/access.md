@@ -2,13 +2,13 @@
 
 Your account has access. A device uses that access, a sign-in proves it, and a session records who is doing the work.
 
-## Check the account and deployment
+## Check the signed-in account
 
 ```sh
-nforge auth status DEPLOYMENT_URL
+nforge auth status
 ```
 
-Check the deployment as well as the account. Open **Account → Sign-in and devices** (`/account/devices`) to see this account's devices and manage the reach of a specific device. The [sign-in steps](../quickstart.md#sign-in) cover terminal approval and reconnecting.
+Open **Account → Sign-in and devices** (`/account/devices`) to see this account's devices and manage the reach of a specific device. The [sign-in steps](../quickstart.md#sign-in) cover terminal approval and reconnecting.
 
 ## Keep the three records separate
 

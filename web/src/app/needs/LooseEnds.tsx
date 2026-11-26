@@ -107,7 +107,7 @@ export default function LooseEnds({ route, projectId, projectName, viewerHandle 
       copy={text => navigator.clipboard.writeText(text)}
       itemHref={itemId => hrefFor({ ...route, place: 'plan', section: '', rest: itemId })}
       viewer={viewerHandle}
-      project={{ name: projectName, projectId, backend: convex.url }}
+      project={{ name: projectName, projectId }}
     />
   );
 }
@@ -150,7 +150,7 @@ export function LooseEndsView({
   itemHref: (itemId: string) => string;
   viewer?: string | undefined;
   /** The project this page belongs to: named in the hand-over prompt, and not trashed from here. */
-  project: { name: string; projectId: string; backend: string };
+  project: { name: string; projectId: string };
 }) {
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
   /** Per-row results of the actions so far: Lanes (set aside, brought back) and projects (trash, restored). */

@@ -14,7 +14,8 @@ import { moduleUrl } from './convex-module.mjs';
 import { clone, setup } from './helpers/sealed-hosted.mjs';
 import { addMachine, checksClient } from '../dist/sealed-checks.js';
 import { decodeMachineBundle, encodeMachineBundle, machineKeys } from '../dist/sealed-machine.js';
-import { machineRunFor } from '../dist/sealed-run.js';
+import { machineRunFor, sealedRunSecrets } from '../dist/sealed-run.js';
+import { defaultForgeSite } from '../dist/forge-site.js';
 import { runWithSecrets } from '../dist/secret-run.js';
 import { framedHash } from '../dist/sealed-format.js';
 import { rosterBytes } from '../dist/sealed-records.js';
@@ -77,6 +78,39 @@ const adapters = {
   'github-actions': { CI: 'true', GITHUB_ACTIONS: 'true', GITHUB_WORKFLOW: 'test', RUNNER_OS: 'Linux' },
   'gitlab-ci': { CI: 'true', GITLAB_CI: 'true', CI_PIPELINE_SOURCE: 'push', CI_SERVER_NAME: 'GitLab' },
 };
+
+test('a mirror check finds the built-in site using only its project ID and machine key', async t => {
+  const p = await project(t);
+  const fetch = globalThis.fetch;
+  const backend = 'https://example.convex.cloud';
+  const requests = [];
+  globalThis.fetch = async (input, options) => {
+    const url = new URL(input);
+    requests.push(url.origin + url.pathname);
+    if (url.origin === defaultForgeSite) {
+      assert.equal(new Headers(options.headers).has('authorization'), false);
+      assert.equal(options.body, undefined);
+      return Response.json({ deployment: backend });
+    }
+    assert.equal(url.origin, backend);
+    const request = JSON.parse(options.body);
+    assert.equal(request.path, 'sealedMachines:read');
+    assert.equal(request.args[0].projectId, p.project);
+    return Response.json({ status: 'success', value: null, logLines: [] });
+  };
+  t.after(() => {
+    globalThis.fetch = fetch;
+  });
+  await assert.rejects(
+    sealedRunSecrets({
+      root: p.tree,
+      set: 'checks',
+      source: { FORGE_SECRETS_KEY: p.bundle, FORGE_PROJECT_ID: p.project },
+    }),
+    { code: 'SECRETS_NOT_SET_UP' },
+  );
+  assert.deepEqual(requests, [`${defaultForgeSite}/_forge/cli.json`, `${backend}/api/query`]);
+});
 
 test('slice 5 BYOCI contract: a check receives exactly its declared names on any CI with one machine key', async t => {
   const p = await project(t);

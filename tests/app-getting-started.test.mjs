@@ -26,16 +26,13 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const cli = readFileSync(new URL('../src/cli.ts', import.meta.url), 'utf8');
 const verbs = readFileSync(new URL('../src/agent-verbs.ts', import.meta.url), 'utf8');
 const commands = new Set([...cli.matchAll(/^ {2}nforge ([a-z][a-z-]*)/gm)].map(match => match[1]));
-const DEPLOYMENT = 'https://example-123.convex.cloud';
-
-test('every step for every agent app runs a command the CLI ships, and nothing from Phase 8', () => {
+test('every agent app shows a URL-free sign-in and commands the CLI ships', () => {
   for (const app of apps.agentApps)
     for (const project of [undefined, 'https://forge.example/someone/shop']) {
-      const steps = apps.setupSteps(app, DEPLOYMENT, project);
+      const steps = apps.setupSteps(app, project);
       assert.equal(steps.filter(step => step.needsPerson).length, 1, 'the person acts once: the device');
       for (const line of steps.flatMap(step => step.commands)) {
         assert.doesNotMatch(line, /npm (install|i) -g|npx nforge/, 'no published package yet');
-        assert.notEqual(line.trim(), 'nforge login', 'bare login is Phase 8');
         const forge = line.match(/^nforge ([a-z-]+)/);
         if (forge) assert.ok(commands.has(forge[1]), `nforge ${forge[1]} is in the CLI usage`);
         else
@@ -45,22 +42,23 @@ test('every step for every agent app runs a command the CLI ships, and nothing f
             `only the source install runs other tools: ${line}`,
           );
       }
-      assert.ok(steps.some(step => step.commands.includes(`nforge login ${DEPLOYMENT}`)));
+      assert.ok(steps.some(step => step.commands.includes('nforge login')));
+      if (project) assert.ok(steps.some(step => step.commands.includes('nforge clone someone/shop ./shop')));
     }
   assert.ok(verbs.includes("'check-settings'"), 'the checks page names a verb agents have');
-  assert.match(apps.setupSteps('other', DEPLOYMENT).at(-1).detail, /Any app with a terminal/);
+  assert.match(apps.setupSteps('other').at(-1).detail, /Any app with a terminal/);
 });
 
 test('no agent app is preselected: the shared steps show at once and the app is chosen in the last, optional step', () => {
-  const html = renderToStaticMarkup(h(ConnectSteps, { deployment: DEPLOYMENT }));
+  const html = renderToStaticMarkup(h(ConnectSteps));
   assert.equal([...html.matchAll(/aria-pressed="false"/g)].length, apps.agentApps.length);
   assert.doesNotMatch(html, /aria-pressed="true"/, 'every app is offered the same way');
-  assert.ok(html.includes(`nforge login ${DEPLOYMENT}`), 'the steps every app shares need no choice');
+  assert.ok(html.includes('nforge login'), 'the steps every app shares need no choice');
   assert.doesNotMatch(html, /mcp-config|nforge connect/, 'no app’s tools step before the person picks');
   for (const app of apps.agentApps) {
     assert.deepEqual(
-      apps.setupSteps(app, DEPLOYMENT).slice(0, -1),
-      apps.sharedSteps(DEPLOYMENT),
+      apps.setupSteps(app).slice(0, -1),
+      apps.sharedSteps(),
       'apps differ only in the last step',
     );
     const last = apps.appStep(app);
@@ -70,14 +68,14 @@ test('no agent app is preselected: the shared steps show at once and the app is 
     ]);
   }
   assert.doesNotMatch(
-    JSON.stringify(apps.sharedSteps(DEPLOYMENT).filter(step => !step.needsPerson)),
+    JSON.stringify(apps.sharedSteps().filter(step => !step.needsPerson)),
     /"detail"/,
     'a step the person only copies carries no standing explainer; its docs link explains',
   );
 });
 
 test('the steps link the install guide, hooks, MCP and guidance, each to a docs page and heading that exists', () => {
-  const html = renderToStaticMarkup(h(ConnectSteps, { deployment: DEPLOYMENT }));
+  const html = renderToStaticMarkup(h(ConnectSteps));
   const slug = text =>
     text
       .toLowerCase()
@@ -85,7 +83,7 @@ test('the steps link the install guide, hooks, MCP and guidance, each to a docs 
       .replace(/\s/g, '-');
   const hrefs = [...html.matchAll(/href="(\/docs\/[^"]*)"/g)].map(match => match[1]);
   for (const wanted of [
-    '/docs/quickstart/#install-the-development-cli',
+    '/docs/quickstart/#install-the-cli',
     '/docs/agents/workflow/#overlap-before-the-first-write',
     '/docs/agents/#connect-over-mcp',
     '/docs/agents/#copy-prompts-and-briefings',
@@ -105,14 +103,14 @@ test('the steps link the install guide, hooks, MCP and guidance, each to a docs 
 });
 
 test('Cursor gets the one-step command and its project file for manual setup', () => {
-  const last = apps.setupSteps('cursor', DEPLOYMENT).at(-1);
+  const last = apps.setupSteps('cursor').at(-1);
   assert.deepEqual(last.commands, ['nforge connect cursor']);
   assert.match(last.detail, /\.cursor\/mcp\.json/);
 });
 
 test('the sign-in step sends the person to the devices page where the same code and name show', () => {
   for (const app of apps.agentApps) {
-    const signIn = apps.setupSteps(app, DEPLOYMENT).find(step => step.needsPerson);
+    const signIn = apps.setupSteps(app).find(step => step.needsPerson);
     assert.equal(signIn.link.href, '/account/devices');
     assert.match(signIn.detail, /code matches/);
   }

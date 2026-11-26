@@ -207,7 +207,7 @@ test('CLI clone without a login refuses before network or local checkout IO', as
       assert.equal(refusal.code, 'SIGN_IN_REQUIRED');
       assert.match(refusal.message, /Nothing was copied/);
       assert.equal(refusal.recovery?.nothingChanged, true);
-      assert.equal(refusal.next, "nforge login 'https://forge.example'");
+      assert.equal(refusal.next, "nforge login --deployment 'https://forge.example'");
       return true;
     },
   );

@@ -7,7 +7,7 @@ subscription opens the project when complete hosted `main` is published. The
 separate read-only analysis tour calls `hosted.start` and creates no writable
 project. The [quickstart](../quickstart.md) covers installation and Lane work.
 
-From the CLI, `nforge import URL [--ref REF] [--name NAME] [--private] [--deployment URL]
+From the CLI, `nforge import URL [--ref REF] [--name NAME] [--private] [--site APP_URL]
 [--operation-id UUID] [--no-wait]` calls the same start with the saved login,
 waits on the same progress subscription (no polling) and prints one JSON report:
 `operationId`, `projectId`, `commit`, `visibility`, `phase`, `ready`, file and byte counts,

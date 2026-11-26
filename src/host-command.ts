@@ -146,10 +146,11 @@ export async function hostCli(args: string[], host: typeof hostProject = hostPro
     const flag = flags[i]!;
     if (flag === '--backfill' || flag === '--wait' || flag === '--resume') continue;
     if (flag === '--new') options.new = true;
-    else if (['--deployment', '--name', '--visibility'].includes(flag)) {
+    else if (['--site', '--deployment', '--name', '--visibility'].includes(flag)) {
       const value = flags[++i];
       invariant(value && !value.startsWith('--'), 'BAD_ARGUMENT', HOST_HELP);
       if (flag === '--deployment') options.deployment = value;
+      else if (flag === '--site') options.site = value;
       else if (flag === '--name') options.name = value;
       else {
         invariant(value === 'private' || value === 'public', 'BAD_ARGUMENT', HOST_HELP);
@@ -199,5 +200,7 @@ export async function hostCli(args: string[], host: typeof hostProject = hostPro
     );
     child.unref();
   }
-  return json ? { type: 'host-result', ...result } : result;
+  const presented = { ...result };
+  if (!options.deployment) Reflect.deleteProperty(presented, 'deployment');
+  return json ? { type: 'host-result', ...presented } : presented;
 }

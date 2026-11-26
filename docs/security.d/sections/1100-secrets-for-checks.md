@@ -104,7 +104,7 @@ request from a fork or a `pull_request_target` workflow.
 
 `nforge run --set checks --only NAMES -- COMMAND` runs on any CI that gives the
 step `FORGE_SECRETS_KEY`. Outside a Forge checkout the step also gives
-`FORGE_DEPLOYMENT_URL` and `FORGE_PROJECT_ID`, which are addresses, not secrets.
+`FORGE_PROJECT_ID`, which is the project's ID.
 Each run makes one machine query: the reader row, the project row, the active set
 and its history, with no writes and nothing when idle. A removal by a person is two
 reads and one write on the ordinary path: the Development anchor read, the Checks

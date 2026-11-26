@@ -102,29 +102,28 @@ test('ages are whole hours, then whole days, like the server order', () => {
 });
 
 test('empty Projects starts at Quickstart’s first landing and gives the agent the real CLI order', () => {
-  const deployment = 'https://example-123.convex.cloud';
-  const prompt = onboardingPrompt('https://forge.example', deployment);
+  const prompt = onboardingPrompt('https://forge.example');
   assert.equal(
     prompt.split('\n')[0],
     'Read First landing in https://forge.example/docs/quickstart.md#first-landing',
   );
-  assert.ok(prompt.includes(`nforge login ${deployment}`), 'includes deployment URL for clean-machine login');
-  assert.ok(prompt.includes('nforge import <github-url>'));
-  assert.ok(prompt.includes(`nforge host <folder> --deployment ${deployment}`));
-  assert.ok(prompt.includes('nforge clone <project-url> <dir>'));
+  assert.ok(prompt.includes('`nforge login`'), 'sign-in uses the built-in site');
+  assert.ok(prompt.includes('nforge import OWNER/REPO'));
+  assert.ok(prompt.includes('nforge host FOLDER'));
+  assert.ok(prompt.includes('nforge clone OWNER/PROJECT DIR'));
   assert.ok(prompt.includes('nforge connect <app>'));
-  const loginAt = prompt.indexOf(`nforge login ${deployment}`);
-  const importAt = prompt.indexOf('nforge import <github-url>');
-  const cloneAt = prompt.indexOf('nforge clone <project-url> <dir>');
+  const loginAt = prompt.indexOf('nforge login');
+  const importAt = prompt.indexOf('nforge import OWNER/REPO');
+  const cloneAt = prompt.indexOf('nforge clone OWNER/PROJECT DIR');
   const connectAt = prompt.indexOf('nforge connect <app>');
   assert.ok(loginAt > 0 && loginAt < importAt && importAt < cloneAt && cloneAt < connectAt, 'real CLI order');
   assert.doesNotMatch(
     prompt,
-    /npm (install|i) -g|npx nforge|tool server|local Git clone with history|project settings/,
+    /npm (install|i) -g|npx nforge|tool server|local Git clone with history|project settings|--deployment|--site/,
     'no unbuilt or overpromised capabilities',
   );
   assert.equal(
-    onboardingPrompt('', deployment).split('\n')[0],
+    onboardingPrompt('').split('\n')[0],
     'Read First landing in /docs/quickstart.md#first-landing',
   );
   assert.equal(agentSetupHref, '/docs/quickstart.md');

@@ -691,10 +691,11 @@ test('public discovery screens: explore, a profile signed out and as its person,
   await visitor.getByRole('button', { name: 'Clone' }).click();
   const clone = visitor.getByRole('dialog', { name: 'Clone atlas' });
   await clone.waitFor();
-  assert.deepEqual(await clone.locator('code').allTextContents(), [
-    `nforge login '${sourceDeployment}'`,
-    `nforge clone 'https://forge.test/ada/atlas' 'atlas' --deployment '${sourceDeployment}'`,
-  ]);
+  const cloneCommands = [
+    "nforge login 'https://forge.test'",
+    "nforge clone 'https://forge.test/ada/atlas' 'atlas'",
+  ];
+  assert.deepEqual(await clone.locator('code').allTextContents(), cloneCommands);
 
   // The owner's view requests and paginates handles only when opened.
   const owner = await open(`${next}&as=self`);
@@ -714,9 +715,12 @@ test('public discovery screens: explore, a profile signed out and as its person,
 
   const legacy = await open('/ada/legacy?view=public&as=visitor');
   await legacy.getByRole('button', { name: 'Clone' }).click();
-  assert.equal(
-    await legacy.getByRole('dialog').locator('code').textContent(),
-    "nforge clone --find 'ada/atlas' --site 'https://forge.test'",
+  const legacyClone = legacy.getByRole('dialog', { name: 'Clone atlas' });
+  await legacyClone.waitFor();
+  assert.deepEqual(
+    await legacyClone.locator('code').allTextContents(),
+    cloneCommands,
+    'a legacy listing provides the same commands without backend metadata',
   );
 
   const fork = await open('/ada/fork');
