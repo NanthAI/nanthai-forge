@@ -20,7 +20,13 @@ import { digest } from '../dist/hash.js';
 import { SEED_EMPTY } from '../dist/hosted-seed-protocol.js';
 import { buildUploadPack } from '../dist/object-pack-upload.js';
 
-for (const name of ['projectHostedSeed', 'projectHostedSeedActions'])
+for (const name of [
+  'projectHostedSeed',
+  'projectHostedSeedActions',
+  'projectCode',
+  'projectCodeBrowse',
+  'projectWorkIndexActions',
+])
   modules[name] = await import(moduleUrl(`../convex/${name}.ts`));
 const { findObject, findStoredObject } = await import(moduleUrl('../convex/projectObjectFind.ts'));
 const { sourceKeyReferenced } = await import(moduleUrl('../convex/projectSourceKeyProtection.ts'));
@@ -157,6 +163,7 @@ test('a 28,905-file hosted seed retains catalog pages within the metadata budget
     `${retained} retained documents: ${JSON.stringify(retainedByTable)}`,
   );
   assert.equal(f.s.tables.projectObjects.size, 0);
+  assert(retainedByTable.projectWorkDataRecords <= 8, 'seed writes at most eight work-data rows');
   assert.equal(f.s.scheduled.length, 0);
   const selected = JSON.parse([...f.s.tables.projectHostedChannels.values()][0].selection);
   assert.equal(selected.head, result.mainDigest);
@@ -174,6 +181,78 @@ test('a 28,905-file hosted seed retains catalog pages within the metadata budget
   assert((await findObject(f.s.ctx, f.input.projectId, packed.pack.digest)).sourceReferenced);
   assert.deepEqual(await f.exchange.download(pin), ordinary);
 });
+
+for (const count of [4_000, 29_000]) {
+  test(`catalog-backed fallback builds no per-file Work rows at ${count} files and opens exact source`, async t => {
+    const f = setup(t, count - 2);
+    // An interrupted legacy host keeps its original native-owner authority and
+    // reaches the operator builder when it has no staged initial generation.
+    delete f.input.serverAuthority;
+    const seed = await seedHostedProject(f.store, f.input, f.client, f.exchange);
+    const projectId = f.input.projectId;
+    if (count === 29_000) {
+      // Older object-backed checkpoints predate the closure marker.
+      delete f.s.tables.projectBackups.get(seed.backupId).validatedClosure;
+    }
+    const ready = await f.client.action(makeFunctionReference('projectWorkActions:initialize'), {
+      projectId,
+      backupId: seed.backupId,
+      operationId: randomUUID(),
+    });
+    assert.equal(ready.work.generationId, undefined);
+    const started = performance.now();
+    const before = { ...f.stats };
+    const generationId = await f.client.action(makeFunctionReference('projectWorkIndexActions:ensure'), {
+      projectId,
+      rebuild: true,
+    });
+    assert.equal(typeof generationId, 'string');
+    const rows = [...f.s.tables.projectWorkDataRecords.values()].filter(
+      row => row.generationId === generationId,
+    );
+    const metrics = Object.fromEntries(
+      Object.entries(f.stats).map(([key, value]) => [key, value - before[key]]),
+    );
+    t.diagnostic(
+      JSON.stringify({
+        ...metrics,
+        rows: rows.length,
+        rowBytes: Buffer.byteLength(JSON.stringify(rows)),
+        rebuildMillis: Math.round(performance.now() - started),
+        peakRssKiB: process.resourceUsage().maxRSS,
+      }),
+    );
+    assert(rows.length <= 8, `${rows.length} work-data rows`);
+    assert(!rows.some(row => ['sourceBlobs', 'sourceTreePaths'].includes(row.collection)));
+    const state = seed.mainDigest;
+    const code = JSON.parse(
+      await f.client.action(makeFunctionReference('projectCodeBrowse:read'), {
+        projectId,
+        state,
+        want: 'open',
+        path: 'files-0/file-1.ts',
+      }),
+    );
+    assert.equal(code.state, state);
+    assert.equal(code.files, count);
+    assert.equal(code.file.blob, digest('export const value = 1;\n'));
+    const review = JSON.parse(
+      await f.client.action(makeFunctionReference('projectSourceReview:read'), {
+        projectId,
+        backupId: seed.backupId,
+        base: state,
+        head: state,
+        render: true,
+      }),
+    );
+    assert.equal(review.available, true);
+    assert.equal(
+      review.timings.manifestMs,
+      0,
+      'review resolves both pins without loading the checkpoint manifest',
+    );
+  });
+}
 
 test('the catalog seed reconciles a lost upload reply and rejects a changed committed page', async t => {
   const f = setup(t, 220);

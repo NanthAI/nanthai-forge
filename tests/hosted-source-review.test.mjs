@@ -157,27 +157,35 @@ test('indexed source reviews read only selected State/file pins, preserving byte
     seen.every(pin => allowed.has(pin)),
     'only the selected State and file blobs are resolved',
   );
-  // A missing disposable row keeps the exact original manifest path available.
-  const row = [...workRecordRows(s.tables)].find(
-    r => r.collection === 'sourceBlobs' && r.key === s.input.head,
-  );
-  assert(row);
-  deleteWorkRecord(s.tables, row._id);
+  // An unavailable derived lookup keeps the exact original manifest path available.
+  const generation = s.tables.projectWorkGenerations.get(generationId);
+  assert.equal(generation.objectCatalog, true);
+  assert(!workRecordRows(s.tables).some(r => r.collection === 'sourceBlobs'));
+  delete generation.objectCatalog;
   seen.length = 0;
   const fallback = JSON.parse(await read._handler(s.ctx, { ...s.input, file: 'a.ts' }));
   assert.deepEqual(fallback.comparison, baseline.comparison);
   assert(seen.includes(s.source.input.digest));
+  const pin = s.source.manifest.files.find(file => file.sha256 === s.input.head);
+  const row = {
+    _id: 'legacy-bad-pin',
+    projectId: 'project',
+    generationId,
+    collection: 'sourceBlobs',
+    key: s.input.head,
+    parent: '',
+    position: 0,
+    value: JSON.stringify({ sha256: pin.sha256, size: pin.size + 1 }),
+  };
   setWorkRecord(s.tables, row._id, row);
-  const value = row.value;
-  const pin = JSON.parse(value);
-  row.value = JSON.stringify({ ...pin, size: pin.size + 1 });
   const repaired = JSON.parse(await read._handler(s.ctx, { ...s.input, file: 'a.ts' }));
   assert.deepEqual(
     repaired.comparison,
     baseline.comparison,
     'an inconsistent derived pin falls back without denying healthy source',
   );
-  row.value = value;
+  deleteWorkRecord(s.tables, row._id);
+  generation.objectCatalog = true;
   s.caller('stranger');
   await assert.rejects(read._handler(s.ctx, s.input), code('PROJECT_UNAVAILABLE'));
   s.caller('owner');

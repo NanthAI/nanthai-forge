@@ -89,6 +89,7 @@ export async function buildRecordIndex(ctx: ActionCtx, input: Identity) {
       initialRevision: project.work.initialRevision,
       metadata: JSON.stringify(metadata),
       cursor: JSON.stringify(cursor),
+      objectCatalog: true,
     });
     if (!generation) return { pending: true as const, progress: JSON.stringify({ phase: 'index', step: 0 }) };
     generation = await ctx.runQuery(resume, input);
@@ -108,6 +109,7 @@ export async function buildRecordIndex(ctx: ActionCtx, input: Identity) {
       if (cursor.phase === 'done') {
         const metadata = JSON.parse(generation.metadata) as IndexMetadata;
         for (const name of scratch) delete metadata.counts[name];
+        if (generation.objectCatalog) metadata.counts.sourceBlobs = context.pins.size;
         if (
           await ctx.runMutation(internal.projectWorkIndexStore.publish, {
             ...selected,
@@ -143,7 +145,16 @@ export async function buildRecordIndex(ctx: ActionCtx, input: Identity) {
           const projected = await replayStep(ctx, selected, exchange, backup, generation, project, after);
           entries = projected.entries;
           metadata = projected.metadata;
-        } else entries = await projectStep(ctx, selected, exchange, backup, after, context);
+        } else
+          entries = await projectStep(
+            ctx,
+            selected,
+            exchange,
+            backup,
+            after,
+            context,
+            generation.objectCatalog,
+          );
         const batches = indexBatches(entries, { rows: 500, bytes: 500000 });
         if (batches.length > 1) {
           // Stage one independently readable RPC page at a time. Cursor+rows are

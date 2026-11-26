@@ -26,8 +26,13 @@ const derived = 'viewAcceptances';
 /** Batches have deterministic positions and boundaries, so a persisted nextBatch
  * is a resumable cursor. No array of all historical State file lists or View
  * provenance rows is retained. Work/manifest metadata remains fully validated. */
-export async function workProjection(ctx: ActionCtx, snapshot: Snapshot, owner: string) {
-  const supplied = await ownerProjection(ctx, snapshot, owner);
+export async function workProjection(
+  ctx: ActionCtx,
+  snapshot: Snapshot,
+  owner: string,
+  objectCatalog = false,
+) {
+  const supplied = await ownerProjection(ctx, snapshot, owner, objectCatalog);
   if (supplied) return supplied;
   const streamed =
     snapshot.backup.transport === 'objects' && snapshot.manifest.kind === 'forge-native-work-backup';
@@ -39,7 +44,16 @@ export async function workProjection(ctx: ActionCtx, snapshot: Snapshot, owner: 
       owner,
       !streamed,
     ),
-    projection = materializeWork(snapshot.data, snapshot.manifest, [], snapshot.backup.transport, parents);
+    projection = materializeWork(
+      snapshot.data,
+      snapshot.manifest,
+      [],
+      snapshot.backup.transport,
+      parents,
+      false,
+      false,
+      objectCatalog,
+    );
   if (!streamed)
     return {
       metadata: projection.metadata,
@@ -56,28 +70,28 @@ export async function workProjection(ctx: ActionCtx, snapshot: Snapshot, owner: 
   return {
     metadata: projection.metadata,
     batches: async function* () {
-      // The common Code tree is published with the same generation as Work.
-      const treeHeads = new Set([
-        snapshot.manifest.head,
-        ...archiveChannels(snapshot.manifest, snapshot.data)
-          .filter(c => c.name === 'main')
-          .map(c => c.head),
-        ...(snapshot.data.hostedChannelMoves ?? [])
-          .filter(c => c.channel === 'main')
-          .slice(-1)
-          .map(c => c.head),
-      ]);
-      for (const head of treeHeads) {
-        const treePin = snapshot.manifest.files.find(file => file.sha256 === head);
-        if (!treePin) continue;
-        try {
-          const reader = exchangeObjectReader(ctx, false, 0);
-          const [bytes] = await reader.read(snapshot.backup.projectId, owner, [treePin]);
-          entries.push(...sourceTreeEntries(head, parseNativeState(bytes!).files));
-        } catch (error) {
-          if (indexReadFailure(ctx, error)) throw error;
-          // Optional tree optimization: the exact source reader remains available.
-          // Publication still checks current authority in the staging transaction.
+      if (!objectCatalog) {
+        const treeHeads = new Set([
+          snapshot.manifest.head,
+          ...archiveChannels(snapshot.manifest, snapshot.data)
+            .filter(c => c.name === 'main')
+            .map(c => c.head),
+          ...(snapshot.data.hostedChannelMoves ?? [])
+            .filter(c => c.channel === 'main')
+            .slice(-1)
+            .map(c => c.head),
+        ]);
+        for (const head of treeHeads) {
+          const treePin = snapshot.manifest.files.find(file => file.sha256 === head);
+          if (!treePin) continue;
+          try {
+            const reader = exchangeObjectReader(ctx, false, 0);
+            const [bytes] = await reader.read(snapshot.backup.projectId, owner, [treePin]);
+            entries.push(...sourceTreeEntries(head, parseNativeState(bytes!).files));
+          } catch (error) {
+            if (indexReadFailure(ctx, error)) throw error;
+            // Exact source remains available when the optional legacy tree cannot be loaded.
+          }
         }
       }
       yield* indexBatches(entries);

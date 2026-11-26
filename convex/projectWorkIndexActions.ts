@@ -32,8 +32,8 @@ async function ensureIndex(
       { projectId, owner },
     );
     if (existing) return existing._id;
-    const snapshot = await load(ctx, projectId, owner),
-      projection = await workProjection(ctx, snapshot, owner);
+    const snapshot = await load(ctx, projectId, owner);
+    const objectCatalog = snapshot.backup.transport === 'objects';
     const generation: Doc<'projectWorkGenerations'> | null = await ctx.runMutation(
       internal.projectWorkIndexStore.begin,
       {
@@ -42,7 +42,9 @@ async function ensureIndex(
         backupId: snapshot.backup._id,
         revision: snapshot.data.revision,
         initialRevision: snapshot.project.work!.initialRevision,
-        metadata: JSON.stringify(projection.metadata),
+        // The fixed-batch builder publishes complete metadata when its rows are ready.
+        metadata: JSON.stringify({ schema: snapshot.data.schema }),
+        ...(objectCatalog ? { objectCatalog: true as const } : {}),
       },
     );
     const pending = () => ({
@@ -58,6 +60,8 @@ async function ensureIndex(
       if (expired()) return pending();
       continue;
     }
+    // Resume the same batch boundaries for builds that started before catalog-backed projection.
+    const projection = await workProjection(ctx, snapshot, owner, generation.objectCatalog);
     if (generation.status === 'ready') {
       if (
         await ctx.runMutation(internal.projectWorkIndexStore.publish, {

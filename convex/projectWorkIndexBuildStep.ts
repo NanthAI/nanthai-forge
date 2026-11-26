@@ -22,6 +22,7 @@ export async function projectStep(
   backup: Doc<'projectBackups'>,
   c: Cursor,
   context: BuildContext = buildContext(ctx, selected, e),
+  objectCatalog = false,
 ): Promise<IndexEntry[]> {
   const pinMap = context.pins;
   e = context.exchange;
@@ -142,6 +143,12 @@ export async function projectStep(
   }
   if (c.phase === 'summaries') return projectSummaries(ctx, selected, e, c, context);
   if (c.phase === 'trees') {
+    if (objectCatalog) {
+      c.phase = 'journal';
+      c.journalCursor = null;
+      c.replayRevision = e.records.revision;
+      return [];
+    }
     const [hosted, main] = await context.main();
     const heads = [...new Set([e.manifest.head, ...(main ? [main] : []), ...(hosted ? [hosted] : [])])];
     const head = heads[c.record++];

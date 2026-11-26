@@ -33,7 +33,8 @@ test('all post-parent index phases fit the dogfood call and action memory budget
   assert.equal(result.counts.events, 5000);
   assert.equal(result.counts.notes, 5000);
   assert.equal(result.counts.sourceBlobs, 32000);
-  assert.equal(result.counts.sourceTreePaths, 25);
+  assert.equal(result.counts.sourceTreePaths, undefined);
+  assert.equal(result.calls['projectWorkIndexBuildStates:tree'] ?? 0, 0);
   assert.equal(result.calls['projectWork:events'], 100);
   t.diagnostic(JSON.stringify(result));
 });
@@ -52,7 +53,7 @@ test('a resumed dogfood coordinator action stays below 512 MiB without retaining
 });
 
 const { randomUUID } = await import('node:crypto');
-const { getFunctionName } = await import('convex/server');
+const { getFunctionName, makeFunctionReference } = await import('convex/server');
 const { moduleUrl } = await import('./convex-module.mjs');
 const { metadataRequest } = await import('../dist/work-metadata.js');
 const { indexedRecord } = await import('../dist/work-hosted-index.js');
@@ -326,11 +327,30 @@ test('MiB recipe-stored files make the former eager comparison exceed the zero-b
   );
 });
 
-test('transient storage failures retry three times, retain the cursor, and resume identical rows', async t => {
+test('a legacy tree build preserves its cursor and retries the same rows after a transient storage failure', async t => {
   const { progressFixture } = await import('./projectWorkIndex-progress-fixture.mjs');
   const options = { treeFiles: 2500, realisticTrees: true, recipes: true };
   const baseline = progressFixture(0.02, undefined, undefined, options);
+  const work = baseline.s.tables.hostedProjects.get('project').work;
+  await baseline.s.ctx.runMutation(makeFunctionReference('projectWorkIndexStore:begin'), {
+    projectId: 'project',
+    owner: 'owner',
+    backupId: work.backupId,
+    revision: work.revision,
+    initialRevision: work.initialRevision,
+    metadata: JSON.stringify({
+      schema: baseline.data.schema,
+      sourceHead: baseline.data.nativeHead,
+      sourceKind: 'native',
+      sourceTransport: 'objects',
+      initialRevision: work.initialRevision,
+      counts: {},
+    }),
+    cursor: JSON.stringify({ phase: 'settings', field: 0, record: 0, source: 0 }),
+  });
   const saved = baseline.snapshot();
+  // The in-memory DB mutates row objects in place. Freeze the old cursor for the resumed driver.
+  saved.tables = structuredClone(saved.tables);
   const complete = async f => {
     let result;
     do {

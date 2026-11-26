@@ -50,7 +50,7 @@ type RecordValue = Pick<
   Doc<'projectWorkRecords'>,
   'collection' | 'key' | 'parent' | 'position' | 'value' | 'status' | 'actor' | 'planning'
 >;
-/** Read-only lookup. Catalog-backed generations (GitHub import) keep no
+/** Read-only lookup. Catalog-backed generations keep no
  * per-blob record: their sourceBlobs resolve from the project object catalog. */
 export async function readRecord(
   ctx: QueryCtx | MutationCtx,
@@ -172,6 +172,7 @@ export const begin = internalMutation({
     initialRevision: v.number(),
     metadata: v.string(),
     cursor: v.optional(v.string()),
+    objectCatalog: v.optional(v.literal(true)),
   },
   returns: v.union(generationDocument, v.null()),
   handler: async (ctx, input) => {
@@ -199,7 +200,11 @@ export const begin = internalMutation({
     const old = previous[0];
     if (old && (!input.cursor || old.ensureCursor || old.status === 'ready')) return old;
     if (old && input.cursor && old.nextBatch === 0) {
-      await ctx.db.patch(old._id, { ensureCursor: input.cursor, metadata: input.metadata });
+      await ctx.db.patch(old._id, {
+        ensureCursor: input.cursor,
+        metadata: input.metadata,
+        ...(input.objectCatalog ? { objectCatalog: input.objectCatalog } : {}),
+      });
       return await ctx.db.get(old._id);
     }
     const { owner: _owner, cursor, ...fields } = input;

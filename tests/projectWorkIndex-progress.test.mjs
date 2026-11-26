@@ -4,6 +4,25 @@ import { workRecordRows } from './hosted-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { progressFixture } from './projectWorkIndex-progress-fixture.mjs';
+
+test('a paged build of an object-backed checkpoint keeps Work history and skips per-file source rows', async () => {
+  const f = progressFixture(0.04, undefined, undefined, { treeFiles: 20, objects: 4_000 });
+  let result;
+  do {
+    result = await f.drive();
+  } while (typeof result !== 'string');
+  const generation = f.s.tables.projectWorkGenerations.get(result);
+  assert.equal(generation.objectCatalog, true);
+  const counts = JSON.parse(generation.metadata).counts;
+  assert.equal(counts.intents, f.data.intents.length);
+  assert.equal(counts.views, f.data.views.length);
+  assert(counts.sourceBlobs >= 4_000, 'logical blob count survives without a Work row per blob');
+  assert.equal(f.metrics.calls['projectWorkIndexBuildStates:tree'] ?? 0, 0);
+  assert(
+    ![...workRecordRows(f.s.tables)].some(row => ['sourceTreePaths', 'sourceBlobs'].includes(row.collection)),
+  );
+});
+
 test('dogfood-shaped synthetic Work index: measured bounded build', async t => {
   const f = progressFixture();
   const started = performance.now();

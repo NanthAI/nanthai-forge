@@ -408,6 +408,12 @@ Row counts and bytes are serialized row JSON from the built projection code, on 
 
 **Why Work payloads stay in Convex.** A mutation can neither read nor write R2, so a payload in R2 turns the one-mutation command into an action, a query and a mutation at best (seven calls on the existing indexed route, measured in a fixture). A reference with overlays removes the read but not the write: every command that changes an Intent produces a new leaf, which only an action can store, or leaves overlays to pile up for a later job to fold. Both break the budget. It would also cost more at every size below the chunk cap: one R2 write is $0.0000045 and needs an action call ($0.000002), against $0.0000006 for a 2 KB chunk in Convex and $0.0000066 at the 32,000-character cap. R2's cheaper storage does not offset it; a 2 KB chunk retained at nine copies costs $0.000000004 a month. These rows do grow by one chunk set per Intent ever filed. That is the Work read model's own growth, and archiving closed Work belongs to S2, which already owns superseded records.
 
+New native seeds and new fallback builds for object-backed checkpoints use the
+existing catalog lookup for blob pins and the exact State reader for Code
+paths. Both omit the per-file Work rows in the onboarding baseline above.
+Older builds resume with their original batch layout. Imported Work history
+still takes space proportional to its own records.
+
 **Candidate file-list cutover.** New clean Candidates carry one listing
 unconditionally; the rollout setting has been removed. The prerequisite dev check
 confirmed one listing pin per new Candidate and unchanged Convex writes per

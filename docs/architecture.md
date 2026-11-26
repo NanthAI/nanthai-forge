@@ -980,7 +980,11 @@ They record timing and query labels only, exclude presence updates, and never
 change a recorded complete time when a live tick rerenders the page.
 
 Source review also resolves exact State and selected-file pins through the
-existing `sourceBlobs` index when its generation names the requested backup.
+existing `sourceBlobs` lookup when its generation names the requested backup.
+Native seeds and newly built generations for object-backed checkpoints resolve
+those pins through the project object catalog. Code reads folder and file paths
+from the exact State. Initial hosting and index repair for these backups reuse
+those readers and omit per-file blob rows and tree-path pages from Work.
 It reads only those immutable objects, without walking the complete retained
 manifest. Each object read still verifies current access, storage metadata,
 size and digest; the final checkpoint check remains. Missing or inconsistent

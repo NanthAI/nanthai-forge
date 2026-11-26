@@ -250,6 +250,9 @@ test('fresh host authority and Plan publication use the same Convex calls as a p
   await hostProject(legacy.root, {}, legacy.dependencies);
   await host(fresh);
   assert.deepEqual(b, a, 'server birth adds no public or nested Convex execution');
+  const calls = b.length;
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(b.length, calls, 'hosting leaves no idle observer or timer');
   // Existing storage-accounting shards depend on random object digests; their
   // occupied shard count is unrelated to server birth. Compare source/control
   // rows and bytes, without turning that random distribution into a test gate.
@@ -272,10 +275,21 @@ test('fresh host authority and Plan publication use the same Convex calls as a p
   );
   assert.equal(fresh.s.tables.projectWorkGenerations.size, 1);
   const projectionRows = [...fresh.s.tables.projectWorkDataRecords.values()];
-  const pathPages = projectionRows.filter(row => row.collection === 'sourceTreePaths');
-  assert.equal(pathPages.length, 8);
-  assert.equal(pathPages.flatMap(row => JSON.parse(row.value).paths).length, 4000);
-  assert.equal(projectionRows.filter(row => row.collection === 'sourceBlobs').length, 0);
+  assert(projectionRows.length <= 8, 'hosting 4,000 files writes at most eight work-data rows');
+  assert(!projectionRows.some(row => ['sourceBlobs', 'sourceTreePaths'].includes(row.collection)));
+  const projectId = [...fresh.s.tables.hostedProjects.keys()][0];
+  const main = await fresh.dependencies.exchange(projectId, randomUUID()).current();
+  const opened = JSON.parse(
+    await fresh.s.ctx.runAction(makeFunctionReference('projectCodeBrowse:read'), {
+      projectId,
+      state: main.head,
+      want: 'open',
+      path: 'nested/file-3995.txt',
+    }),
+  );
+  assert.equal(opened.state, main.head);
+  assert.equal(opened.files, 4000);
+  assert.equal(opened.file.available, true);
   assert(fresh.s.tables.projectFinishReadRows.size - legacy.s.tables.projectFinishReadRows.size <= 2);
   const indexBytes =
     indexTables.reduce(
@@ -291,10 +305,7 @@ test('fresh host authority and Plan publication use the same Convex calls as a p
       (sum, row) => sum + Buffer.byteLength(JSON.stringify(row)),
       0,
     );
-  assert(indexBytes < 128 * 1024, 'the 4000-file Plan projection stays under 128 KiB');
-  const calls = b.length;
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal(b.length, calls, 'hosting leaves no idle observer or timer');
+  assert(indexBytes < 8 * 1024, 'the 4000-file initial index stays under 8 KiB');
   assert.equal(inventory(fresh.root).length, 4000);
   t.diagnostic(
     `4000 files: ${calls} Convex executions per host, including nested calls; ${indexBytes} initial index bytes; idle 0; process peak RSS ${process.resourceUsage().maxRSS} KiB`,

@@ -22,6 +22,7 @@ export async function ownerProjection(
     manifest: z.infer<typeof sourceManifestSchema>;
   },
   owner: string,
+  objectCatalog: boolean,
 ) {
   const pin = snapshot.backup.ownerDerived;
   if (!pin) return;
@@ -40,6 +41,8 @@ export async function ownerProjection(
     snapshot.backup.transport,
     new Map(),
     true,
+    false,
+    objectCatalog,
   );
   const summaries = projection.entries.filter(
     row => row.collection === 'lanes' || row.collection === 'views',
@@ -60,14 +63,16 @@ export async function ownerProjection(
   if ('reason' in supplied) return; // Existing hosted reads preserve their compatibility path.
   const entries = [
     ...projection.entries.filter(row => row.collection !== 'lanes' && row.collection !== 'views'),
-    ...supplied.rows,
+    ...supplied.rows.filter(row => !objectCatalog || row.collection !== 'sourceTreePaths'),
   ];
   const counts: Record<string, number> = {};
   for (const row of entries) {
     if (row.collection === 'viewAcceptances') row.position = counts[row.collection] ?? 0;
     counts[row.collection] = (counts[row.collection] ?? 0) + 1;
   }
-  projection.metadata.counts = counts;
+  projection.metadata.counts = objectCatalog
+    ? { ...counts, sourceBlobs: projection.metadata.counts.sourceBlobs! }
+    : counts;
   return {
     metadata: projection.metadata,
     batches: async function* () {

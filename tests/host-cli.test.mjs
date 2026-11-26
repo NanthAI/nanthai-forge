@@ -51,10 +51,9 @@ test('host creates a brand-new empty native owner through schema-validated Conve
   assert.equal(workspace.planningFilteredReads, true);
   const generation = f.s.tables.projectWorkGenerations.get(empty.generationId);
   assert.equal(generation.format, HOSTED_WORK_INDEX_FORMAT);
-  const tree = [...f.s.tables.projectWorkDataRecords.values()].find(
-    row => row.collection === 'sourceTreePaths',
-  );
-  assert.deepEqual(JSON.parse(tree.value).paths, ['hello.ts']);
+  const rows = [...f.s.tables.projectWorkDataRecords.values()];
+  assert(rows.length <= 8);
+  assert(!rows.some(row => ['sourceBlobs', 'sourceTreePaths'].includes(row.collection)));
   const itemOperation = randomUUID();
   await workCommand.command._handler(f.s.ctx, {
     projectId: result.projectId,
@@ -291,6 +290,9 @@ test('Git-backed hosting preserves Git source/history and complete Work without 
   assert.equal(backup.preview.format, 'sha1');
   assert.equal(backup.preview.intents, 1);
   assert.equal(backup.preview.head, workGit(f.root, ['rev-parse', 'HEAD']).trim());
+  assert.equal(f.s.tables.projectWorkDataRecords.size, 0, 'hosting the Git bundle writes no Work rows');
+  await indexActions.ensure._handler(f.s.ctx, { projectId: result.projectId, rebuild: true });
+  assert(f.s.tables.projectWorkDataRecords.size <= 8, 'indexing the Git bundle has a fixed Work footprint');
   const transport = f.dependencies.exchange(result.projectId, randomUUID());
   const { pullNativeExchange } = await import('../dist/native-exchange.js');
   const target = join(f.directory, 'restored');
