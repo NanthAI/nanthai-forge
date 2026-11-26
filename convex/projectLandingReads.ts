@@ -12,7 +12,8 @@
 // reader marks, or a listed Item changes; never on a clock. mark: 1 read + 1 write, idempotent.
 import { v } from 'convex/values';
 import { mutation, query } from './cliServer';
-import { accessibleProject } from './projectAuthority';
+import { accessibleProject, requireDeviceWrite } from './projectAuthority';
+import { projectRole } from './projectRole';
 import { finishRow } from './projectHostedFinishWake';
 import { hostedRecordBody, recordHead } from './projectHostedRecords';
 import { LANDING_READ_SET } from './projectLandingReadFields';
@@ -220,6 +221,21 @@ export const list = query({
 });
 
 /** Mark landings read (or unread again, for Undo). `through` marks every landing up to that sequence. */
+/** Per-account read state is a write for explicit project participants, including read members. */
+export async function requireLandingReadWrite(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  actor: string,
+) {
+  await requireDeviceWrite(ctx, projectId);
+  const project = await accessibleProject(ctx, projectId, actor);
+  invariant(
+    project.visibility !== 'public' || (await projectRole(ctx, project, actor)),
+    'PROJECT_UNAVAILABLE',
+    'Project membership is required to update read state.',
+  );
+}
+
 export const mark = mutation({
   args: {
     projectId: v.id('hostedProjects'),
@@ -234,7 +250,7 @@ export const mark = mutation({
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to mark what you have read.');
-      await accessibleProject(ctx, projectId, user.subject);
+      await requireLandingReadWrite(ctx, projectId, user.subject);
       invariant(
         read.length + unread.length <= LANDING_READ_SET,
         'BAD_ARGUMENT',

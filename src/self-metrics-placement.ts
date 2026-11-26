@@ -1,41 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-import { z } from 'zod';
-import type { MetricPeriod, MetricRecords } from './self-metrics-types.js';
-import { ForgeError } from './errors.js';
+import type { MetricRecords } from './self-metrics-types.js';
 
-const placementPage = z.object({
-  count: z.number().int().nonnegative(),
-  bytes: z.number().nonnegative(),
-  isDone: z.boolean(),
-  cursor: z.string(),
-});
 export type ConvexBytesWritten = { count: number; bytes: number };
-
-/** Convex file-storage writes in the window: one call when there were none. */
-export async function readPlacement(
-  query: (name: string, args: Record<string, unknown>) => Promise<unknown>,
-  period: MetricPeriod,
-  records: MetricRecords,
-) {
-  const total = { count: 0, bytes: 0 };
-  let cursor: string | null = null;
-  try {
-    do {
-      const page = placementPage.parse(
-        await query('projectBytePlacement:convexWritten', { from: period.from, to: period.to, cursor }),
-      );
-      total.count += page.count;
-      total.bytes += page.bytes;
-      cursor = page.isDone ? null : page.cursor;
-    } while (cursor);
-    records.placement = total;
-  } catch (error) {
-    records.gaps.push(
-      `Bytes by location are unavailable (${error instanceof ForgeError ? error.code : 'projectBytePlacement:convexWritten failed'}).`,
-    );
-  }
-}
 
 /** Bytes go to R2; Convex file storage must receive none. Unknown stays null, never 0. */
 export function calculatePlacementMetrics(records: MetricRecords) {
@@ -43,7 +10,7 @@ export function calculatePlacementMetrics(records: MetricRecords) {
   return {
     partial: !records.placement,
     gaps: [
-      'Convex bytes count every Convex file-storage write on the deployment in the window; R2 holds every new byte.',
+      'Deployment-wide Convex file storage is measured by the internal placement audit. R2 holds new source bytes.',
     ],
     convexBytes,
     convexObjects: records.placement?.count ?? null,

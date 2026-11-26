@@ -162,10 +162,10 @@ linked-retry intervention receipts; other owner interventions remain a named gap
 JSON is the default for agents and redirected output; a terminal gets a short
 text table (`--text` also selects it explicitly).
 
-Hosted metrics also report **bytes by location**: Convex file-storage writes in the
+Deployment administrators can also measure **bytes by location**: Convex file-storage writes in the
 window, which must be 0 because bytes go to R2 (`projectBytePlacement:convexWritten`,
-see [data placement](data-placement.md#measuring-it)). A non-zero value adds a
-warning; a deployment without the query reports the value as unknown (`null`), never 0.
+see [data placement](data-placement.md#measuring-it)). Hosted project self-metrics
+leave that deployment-wide figure unknown (`null`).
 
 The owner records provider bills; Forge never fetches them:
 `nforge metrics record-bill ROOT --provider convex --from 2026-10-27 --to 2026-11-27 --billed-usd N --usage egress-gb=Q,db-io-gb=Q --rate egress-gb=0.132,db-io-gb=0.22`.

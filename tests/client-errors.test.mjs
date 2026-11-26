@@ -73,8 +73,9 @@ test('client error fields are scrubbed and truncated before storage', async () =
   for (const value of Object.values(row)) assert.doesNotMatch(String(value), new RegExp(jwt.slice(0, 20)));
 });
 
-test('a project is attached only under current access', async () => {
+test('a public project is attached only under current membership', async () => {
   const { s, report, rows } = setup();
+  s.tables.hostedProjects.get('project').visibility = 'public';
   s.caller('stranger');
   await report();
   s.caller('reader');

@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import { v } from 'convex/values';
-import { query } from './cliServer';
-import { metricsReader } from './projectSelfMetrics';
+import { internalQuery } from './server';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 
@@ -12,10 +11,9 @@ export const placementPageSize = 64;
 /** Bytes-by-location self-metric: Convex file-storage writes in [from,to), which must stay 0
  * because bytes go to R2 (docs/data-placement.md). Read from the `_storage` system table,
  * newest first, stopping at `from`: one call when nothing was written. Counts only; no ids
- * or names leave the deployment. Owner or maintainer of a project; runs only when asked. */
-export const convexWritten = query({
+ * or names leave the deployment. Deployment administrators can run this internal query on demand. */
+export const convexWritten = internalQuery({
   args: {
-    projectId: v.id('hostedProjects'),
     from: v.string(),
     to: v.string(),
     cursor: v.union(v.string(), v.null()),
@@ -23,7 +21,6 @@ export const convexWritten = query({
   returns: v.object({ count: v.number(), bytes: v.number(), isDone: v.boolean(), cursor: v.string() }),
   handler: async (ctx, input) => {
     try {
-      await metricsReader(ctx, input.projectId);
       const start = Date.parse(input.from),
         end = Date.parse(input.to);
       invariant(

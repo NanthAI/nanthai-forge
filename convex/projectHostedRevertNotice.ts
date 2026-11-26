@@ -8,7 +8,7 @@ import { acceptancePage, acceptanceRow } from './projectHostedAcceptanceStore';
 import { independentIntentItem, readHostedRecord, writeHostedRecord } from './projectHostedRecords';
 import { postSystemLaneNote } from './projectBoardSystem';
 import { markNoteReverted, postIntentLandingNote } from './projectIntentLandingNotes';
-import { accessibleProject } from './projectAuthority';
+import { activeProject } from './projectAuthority';
 import { requireMemberAuthority } from './projectLaneAuthority';
 import { withoutRawId } from './projectNeedsMe';
 import { report } from './errors';
@@ -238,7 +238,7 @@ export const resolveTaken = mutation({
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to answer this.');
-      const project = await accessibleProject(ctx, projectId, user.subject);
+      const project = await activeProject(ctx, projectId, user.subject);
       const stored = project.needsFix?.[intentId];
       const entry = stored ? takenOutOf(JSON.parse(stored)) : null;
       invariant(entry, 'WORK_STALE', 'This change is no longer waiting for an answer.');

@@ -22,7 +22,6 @@ import { applyHostedBills, currentBills, hostedBillRows, type RecordedBill } fro
 import type { readExactHostedContext } from './self-metrics-hosted-context.js';
 import { metricReceiptRowSchema } from './self-metric-receipts.js';
 import { hostedCallerReceipts } from './self-metrics-hosted-receipts.js';
-import { readPlacement } from './self-metrics-placement.js';
 import { METRICS_CONTEXT_DAYS_DEFAULT, METRICS_CONTEXT_DAYS_MAX } from './self-metrics-page.js';
 import { landingCostsSchema } from './hosted-landings-view.js';
 import { dayBudgetSummarySchema, landingSpeedSummarySchema } from './landing-speed-alerts.js';
@@ -674,7 +673,6 @@ export async function readHostedMetricPages(
       });
     applyHostedBills(records, bills);
     hostedCallerReceipts(records, receiptRows, receiptCoverage, period);
-    await readPlacement(query, period, records);
     const requests = records.submissions;
     joinMetricAttempts(records, attempts, pins);
     await hydrateMetricInputs(

@@ -3,7 +3,8 @@
 import { makeFunctionReference } from 'convex/server';
 import { v } from 'convex/values';
 import { mutation } from './cliServer';
-import { accessibleProject } from './projectAuthority';
+import { accessibleProject, requireDeviceWrite } from './projectAuthority';
+import { projectRole } from './projectRole';
 import { report } from './errors';
 import { utcDay } from './projectStatsClose';
 import { invariant } from '../src/errors';
@@ -20,7 +21,13 @@ export const refreshToday = mutation({
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'AUTH_REQUIRED', 'Sign in to see Stats.');
-      await accessibleProject(ctx, projectId, user.subject);
+      await requireDeviceWrite(ctx, projectId);
+      const project = await accessibleProject(ctx, projectId, user.subject);
+      invariant(
+        project.visibility !== 'public' || (await projectRole(ctx, project, user.subject)),
+        'PROJECT_UNAVAILABLE',
+        'Project membership is required to refresh Stats.',
+      );
       const now = Date.now(),
         day = utcDay(now);
       const row = await ctx.db

@@ -3,7 +3,7 @@
 import { v } from 'convex/values';
 import { query, mutation, type QueryCtx, type MutationCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
-import { accessibleProject } from './projectAuthority';
+import { accessibleProject, activeOwnedProject } from './projectAuthority';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { digest } from '../src/state/hash';
 import { hostedBillSchema } from '../src/self-metrics-bills';
@@ -23,8 +23,10 @@ export const record = mutation({
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
-      const { project, actor } = await reader(ctx, input.projectId);
-      invariant(project.owner === actor, 'PROJECT_UNAVAILABLE', 'Only the project owner records bills.');
+      const user = await ctx.auth.getUserIdentity();
+      invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to record project bills.');
+      const actor = user.subject;
+      await activeOwnedProject(ctx, input.projectId, actor);
       const bill = hostedBillSchema.parse(JSON.parse(input.bill));
       const value = canonicalPayload(bill),
         hash = digest(value);

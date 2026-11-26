@@ -4,7 +4,10 @@ import { v } from 'convex/values';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
 import { query, mutation } from './cliServer';
 import { clientErrorKind } from './clientErrorFields';
-import { accessibleProject, ownedProject } from './projectAuthority';
+import { accessibleProject, ownedProject, requireDeviceWrite } from './projectAuthority';
+import { assertAccountActive } from './accountLimits';
+import { requireAccountWriteAccess } from './accessPolicy';
+import { projectRole } from './projectRole';
 import { report as reportError } from './errors';
 import { invariant } from '../src/errors';
 import { clientErrorLimits as limit, clip, scrubRoute, scrubText } from '../src/client-error-text';
@@ -44,14 +47,16 @@ export const report = mutation({
         )
         .unique();
       if (existing) return existing._id;
-      // A project is attached only under current access, so its owner never sees reports about projects the caller cannot read.
+      await assertAccountActive(ctx, user.subject);
       const id = args.projectId ? ctx.db.normalizeId('hostedProjects', args.projectId) : null;
-      const projectId = id
-        ? await accessibleProject(ctx, id, user.subject).then(
-            () => id,
-            () => undefined,
-          )
-        : undefined;
+      if (id) await requireDeviceWrite(ctx, id);
+      else requireAccountWriteAccess(ctx.forgeDevice);
+      // Public source visibility alone cannot put a visitor's report in the owner's error feed.
+      const project = id && (await accessibleProject(ctx, id, user.subject).catch(() => null));
+      const projectId =
+        project && (project.visibility !== 'public' || (await projectRole(ctx, project, user.subject)))
+          ? project._id
+          : undefined;
       const stack = optionalText(args.stack, limit.stack),
         functionName = optionalText(args.functionName, limit.functionName),
         code = optionalText(args.code, limit.code);

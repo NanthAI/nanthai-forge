@@ -13,7 +13,7 @@ export const clientErrorFields = {
   /** Auth subject of the reporting account; never supplied by the client. */
   user: v.string(),
   operationId: v.string(),
-  /** Set only when the reporter had current access to the project. */
+  /** Set only when the reporter was a current project member. */
   projectId: v.optional(v.id('hostedProjects')),
   kind: clientErrorKind,
   message: v.string(),

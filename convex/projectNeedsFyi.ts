@@ -20,6 +20,7 @@ import type { QueryCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
 import { landingReadState } from './projectLandingReadFields';
 import { accessibleProject, coordinationAccess } from './projectAuthority';
+import { requireLandingReadWrite } from './projectLandingReads';
 import { shareQueryRoles } from './projectRole';
 import { finishRow } from './projectHostedFinishWake';
 import { culpritOf } from './projectMainRed';
@@ -336,7 +337,7 @@ export const dismiss = mutation({
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to clear what you have seen.');
-      await accessibleProject(ctx, projectId, user.subject);
+      await requireLandingReadWrite(ctx, projectId, user.subject);
       invariant(
         keys.length <= FYI_DISMISS_BATCH && keys.every(key => KEY.test(key)),
         'BAD_ARGUMENT',

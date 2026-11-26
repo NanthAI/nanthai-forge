@@ -111,11 +111,7 @@ test('owner bills are idempotent, owner-only, paged in one call, and give per-pe
   const writes = f.meter.writes,
     calls = f.meter.calls;
   const { records } = await readHostedMetricPages(f.query, period);
-  assert.equal(
-    f.meter.calls - calls,
-    8,
-    'six required metric streams, one bill page and one bytes-by-location page',
-  );
+  assert.equal(f.meter.calls - calls, 7, 'six required metric streams and one bill page');
   assert.equal(f.meter.writes, writes, 'reading metrics writes nothing');
   const result = metricsSurface(records, period);
   const periods = result.totals['5.8'].periods;
@@ -228,11 +224,7 @@ test('metrics projects every live cost budget from existing landing and run page
   f.run('audit', at(15), at(18), 1200, { gate: { mode: 'audit' }, execution: { seconds: 1200 } });
   const calls = f.meter.calls;
   const { records } = await readHostedMetricPages(f.query, period);
-  assert.equal(
-    f.meter.calls - calls,
-    8,
-    'required metric streams, bills and placement; no unused Lane/save history',
-  );
+  assert.equal(f.meter.calls - calls, 7, 'required metric streams and bills; no unused Lane/save history');
   const rows = speedBudgetRows(records, period, speedBudgets);
   const value = id => rows.find(row => row.id === id).value;
   assert.equal(value('save'), 15000);
@@ -301,7 +293,7 @@ test('metrics projects every live cost budget from existing landing and run page
     projectedRows += parsed.page.length;
     return JSON.stringify(old);
   }, period);
-  assert.equal(f.meter.calls - before.calls, 8);
+  assert.equal(f.meter.calls - before.calls, 7);
   assert.equal(f.meter.documents - before.documents, latestDocuments, 'same DB rows on each read');
   assert(addedBytes < projectedRows * 300, 'bounded additive reply bytes per row');
   const unknown = speedBudgetRows(legacy.records, period, speedBudgets).filter(

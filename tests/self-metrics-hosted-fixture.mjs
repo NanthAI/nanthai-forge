@@ -8,11 +8,9 @@ const api = await import(moduleUrl('../convex/projectSelfMetrics.ts'));
 const { metricReadProjection } = await import(moduleUrl('../convex/projectMetricReadProjection.ts'));
 const bills = await import(moduleUrl('../convex/projectSelfMetricBills.ts'));
 const saveHeads = await import(moduleUrl('../convex/projectMetricSaveHeadBackfill.ts'));
-const placement = await import(moduleUrl('../convex/projectBytePlacement.ts'));
 const handlers = {
   'projectSelfMetrics:page': api.page,
   'projectSelfMetricBills:page': bills.page,
-  'projectBytePlacement:convexWritten': placement.convexWritten,
 };
 const schema = (await import(moduleUrl('../convex/schema.ts'))).default;
 export const period = { from: '2026-10-28T00:00:00.000Z', to: '2026-11-04T00:00:00.000Z' };
