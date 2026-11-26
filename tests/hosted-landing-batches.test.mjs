@@ -241,6 +241,52 @@ test('a main receipt race recomposes the whole cohort without transferring evide
   assertForkRacesNamed(f, 'cohort');
 });
 
+test('a rebased cohort reports zero landed paths for a member already present on main', async t => {
+  const f = await batchesFixture(t, { count: 3, fileCount: 2 });
+  await f.drain();
+  const moved = f.moveMain({ files: [['member-0', 'member 0']] });
+  const [first] = f.runs();
+  await f.passChecks();
+  await f.drain();
+  const replacement = f.runs().find(run => run.status === 'queued');
+  assert.notEqual(replacement.id, first.id);
+  await f.passChecks();
+  await f.drain();
+
+  assert(states(f).every(state => state.phase === 'landed'));
+  const mainPaths = new Set(JSON.parse(f.c.objects.get(moved.head)).files.map(file => file.path));
+  const landedFiles = JSON.parse(f.c.objects.get(f.currentMain().head)).files;
+  assert.deepEqual(
+    landedFiles.map(file => file.path).filter(path => !mainPaths.has(path)),
+    ['member-1', 'member-2'],
+  );
+  const rows = [...f.tables.projectHostedLandingRequests.values()];
+  assert.deepEqual(
+    f.entries.map(({ state }) => rows.find(row => row.submissionId === state.id).landedPathCount),
+    [0, 1, 1],
+  );
+});
+
+test('a published cohort reports unknown counts for members sharing a net changed path', async t => {
+  const f = await batchesFixture(t, {
+    count: 3,
+    fileCount: 2,
+    memberPaths: ['shared.txt', 'shared.txt', 'separate.txt'],
+    memberContents: ['same bytes', 'same bytes'],
+  });
+  await f.drain();
+  await f.passChecks();
+  await f.drain();
+
+  assert.equal(f.runs().length, 1);
+  assert(states(f).every(state => state.phase === 'landed' && !state.batchSolo));
+  const rows = [...f.tables.projectHostedLandingRequests.values()];
+  assert.deepEqual(
+    f.entries.map(({ state }) => rows.find(row => row.submissionId === state.id).landedPathCount),
+    [null, null, 1],
+  );
+});
+
 for (const firstSeconds of [undefined, 480])
   test(`a cohort main race carries ${firstSeconds === undefined ? 'unknown' : 'shared, reported'} discarded usage once per member`, async t => {
     compactDiscardedChecks(t);

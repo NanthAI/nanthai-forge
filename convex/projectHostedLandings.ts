@@ -16,6 +16,7 @@ import { landingAttemptPrefix } from './projectHostedLandingAttemptRead';
 import { replayHoldEdges, replayRead, type LandingReplay } from './projectHostedLandingReplay';
 import { landingRow } from './projectHostedLandingStore';
 import { finishRow } from './projectHostedFinishWake';
+import { acceptancePage } from './projectHostedAcceptanceStore';
 import type { HostedAcceptance } from '../src/hosted-acceptance';
 import type { HostedLandingAttempt, HostedLandingState } from '../src/hosted-landing';
 import { invariant } from '../src/errors';
@@ -163,14 +164,12 @@ async function evidence(
   const intentId = finish
     ? ((JSON.parse(finish.value) as { source?: { intentId?: string } }).source?.intentId ?? null)
     : null;
-  const lanes = intentId
-    ? await ctx.db
-        .query('projectHostedRecordHeads')
-        .withIndex('by_project_and_kind_and_parent', q =>
-          q.eq('projectId', projectId).eq('kind', 'lane').eq('parent', intentId),
-        )
-        .take(2)
-    : [];
+  const laneCount = receipt.completion?.lanes ?? 0;
+  const inputs = laneCount
+    ? await acceptancePage(ctx, { projectId, receiptId: receipt.id, kind: 'inputs', index: 0 })
+    : null;
+  bytes += inputs?.value.length ?? 0;
+  const laneId = inputs ? (JSON.parse(inputs.value).entries[0]?.laneId as string | undefined) : undefined;
   // The admission Lane check first, then each attempt's check, then the accepting run; distinct, capped.
   const runIds = [
     ...new Set(
@@ -204,8 +203,8 @@ async function evidence(
       title: (message ?? state?.message ?? state?.request?.message)?.split(/\r?\n/, 1)[0] ?? null,
       receiptId: receipt.id,
       submissionId: receipt.submissionId,
-      laneId: lanes[0]?.key ?? null,
-      ...(lanes.length > 1 ? { moreLanes: true } : {}),
+      laneId: laneId ?? null,
+      ...(laneCount > 1 ? { moreLanes: true } : {}),
       intentId,
       kind: request?.revertOf ? 'compensating' : 'landing',
       batchId: receipt.batchId ?? null,

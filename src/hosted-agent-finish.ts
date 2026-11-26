@@ -59,6 +59,7 @@ import {
 } from './hosted-finish-guard.js';
 import { syncRequiredAdvice, syncRequiredContinuation, type WouldConflict } from './hosted-would-conflict.js';
 import type { HostedAgentResponse, HostedAgentSession } from './hosted-agent-transport.js';
+import { landedPathCountFeature } from './hosted-contract-features.js';
 import {
   AuthorityPinRefused,
   beganAtOlderEpoch,
@@ -76,6 +77,14 @@ import { makeFunctionReference } from 'convex/server';
 const finishNotSavedKey = 'finish-not-saved';
 
 type FinishCommand = z.infer<typeof hostedAgentCommandSchemas.finish>;
+type LandingSubmitReply = HostedLandingState & { changedPaths?: number | null };
+
+function finishSubmission({ changedPaths, ...submission }: LandingSubmitReply) {
+  return { submission, ...(changedPaths === undefined ? {} : { changedPaths }) };
+}
+
+const landedCountArg = (session: HostedAgentSession) =>
+  session.capabilities.features?.includes(landedPathCountFeature) ? { landedPathCount: 1 } : {};
 
 /** Enqueue a landing request. A moved main refuses it inside the transaction that would begin it, so
  * nothing began: its Candidate composed on a main that has since moved, and resending it can never
@@ -244,13 +253,14 @@ async function enqueueLanding(session: HostedAgentSession, request: unknown, pin
     return await submitWhenRoom(
       session,
       room =>
-        session.mutation<HostedLandingState>('projectHostedLanding:enqueue', {
+        session.mutation<LandingSubmitReply>('projectHostedLanding:enqueue', {
           request: canonicalPayload({ ...(request as object), governanceVersion: 1 }),
           ...(session.landingAgent ? { agent: session.landingAgent } : {}),
           ...(session.landingClient ? { agentClient: session.landingClient } : {}),
           ...landGatesArg(session),
           ...tokensArg(session),
           ...clientHoldArg(session),
+          ...landedCountArg(session),
           ...room,
         }),
       () => {
@@ -292,16 +302,17 @@ async function replayFinish(session: HostedAgentSession, pinnedCandidate: boolea
     session.journal.get<string>('finish-compose-operation') ?? session.journal.get<string>('id:compose');
   const desired = session.journal.get<{ authorityEpoch: number }>('desired-landing');
   if (desired) {
-    let submission: HostedLandingState;
+    let submission: LandingSubmitReply;
     try {
       submission = await submitWhenRoom(session, room =>
-        session.mutation<HostedLandingState>('projectHostedLandingDesired:submit', {
+        session.mutation<LandingSubmitReply>('projectHostedLandingDesired:submit', {
           request: canonicalPayload(desired),
           ...(session.landingAgent ? { agent: session.landingAgent } : {}),
           ...(session.landingClient ? { agentClient: session.landingClient } : {}),
           ...landGatesArg(session),
           ...tokensArg(session),
           ...clientHoldArg(session),
+          ...landedCountArg(session),
           ...room,
         }),
       );
@@ -355,7 +366,7 @@ async function replayFinish(session: HostedAgentSession, pinnedCandidate: boolea
       phase: 'finish',
       composeOperationId,
       ...(progress === undefined ? {} : { progress }),
-      submission,
+      ...finishSubmission(submission),
       ...(await queuedConflict(session, submission)),
     };
   }
@@ -389,7 +400,7 @@ async function replayFinish(session: HostedAgentSession, pinnedCandidate: boolea
     await session.journal.retain('finish-check-run', () => run);
     return { phase: 'check', composeOperationId, run };
   }
-  let submission: HostedLandingState;
+  let submission: LandingSubmitReply;
   try {
     submission = await enqueueLanding(session, request, pinnedCandidate);
   } catch (error) {
@@ -402,7 +413,7 @@ async function replayFinish(session: HostedAgentSession, pinnedCandidate: boolea
   return {
     phase: 'finish',
     composeOperationId,
-    submission,
+    ...finishSubmission(submission),
     ...(await queuedConflict(session, submission)),
   };
 }
@@ -599,7 +610,15 @@ export async function executeHostedFinish(session: HostedAgentSession, input: un
   const context = session.journal.get<FinishContext>('finish-context');
   const { localPreflight, ...defaults } =
     session.journal.get<Record<string, unknown>>('finish-defaults') ?? {};
-  const changedPaths = session.journal.get<number | null>(finishChangedPathsKey);
+  const observed = result as
+    | { changedPaths?: number | null; submission?: Pick<HostedLandingState, 'phase'> }
+    | null
+    | undefined;
+  const acceptedPaths = observed?.changedPaths;
+  const changedPaths =
+    acceptedPaths === undefined && observed?.submission?.phase !== 'landed'
+      ? session.journal.get<number | null>(finishChangedPathsKey)
+      : acceptedPaths;
   const notSaved = session.journal.get<NotSaved>(finishNotSavedKey);
   // Retained by the check selection (no extra read): the runner's logs are public.
   const checkLogs = session.journal.get<string>(checkLogsKey);
@@ -612,7 +631,7 @@ export async function executeHostedFinish(session: HostedAgentSession, input: un
     ...(Object.keys(defaults).length ? { defaults } : {}),
     ...(localPreflight ? { localPreflight } : {}),
     ...(notSaved ? { notSaved } : {}),
-    // Changed paths this landing carries against the Lane's base; null when the base manifest is not cached.
+    // Pending replies may have a Lane estimate. Settled landings only use accepted evidence.
     ...(changedPaths === undefined ? {} : { changedPaths }),
   };
   // One wake-driven command that resumes a long queue; absent once the outcome is final.
@@ -999,7 +1018,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
       );
       await retainLandGates(session, composeOperationId);
       const submission = await submitWhenRoom(session, room =>
-        session.mutation('projectHostedLandingDesired:submit', {
+        session.mutation<LandingSubmitReply>('projectHostedLandingDesired:submit', {
           request: canonicalPayload({ ...desired, governanceVersion: 1 }),
           // The receipt records the agent run that landed it (d730121f); outside the replayed request.
           ...(session.landingAgent ? { agent: session.landingAgent } : {}),
@@ -1007,6 +1026,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
           ...landGatesArg(session),
           ...tokensArg(session),
           ...clientHoldArg(session),
+          ...landedCountArg(session),
           ...room,
         }),
       );
@@ -1015,7 +1035,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
         phase: 'finish',
         composeOperationId,
         progress,
-        submission,
+        ...finishSubmission(submission),
         ...(await queuedConflict(session, submission as HostedLandingState)),
       };
     }
@@ -1087,7 +1107,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
   return {
     phase: 'finish',
     composeOperationId,
-    submission: result,
+    ...finishSubmission(result),
     ...(await queuedConflict(session, result)),
   };
 }

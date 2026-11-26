@@ -77,6 +77,7 @@ export const submit = receiptMutation({
     /** Land only while the queue holds fewer checks (feature land-when-room, ad80e037); judged here,
      * for a new submission only, and not part of the request. */
     maxChecks: v.optional(v.number()),
+    landedPathCount: v.optional(v.literal(1)),
   },
   returns: v.string(),
   handler: async (ctx, input) => {
@@ -104,6 +105,7 @@ export const submit = receiptMutation({
         input.maxChecks,
         true,
         heldMs,
+        input.landedPathCount === 1,
       );
       return reply(state);
     } catch (error) {
@@ -130,6 +132,7 @@ export async function submitDesiredLanding(
   maxChecks?: number,
   includeReview = false,
   heldMs?: number,
+  includeLandedPathCount = false,
 ): Promise<string> {
   const { githubProof, ...requestCommand } = inputCommand;
   const command =
@@ -148,13 +151,20 @@ export async function submitDesiredLanding(
   const project = await activeProject(ctx, input.projectId, actor.id);
   // Only reused canonical states can be held. Project the current approval on the public reply,
   // leaving the stored state bytes intact and every fresh submission on its existing path.
-  const reply = async (row: Pick<LandingRow, 'value'> & { phase?: LandingRow['phase'] }) => {
+  const reply = async (
+    row: Pick<LandingRow, 'value' | 'landedPathCount'> & { phase?: LandingRow['phase'] },
+  ) => {
     const state = JSON.parse(row.value) as z.infer<typeof storedLandingStateSchema>;
     const review = includeReview && row.phase === 'ready' ? await heldReview(ctx, project, state) : null;
     const visible = heldMs === undefined ? landingWithoutClientHold(state) : state;
-    if (!review && !state.messageRef && visible === state) return row.value;
+    const changedPaths = includeLandedPathCount && state.phase === 'landed' ? row.landedPathCount : undefined;
+    if (!review && !state.messageRef && visible === state && changedPaths === undefined) return row.value;
     const selected = await landingMessageForReader(ctx, projectId, visible);
-    return canonicalPayload(review ? { ...selected, ...review } : selected);
+    return canonicalPayload({
+      ...selected,
+      ...review,
+      ...(changedPaths === undefined ? {} : { changedPaths }),
+    });
   };
   const request = canonicalPayload(withoutAuthorship(command));
   const old = await ctx.db

@@ -22,6 +22,7 @@ export const finishReadFields = {
     'metadata',
   ],
   projectHostedLandingRequests: [
+    'landedPathCount',
     'runnerAccounting',
     'hold',
     'requestBodyId',

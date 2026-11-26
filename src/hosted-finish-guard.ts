@@ -1,14 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import { pathsAgainstBase } from './hosted-changed-paths.js';
-import { join } from 'node:path';
 import { ForgeError } from './errors.js';
 import { readLaneEntry } from './lane-registry.js';
 import { readHostedLaneCheckout, type HostedLaneCheckoutMarker } from './hosted-lane-checkout-marker.js';
 import { scanCheckout } from './hosted-agent-finish-identity.js';
 import { shellQuote } from './shell-quote.js';
-import { checkoutPathExists } from './hosted-checkout-files.js';
-import { hostedAgentDirectory, readAgentJson } from './hosted-agent-journal.js';
 
 export function changedPathsAgainstBase(root: string, marker: HostedLaneCheckoutMarker): number | null {
   return pathsAgainstBase(root, marker)?.length ?? null;
@@ -48,19 +45,5 @@ export function nothingToLandError(laneId: string) {
   );
 }
 
-/** Changed-path count a finish reported, kept in the finish journal beside its other retained values. */
+/** Local path estimate retained for pending finish replies. */
 export const finishChangedPathsKey = 'finish-changed-paths';
-
-/** The changed-path count this checkout's finish operation retained (a wait prints it with LANDED). */
-export function retainedChangedPaths(root: string, operationId: string): number | null | undefined {
-  try {
-    const path = join(hostedAgentDirectory(root), `${operationId}.json`);
-    if (!checkoutPathExists(path)) return undefined;
-    const value = (readAgentJson(path) as { values?: Record<string, unknown> }).values?.[
-      finishChangedPathsKey
-    ];
-    return typeof value === 'number' || value === null ? value : undefined;
-  } catch {
-    return undefined;
-  }
-}

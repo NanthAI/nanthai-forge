@@ -47,6 +47,7 @@ export async function reuseHostedLanding(
   },
 ): Promise<{
   state?: HostedLandingState;
+  landedPathCount?: number | null;
   selectionKey?: string;
   supersedes?: string;
   retryReason?: HostedLandingState['retryReason'];
@@ -63,9 +64,11 @@ export async function reuseHostedLanding(
       'WORK_OPERATION_CHANGED',
       'Replay the original landing request.',
     );
-    return {
-      state: (await loadLanding(ctx, { projectId: input.projectId, submissionId: alias.submissionId })).state,
-    };
+    const { row, state } = await loadLanding(ctx, {
+      projectId: input.projectId,
+      submissionId: alias.submissionId,
+    });
+    return { state, ...(row.landedPathCount === undefined ? {} : { landedPathCount: row.landedPathCount }) };
   }
   // Reviewed API Candidates retain independent person selections. The agent
   // finish/land protocol describes a desired set of saved Lane heads.
@@ -139,5 +142,8 @@ export async function reuseHostedLanding(
     requestHash,
     submissionId: existing.submissionId,
   });
-  return { state };
+  return {
+    state,
+    ...(existing.landedPathCount === undefined ? {} : { landedPathCount: existing.landedPathCount }),
+  };
 }

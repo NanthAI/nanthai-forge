@@ -57,6 +57,7 @@ const eventSchema = z.object({
   sourceFailure: z.unknown().optional(),
   /** A landed reply while the GitHub mirror is stopped (friction 28e84c06). */
   mirrorStopped: z.unknown().optional(),
+  changedPaths: z.number().int().nonnegative().nullable().optional(),
   pendingAttempt: hostedFinishSchema.shape.pending,
   queue: z.unknown().optional(),
   queueAheadSelection: z.unknown().optional(),
@@ -172,6 +173,7 @@ export async function observeHostedSubmissions(
                 failureCause,
                 sourceFailure,
                 mirrorStopped,
+                changedPaths,
                 pendingAttempt,
                 queue,
                 wouldConflict,
@@ -189,6 +191,7 @@ export async function observeHostedSubmissions(
                 ...(failureCause ? { failureCause } : {}),
                 ...(sourceFailure ? { sourceFailure } : {}),
                 ...(mirrorStopped ? { mirrorStopped } : {}),
+                ...(changedPaths === undefined ? {} : { changedPaths }),
                 pendingAttempt,
                 ...(recovery ? { recovery } : {}),
                 ...(conflict ? { conflict } : {}),
@@ -573,6 +576,7 @@ async function observeHostedSubmissionsOnce(
               ...(page.failureCause ? { failureCause: page.failureCause } : {}),
               ...(page.sourceFailure ? { sourceFailure: page.sourceFailure } : {}),
               ...(page.mirrorStopped ? { mirrorStopped: page.mirrorStopped } : {}),
+              ...(page.changedPaths === undefined ? {} : { changedPaths: page.changedPaths }),
               ...((page.recovery ?? suppliedAdvice?.recovery)
                 ? { recovery: page.recovery ?? suppliedAdvice?.recovery }
                 : {}),

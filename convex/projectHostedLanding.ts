@@ -76,6 +76,7 @@ import {
   landingObservation,
   landingHoldMs,
   landingTokensColumn,
+  type HostedLandingState,
 } from '../src/hosted-landing';
 import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
@@ -130,6 +131,7 @@ export const enqueue = receiptMutation({
     /** Land only while the queue holds fewer checks (feature land-when-room, ad80e037); judged here,
      * for a new operation only, and not part of the request. */
     maxChecks: v.optional(v.number()),
+    landedPathCount: v.optional(v.literal(1)),
   },
   returns: v.string(),
   handler: async (ctx, input) => {
@@ -145,7 +147,7 @@ export const enqueue = receiptMutation({
         'landing',
         input.memberBudget,
       );
-      const state = await enqueueHostedLanding(
+      const { changedPaths, ...state } = await enqueueHostedLanding(
         ctx,
         {
           projectId: input.projectId,
@@ -156,6 +158,7 @@ export const enqueue = receiptMutation({
           heldMs,
           gates: { value: input.gates },
           ...(input.maxChecks === undefined ? {} : { maxChecks: input.maxChecks }),
+          ...(input.landedPathCount === 1 ? { includeLandedPathCount: true } : {}),
         },
         request,
         actor,
@@ -163,7 +166,13 @@ export const enqueue = receiptMutation({
       const review = await heldReview(ctx, authorizedReadProject(ctx, input.projectId), state);
       const visible = heldMs === undefined ? landingWithoutClientHold(state) : state;
       const selected = await landingMessageForReader(ctx, input.projectId, visible);
-      return reply(canonicalPayload(review ? { ...selected, ...review } : selected));
+      return reply(
+        canonicalPayload({
+          ...selected,
+          ...review,
+          ...(changedPaths === undefined ? {} : { changedPaths }),
+        }),
+      );
     } catch (error) {
       return report(error);
     }
@@ -366,6 +375,7 @@ export async function enqueueHostedLanding(
     gates?: { value: string | undefined };
     /** Public entry point only: `land {maxChecks}` (convex/projectHostedQueueRoom.ts). */
     maxChecks?: number;
+    includeLandedPathCount?: boolean;
     /** The submitting device's folder grant (df06081d), stamped at submit; absent otherwise. */
     grant?: LandingGrant | undefined;
   },
@@ -399,7 +409,14 @@ export async function enqueueHostedLanding(
     workCharged: Boolean(reserved),
     grant: input.grant,
   });
-  if (reused.state) return reused.state;
+  const forCaller = (
+    state: HostedLandingState,
+    count: number | null | undefined,
+  ): HostedLandingState & { changedPaths?: number | null } =>
+    input.includeLandedPathCount && state.phase === 'landed' && count !== undefined
+      ? { ...state, changedPaths: count }
+      : state;
+  if (reused.state) return forCaller(reused.state, reused.landedPathCount);
   const expected = {
     authorityEpoch: request.authorityEpoch,
     ...request.expectedMain,
@@ -444,7 +461,7 @@ export async function enqueueHostedLanding(
     else if (state.phase === 'checking' && row.runId)
       await notifyLandingCheck(ctx, { projectId: input.projectId, runId: row.runId });
     await initializeFinish(ctx, state);
-    return state;
+    return forCaller(state, row.landedPathCount);
   }
   // A new operation only: a replay above returns its retained landing unjudged.
   await requireQueueRoom(ctx, input.projectId, input.maxChecks);
@@ -698,7 +715,7 @@ export async function enqueueHostedLanding(
   // A held change keeps its stall alarm: while its holder holds order the alarm only clears itself
   // (as a Ready waiter's does); if the holder left without releasing it, the repair queues it.
   await scheduleLandingAlarm(ctx, state);
-  return state;
+  return forCaller(state, undefined);
 }
 
 /** One Candidate subscription, no project queue scan or observer-driven work. */

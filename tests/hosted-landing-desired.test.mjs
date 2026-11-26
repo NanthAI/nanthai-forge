@@ -38,9 +38,13 @@ const request = f => ({
   after: null,
   check: f.request().check,
 });
-const submit = (f, command) =>
+const submit = (f, command, options = {}) =>
   f
-    .tx('desiredSubmit', desired.submit, { projectId: f.projectId, request: JSON.stringify(command) })
+    .tx('desiredSubmit', desired.submit, {
+      projectId: f.projectId,
+      request: JSON.stringify(command),
+      ...options,
+    })
     .then(JSON.parse);
 const read = (f, operationId, actor = 'owner') =>
   f
@@ -830,6 +834,11 @@ test('incident replay 08169467: completed compose replaces a running desired wak
   assert.equal(f.tables.projectHostedAcceptances.size, 1);
   assert.equal(f.pending().length, 0);
   assert.equal((await read(f, command.operationId)).submission.id, state.id);
+  const replay = await submit(f, command, { landedPathCount: 1 });
+  assert.equal(replay.id, state.id);
+  assert.equal(replay.changedPaths, (await read(f, command.operationId)).changedPaths);
+  assert.equal(typeof replay.changedPaths, 'number');
+  assert.equal((await submit(f, command)).changedPaths, undefined);
 });
 
 test('incident replay 9809f716: compose completion wakes the live goal, not an older ended goal on the same compose', async t => {

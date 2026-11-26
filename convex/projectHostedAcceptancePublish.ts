@@ -555,6 +555,7 @@ export async function publishAcceptance(
   const completionAlarm = plan.inputPages ? row.alarm?.taskId : undefined;
   await writeLanding(ctx, row, next, false, row.runId !== run?.id, completionAlarm, {
     feedLanes: plan.feedLanes,
+    landedPathCount: changedPaths?.length ?? null,
     replay: {
       ...(run ? checkReplay(run) : {}),
       actualBase: receipt.previous,

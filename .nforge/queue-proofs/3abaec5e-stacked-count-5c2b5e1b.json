@@ -1,0 +1,78 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "src/hosted-finish-guard.ts": "1d64b0e08f77fc20bd139663eab737f6edaf60ebc1851288e8b9d7af0f29ece1"
+  },
+  "replay": {
+    "incident": "5c2b5e1b",
+    "test": "incident replay 5c2b5e1b: a resolution Lane landed with keepOpen completes its original; the resolution stays open",
+    "receipt": "b80ee33a-708f-4c95-b26d-e3e1d6cdc814"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "thread:delegated-task:command%3Amcp%3Ab657ad7c-db45-496b-8ea7-c92c22ca8403%3Adelegate-task%3A40280f4a-d4b3-4f67-983f-6bc42a243457",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "thread:delegated-task:command%3Amcp%3A270dd238-0ec5-4894-aa79-f5b1f28067e3%3Adelegate-task%3Ad89b253b-a227-40f7-ae7e-9663e991addf",
+    "receipt": "b80ee33a-708f-4c95-b26d-e3e1d6cdc814"
+  },
+  "exercised": {
+    "src/hosted-finish-guard.ts": {
+      "executed": [
+        "changedPathsAgainstBase"
+      ],
+      "digest": "0cae0ce2bffa782261b38dd62603bff14d726222441003f5efc13e8b94e11385",
+      "units": [
+        [
+          "ForgeError",
+          "80782ffe370115376243f742db60843dd45ba6c24c25340d4092b697f7ab8a84"
+        ],
+        [
+          "changedPathsAgainstBase",
+          "80d1390efc10a237636ced825e0ad3f059f575d6748b2d0e2dd31e08670ebbe1"
+        ],
+        [
+          "finishChangedPathsKey",
+          "3520fd5736136672e6bab820472167aa1a00f89b2b6282d90664b52572892b74"
+        ],
+        [
+          "inspectLaneCheckout",
+          "9a5cc9edf99c7582d966cbd72fd0c9615c5cb6d86d5ee68d504f7f8a83042406"
+        ],
+        [
+          "nothingToLandError",
+          "1607fa64e5184aae5f8f600d16671a0f7aef2bd6560276993e26d3dddd415d7f"
+        ],
+        [
+          "pathsAgainstBase",
+          "9791422cf40d67330387961da21178bd682716403660219be99bbbed5c93b3f7"
+        ],
+        [
+          "plural",
+          "3410a5451c4f4504919f19a21791117be7bba582d422dd21d1940eb614324b84"
+        ],
+        [
+          "readHostedLaneCheckout",
+          "a9e34c0f2ca203e38017b50fcae0943416c213fd8f668dc8c0bf6346628b5de6"
+        ],
+        [
+          "readLaneEntry",
+          "234143c671f57b9d5faf00532c8b669b652ea50071fdcb75127385c9831f20a5"
+        ],
+        [
+          "scanCheckout",
+          "c5bd97583ebc362a3a26f8a8a124c444d70bee57f8ba8de7882e628eb4b92b3c"
+        ],
+        [
+          "shellQuote",
+          "5298851f4c8211780b29057b283a3ca3ed58fe90955dd95bd4912059c331950b"
+        ],
+        [
+          "unsavedEditsError",
+          "f2f905414d8493ba0a6dfc293d6c4a8fe1b06f0087c1b4658cbf0924ae9c83e6"
+        ]
+      ],
+      "shell": "9f5dc3f793a98de4b125448872d5a2c8dd0a6908ade61922b1ce00253de93675"
+    }
+  }
+}

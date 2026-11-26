@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import { withCheckoutPrepObservation } from './checkout-prep-observation.js';
-import { retainedChangedPaths } from './hosted-finish-guard.js';
 import { waitFailure } from './wait-failure.js';
 import { isNetworkPending } from './network-continuation.js';
 import { readFileSync } from 'node:fs';
@@ -462,6 +461,7 @@ async function dispatchHostedAgentCli(
           recovery?: unknown;
           conflict?: unknown;
           orderWait?: unknown;
+          changedPaths?: number | null;
           sourceFailure?: unknown;
           providerDelay?: string;
           failureCause?: unknown;
@@ -606,13 +606,7 @@ async function dispatchHostedAgentCli(
         for (const entry of submissions ?? []) {
           // A failed landing exits 2, the same as `land` (SM-C M7); landed and superseded stay 0.
           if (landExitsFailed({ result: { phase: 'finish', ...entry } } as never)) process.exitCode = 2;
-          const changedPaths =
-            selectedWait.operationIds?.length === 1
-              ? retainedChangedPaths(root, selectedWait.operationIds[0]!)
-              : undefined;
-          for (const line of landSummary({
-            result: { phase: 'finish', ...entry, ...(changedPaths === undefined ? {} : { changedPaths }) },
-          } as never))
+          for (const line of landSummary({ result: { phase: 'finish', ...entry } } as never))
             process.stderr.write(`${line}\n`);
           // A failed check of this checkout's landing teaches the next preflight its failing tests.
           if (submissions?.length === 1) learnFromLanding(root, entry);

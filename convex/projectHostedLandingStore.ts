@@ -203,6 +203,7 @@ export async function writeLanding(
     /** Fix D (Item 687d1eda): only parkLanding passes 'main-red'. Never inferred from the row. */
     hold?: 'main-red' | 'ci-down';
     feedLanes?: readonly { laneId: string; actor?: string }[];
+    landedPathCount?: number | null;
     settlement?: { passedAt: string; startedAt: number };
     publishedMainReceiptId?: string;
     replay?: LandingReplay | undefined;
@@ -485,6 +486,7 @@ export async function writeLanding(
       : undefined;
   const ownerDecision = reviewState(row, state);
   await ctx.db.patch(row._id, {
+    ...(options?.landedPathCount === undefined ? {} : { landedPathCount: options.landedPathCount }),
     ...(options?.reservedCause ? { reservedCause: options.reservedCause } : {}),
     ...(ownerDecision !== row.reviewState ? { reviewState: ownerDecision } : {}),
     ...(alarm && alarm.id === row._id ? { alarm: alarm.alarm } : {}),

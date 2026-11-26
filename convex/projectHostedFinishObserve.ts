@@ -252,8 +252,12 @@ async function observePage(
         ? await stoppedMirror({ ...rawCtx, db: finishReadSourceDb(rawCtx) }, input.projectId)
         : null;
     const mirror = stopped ? { mirrorStopped: stopped } : {};
+    const paths =
+      state.phase === 'landed' && selectedRow.landedPathCount !== undefined
+        ? { changedPaths: selectedRow.landedPathCount }
+        : {};
     for (const event of events)
-      if (event.submission.version === state.version) Object.assign(event, delay, cause, mirror);
+      if (event.submission.version === state.version) Object.assign(event, delay, cause, mirror, paths);
     const decision = selectedRow.reviewState ?? reviewState(selectedRow, state);
     const payload = {
       ...review,
@@ -261,6 +265,7 @@ async function observePage(
       ...delay,
       ...cause,
       ...mirror,
+      ...paths,
       projectId: input.projectId,
       operationId: input.operationId,
       canonicalOperationId: state.operationId,

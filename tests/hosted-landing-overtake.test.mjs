@@ -420,10 +420,12 @@ test('incident replay 70a9bd2f: global-risk A/C overtake meets the unchanged 1.5
   // and +378 write bytes for the pair, with unchanged calls.
   // Item 8947a779: each landing's save-to-main time joins its day's histogram in the main summary's existing write
   // (twelve counters, no new call): +105 read and +140 write bytes for the pair, with unchanged calls.
+  // Item 3abaec5e: the accepted path count on existing request and observation rows adds 180 read and
+  // 84 write bytes for the pair. Calls, timing and idle work stay unchanged.
   const pair = await guardReplayCost(t, '70a9bd2f pair', pairInput, {
     calls: 103,
-    readBytes: 1_666_721,
-    writeBytes: 569_059,
+    readBytes: 1_666_901,
+    writeBytes: 569_143,
   });
   assert.equal(pair.idle, 0, 'the settled pair has no idle queue work');
   assert.equal(pair.runs[0], 1);
@@ -485,10 +487,11 @@ test('70a9bd2f: admission pipeline calls and metadata bytes stay bounded at 4000
   // Item 411727ba (settle): the same landing-row read saved per finish wake at 4,000 files: 37,467 fewer read bytes.
   // Item c0af6cfa: the same `reportStorage: 'r2'` field on each run row: +462 read and +378 write bytes at 4,000 files.
   // Item 8947a779: the same day histogram on the summary row: +105 read and +140 write bytes at 4,000 files.
+  // Item 3abaec5e: the same 180 read and 84 write bytes for the accepted path count at 4,000 files.
   const after = await guardReplayCost(t, '70a9bd2f 4,000-file pair', input, {
     calls: 103,
-    readBytes: 1_671_233,
-    writeBytes: 571_252,
+    readBytes: 1_671_413,
+    writeBytes: 571_336,
   });
   assert(after.landedAt[1] <= 1500, 'one check duration plus bounded source/queue progress');
   assert.deepEqual(after.runs, [1, 1]);

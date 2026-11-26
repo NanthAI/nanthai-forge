@@ -72,6 +72,33 @@ import type { BatchMemberPaths } from '../src/hosted-batch-coverage';
 import { landingDocsUndo } from '../src/docs-resolution';
 import { landingToMainSeconds } from '../src/public-time-to-main';
 
+/** Count only net paths on accepted main. An overlapping net path has no provable
+ * per-member attribution in these manifests, even when ancestry proves the member merged. */
+function batchLandedPathCounts(
+  sharedPaths: readonly string[] | null | undefined,
+  members: readonly BatchMemberPaths[],
+) {
+  const pathsByMember = members.map(member => member.paths);
+  if (!sharedPaths || !pathsByMember.every(paths => paths != null)) return null;
+  const claims = new Map<string, number>();
+  for (const path of sharedPaths) claims.set(path, 0);
+  for (const paths of pathsByMember)
+    for (const path of paths) {
+      const count = claims.get(path);
+      if (count !== undefined) claims.set(path, count + 1);
+    }
+  return pathsByMember.map(paths => {
+    let count = 0;
+    for (const path of paths) {
+      const owners = claims.get(path);
+      if (owners === undefined) continue;
+      if (owners > 1) return null;
+      count++;
+    }
+    return count;
+  });
+}
+
 /** At most eight independently authorized members, one checked head, one main
  * CAS. All receipts, request settlements and completion activations commit with
  * that CAS. No intermediate/unchecked prefix is ever published. */
@@ -349,6 +376,7 @@ export async function publishLandingBatch(
   }[] = [];
   const messages = [];
   for (const member of members) messages.push(await acceptedLandingMessage(ctx, member.state));
+  const landedPathCounts = batchLandedPathCounts(candidate.governance?.paths, memberPaths);
   for (const [index, member] of members.entries()) {
     const message = messages[index];
     const receipt = hostedAcceptanceSchema.parse({
@@ -463,6 +491,7 @@ export async function publishLandingBatch(
     const completionAlarm = member.plan.inputPages ? currentRow.alarm?.taskId : undefined;
     await writeLanding(ctx, currentRow, next, false, currentRow.runId !== run.id, completionAlarm, {
       feedLanes: member.plan.feedLanes,
+      landedPathCount: landedPathCounts?.[index] ?? null,
       publishedMainReceiptId: members.at(-1)!.attempt.operations.accept,
       replay: {
         ...checkReplay(run),

@@ -431,6 +431,7 @@ export async function hostedLandCli(
           recovery?: unknown;
           conflict?: unknown;
           orderWait?: unknown;
+          changedPaths?: number | null;
         }[];
         pendingProgress?: LandingRecord;
       }
@@ -458,6 +459,9 @@ export async function hostedLandCli(
       ? { waitStatus: observation.status, inProgress: true }
       : {}),
   });
+  // An older observer can omit the accepted count. Drop any estimate inherited from submission.
+  if (selected?.submission.phase === 'landed' && selected.changedPaths === undefined)
+    delete result.changedPaths;
   if (pending) {
     result.pendingProgress = observation?.pendingProgress;
     result.landingState = pending.landingState;

@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { landingApi } from './hosted-finish-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
+import { reviewPaths } from '../dist/source-review-format.js';
 const queueView = await import(moduleUrl('../convex/projectHostedQueueView.ts'));
 const landings = await import(moduleUrl('../convex/projectHostedLandings.ts'));
 const observe = await import(moduleUrl('../convex/projectHostedFinishObserve.ts'));
@@ -202,6 +203,26 @@ test('replay 19328518: a parked passed landing names the older submission it wai
     assert.equal(final.attemptId, accepted.attemptId, 'the queue read the attempt that landed');
     assert.equal(final.count, recomposes, 'the queue counts distinct Candidates after the first');
     assert.equal(reply.landings[0].recomposeCount, recomposes, 'the receipt agrees');
+    const acceptedEntry = f.entries.find(entry => entry.state.id === submission.id);
+    assert.equal(reply.landings[0].laneId, acceptedEntry.lane.laneId);
+    const page = JSON.parse(
+      await f.tx('landed count', observe.page, {
+        projectId: f.projectId,
+        operationId: submission.operationId,
+        nextVersion: stateOf(f, submission.id).version,
+      }),
+    );
+    const acceptedReceipt = JSON.parse(accepted.value);
+    const files = head => JSON.parse(f.c.objects.get(head)).files;
+    const changed = reviewPaths(
+      files(acceptedReceipt.previous.head),
+      files(acceptedReceipt.candidate.head),
+    ).filter(path => path.status !== 'unchanged');
+    assert.equal(page.changedPaths, changed.length, 'the count comes from the two exact accepted States');
+    const replayed = await f.enqueue(acceptedEntry.request, { landedPathCount: 1 });
+    assert.equal(replayed.acceptance.receiptId, accepted.receiptId);
+    assert.equal(replayed.changedPaths, changed.length);
+    assert.equal((await f.enqueue(acceptedEntry.request)).changedPaths, undefined);
     if (submission.id === newer.id) {
       const [wait] = reply.landings[0].orderWaits;
       assert.equal(wait.holderPhase, 'checking');

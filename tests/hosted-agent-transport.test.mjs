@@ -286,7 +286,7 @@ test('pending source and finish steps return promptly and retain all child opera
       message: 'Pending subject\n\nCo-Authored-By: Synthetic Sol <noreply@openai.com>',
       notVerified: ['The Windows adapter was not checked'],
     };
-  s.caps.features = ['save-declarations', 'landing-client-hold'];
+  s.caps.features = ['save-declarations', 'landing-client-hold', 'landed-path-count'];
   const previousHold = process.env[LAND_HELD_MS_ENV];
   t.after(() => {
     if (previousHold === undefined) delete process.env[LAND_HELD_MS_ENV];
@@ -297,12 +297,14 @@ test('pending source and finish steps return promptly and retain all child opera
   const first = await s.transport().dispatch('finish', command);
   const { features } = s.calls.find(c => c.name === 'projectHostedAgent:capabilities').args;
   assert(features.includes('landing-client-hold'));
+  assert(features.includes('landed-path-count'));
   assert(features.length <= MAX_CONTRACT_FEATURES);
   assert.equal(first.result.phase, 'finish');
   assert.equal(first.result.submission.phase, 'composing');
   assert.equal(first.result.submission.preparing, true);
   const desired = s.calls.find(c => c.name === 'projectHostedLandingDesired:submit');
   assert.equal(desired.args.heldMs, 8750);
+  assert.equal(desired.args.landedPathCount, 1);
   assert.equal(JSON.parse(desired.args.request).message, command.message);
   assert.deepEqual(JSON.parse(desired.args.request).notVerified, command.notVerified);
   assert.deepEqual(first.result.submission.request.notVerified, command.notVerified);

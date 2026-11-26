@@ -25,6 +25,7 @@ async function fixture(t, checkOnly = false, memberBudget) {
     timeout = false,
     conflictRecovery,
     terminalFailure,
+    pathCounts,
     stalePending,
     sourceStatus,
     pendingPhase = 'ready';
@@ -33,6 +34,10 @@ async function fixture(t, checkOnly = false, memberBudget) {
   });
   // Retained unrelated history never becomes a client read or observer.
   const retained = Array.from({ length: 575 }, () => ({ operationId: randomUUID() }));
+  const changedPaths = () => {
+    const value = accepted ? pathCounts?.accepted : pathCounts?.estimate;
+    return value === undefined ? {} : { changedPaths: value };
+  };
   const response = () => ({
     schema: 1,
     transport: 'hosted',
@@ -45,6 +50,7 @@ async function fixture(t, checkOnly = false, memberBudget) {
         ? { phase: 'check', run: { id: 'run', status: accepted ? 'passed' : 'running' } }
         : {
             phase: 'finish',
+            ...changedPaths(),
             ...(stalePending ?? {}),
             submission: {
               id: operationId,
@@ -105,6 +111,7 @@ async function fixture(t, checkOnly = false, memberBudget) {
           submissions: [
             {
               submission: response().result.submission,
+              ...(accepted ? changedPaths() : {}),
               ...(conflictRecovery ? { recovery: conflictRecovery } : {}),
             },
           ],
@@ -173,6 +180,12 @@ async function fixture(t, checkOnly = false, memberBudget) {
     run,
     operationId,
     response,
+    pathCounts: counts => {
+      pathCounts = counts;
+    },
+    alreadyLanded: () => {
+      accepted = true;
+    },
     stale: selection => {
       stalePending = {
         status: 'submitted',
@@ -245,6 +258,39 @@ test('land stays waiting at ready and returns the observed outcome without repla
   t.diagnostic(
     '575-record history: 1 selected subscription, 0 idle calls, 0 final replays; no history hydration',
   );
+});
+
+test('LANDED prints the accepted stacked change count instead of the Lane estimate', async t => {
+  const s = await fixture(t);
+  s.pathCounts({ estimate: 23, accepted: 3 });
+  const pending = s.run();
+  await turn();
+  s.release();
+  const landed = await pending;
+  assert.equal(landed.result.changedPaths, 3);
+  assert.match(s.err.join(''), /LANDED receipt accepted, 3 changed paths/);
+  assert.equal(s.calls.length, 1);
+});
+
+test('LANDED omits a stale estimate when an older server returns no accepted count', async t => {
+  const s = await fixture(t);
+  s.pathCounts({ estimate: 23 });
+  const pending = s.run();
+  await turn();
+  s.release();
+  const landed = await pending;
+  assert.equal(landed.result.changedPaths, undefined);
+  assert.match(s.err.join(''), /^LANDED receipt accepted$/m);
+});
+
+test('a terminal stacked land replay prints the returned accepted count without a subscription', async t => {
+  const s = await fixture(t);
+  s.pathCounts({ estimate: 23, accepted: 3 });
+  s.alreadyLanded();
+  const landed = await s.run();
+  assert.equal(landed.result.changedPaths, 3);
+  assert.match(s.err.join(''), /LANDED receipt accepted, 3 changed paths/);
+  assert.deepEqual(s.events, []);
 });
 
 test('check-only still waits only for its run and returns CHECK PASSED without acceptance', async t => {

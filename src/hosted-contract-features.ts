@@ -37,6 +37,8 @@ export const planningHistoryFeature = 'planning-history';
 export const planningAuditFeature = 'planning-audit';
 /** Plan writes own status; CLI/MCP do not move Items on reads or after a tick. */
 export const planningStatusWorkerFeature = 'planning-status-worker';
+/** Finish submits can request the accepted Candidate's path count on terminal replay. */
+export const landedPathCountFeature = 'landed-path-count';
 export const initiativeProgressRequested = (input: Record<string, unknown>) =>
   input.counts === true &&
   typeof input.initiativeId === 'string' &&
@@ -272,6 +274,7 @@ export const advertisedFeatures = (asked: readonly string[]) => [
   ...(asked.includes(planningHistoryFeature) ? [planningHistoryFeature] : []),
   ...(asked.includes(planningAuditFeature) ? [planningAuditFeature] : []),
   ...(asked.includes(planningStatusWorkerFeature) ? [planningStatusWorkerFeature] : []),
+  ...(asked.includes(landedPathCountFeature) ? [landedPathCountFeature] : []),
   ...hostedContractFeatures.filter(feature => asked.includes(feature)),
   ...(asked.includes('feed') ? ['feed'] : []),
 ];

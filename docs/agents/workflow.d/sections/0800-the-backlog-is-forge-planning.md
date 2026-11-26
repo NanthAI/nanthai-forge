@@ -102,6 +102,12 @@ Transfers stream and retain explicit caller budgets.
 
 Hosted land waits for acceptance; check-only stops after its check. NDJSON wake events carry progress and advisory conflicts; speculative advice never claims a landing. Exact predecessor conflicts return the pinned early-resolution `sync` continuation when project policy selects it; off or measured-wait replies expose the facts and optional recovery. See [early resolution](../../../pre-queue-checks.md#resolve-an-exact-predecessor-conflict-early). A terminal conflict returns its retained sync/resolve command. Following it or ordinary sync reuses the draft; a new sync `operationId` creates a new draft. Before a new land selects source, it installs any pinned sync/resolve result that outlived the client wait. Idle adds no calls.
 
+`LANDED` uses the accepted Candidate's net path count when available, including for
+stacked changes. A cohort member counts its paths that changed on main. When multiple
+members can account for the same changed path, their counts are unknown. `LANDED`
+omits the count when the accepted change has no count evidence. The landing ledger
+names the first input Lane in that receipt.
+
 Hosted projects keep their backlog as planning: Initiatives group Issues, and an Issue is the work an agent starts. The same records show in the web app under Work > Planning. Read, write and start from them without leaving the agent command surface:
 
 ```sh

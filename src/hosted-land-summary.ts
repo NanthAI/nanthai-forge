@@ -67,7 +67,7 @@ type Result = {
   };
   run?: { id?: string; status?: string };
   command?: string;
-  /** Paths the landing changes against the Lane's base (null: base manifest not cached). */
+  /** Net paths on a landed result, or a Lane estimate while pending. */
   changedPaths?: number | null;
   retryCommand?: string;
   status?: string;

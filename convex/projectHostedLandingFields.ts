@@ -239,6 +239,8 @@ export const hostedLandingTables = {
     messageProjectId: v.optional(v.id('hostedProjects')),
   }),
   projectHostedLandingRequests: defineTable({
+    /** The accepted Candidate's net paths, available to terminal observers. */
+    landedPathCount: v.optional(v.union(v.number(), v.null())),
     /** Why a cancel ended this entry, on its terminal write (ced8e98f): a reserved recompose that was
      * never installed has no attempt row, so its history reads the cause here. */
     reservedCause: v.optional(replayCause),

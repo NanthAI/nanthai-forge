@@ -172,6 +172,13 @@ function fixture() {
       value: JSON.stringify({ source: { intentId: intent } }),
     });
     put('projectHostedRecordHeads', { projectId: 'project', kind: 'lane', key: lane, parent: intent });
+    put('projectHostedAcceptancePages', {
+      projectId: 'project',
+      receiptId: id('receipt', n),
+      kind: 'inputs',
+      index: 0,
+      value: JSON.stringify({ entries: [{ laneId: lane }] }),
+    });
     put(
       'projectHostedAcceptances',
       {
@@ -188,6 +195,7 @@ function fixture() {
           submissionId: sub,
           previous: { head: `h-${landedOn}`, receiptId: landedOn },
           candidate: { head: `landed-${n}` },
+          completion: { lanes: 1, pages: 1 },
           check: { runId: `final-${n}` },
           ...(landedOn === base ? { firstCheck: { landedOn: 'admission-run', mainMoved: false } } : {}),
         }),
@@ -264,6 +272,23 @@ test('landings reads short order waits and the client hold from existing receipt
   assert.equal(legacy.orderWaits, null);
   assert.equal(timed.clientHoldSeconds, 0);
   assert.deepEqual(timed.orderWaits, orderWaits);
+});
+
+test('the ledger credits the accepted input Lane when its Intent also has a parked Lane', async () => {
+  const f = fixture();
+  f.landing(1, { at: 60 });
+  f.tables.projectHostedRecordHeads.unshift({
+    _creationTime: -1,
+    projectId: 'project',
+    kind: 'lane',
+    key: 'parked-sibling',
+    parent: id('intent', 1),
+  });
+  const {
+    landings: [landed],
+  } = await f.read();
+  assert.equal(landed.laneId, id('lane', 1));
+  assert.equal(landed.moreLanes, undefined);
 });
 
 test('landings exposes handed edges and kept-run evidence from the existing request row', async () => {
