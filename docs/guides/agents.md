@@ -41,7 +41,7 @@ nforge mcp ROOT --agent
 
    Prove the changed behavior and failure paths, with UI/runtime evidence when relevant. Run affected checks, format, lint and types; the project runner owns the full check. Review the saved diff, following every `nextCursor` for that pinned pair. Record [findings and outcomes](review.md#structured-review-findings) on the Item. Use an independent reviewer when the user or project requires one; this recipe adds no review gate. Later review rounds cover changed code and unresolved findings, keeping pre-existing issues distinct. Escalate unresolved judgment with the evidence rather than cycling indefinitely.
 
-3. For a newly hosted project, check that it has [a check and runner](../quickstart.md#configure-the-first-hosted-check). Submit once:
+3. For a newly hosted project, read [how the project checks changes](set-up-your-project.md#3-choose-how-changes-are-checked). Submit once:
 
    ```sh
    nforge agent LANE_PATH land '{"message":"Problem and result; what was removed or why nothing can go"}'

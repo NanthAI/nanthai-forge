@@ -726,7 +726,13 @@ export function NeedsMeView({
         ) : null}
       </Head>
       <LaneHelp />
-      {setupHelp ? <p className="needs-help">Help: {setupHelp}</p> : null}
+      <p className="needs-help">
+        Help ·{' '}
+        <a className="lk" href="/docs/guides/set-up-your-project/#forge-words">
+          Forge words
+        </a>
+        {setupHelp ? <> · {setupHelp}</> : null}
+      </p>
       {setup && view && !view.count ? setup : null}
       <Standing
         of="app"

@@ -3,6 +3,7 @@
 import { randomUUID } from 'node:crypto';
 import type { AutonomyPolicy } from './autonomy-policy.js';
 import type { HostedAgentSession } from './hosted-agent-transport.js';
+import { setupLesson } from './error-teaching.js';
 
 type PolicyPort = Pick<HostedAgentSession, 'query' | 'mutation'>;
 
@@ -26,8 +27,17 @@ export async function executeHostedPolicy(
     };
   }
   const id = operationId ?? randomUUID();
-  const result = await port.mutation('projectAutonomy:set', {
+  const result = await port.mutation<Record<string, unknown>>('projectAutonomy:set', {
     command: JSON.stringify({ action: 'set-policy', operationId: id, ...command }),
   });
-  return { operationId: id, result };
+  if (result.rule !== 'held') return { operationId: id, result };
+  const acceptance = command.acceptance as Partial<AutonomyPolicy['acceptance']> | undefined;
+  const section = command.deploys
+    ? '7-tell-forge-where-you-deploy'
+    : acceptance?.protectedPaths !== undefined || acceptance?.ownerApprovalPaths !== undefined
+      ? '5-choose-paths-that-need-a-person'
+      : acceptance?.mode !== undefined
+        ? '4-choose-who-approves-landings'
+        : 'what-an-agent-can-and-cant-do';
+  return { operationId: id, result: { ...result, learn: setupLesson(section) } };
 }

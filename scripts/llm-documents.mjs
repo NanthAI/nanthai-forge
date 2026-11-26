@@ -26,6 +26,7 @@ export const llmsFullPaths = [
   'docs/why-forge.md',
   'docs/principles.md',
   'docs/quickstart.md',
+  'docs/guides/set-up-your-project.md',
   'docs/guides/people.md',
   'docs/guides/agents.md',
   'docs/guides/plan.md',
@@ -70,6 +71,7 @@ const agentRules = [
   // Item 12fde646 (owner decision 2026-11-15): questions stay in the agent's own app.
   'Forge is not a chat channel: ask the person running you in your own app; message through Forge only someone else who must decide (an owner approval, a real choice between options, a handoff to another Lane’s owner).',
   'Governance: hosted landing checks and lands under current project policy. Automatic projects land after passing evidence; protected paths or review-required policy may hold for a person. Never change policy to bypass a hold.',
+  'For setup, follow [Set up your project](/docs/guides/set-up-your-project.md). If Forge asks for the owner, use the [handover table](/docs/guides/set-up-your-project/#what-an-agent-can-and-cant-do): give your user the exact link, say what to click and keep the printed wait running.',
   // Default project rules (docs/parallel-work-defaults.md); a project's `policy` read shows its own.
   ...agentDefaultLines(AGENT_DEFAULTS),
   'Find public projects by name with `nforge clone NAME` or `forge_find_project` in `nforge mcp --public`. A lookup returns public URLs and clone commands.',
@@ -88,6 +90,7 @@ const startHere = new Set([
   'docs/why-forge.md',
   'docs/principles.md',
   'docs/quickstart.md',
+  'docs/guides/set-up-your-project.md',
   'docs/concepts.md',
 ]);
 const agentDocs = new Set([

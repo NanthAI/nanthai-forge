@@ -88,6 +88,8 @@ const firstChecks = {
   'docs/guides/review.md': 'Check the Candidate, exact source and required check result first.',
   'docs/guides/secrets.md':
     'Check the project, device reach and whether the value is for Development or Checks first.',
+  'docs/guides/set-up-your-project.md':
+    'Check my Forge sign-in, source folder or repository, and project settings first.',
   'docs/operations.md': 'Check the deployment, project and current operating state first.',
   'docs/operations/ci-status-checks.md':
     'Check the repository, CI provider and current required check first.',

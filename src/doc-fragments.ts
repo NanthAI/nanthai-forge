@@ -14,6 +14,12 @@
  */
 import { posix } from 'node:path';
 
+export const documentHeadingId = (text: string) =>
+  text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s_-]/gu, '')
+    .replace(/\s/g, '-');
+
 export const ENTRIES_LINE = /^Entries: \[([^\]\s]+\.d\/[^\]\s]+)\]\(\1\/\)$/;
 /** Entry files live under a `NAME.d/` folder next to `NAME.md`; they are never documents on their own. */
 export const isDocumentFragment = (path: string) => /(?:^|\/)[^/]+\.d\//.test(path) && path.endsWith('.md');

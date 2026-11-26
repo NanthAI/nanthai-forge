@@ -12,8 +12,11 @@
 // the caller's laneId ({} when unknown: actions select the Lane from the folder), <runId> the run id or
 // RUN_ID, <replay> the caller's own command line (kept short except on timed agent limits).
 
-type Entry = { learn: string; next?: string };
+type Entry = { learn: string; next?: string; setupSection?: string };
 const land = `nforge agent <root> land --save '{"message":"MESSAGE"}'`;
+const deviceSetup = '1-sign-in-and-approve-a-device';
+const checksSetup = '3-choose-how-changes-are-checked';
+const secretsSetup = '6-add-secrets-in-this-order';
 
 /** The codes agents hit and repeat most (bench transcripts, frictions, the weaker-model trial), by hand. */
 export const teachingByCode: Record<string, Entry> = {
@@ -26,6 +29,7 @@ export const teachingByCode: Record<string, Entry> = {
   SECRETS_JOURNAL_FULL: { learn: 'retry', next: 'nforge secret list' },
   SECRETS_WAITING: { learn: 'retry' },
   SECRETS_REKEY_PENDING: { learn: 'auth', next: 'nforge secret unshare --marked' },
+  SECRETS_NOT_SET_UP: { learn: 'auth', setupSection: secretsSetup },
   LANDING_STALLED: { learn: 'queue', next: `nforge agent <root> queue '{}'` },
   HOSTED_ACTION_UNSUPPORTED: { learn: 'hosted', next: 'nforge agent <root> help' },
   WORK_STALE: { learn: 'retry', next: '<replay>' },
@@ -64,11 +68,11 @@ export const teachingByCode: Record<string, Entry> = {
   HOSTED_ACTION_FAILED: { learn: 'retry', next: '<replay>' },
   UNKNOWN_JSON_FIELD: { learn: 'arguments', next: '<command> --help' },
   AMBIGUOUS_ID: { learn: 'arguments' },
-  AUTH_REQUIRED: { learn: 'auth', next: 'nforge login' },
-  SIGN_IN_REQUIRED: { learn: 'auth', next: 'nforge login' },
+  AUTH_REQUIRED: { learn: 'auth', next: 'nforge login', setupSection: deviceSetup },
+  SIGN_IN_REQUIRED: { learn: 'auth', next: 'nforge login', setupSection: deviceSetup },
   RATE_LIMITED: { learn: 'limits', next: '<replay>' },
   DEPENDENCIES_MISSING: { learn: 'install' },
-  AUTH_EXPIRED: { learn: 'auth', next: 'nforge login' },
+  AUTH_EXPIRED: { learn: 'auth', next: 'nforge login', setupSection: deviceSetup },
   INTENT_CLOSED: { learn: 'planning', next: `nforge agent <root> lanes '{}'` },
   UNSAVED_LANE_EDITS: { learn: 'lanes', next: `nforge agent <root> save '<lane>'` },
   CWD_UNAVAILABLE: { learn: 'system' },
@@ -122,6 +126,14 @@ export const teachingFamilies: readonly (readonly [RegExp, string])[] = [
 
 /** A refusal whose code is generic but whose message pins the one right command (5a22ee20). */
 const teachingByMessage: readonly (readonly [RegExp, Entry])[] = [
+  [
+    /^Select a configured hosted check\b|^No (?:hosted )?runner is set\b/,
+    { learn: 'check', next: "nforge agent <root> check-settings '{}'", setupSection: checksSetup },
+  ],
+  [
+    /^(?:A person changes Checks|Only a full owner device changes Checks|No value in Checks|Checks runs with a machine key|Set this value in Checks)/,
+    { learn: 'auth', setupSection: secretsSetup },
+  ],
   [
     /^cleanOnly restacks a stacked Lane/,
     { learn: 'lanes', next: `nforge agent <root> save --sync '<lane>'` },
@@ -186,6 +198,23 @@ export function learnCommand(topic: string, context: TeachContext = {}) {
     : `nforge agent ${shell(context.root || '.')} help ${topic}`;
 }
 
+function errorLesson(code: string, message?: string) {
+  return (
+    (message && teachingByMessage.find(([pattern]) => pattern.test(message))?.[1]) || teachingEntry(code)
+  );
+}
+
+export function setupLesson(section: string, context: TeachContext = {}) {
+  return context.surface === 'mcp'
+    ? `/docs/guides/set-up-your-project/#${section}`
+    : `nforge docs guides/set-up-your-project#${section}`;
+}
+
+function lessonCommand(entry: Entry, context: TeachContext) {
+  if (entry.setupSection) return setupLesson(entry.setupSection, context);
+  return learnCommand(entry.learn, context);
+}
+
 function fill(template: string, context: TeachContext, timedAgentLimit: boolean): string | undefined {
   if (template === '<replay>') {
     const replay = context.argv?.length ? commandLine(context.argv) : undefined;
@@ -203,8 +232,7 @@ function fill(template: string, context: TeachContext, timedAgentLimit: boolean)
 
 /** The teaching part for one error: next (one runnable command) and learn (the help command for its topic). */
 export function teach(code: string, context: TeachContext = {}, recovery?: unknown, message?: string) {
-  const entry =
-    (message && teachingByMessage.find(([pattern]) => pattern.test(message))?.[1]) || teachingEntry(code);
+  const entry = errorLesson(code, message);
   if (!entry) return {};
   let next = commandIn(recovery);
   if (!next && context.surface !== 'mcp') {
@@ -217,7 +245,7 @@ export function teach(code: string, context: TeachContext = {}, recovery?: unkno
         ? context.corrected
         : entry.next && fill(entry.next, context, timedAgentLimit);
   }
-  return { ...(next ? { next } : {}), learn: learnCommand(entry.learn, context) };
+  return { ...(next ? { next } : {}), learn: lessonCommand(entry, context) };
 }
 
 /** The caller's own values from its command line: ROOT, action, and ids in its JSON parameters. */
@@ -288,14 +316,24 @@ export function teachReceipt<T>(value: T, context: TeachContext, depth = 0): T {
     if (taught !== item) (out ??= { ...record })[key] = taught;
   }
   const code = record.code;
+  if (record.rule === 'held' && record.approval && record.learn === undefined) {
+    const action = context.argv?.[2];
+    const section =
+      action === 'configure-check' || action === 'configure-runner'
+        ? checksSetup
+        : 'what-an-agent-can-and-cant-do';
+    (out ??= { ...record }).learn = setupLesson(section, context);
+  }
+  if (context.argv?.[2] === 'approve-link' && record.held === true && record.learn === undefined)
+    (out ??= { ...record }).learn = setupLesson('4-choose-who-approves-landings', context);
   if (
     typeof code === 'string' &&
     /^[A-Z][A-Z0-9_]{2,}$/.test(code) &&
     typeof record.message === 'string' &&
     record.learn === undefined
   ) {
-    const entry = teachingEntry(code);
-    if (entry) (out ??= { ...record }).learn = learnCommand(entry.learn, context);
+    const entry = errorLesson(code, record.message);
+    if (entry) (out ??= { ...record }).learn = lessonCommand(entry, context);
   }
   return (out ?? value) as T;
 }

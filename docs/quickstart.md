@@ -8,23 +8,14 @@ the CLI and read its packaged guides while you wait for access.
 
 ## First landing
 
-For a checked landing on a new project, confirm which [runner](#configure-the-first-hosted-check)
-you can use and who will [approve the first landing](#approve-the-first-landing).
-You can host and clone the project while arranging those.
-
 1. [Build and link the CLI](#install-the-cli) if you do not have it yet. [Check your terminal sign-in](#sign-in) and sign in if needed.
 2. [Import committed GitHub source](#import-from-github-in-the-app), or [host a local folder](#host-a-local-folder). For a new project, start with a folder and a short README.
 3. [Clone the hosted project](#clone-the-project). Use the project name shown in the app or the command from the host or import receipt.
-4. [Choose a check and runner](#configure-the-first-hosted-check) if the project has none.
-5. [Start a Lane](#work-on-a-hosted-project) and edit its README. Run `nforge agent LANE_PATH land --save '{"message":"Improve the README"}'` with the returned Lane path. Follow the receipt through any [approval](#approve-the-first-landing). Open the accepted State in the project when the receipt says `LANDED`.
+4. [Start a Lane](#work-on-a-hosted-project) and edit its README. Run the landing command and follow what it prints. `LANDED` means your change reached main.
 
-| What you want to set up | Start here |
-| --- | --- |
-| Approve, rename or change what a terminal can reach | **Account → Sign-in and devices** (`/account/devices`) |
-| Add someone to this project | Project **Settings → People and access** |
-| Choose a check, runner or who approves landings | Project **Settings → Landing and checks** |
-| Connect your agent app to the clone | [Connect over MCP](agents.md#connect-over-mcp) |
-| Mirror accepted main to GitHub | Project **Settings → GitHub** |
+For project settings, checks, secrets, teammates and GitHub, see
+[Set up your project](guides/set-up-your-project.md). For an agent app that
+needs a tool connection, see [Connect over MCP](agents.md#connect-over-mcp).
 
 ## What you need installed
 
@@ -204,44 +195,8 @@ cached objects and Lane directories.
 
 ## Configure the first hosted check
 
-On the project's **Needs me** page, **Getting started → Quickstart** opens [First landing](#first-landing). Use **Choose** to open **Settings → Landing and checks** for the required check. Bring your own CI; GitHub is not required. **Connect GitHub (optional)** links to the mirror settings if you want to mirror `main` or use a CI file from GitHub Actions, and does not count toward checklist progress.
-
-Use **Skip** on any other step and **Undo** on the same row to restore it. To put the whole checklist away, select **Hide getting started**; restore it from **Needs me → Help → Show getting started**. Forge keeps your choices for that project across devices without changing anyone else's setup or the landing rules. With the checklist hidden, the owner can still choose who approves landings in **Settings → Landing and checks**.
-
-A new project has source but needs a check definition and a runner before the
-first checked landing. In the commands below, replace `ROOT` with the path to
-your hosted clone. The project owner can inspect existing setup with
-`nforge agent ROOT check-settings '{}'`. If a landing reports
-`RUNNER_UNAVAILABLE` and check settings say no hosted runner is configured, keep
-the saved Lane and have the owner configure a runner before retrying.
-
-For a repository with a README.md, this example defines a small onboarding smoke
-check. Replace it with the repository's real verification command for code changes.
-
-```sh
-nforge x ROOT configure-check '{"command":{"name":"verify","executable":"bash","args":["-c","test -s README.md"],"environmentLabel":"README smoke"}}'
-```
-
-For GitHub Actions, use a runner repository where your linked GitHub account is
-an admin or maintainer. Use a prepared runner repository from your operator, or
-have the runner repository owner prepare one. For a new runner repository, use
-a copy of the operator's Forge source revision on the runner repository's
-`main` so `.github/workflows/forge-check.yml` and the runner code match. Enable
-Actions there and install the Forge GitHub App on that repository
-with Actions permissions. For a private project, use a private runner to keep
-its check logs private.
-
-```sh
-nforge x ROOT configure-runner '{"provider":"github-actions","repository":"OWNER/RUNNER_REPOSITORY","runsOn":"ubuntu-latest"}'
-nforge agent ROOT check-settings '{}'
-```
-
-See [GitHub App dispatch and runner visibility](operations/github-actions-checks.md#convex-dispatch-with-the-github-app)
-and [runner grants](operations/github-app.md#runner-grants-checks-only) for setup
-and recovery. A project that uses a runner without GitHub needs
-[owner-person authentication for self-hosted runner registration](operations/self-hosted-runner.md#registration).
-The owner's saved terminal sign-in can configure the first runner, while the
-machine needs owner-person authentication when it starts.
+See [Choose how changes are checked](guides/set-up-your-project.md#3-choose-how-changes-are-checked)
+for all three options and their setup commands.
 
 ## Work on a hosted project
 
@@ -253,8 +208,8 @@ nforge agent /absolute/path/to/project start '{"outcome":"Improve the README","m
 ```
 
 Replace `LANE_PATH` with the path returned by `start` and edit inside it.
-Concurrent agents start separate Lanes. When a check and runner are ready,
-land from your Lane. This also saves your edits and runs any configured local preflight.
+Concurrent agents start separate Lanes. Land from your Lane. This saves your
+edits and runs any configured local checks before submitting them.
 
 ```sh
 nforge agent LANE_PATH land --save '{"message":"Improve the README"}'
@@ -263,20 +218,14 @@ nforge agent LANE_PATH land --save '{"message":"Improve the README"}'
 Use `nforge agent LANE_PATH save '{"message":"Improve the README"}'` if you want
 to keep a checkpoint before you're ready to land.
 
-Keep the landing's operation id and follow its wait command through the check and any
-[approval](#approve-the-first-landing). Follow the receipt's recovery for
-conflicts and interrupted operations.
+Keep the operation ID. Run the wait command Forge prints. Run it again
+if it times out. If Forge says the landing is held, see
+[Approve the first landing](#approve-the-first-landing).
 
 ## Approve the first landing
 
-New projects use supervised acceptance. When the landing is awaiting review,
-the agent can run `nforge agent ROOT approve-link '{"operationId":"LANDING_OPERATION_ID"}'`
-with the original landing operation id and share the returned link. Open its
-Candidate in the hosted app, inspect the change and check result, and choose
-**Approve and land** if you have authority to approve it. Follow the original
-wait until it reports `LANDED` and an accepted receipt. An existing trusted
-project follows its configured agent acceptance policy. See the
-[agent workflow](agents/workflow.md) for retries and acceptance receipts.
+Follow the [held landing steps](guides/set-up-your-project.md#4-choose-who-approves-landings)
+if Forge asks a person to review your change.
 
 ## No background process
 
@@ -326,13 +275,4 @@ your edits, and `nforge x . snapshots '{"restore":"saved","paths":["FILE"]}'` is
 
 ## Glossary
 
-| Term | Meaning |
-| --- | --- |
-| Item | One piece of planned work on the project's Plan. |
-| Intent | The outcome someone wants; groups related work. |
-| Lane | One contributor's isolated working directory and saved source history. |
-| Candidate | An exact pinned combination of Lane heads for checks and review. |
-| Check | A configured command; a run records its result against an exact Candidate. |
-| Landing | A Candidate that passed its checks and was accepted into main, with a receipt. |
-| Channel | A named pointer to accepted source, usually main. |
-| Needs me | The project page that lists what waits on you, such as an approval or a failed check. |
+See [Forge words](guides/set-up-your-project.md#forge-words).

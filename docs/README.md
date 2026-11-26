@@ -7,6 +7,7 @@ Get a change from an idea to main, with people and agents working together.
 - [For people](guides/people.md): build the CLI, sign in, bring a project across and review the first change.
 - [For agents](guides/agents.md): connect your tools, start from an Item, edit in a Lane and follow the landing receipt.
 - [Quickstart](quickstart.md): bring your code to Forge and land the first change.
+- [Set up your project](guides/set-up-your-project.md): choose checks, approvals, secrets, deploys and who can see the project.
 - [Concepts](concepts.md): Lanes, saves, checks and main in plain words.
 
 ## Do the next thing
@@ -31,6 +32,7 @@ The [CLI reference](reference/cli.md) and [MCP reference](reference/mcp.md) are 
 ```sh
 nforge docs
 nforge docs quickstart
+nforge docs guides/set-up-your-project
 nforge docs agents/hosted
 ```
 

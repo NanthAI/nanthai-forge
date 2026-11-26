@@ -15,10 +15,14 @@ import { docsReference } from './docs-reference.ts';
 import { DocsFrame, type DocsGroup } from '../web/src/ds/DocsFrame.tsx';
 import { DocsAgentPrompt } from '../web/src/ds/DocsAgentPrompt.tsx';
 import { agentGuidePrompt } from './docs-agent-prompts.mjs';
+import { documentHeadingId } from '../src/doc-fragments.ts';
 
 // A newcomer's path: first landing, then everyday tasks, then lookup and trust.
 const routes: [string, string[]][] = [
-  ['Start here', ['README', 'guides/people', 'guides/agents', 'quickstart', 'concepts']],
+  [
+    'Start here',
+    ['README', 'guides/people', 'guides/agents', 'quickstart', 'guides/set-up-your-project', 'concepts'],
+  ],
   [
     'Guides',
     [
@@ -58,11 +62,6 @@ const navLabels: Record<string, string> = {
 };
 const href = (path: string) => (path === 'docs/README.md' ? '/docs/' : `/${path.replace(/\.md$/, '')}/`);
 const titleOf = (source: string) => /^# (.+)$/m.exec(source)?.[1]?.replace(/[`*]/g, '') ?? 'Documentation';
-const slug = (text: string) =>
-  text
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s_-]/gu, '')
-    .replace(/\s/g, '-');
 const textOf = (children: ReactNode): string =>
   Array.isArray(children)
     ? children.map(textOf).join('')
@@ -117,7 +116,7 @@ export function docsSite(root: string): Plugin {
     const heading =
       (tag: 'h1' | 'h2' | 'h3' | 'h4') =>
       ({ children }: { children?: ReactNode }) => {
-        const key = slug(textOf(children));
+        const key = documentHeadingId(textOf(children));
         const count = ids.get(key) ?? 0;
         ids.set(key, count + 1);
         return createElement(tag, { id: count ? `${key}-${count}` : key }, children);

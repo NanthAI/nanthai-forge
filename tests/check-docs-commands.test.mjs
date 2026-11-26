@@ -33,3 +33,31 @@ test('docs commands: a flag on a shell continuation line is checked', () => {
 test('docs commands: every documented command in this repository exists', async () => {
   assert.deepEqual(await docsCommandsFindings(new URL('..', import.meta.url).pathname), []);
 });
+
+test('docs commands: a removed setup subcommand fails even when the top-level verb still exists', () => {
+  const text = '`nforge github attach .`\n`nforge secret machine issue CI`\n';
+  const findings = docsCommandFindings('docs/guide.md', text, {
+    ...known,
+    commands: new Set(['github', 'secret']),
+    subcommands: { github: new Set(['connect']), secret: new Set(['machine']), machine: new Set(['add']) },
+  });
+  assert.deepEqual(
+    findings.map(line => line.match(/subcommand (.+), which does not exist/)[1]),
+    ['github attach', 'secret machine issue'],
+  );
+});
+
+test('docs commands: a setup flag must belong to the command that uses it', () => {
+  const findings = docsCommandFindings(
+    'docs/guides/set-up-your-project.md',
+    '`nforge host ROOT --resume`\n`nforge import --resume OPERATION_ID`',
+    {
+      ...known,
+      commands: new Set(['host', 'import']),
+      flags: new Set(['--resume']),
+      setupFlags: { host: new Set(), import: new Set(['--resume']) },
+    },
+  );
+  assert.equal(findings.length, 1);
+  assert.match(findings[0], /--resume, which host does not accept/);
+});

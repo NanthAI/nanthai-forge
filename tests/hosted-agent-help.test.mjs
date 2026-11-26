@@ -19,6 +19,7 @@ import { landAnnouncement } from '../dist/hosted-land-wait.js';
 import { canonicalRoot } from '../dist/root-paths.js';
 import { agentCli } from '../dist/agent-cli.js';
 import { docsCli } from '../dist/docs-cli.js';
+import { executeHostedPolicy } from '../dist/hosted-agent-policy.js';
 import { agentFixture } from './hosted-agent-fixture.mjs';
 import { readDocument } from '../scripts/package-documents.mjs';
 import { fileURLToPath } from 'node:url';
@@ -39,6 +40,43 @@ async function output(call) {
   }
   return text;
 }
+
+test('setup refusals and held settings take the agent directly to the relevant offline steps', async () => {
+  const context = cliTeachContext(['x', '.', 'configure-check', '{}']);
+  const settings = teachReceipt(
+    { result: { rule: 'held', approval: { id: 'setting:check-definition' } } },
+    context,
+  );
+  const cases = [
+    [teach('AUTH_REQUIRED', context).learn, '1. Sign in and approve a device'],
+    [
+      teach('BAD_ARGUMENT', context, undefined, 'Select a configured hosted check.').learn,
+      '3. Choose how changes are checked',
+    ],
+    [
+      teach('PERSON_REQUIRED', context, undefined, 'A person changes Checks.').learn,
+      '6. Add secrets in this order',
+    ],
+    [settings.result.learn, '3. Choose how changes are checked'],
+  ];
+  const port = {
+    mutation: async (_reference, { command }) => ({
+      operationId: JSON.parse(command).operationId,
+      rule: 'held',
+      approval: { id: 'setting:policy' },
+    }),
+  };
+  const deploy = await executeHostedPolicy(port, 'set-policy', {
+    deploys: { targets: [{ name: 'website', label: 'Website', environment: 'test' }] },
+  });
+  cases.push([deploy.result.learn, '7. Tell Forge where you deploy']);
+  for (const [command, heading] of cases) {
+    assert.ok(command.startsWith('nforge docs '));
+    const doc = await output(() => docsCli([command.slice('nforge docs '.length)]));
+    assert.equal(doc.split('\n')[0], `## ${heading}`);
+    assert.equal(doc.match(/^## /gm).length, 1);
+  }
+});
 
 test('hosted help and packaged docs are generated from every enforced schema', async t => {
   assert.deepEqual(

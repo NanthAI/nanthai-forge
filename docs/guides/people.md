@@ -8,7 +8,7 @@ Follow the [first-landing checklist](../quickstart.md#first-landing) for install
 
 ## Bring your code
 
-[Import a GitHub repository](../quickstart.md#import-from-github-in-the-app) or [host a local folder](../quickstart.md#host-a-local-folder). A GitHub import selects the committed snapshot for main and acquires Git history separately. When main is ready, follow the [clone steps](../quickstart.md#clone-the-project). Before the first checked landing, use an existing runner or have the project owner [configure a check and runner](../quickstart.md#configure-the-first-hosted-check).
+[Import a GitHub repository or host a local folder](set-up-your-project.md#2-bring-your-files-to-forge), then clone the project. The owner chooses [how changes are checked](set-up-your-project.md#3-choose-how-changes-are-checked).
 
 ## Give the change to an agent
 

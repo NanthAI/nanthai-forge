@@ -38,7 +38,7 @@ After the first accepted landing, a device's runner configuration changes
 follow [the existing owner approval flow](governance.md#settings-changes-from-agents).
 Registration and signing-key issuance require owner-person authentication.
 If you only have a device sign-in, ask the deployment operator about
-provisioning or use the [GitHub Actions setup](../quickstart.md#configure-the-first-hosted-check)
+provisioning or use the [GitHub Actions setup](../guides/set-up-your-project.md#3-choose-how-changes-are-checked)
 with a prepared runner repository.
 
 The registration API verifies the configured machine, runtime and environment.

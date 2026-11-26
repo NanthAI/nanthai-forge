@@ -13,6 +13,17 @@ Forge is in open development. Build the CLI from source to try Forge. An npm rel
 
 `nforge agent ROOT VERB [--MODE] --help` gives parameters; `help TOPIC` gives one how-to. `nforge docs agents/hosted` is generated from the enforced contract. Use `--command-file FILE` for nested JSON. Refusals name `{code,message,next,learn}`: follow `next`, reading `learn` once. First-write hooks are advisory; `help hosted` explains opting out.
 
+## Set up a project
+
+Follow [Set up your project](../../docs/guides/set-up-your-project.md) or run
+`nforge docs guides/set-up-your-project`. For a step that needs a person,
+use the [handover table](../../docs/guides/set-up-your-project.md#what-an-agent-can-and-cant-do).
+In this conversation, give your user the exact link Forge prints, which
+account to use and what to click. If they own the project, tell them
+they can approve it themselves in the browser. Keep the original request
+and follow its wait. For secrets, give them the terminal steps and let them
+enter values and copy their machine key.
+
 <!-- agent-workflow:start -->
 Lifecycle verbs: `start`, `save`, `land`, `abandon`, `revert`, `cancel`. Use `land --save` (bare `land`) to save, run affected checks, update from main, check and land under project policy; follow the commands it prints. `tests {candidateId}` reads a Candidate's test selection.
 <!-- agent-workflow:end -->

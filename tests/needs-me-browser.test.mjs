@@ -148,6 +148,10 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
               .filter({ hasText: 'Choose the check that decides a landing' });
             await card.getByText('1 of 4 done').waitFor();
             assert.equal(
+              await page.getByRole('link', { name: 'Forge words' }).getAttribute('href'),
+              '/docs/guides/set-up-your-project/#forge-words',
+            );
+            assert.equal(
               await card.getByRole('link', { name: 'Quickstart' }).getAttribute('href'),
               '/docs/quickstart/#first-landing',
             );
