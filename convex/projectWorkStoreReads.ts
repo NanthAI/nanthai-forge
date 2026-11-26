@@ -5,6 +5,7 @@
 // (both read `projectWorkIndex:records` and `:detail`). One head per item and no project-wide row, so a
 // write re-runs only the page that holds it. Rows keep the journal's shape: the whole item or comment
 // (never a payload header), in the journal's append order (the order the heads were created).
+import { invariant } from '../src/errors';
 import { journalRecordPage } from './projectJournalRecordPage';
 import type { QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
@@ -166,11 +167,11 @@ export async function storeReadOf(
   collection: 'planningItems' | 'planningVersions' | 'planningComments' | 'notes' | 'lifecycle',
   value: { id?: string; version?: number; intentId?: string; index?: number },
 ) {
-  if (collection === 'planningVersions')
-    return journalValue(
-      collection,
-      await body(ctx, await recordVersion(ctx, projectId, 'issue', value.id!, value.version!)),
-    );
+  if (collection === 'planningVersions') {
+    const row = await recordVersion(ctx, projectId, 'issue', value.id!, value.version!);
+    if (row?.purged !== undefined) return { purgedRecord: { ...row, purged: row.purged } };
+    return { value: journalValue(collection, await body(ctx, row)) };
+  }
   const kind =
     collection === 'planningItems' ? 'issue' : collection === 'lifecycle' ? 'lifecycle' : 'comment';
   const id =
@@ -180,11 +181,24 @@ export async function storeReadOf(
         ? (value.id ?? noteRecordId(value.intentId!, value.index!))
         : noteRecordId(value.intentId!, value.index!, 'lifecycle');
   const head = await recordHead(ctx, projectId, kind, id);
-  if (!head) return null;
-  const read = await headValue(ctx, collection, head),
-    row = await ctx.db.get(head.recordId);
-  // A purged version keeps no body: its head's purged form is all there is to compare (Item 4c9e961e).
-  if (row?.purged !== undefined) return read;
+  if (!head) return { value: null };
+  const row = await ctx.db.get(head.recordId);
+  if (row?.purged !== undefined) {
+    invariant(
+      row.projectId === projectId &&
+        row.kind === kind &&
+        row.key === id &&
+        row.parent === head.parent &&
+        row.version === head.version,
+      'INVALID_WORK_JOURNAL',
+      'The marked Work record does not match its head.',
+    );
+    return {
+      purgedRecord: { ...row, purged: row.purged },
+      ...(head.value === undefined ? {} : { value: await headValue(ctx, collection, head) }),
+    };
+  }
+  const read = await headValue(ctx, collection, head);
   const stored = journalValue(collection, await body(ctx, row));
-  return sameValue(read, stored) ? read : { read, stored };
+  return { value: sameValue(read, stored) ? read : { read, stored } };
 }

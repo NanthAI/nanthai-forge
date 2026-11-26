@@ -9,6 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
 import { metadataRequest } from '../dist/work-metadata.js';
+import { purgedIndexValue } from '../dist/work-planning-purge.js';
 import { digest } from '../dist/hash.js';
 import { encodeArchiveBytes } from '../dist/landing-capsule-bytes.js';
 import { journalFragmentTexts } from '../dist/journal-fragments.js';
@@ -261,34 +262,92 @@ test('a purge redacts every store, checks completeness before purgedAt, and no t
   assert.deepEqual(await executor(s).run(itemId, operationId), done);
 });
 
-test('a full Item version comparison lists purges only with the recorded command and request', async t => {
+async function compareWork(s, collection, itemId) {
+  return JSON.parse(
+    await workStore.compare._handler(s.ctx, {
+      projectId: s.projectId,
+      collection,
+      ...(itemId === undefined ? {} : { itemId }),
+      cursor: null,
+      digestOnly: false,
+    }),
+  );
+}
+
+test('Item version comparisons require the recorded purge request and a redacted index row', async t => {
   const { s, itemId } = await deletedItem(t, { records: true, intentBorn: false, useAlias: false });
   const done = await executor(s).run(itemId, randomUUID());
-  const compare = async () =>
-    JSON.parse(
-      await workStore.compare._handler(s.ctx, {
-        projectId: s.projectId,
-        collection: 'readVersions',
-        itemId,
-        cursor: null,
-        digestOnly: false,
-      }),
-    );
-  const valid = await compare();
+  const collections = ['readVersions', 'planningVersions'];
+  const valid = await compareWork(s, collections[0], itemId);
   assert.equal(valid.matched, 1, 'the Item tombstone compares as an ordinary retained version');
   assert.ok(valid.purged.count > 1);
   assert.equal(valid.checked, valid.matched + valid.purged.count);
   assert.equal(valid.invalid.count + valid.different.count + valid.missing.count, 0);
   assert.equal(new Set(valid.purged.keys).size, valid.purged.count);
+  assert.deepEqual(await compareWork(s, collections[1], itemId), { ...valid, hosted: 0 });
   const recorded = [
     ...s.tables.projectWorkEvents.values(),
     ...s.tables.projectHostedRecordBodies.values(),
   ].find(row => row.operationId === done.operationId && row.command);
   assert.ok(recorded, 'the purge has a canonical command');
+  const request = recorded.request;
   recorded.request = '0'.repeat(64);
-  const invalid = await compare();
-  assert.deepEqual(invalid.purged, { count: 0, keys: [] });
-  assert.equal(invalid.invalid.count, valid.purged.count);
+  for (const collection of collections) {
+    const invalid = await compareWork(s, collection, itemId);
+    assert.deepEqual(invalid.purged, { count: 0, keys: [] });
+    assert.equal(invalid.invalid.count, valid.purged.count);
+  }
+  recorded.request = request;
+  const row = [...s.tables.projectPlanningRecords.values(), ...s.tables.projectWorkDataRecords.values()].find(
+    row => row.collection === 'planningVersions' && valid.purged.keys.includes(row.key),
+  );
+  assert.ok(row, 'the historical version is still in the comparison index');
+  row.value = JSON.stringify({ ...JSON.parse(row.value), body: 'Unredacted synthetic text' });
+  for (const collection of collections) {
+    const invalid = await compareWork(s, collection, itemId);
+    assert.deepEqual(invalid.invalid, { count: 1, keys: [row.key] });
+    assert.equal(invalid.purged.count, valid.purged.count - 1);
+  }
+});
+
+test('a different Item purge does not vouch for redacted versions or inline comments', async t => {
+  const { s, itemId, keep } = await deletedItem(t, { records: true, intentBorn: false, useAlias: false });
+  const commentId = randomUUID();
+  await s.send({
+    action: 'comment-planning-item',
+    operationId: commentId,
+    itemId: keep.itemId,
+    authorLabel: 'agent',
+    text: 'Kept comment',
+  });
+  const done = await executor(s).run(itemId, randomUUID());
+  const valid = await compareWork(s, 'readComments');
+  assert.ok(valid.purged.count > 0, 'real purged comments count');
+  assert.equal(valid.invalid.count, 0);
+  for (const [kind, key, source, read] of [
+    ['issue', keep.itemId, 'planningVersions', 'readVersions'],
+    ['comment', commentId, 'planningComments', 'readComments'],
+  ]) {
+    const head = await hostedRecords.recordHead(s.ctx, s.projectId, kind, key);
+    assert.ok(head);
+    const record = s.tables.projectHostedRecords.get(head.recordId);
+    record.purged = done.operationId;
+    const row = [
+      ...s.tables.projectPlanningRecords.values(),
+      ...s.tables.projectWorkDataRecords.values(),
+    ].find(row => row.collection === source && row.parent === keep.itemId);
+    assert.ok(row);
+    row.value = JSON.stringify(purgedIndexValue(source, JSON.parse(row.value), done.operationId));
+    if (kind === 'comment') {
+      assert.ok(head.value, 'the comment head has an inline value');
+      head.value = row.value;
+    }
+    for (const collection of [source, read]) {
+      const proof = await compareWork(s, collection, kind === 'issue' ? keep.itemId : undefined);
+      assert.deepEqual(proof.invalid, { count: 1, keys: [row.key] });
+      assert.ok(!proof.purged.keys.includes(row.key), 'the spoofed purge is invalid');
+    }
+  }
 });
 
 test('a purge stopped mid-way never reports done and resumes, also after an index rebuild', async t => {

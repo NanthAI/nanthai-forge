@@ -43,6 +43,7 @@ import { advancePlanningTimes, pinnedPlanningTimes } from './projectPlanningTime
 import { retainAuditVersion } from './projectPlanningAuditWindow';
 import { isPlanningUuid } from '../src/planning-id';
 import { purgedIndexValue } from '../src/work-planning-purge';
+import { verifiedPurgedRecord } from './projectWorkPurgedRows';
 
 type WorkStoreProject = Pick<Doc<'hostedProjects'>, '_id' | 'workStore' | 'workStoreCutoverRevision'>;
 const pinRequired =
@@ -561,6 +562,18 @@ export const copy = mutation({
   },
 });
 
+// A historical Issue marker is not the live tombstone. Requiring the redaction fixed point
+// prevents a forged index marker from bypassing the content check.
+function compareRedacted(collection: string, value: unknown, operationId: string) {
+  const version = value as { purged?: unknown } | null;
+  return (
+    !(
+      (collection === 'planningVersions' || collection === 'planningItems') &&
+      version?.purged !== undefined
+    ) && sameValue(value, purgedIndexValue(collection, value, operationId))
+  );
+}
+
 /** S2: compare one page read-only. Journal pages check each row has its record version with the same
  * digest (an Intent: its head holds the journal's current Intent, or a Lane pinned it: `hosted`); `planningItems` checks each Issue head is at the journal's latest version; `issueHeads`
  * pages the store and checks each head has its journal Issue (nothing extra). `readItems`, `readVersions`,
@@ -596,9 +609,10 @@ export async function journalWorkStoreCompare(
   try {
     const { project, partition } = await ownerStore(ctx, input.projectId);
     invariant(
-      input.itemId === undefined || (input.collection === 'readVersions' && isPlanningUuid(input.itemId)),
+      input.itemId === undefined ||
+        (['planningVersions', 'readVersions'].includes(input.collection) && isPlanningUuid(input.itemId)),
       'BAD_ARGUMENT',
-      'Select one Item by full UUID for a version reader comparison.',
+      'Select one Item by full UUID for a version comparison.',
     );
     const fullPrefix = 'work-full:';
     invariant(
@@ -621,7 +635,57 @@ export async function journalWorkStoreCompare(
       hosted = 0;
     const missing = tally(),
       different = tally(),
-      invalid = tally();
+      invalid = tally(),
+      purged = tally();
+    const listPurge = (key: string) => {
+      purged.count++;
+      purged.keys.push(key);
+    };
+    const comparePurged = async (
+      stored: Doc<'projectHostedRecords'> & { purged: string },
+      source: string,
+      value: unknown,
+      key: string,
+      inline?: unknown,
+    ) => {
+      if (
+        (await verifiedPurgedRecord(ctx, stored)) &&
+        value != null &&
+        compareRedacted(source, value, stored.purged) &&
+        (inline === undefined || sameValue(inline, value))
+      )
+        listPurge(key);
+      else note(invalid, key);
+    };
+    const compareHead = async (
+      head: Doc<'projectHostedRecordHeads'>,
+      value: unknown,
+      key: string,
+      version: number | undefined,
+    ) => {
+      if (version !== head.version) {
+        note(different, `${head.key}:${head.version}:${version}`);
+        return;
+      }
+      const stored = await ctx.db.get(head.recordId);
+      if (
+        !stored ||
+        stored.projectId !== input.projectId ||
+        stored.kind !== 'issue' ||
+        stored.key !== head.key ||
+        stored.version !== head.version
+      ) {
+        note(invalid, key);
+      } else if (stored.purged !== undefined) {
+        await comparePurged(
+          { ...stored, purged: stored.purged },
+          'planningItems',
+          value,
+          key,
+          head.value === undefined ? undefined : JSON.parse(head.value),
+        );
+      } else matched++;
+    };
     if (collection === 'issueHeads') {
       const page = await ctx.db
         .query('projectHostedRecordHeads')
@@ -634,14 +698,17 @@ export async function journalWorkStoreCompare(
       for (const head of page.page) {
         checked++;
         const row = await indexRecord(ctx, partition, 'planningItems', head.key);
-        const version = row ? (JSON.parse(row.value) as { version?: number }).version : undefined;
         if (!row) note(missing, head.key);
-        else if (version !== head.version) note(different, `${head.key}:${head.version}:${version}`);
-        else matched++;
+        else {
+          const value = JSON.parse(row.value) as { version?: number; payloadKey?: string };
+          // A redacted Issue head is inline. A payload pointer cannot establish its redacted form here.
+          await compareHead(head, value.payloadKey ? null : value, head.key, value.version);
+        }
       }
       return full({
         checked,
         matched,
+        purged,
         missing,
         different,
         invalid,
@@ -657,49 +724,41 @@ export async function journalWorkStoreCompare(
     ) {
       const source = readCompares[collection];
       const page = await indexPage(ctx, partition, source, input.cursor, input.newest, input.itemId);
-      const purged = tally();
       for (const row of page.rows) {
         checked++;
-        let read;
         try {
-          read = await storeReadOf(ctx, input.projectId, source, row.value as { id?: string });
+          const read = await storeReadOf(ctx, input.projectId, source, row.value as { id?: string });
+          if ('purgedRecord' in read && read.purgedRecord)
+            await comparePurged(read.purgedRecord, source, row.value, row.key, read.value);
+          else if (read.value == null) note(missing, row.key);
+          else if (!sameValue(read.value, row.value)) note(different, row.key);
+          else matched++;
         } catch (error) {
           if (error instanceof JournalNeeded) throw error;
-          // The retained body reader emits this only after verifying the recorded purge and its request digest.
-          // The indexed version must independently agree with that purge's redacted form.
-          const version = row.value as { id?: string; purged?: unknown };
-          const purgeOperationId = error instanceof ForgeError ? error.recovery?.purgeOperationId : undefined;
-          if (
-            source === 'planningVersions' &&
-            error instanceof ForgeError &&
-            error.code === 'PLANNING_ITEM_PURGED' &&
-            error.recovery?.itemId === version.id &&
-            version.purged === undefined &&
-            typeof purgeOperationId === 'string' &&
-            sameValue(row.value, purgedIndexValue(source, row.value, purgeOperationId))
-          ) {
-            purged.count++;
-            purged.keys.push(row.key);
-            continue;
-          }
           note(invalid, row.key);
-          continue;
         }
-        if (read == null) note(missing, row.key);
-        else if (!sameValue(read, row.value)) note(different, row.key);
-        else matched++;
       }
       return full({ checked, matched, purged, missing, different, invalid, cursor: page.cursor });
     }
-    const page = await indexPage(ctx, partition, collection, input.cursor, input.newest);
+    const page = await indexPage(ctx, partition, collection, input.cursor, input.newest, input.itemId);
     for (const row of page.rows) {
       checked++;
       if (collection === 'intents') {
         let stored;
         try {
           stored = await storeIntent(ctx, input.projectId, project.owner, row.value, false);
-        } catch {
-          note(invalid, row.key);
+        } catch (error) {
+          if (error instanceof JournalNeeded) throw error;
+          // hostedRecordBody checks the recorded purge before raising this refusal.
+          const operation = error instanceof ForgeError ? error.recovery?.purgeOperationId : undefined;
+          if (
+            error instanceof ForgeError &&
+            error.code === 'PLANNING_ITEM_PURGED' &&
+            typeof operation === 'string' &&
+            compareRedacted(collection, row.value, operation)
+          )
+            listPurge(row.key);
+          else note(invalid, row.key);
           continue;
         }
         if (stored === 'same') matched++;
@@ -720,19 +779,18 @@ export async function journalWorkStoreCompare(
       if (collection === 'planningItems') {
         const head = await recordHead(ctx, input.projectId, 'issue', record.id);
         if (!head) note(missing, record.id);
-        else if (head.version !== record.version)
-          note(different, `${record.id}:${head.version}:${record.version}`);
-        else matched++;
+        else await compareHead(head, row.value, row.key, record.version);
         continue;
       }
       const stored = await recordVersion(ctx, input.projectId, record.kind, record.id, record.version);
       if (!stored) note(missing, `${record.kind}:${record.id}:${record.version}`);
-      else if (stored.purged !== undefined) matched++;
+      else if (stored.purged !== undefined)
+        await comparePurged({ ...stored, purged: stored.purged }, collection, row.value, row.key);
       else if (stored.digest !== ref.digest || stored.bytes !== ref.bytes)
         note(different, `${record.kind}:${record.id}:${record.version}`);
       else matched++;
     }
-    return full({ checked, matched, hosted, missing, different, invalid, cursor: page.cursor });
+    return full({ checked, matched, hosted, purged, missing, different, invalid, cursor: page.cursor });
   } catch (error) {
     if (error instanceof JournalNeeded)
       return journalReadReply(ctx, error, input.projectId, {
