@@ -13,15 +13,21 @@ import {
 import {
   docsPackager,
   packageScriptGraph,
+  pathOnlyReference,
   recursiveFolderReader,
   recursiveJsonReader,
   scriptPath,
+  spawnedModulePath,
 } from './script-impact.mjs';
 import { byNameDispatch } from './convex-function-names.mjs';
 import { moduleTaint, resolveSymbols, wholeTaint } from './test-symbols.mjs';
 import { importFacts } from './test-import-cache.mjs';
 
-export function testImportGraph(files, scriptsChanged = [], { typeImports = false } = {}) {
+export function testImportGraph(
+  files,
+  scriptsChanged = [],
+  { typeImports = false, pairedRecheck = false } = {},
+) {
   const evidence = new Map(),
     rows = new Map();
   const emptyStatements = new Set();
@@ -62,11 +68,15 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
     // A workspace path is the narrowest evidence; dynamic is replaced by specific evidence. A folder
     // read never replaces other evidence: that one says the file runs, which pipeline and by-name
     // traversal must still see.
+    const previousPathOnly = pairedRecheck && previous && pathOnlyReference(previous.kind, previous.detail);
+    const nextPathOnly = pairedRecheck && pathOnlyReference(kind, detail);
     if (
       !previous ||
+      (previousPathOnly && (kind === 'import' || kind === 'dynamic' || detail === spawnedModulePath)) ||
       ((previous.detail === recursiveJsonReader || previous.detail === recursiveFolderReader) &&
         kind === 'import') ||
       (detail !== recursiveFolderReader &&
+        (!nextPathOnly || previousPathOnly) &&
         (previous.kind === 'workspace-path' || (previous.kind === 'dynamic' && kind !== 'workspace-path')))
     ) {
       if (byName) {
@@ -422,7 +432,13 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
               from === unknownHome ? undefined : from ? resolve(from, value) : resolveHere(value);
             if (fact.specifier && !target && !external(value) && !installedImport(path, value))
               uncertain = `Unresolved import ${value} in ${path}`;
-            if (target) edge(target, path, fact.importing ? 'import' : pathKind(path, value));
+            if (target)
+              edge(
+                target,
+                path,
+                fact.importing ? 'import' : pathKind(path, value),
+                pairedRecheck && fact.spawn ? spawnedModulePath : undefined,
+              );
           }
           if (fact.runtime && isScriptOrTest) packageGraph.reference?.(value, path);
           if (fact.widen) widen(fact.widen);
@@ -438,17 +454,19 @@ export function testImportGraph(files, scriptsChanged = [], { typeImports = fals
             else if (fact.reference) widenFunctions(path, '', `Unknown Convex function name: ${fact.source}`);
           }
           const file = literal && resolveHere(literal);
+          const exec = pairedRecheck && fact.spawn ? spawnedModulePath : undefined;
           if (file && file.endsWith(literal.replace(/^(?:\.\.?\/)+/, '')))
-            edge(file, path, pathKind(path, literal));
+            edge(file, path, pathKind(path, literal), exec);
           else if (fact.nameLoader) nameLoaders.add(path);
           else if (parts) {
             const targets = enumerated?.map(resolveHere);
             if (targets?.every(Boolean))
-              for (const [i, target] of targets.entries()) edge(target, path, pathKind(path, enumerated[i]));
+              for (const [i, target] of targets.entries())
+                edge(target, path, pathKind(path, enumerated[i]), exec);
             else
               widen(
                 parts,
-                undefined,
+                exec,
                 pathKind(path, parts[0]) === 'workspace-path' ? 'workspace-path' : 'dynamic',
               );
           }

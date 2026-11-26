@@ -61,6 +61,40 @@ test('overlapping Convex impact selects only the shared tests, own tests and smo
   assert.match(selected.reason, /3 of 10 full-suite tests are main-audit debt/);
 });
 
+test('paired rechecks distinguish path mentions from running a dependency', () => {
+  const tool = 'src/tool.ts';
+  const tree = files([
+    [tool, "import '../convex/lane.ts'; export const tool = 1;"],
+    [
+      'tests/read-tool.test.mjs',
+      "import { readFileSync } from 'node:fs'; readFileSync('../src/tool.ts', 'utf8'); import '../convex/main.ts';",
+    ],
+    [
+      'tests/run-tool.test.mjs',
+      "import { spawnSync as run } from 'node:child_process'; run(process.execPath, ['dist/tool.js']); import '../convex/main.ts';",
+    ],
+    [
+      'tests/import-tool.test.mjs',
+      "import { readFileSync } from 'node:fs'; readFileSync('../src/tool.ts', 'utf8'); await import('../dist/tool.js'); import '../convex/main.ts';",
+    ],
+  ]);
+  const select = lanePaths =>
+    scopedRecheckSelection({ lanePaths, mainPaths: ['convex/main.ts'], files: tree });
+  assert.deepEqual(
+    select(['convex/lane.ts']).tests,
+    ['tests/both.test.mjs', 'tests/import-tool.test.mjs', 'tests/run-tool.test.mjs', ...smokeTests].sort(),
+  );
+  assert.deepEqual(
+    select([tool]).tests,
+    [
+      'tests/import-tool.test.mjs',
+      'tests/read-tool.test.mjs',
+      'tests/run-tool.test.mjs',
+      ...smokeTests,
+    ].sort(),
+  );
+});
+
 test("replay (c): this change's package, lockfile, selector, root configuration and deletions keep the full suite", () => {
   const extra = [
     ['scripts/test-impact.mjs', 'export const selector = 1;'],

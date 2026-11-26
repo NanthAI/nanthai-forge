@@ -28,6 +28,24 @@ const files = new Map(
 );
 const select = (paths, extra = {}) => selectTests({ files, paths, ...extra });
 
+test('TypeScript JSX scripts follow their importers and still detect check entry dependencies', () => {
+  const path = 'scripts/render-preview.tsx';
+  const tree = new Map([
+    ...files,
+    ['package.json', '{"scripts":{}}'],
+    [path, 'export const render = () => <main />;'],
+    ['tests/render.test.mjs', "import { render } from '../scripts/render-preview.tsx'; render();"],
+  ]);
+  const scoped = selectTests({ files: tree, paths: [path] });
+  assert.equal(scoped.scope, 'scoped', scoped.reason);
+  assert(scoped.tests.includes('tests/render.test.mjs'));
+  assert(!scoped.tests.includes('tests/unrelated.test.mjs'));
+  tree.set('package.json', '{"scripts":{"verify":"tsx scripts/render-preview.tsx"}}');
+  const pipeline = selectTests({ files: tree, paths: [path] });
+  assert.equal(pipeline.scope, 'full', pipeline.reason);
+  assert.match(pipeline.reason, /render-preview\.tsx reaches package-script:verify/);
+});
+
 test('attaching queue proof preserves the scoped check and its queue tests', () => {
   const path = 'convex/projectHostedFinishWake.ts';
   const tree = new Map([

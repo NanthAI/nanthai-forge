@@ -61,6 +61,7 @@ ecosystem; rows that name an "any-ecosystem slice" Issue are live cases that sli
 | `src/hosted-actions-export.ts` | `check-entry` | 1 | the marker inside that generated workflow | their own configured command |
 | `scripts/script-impact.mjs` | `check-entry` | 1 | Forge's selector treats its check entry as global | their check entries are global-risk (`checkRunEntryPaths`) |
 | `scripts/script-impact.mjs` | `forge-folders` | 1 | Forge's selector maps scripts to its own product folders | the project runner and the generic import graph |
+| `scripts/script-impact.mjs` | `js-extension` | 1 | the standard check recognizes JavaScript and TypeScript scripts, including TSX, for package command and importer coverage | the project runner and its own source language |
 | `scripts/test-impact.mjs` | `forge-folders` | 4 | Forge's selector inventory and product folders | the project runner and the generic import graph |
 | `scripts/test-impact.mjs` | `tests-folder` | 9 | Forge's selector reads `tests/*.test.mjs` | their runner's test globs |
 | `scripts/test-impact.mjs` | `npm-lockfile` | 2 | Forge's selector classifies installed packages from its npm lockfile | declared dependencies of every manifest (`src/js-import-graph.ts`) |

@@ -24,6 +24,7 @@ import {
 } from './test-import-loaders.mjs';
 
 const jsonReaders = new Set(['readdir', 'readdirSync', 'opendir', 'opendirSync', 'glob', 'globSync']);
+const spawnCalls = new Set(['spawn', 'spawnSync', 'exec', 'execSync', 'execFile', 'execFileSync', 'fork']);
 const widenedDirectories = new Set(['../dist', 'dist', '../src', '../web/src', 'web/src', '../convex']);
 
 export function parseImportFacts(path, text, withSymbols) {
@@ -114,7 +115,11 @@ export function parseImportFacts(path, text, withSymbols) {
         const fact = { value };
         if (specifier) fact.specifier = true;
         if (importing) fact.importing = true;
-        if (runtime) fact.runtime = true;
+        if (runtime) {
+          fact.runtime = true;
+          if (!importing && (value.includes('/') || value.includes('.')))
+            fact.spawn = directoryDependency(node, ast, false, spawnCalls);
+        }
         if (json) {
           fact.json = true;
           if (glob) fact.glob = true;
@@ -146,6 +151,7 @@ export function parseImportFacts(path, text, withSymbols) {
           literal,
           nameLoader,
           parts,
+          spawn: parts && directoryDependency(node, ast, false, spawnCalls),
           source: names && !names.exact ? node.getText() : null,
           enumerated: parts && templateStrings(node),
         });

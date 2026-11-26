@@ -466,6 +466,13 @@ closures, package commands) are whole, and `eval`, `new Function`, `with` or `ex
 make a module whole. A side-effect import therefore reaches a module only when its load
 changed.
 
+Paired rechecks start from two separately checked changes. A path mention covers a
+direct change to the named file. When only that file's dependencies change, an
+import, recognized subprocess launch or other execution edge still reaches its
+consumers. Where the graph finds both kinds of evidence for the same pair of
+files, it retains execution evidence. The full main audit covers effects outside
+the resulting intersection.
+
 A `scoped` selection names its domain (`web`, `convex`, `core`, `site`, `tests`,
 `scripts`, `tooling`, or `mixed`) and prints its reason and complete file list before tests.
 Root non-Markdown files, non-Markdown `docs/` files and non-Markdown `evals/` files
@@ -479,7 +486,7 @@ configuration widen to their domain; every static check still runs. Convex funct
 consumers; generated API changes also include web consumers. Test helpers and data
 fixtures follow their importing tests; an unreferenced, unclassified fixture stays
 full. Known manual browser/QA fixtures select UI regressions and asset serving.
-Scripts under `scripts/` with `.mjs`, `.js` or `.ts` extensions follow importing
+JavaScript and TypeScript modules under `scripts/`, including `.tsx`, follow importing
 and literal spawning tests, including `scripts/name` paths embedded in commands.
 Package commands contribute script dependencies and `npm run` aliases; tests that
 name those commands are consumers too. A standalone script runs static checks,

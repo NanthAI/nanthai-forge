@@ -8,6 +8,7 @@ import {
   queueProofPath,
   REGISTRY,
 } from './core-queue-paths.mjs';
+import { scriptPath } from './script-impact.mjs';
 // Explicit infrastructure/fixture ownership supplements the import graph. Unknown
 // paths stay unknown: a filename resemblance is never an independence proof.
 export const webTest = path => /^(?:tests\/ui-|tests\/.*-ui\.test)/.test(path);
@@ -288,7 +289,7 @@ export function classifyCheckPath(path, files) {
     };
   }
   if (!files.has(path)) return null;
-  if (/^scripts\/.+\.(?:mjs|js|ts)$/.test(path)) return { domain: 'scripts', seeds: [path] };
+  if (scriptPath(path)) return { domain: 'scripts', seeds: [path] };
   // The shared preload watches only replay files named in the registry. Route those
   // files as guards so unrelated preload users do not expand local preflight.
   if (path === REGISTRY)

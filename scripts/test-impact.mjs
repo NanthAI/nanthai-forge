@@ -15,6 +15,7 @@ import { coreQueuePath, coreQueueReason, coreQueueTests } from './core-queue-pat
 import {
   docsPackager,
   docsWrapper,
+  pathOnlyReference,
   recursiveFolderReader,
   scriptPath,
   scriptSelectionReason,
@@ -70,11 +71,11 @@ export function selectImpactPair(files, comparisons, graphCache) {
   const scripts = [...new Set(comparisons.flat())]
     .filter(path => scriptPath(path) && files.has(path))
     .map(path => ({ path }));
-  const graph = testImportGraph(files, scripts);
+  const graph = testImportGraph(files, scripts, { pairedRecheck: true });
   if (graphCache) graphCache.graph = graph;
   return comparisons.map(paths =>
     paths.length
-      ? selectWithGraph({ paths, files }, graph)
+      ? selectWithGraph({ paths, files, pairedRecheck: true }, graph)
       : {
           scope: 'docs',
           reason: 'No paths in this inventory',
@@ -522,7 +523,7 @@ export function fitPreflightBudget({
 /** `graphCache` is an optional caller-owned `{}`: calls for one immutable inventory and one path
  * list may share it so the import graph is parsed once. Never reuse it across inventories or paths. */
 function selectWithGraph(
-  { paths, files, forceFull = false, consumersOnly = false },
+  { paths, files, forceFull = false, consumersOnly = false, pairedRecheck = false },
   suppliedGraph,
   graphCache = {},
 ) {
@@ -569,6 +570,7 @@ function selectWithGraph(
   // those commands, and at those tools when the tool reads it rather than imports it.
   // The docs-check wrapper only spawns the docs check; the runner importing it is not a consumer.
   const affected = new Map();
+  const changed = new Set(paths);
   // Workspace-path edges wait here; they reach only code that makes this repository a workspace.
   const held = new Map();
   const step = (previous, edge, importer) => ({
@@ -643,6 +645,9 @@ function selectWithGraph(
       for (const [importer, edge] of evidence.get(current) ?? []) {
         // A folder walk reads bytes: only a changed file's own bytes differ, never an affected file's.
         if (edge.detail === recursiveFolderReader && previous.kind !== 'changed') continue;
+        // A path reference sees changes to that file. Following its dependencies
+        // in a paired recheck requires evidence the reader can execute it.
+        if (pairedRecheck && !changed.has(current) && pathOnlyReference(edge.kind, edge.detail)) continue;
         if (
           fenceStatic &&
           (packageGraph.staticCommands?.has(importer) ||

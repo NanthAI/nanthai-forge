@@ -19,15 +19,19 @@ const docsTests = [
   'tests/selfhost-notices.test.mjs',
 ];
 
-export const scriptPath = path => /^scripts\/.+\.(?:mjs|js|ts)$/.test(path);
+const scriptExtension = /\.(?:[cm]?[jt]s|tsx)$/;
+export const scriptPath = path => path.startsWith('scripts/') && scriptExtension.test(path);
 export const recursiveJsonReader = 'Recursive repository JSON reader';
 // A tooling walk reads files as data: it never makes them part of the walker's code or pipeline.
 export const recursiveFolderReader = 'Recursive repository folder reader';
+export const spawnedModulePath = 'Spawned module path';
+export const pathOnlyReference = (kind, detail) =>
+  (kind === 'runtime-path' || kind === 'workspace-path') && detail !== spawnedModulePath;
 const commandNode = name => `package-script:${name}`;
 const scriptReferences = text =>
-  [...text.matchAll(/(?:^|[^\w./-])(?:\.\/)?(scripts\/[\w./-]+\.(?:mjs|js|ts))(?=$|[^\w./-])/g)].map(
-    match => match[1],
-  );
+  [...text.matchAll(/(?:^|[^\w./-])(?:\.\/)?(scripts\/[\w./-]+)(?=$|[^\w./-])/g)]
+    .map(match => match[1])
+    .filter(scriptPath);
 
 const staticCommand = name =>
   /^(?:build(?::core|:web|:hosted|:core:tsc)?|typecheck(?::tsc)?|lint|format(?::check)?|check(?::schema)?|smoke:package)$/.test(
@@ -90,7 +94,11 @@ export function packageScriptGraph(files, edge) {
     if (/^(?:verify|test|check|build)(?::|$)/.test(name)) roots.add(node);
   }
   for (const path of files.keys())
-    if (/^scripts\/(?:package-.+|build(?:[./-].+)?)\.(?:mjs|js|ts)$/.test(path)) roots.add(path);
+    if (
+      scriptPath(path) &&
+      /^scripts\/(?:package-.+|build(?:[./-].+)?)$/.test(path.replace(scriptExtension, ''))
+    )
+      roots.add(path);
   // Commands the static job runs on every exact Candidate (verify: build, typecheck,
   // lint, format, schema and package smoke), and the scripts those commands name.
   const staticCommands = new Set(
@@ -116,7 +124,7 @@ export function packageScriptGraph(files, edge) {
 }
 
 export function scriptSelectionReason(item, roots, tests, reverse, graph) {
-  const basename = posix.basename(item.path).replace(/\.(?:mjs|js|ts)$/, '');
+  const basename = posix.basename(item.path).replace(scriptExtension, '');
   const matching = tests.filter(path => posix.basename(path) === `${basename}.test.mjs`);
   // Only claim a consumer when it is reachable from this particular changed script.
   const docs = docsPackager(item.path);
