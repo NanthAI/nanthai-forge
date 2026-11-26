@@ -233,7 +233,7 @@ test('friction 25f56c0a: nforge settings localHeavySlots wakes a queued nforge h
   assert(existsSync(held), 'the waiter ran in the new slot, not after a release');
 });
 
-function heavyProcess(directory, args, settings, cwd) {
+function heavyProcess(directory, args, settings, cwd, stdin = 'ignore') {
   const env = { ...process.env, FORGE_HEAVY_DIR: directory, FORGE_CLIENT_SETTINGS: settings };
   delete env.FORGE_HEAVY_TEST_CONCURRENCY;
   delete env.GOMAXPROCS;
@@ -241,7 +241,7 @@ function heavyProcess(directory, args, settings, cwd) {
   const child = spawn(process.execPath, [cli, 'heavy', ...args], {
     cwd,
     env,
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: [stdin, 'pipe', 'pipe'],
   });
   const result = { stdout: '', stderr: '', exited: new Promise(done => child.once('exit', done)), child };
   child.stdout.on('data', data => (result.stdout += data));
@@ -256,22 +256,42 @@ test('nforge heavy runs queued commands first come, first served and tells each 
   writeFileSync(settings, JSON.stringify({ localHeavySlots: 1 }));
   for (const ms of [200, 250, 300]) recordHold(directory, ms);
   const held = tryHeavySlot(directory, 1);
+  assert(held);
+  // The real CLI may otherwise admit a burst slot on an idle machine. These commands
+  // each reserve the machine's cores, so the test always exercises one occupied slot.
+  const command = [
+    '--cores',
+    String(availableParallelism()),
+    process.execPath,
+    '-e',
+    "process.stdout.write('started\\n'); process.stdin.resume()",
+  ];
   const callers = [];
-  for (let id = 0; id < 4; id++) {
-    callers.push(heavyProcess(directory, [process.execPath, '-e', printStart], settings));
-    await until(() => queuedNames(directory).length === id + 1, 30_000);
-    // The caller has told us its position: freeing the slot earlier races its first queue read.
-    await until(() => callers[id].stderr.includes(`Queue position ${id + 1} of ${id + 1}`), 30_000);
+  try {
+    for (let id = 0; id < 4; id++) {
+      const caller = heavyProcess(directory, command, settings, undefined, 'pipe');
+      callers.push(caller);
+      await until(() => queuedNames(directory).length === id + 1, 30_000);
+      await until(() => caller.stderr.includes(`Queue position ${id + 1} of ${id + 1}`), 30_000);
+    }
+    rmSync(held, { recursive: true });
+    for (const [id, caller] of callers.entries()) {
+      await until(() => caller.stdout.includes('started'), 30_000);
+      assert(
+        callers.slice(id + 1).every(later => !later.stdout.includes('started')),
+        'start order is arrival order',
+      );
+      // Keep the penultimate command in its slot until the last waiter sees its new position.
+      if (id === callers.length - 2)
+        await until(() => callers.at(-1).stderr.includes('Queue position 1 of 1'), 30_000);
+      caller.child.stdin.end();
+      assert.equal(await caller.exited, 0, caller.stderr);
+    }
+  } finally {
+    for (const caller of callers)
+      if (caller.child.exitCode === null && caller.child.signalCode === null) caller.child.kill();
+    await Promise.all(callers.map(caller => caller.exited));
   }
-  rmSync(held, { recursive: true });
-  await Promise.all(callers.map(caller => caller.exited));
-  const starts = callers.map(caller => Number(/S(\d+)/.exec(caller.stdout)?.[1]));
-  assert(starts.every(Boolean), callers.map(caller => caller.stderr).join('\n'));
-  assert.deepEqual(
-    starts,
-    [...starts].sort((a, b) => a - b),
-    'start order is arrival order',
-  );
   assert.match(callers[3].stderr, /Queue position 4 of 4; estimated wait about \d+ s \(median heavy command/);
   assert.match(callers[3].stderr, /Queue position 1 of 1/);
   assert.deepEqual(slotFiles(directory), []);
