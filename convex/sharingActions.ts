@@ -3,7 +3,7 @@
 'use node';
 import { v } from 'convex/values';
 import { paginationOptsValidator } from 'convex/server';
-import { action, accountAction, type ActionCtx } from './cliServer';
+import { accountAction, type ActionCtx } from './cliServer';
 import { internal } from './_generated/api';
 import type { Doc, Id } from './_generated/dataModel';
 import { currentAccess } from './access';
@@ -21,7 +21,7 @@ export async function checkForgeUser(ctx: ActionCtx, value: string) {
   return reader;
 }
 
-export const add = action({
+export const add = accountAction('write')({
   args: { id: v.id('imports'), reader: v.string() },
   returns: v.null(),
   handler: async (ctx, { id, reader }): Promise<null> => {

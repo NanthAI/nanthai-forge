@@ -11,14 +11,7 @@ import { invitationWasRevoked, type InvitationRevocations } from './projectInvit
 import { retainMembership } from './projectActorNames';
 import { v } from 'convex/values';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
-import {
-  query,
-  mutation,
-  accountMutation,
-  internalMutation,
-  type QueryCtx,
-  type MutationCtx,
-} from './cliServer';
+import { query, mutation, internalMutation, type QueryCtx, type MutationCtx } from './cliServer';
 import type { Doc, Id } from './_generated/dataModel';
 import { teamReachedProjects } from './teamGrant';
 import { ownedProject, activeProject, activeOwnedProject } from './projectAuthority';
@@ -70,15 +63,14 @@ export const add = internalMutation({
   returns: v.null(),
   handler: addContributor,
 });
-// Project-scoped removal retains its existing owner/device permission.
-export const remove = accountMutation('same')({
+export const remove = mutation({
   args: { projectId: v.id('hostedProjects'), contributor: v.string() },
   returns: v.null(),
   handler: async (ctx, { projectId, contributor }) => {
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to manage your Forge project.');
-      const project = await ownedProject(ctx, projectId, user.subject);
+      const project = await activeOwnedProject(ctx, projectId, user.subject);
       const grant = await ctx.db
         .query('projectContributors')
         .withIndex('by_project_and_contributor', q =>
@@ -254,7 +246,7 @@ export const cancelInvite = mutation({
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to manage access.');
-      await ownedProject(ctx, projectId, user.subject);
+      await activeOwnedProject(ctx, projectId, user.subject);
       const row = await ctx.db.get(id);
       invariant(!row || row.projectId === projectId, 'PROJECT_UNAVAILABLE', 'Invitation unavailable.');
       if (row && invitationStatus(row) === 'pending')

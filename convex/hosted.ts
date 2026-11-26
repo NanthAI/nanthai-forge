@@ -3,7 +3,7 @@
 'use node';
 
 import { v } from 'convex/values';
-import { action, accountAction, type ActionCtx } from './cliServer';
+import { accountAction, type ActionCtx } from './cliServer';
 import { internal } from './_generated/api';
 import type { Id } from './_generated/dataModel';
 import { currentAccess, githubConfig } from './access';
@@ -35,7 +35,7 @@ export const start = accountAction('write')({
     }
   },
 });
-export const status = action({
+export const status = accountAction('same')({
   args: { id: v.id('imports') },
   returns: v.string(),
   handler: async (ctx, { id }): Promise<string> => {
@@ -137,7 +137,7 @@ export async function readSource(
     return report(error);
   }
 }
-export const read = action({
+export const read = accountAction('same')({
   args: { id: v.id('imports'), endpoint: v.string() },
   returns: v.string(),
   handler: readSource,

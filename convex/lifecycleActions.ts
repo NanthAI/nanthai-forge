@@ -2,7 +2,7 @@
 // Copyright 2026 Ferdinando Valsecchi
 'use node';
 import { v } from 'convex/values';
-import { action } from './cliServer';
+import { accountAction } from './cliServer';
 import { internal } from './_generated/api';
 import type { Doc } from './_generated/dataModel';
 import { currentAccess } from './access';
@@ -11,7 +11,7 @@ import { archiveDownload, directDownloadFields } from './archiveDownload';
 import { projectArchivePart } from './projectArchivePart';
 import { report } from './errors';
 
-export const restore = action({
+export const restore = accountAction('write')({
   args: { id: v.id('imports') },
   returns: v.null(),
   handler: async (ctx, { id }): Promise<null> => {
@@ -30,7 +30,7 @@ export const restore = action({
   },
 });
 
-export const snapshotInfo = action({
+export const snapshotInfo = accountAction('same')({
   args: { id: v.id('imports') },
   returns: v.object({
     bytes: v.number(),
@@ -83,7 +83,7 @@ export const snapshotInfo = action({
   },
 });
 
-export const downloadPart = action({
+export const downloadPart = accountAction('same')({
   args: { id: v.id('imports'), offset: v.number(), digest: v.optional(v.string()) },
   returns: v.object({
     ...directDownloadFields,

@@ -8,6 +8,7 @@ import { v } from 'convex/values';
 import { moduleUrl } from './convex-module.mjs';
 import { job, providers, state } from './hosted-fixture.mjs';
 const api = await import(moduleUrl('../convex/cliServer.ts'));
+const { activeOwnedProject } = await import(moduleUrl('../convex/projectAuthority.ts'));
 const teams = await import(moduleUrl('../convex/teams.ts'));
 const actions = await import(moduleUrl('../convex/teamActions.ts'));
 const handles = await import(moduleUrl('../convex/urlAccounts.ts'));
@@ -127,17 +128,19 @@ test('SI-03: registering an account mutation without a device decision fails; ex
 test('public actions require an account device decision or a declared resource selector', async () => {
   const definition = { args: {}, returns: v.string(), handler: () => 'allowed' };
   const project = { ...definition, args: { projectId: v.id('hostedProjects') } };
+  const imported = { ...definition, args: { id: v.id('imports') } };
   const mapped = api.actionWithMappedResult(value => value);
   for (const register of [api.action, api.coordinationAction, mapped]) {
     assert.throws(() => register(definition), /must declare device access with accountAction/);
+    assert.throws(() => register(imported), /must declare device access with accountAction/);
     assert(register(project));
   }
   const s = state();
   credential(s, restricted[1]);
   const ctx = actionContext(s);
-  assert.equal(await api.accountAction('same')(definition)._handler(ctx, {}), 'allowed');
+  assert.equal(await api.accountAction('same')(imported)._handler(ctx, { id: 'own' }), 'allowed');
   await assert.rejects(
-    api.accountAction('write')(definition)._handler(ctx, {}),
+    api.accountAction('write')(imported)._handler(ctx, { id: 'own' }),
     error => error.data?.code === 'AUTH_SCOPE_DENIED',
   );
   assert.equal(await api.action(project)._handler(ctx, { projectId: 'selected' }), 'allowed');
@@ -254,4 +257,16 @@ test('SI-03 review: a read-only one-project device cannot write personal guidanc
     agentGuidance: 'Allowed',
   });
   assert.equal(result.agentGuidance, 'Allowed');
+});
+
+test('owner project writes retain project-scoped write devices and refuse read-level device authority', async () => {
+  const s = state();
+  const project = { _id: 'selected', owner: 'owner', name: 'Synthetic', key: 'synthetic' };
+  s.tables.hostedProjects.set(project._id, project);
+  for (const projects of [{ kind: 'all' }, { kind: 'project', projectId: project._id }]) {
+    const context = source => ({ ...s.ctx, forgeDevice: { settings: { projects, source } } });
+    assert.equal((await activeOwnedProject(context('write'), project._id, 'owner'))._id, project._id);
+    await assert.rejects(activeOwnedProject(context('read'), project._id, 'owner'), refused);
+  }
+  assert.equal((await activeOwnedProject(s.ctx, project._id, 'owner'))._id, project._id);
 });

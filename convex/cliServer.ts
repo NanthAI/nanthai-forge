@@ -54,7 +54,7 @@ function withPeople<B, C>(
     const imported =
       usesUnlinkedImport((definition as { args?: unknown }).args) || usesUnlinkedImport(returns);
     const argsShape = (definition as { args?: unknown }).args;
-    if (kind && !account && !resourceArguments(argsShape)) {
+    if (kind && !account && (!resourceArguments(argsShape) || (kind === 'action' && imported))) {
       const builder = kind === 'mutation' ? 'accountMutation' : 'accountAction';
       throw new Error(`Account ${kind}s must declare device access with ${builder}.`);
     }

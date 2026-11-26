@@ -4,7 +4,7 @@
 import { randomBytes } from 'node:crypto';
 import { blobStore } from './blobStore';
 import { v } from 'convex/values';
-import { action, accountAction, type ActionCtx } from './cliServer';
+import { accountAction, type ActionCtx } from './cliServer';
 import { internal } from './_generated/api';
 import type { Doc, Id } from './_generated/dataModel';
 import { agentTool } from './schema';
@@ -27,7 +27,7 @@ function tokenHash(token: string) {
   invariant(/^fga_[A-Za-z0-9_-]{43}$/.test(token), 'AGENT_UNAVAILABLE', 'This agent grant is unavailable.');
   return digest(token);
 }
-export const create = action({
+export const create = accountAction('write')({
   args: {
     id: v.id('imports'),
     operationId: v.string(),
