@@ -1493,8 +1493,10 @@ launch; they do not settle the still-open public data-policy commitments.
 `/docs/` is a static section emitted by the hosted Vite build. It uses the design
 system's `DocsFrame` and prose rules: a left tree and a 68-character column at
 16 px/1.6. It needs neither sign-in nor the app bundle. Optional browser code
-filters page titles, copies code and remembers the theme; it makes no backend
-calls, polls or idle timers. The public page and sign-in help link here.
+filters page titles, copies code and remembers the theme. The public page and
+sign-in help link here. Cloudflare serves the built files from static storage.
+Reading a page, Markdown twin or discovery file makes zero Convex calls and
+database reads or writes. An idle tab makes zero calls.
 
 The existing explicit `packageDocuments` inventory supplies both HTML pages and
 raw Markdown. New guides need a manifest under `scripts/package-documents/`, as
@@ -1506,7 +1508,20 @@ or authorizing a grant. Schemas are rendered at build
 time; there is no checked-in reference copy to drift. A missing source or nav
 page fails the build. Docs tests guard generated command/tool coverage, safe
 Markdown rendering, links, keyboard interaction and both themes and widths.
-`/llms.txt`, `/llms-full.txt` and crawler rules include the docs destination.
+Setup and how-to pages use `DocsAgentPrompt`. Put new guides under
+`docs/guides/` and add a one-sentence first check in
+`scripts/docs-agent-prompts.mjs`. The top level, `docs/agents/` and
+`docs/operations/` also require a prompt unless the page is classified as
+reference in that module. The shared prompt sends the agent to the page's Markdown twin
+and asks it to use real IDs, keep secrets private and ask before external or
+irreversible changes. Keep task steps and command examples in the guide. The
+static build renders the prompt above the guide. With scripts enabled, it
+uses the reader's current origin. The manual-copy fallback links to the Forge
+development docs. The static docs check catches a guide without a prompt or
+Markdown twin. Both discovery files list every guide. `/llms-full.txt`
+links to guides beyond its curated full-text chapters. `robots.txt` allows the
+guide pages, Markdown twins and both discovery files.
+
 The static docs check runs the same discovery generator as the hosted build,
 including when a docs-only landing skips the web build. It checks for source
 drift and reports the full-text size. Sizes above 409,600 bytes emit a warning

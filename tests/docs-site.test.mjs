@@ -156,9 +156,9 @@ test('docs are static, contract-generated and usable without account or backend 
           assert.equal(await page.locator('h1').innerText(), 'Review and land a change');
           await page.getByRole('button', { name: 'Copy code' }).first().click();
           await page.waitForFunction(
-            () => document.querySelector('.docs-copy-status')?.textContent === 'Copied',
+            () => document.querySelector('.docs-copy [role="status"]')?.textContent === 'Copied',
           );
-          assert.equal(await page.locator('.docs-copy-status').first().textContent(), 'Copied');
+          assert.equal(await page.locator('.docs-copy').getByRole('status').first().textContent(), 'Copied');
           assert.match(await page.evaluate(() => navigator.clipboard.readText()), /nforge agent ROOT status/);
           await page.keyboard.press('Tab');
           assert.ok(await page.evaluate(() => document.activeElement !== document.body));
@@ -171,7 +171,7 @@ test('docs are static, contract-generated and usable without account or backend 
       const page = await noJs.newPage();
       await page.goto(`${origin}/docs/guides/agents/`);
       assert.equal(await page.locator('h1').innerText(), 'Start a Lane and land it');
-      assert.ok((await page.locator('pre').first().innerText()).includes('nforge mcp ROOT --agent'));
+      assert.ok(await page.locator('pre').filter({ hasText: 'nforge mcp ROOT --agent' }).first().isVisible());
       await page
         .getByRole('link', { name: 'Import GitHub source into a hosted project', exact: true })
         .click();

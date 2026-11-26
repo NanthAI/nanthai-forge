@@ -18,6 +18,7 @@ import {
   sourceFiles,
 } from '../scripts/test-impact.mjs';
 import { scanReaders } from '../scripts/test-tree-scanners.mjs';
+import { docsReaders } from '../scripts/docs-readers.mjs';
 import { recursiveFolderReader } from '../scripts/script-impact.mjs';
 import { incompletePreflight, mustRunNotRun, preflightVerdict } from '../dist/agent-preflight-incomplete.js';
 import * as preflight from '../dist/agent-preflight.js';
@@ -291,6 +292,8 @@ test('425ecd74: a data fixture, its test and a doc retain byte and folder reader
     )
     .map(([path]) => path);
   assert.deepEqual(readers, [at('tests', 'incident-replays.test.mjs')]);
+  // Explicit docs readers are also mandatory when a document lands with code or a fixture.
+  const documentReaders = [...docsReaders(files, [paths[0]]).keys()];
   // Repo-wide guards that scan the docs or tests folder read these files too (Issue ec7960f9).
   const scanners = [...scanReaders(files, paths).keys()];
   // A bare readdirSync('tests') observes the JSON folder too, even when the
@@ -318,6 +321,7 @@ test('425ecd74: a data fixture, its test and a doc retain byte and folder reader
     [
       ...new Set([
         ...readers,
+        ...documentReaders,
         ...smokeTests,
         ...scanners,
         ...directoryReaders,
@@ -325,7 +329,7 @@ test('425ecd74: a data fixture, its test and a doc retain byte and folder reader
         ...replayGuards,
       ]),
     ].sort(),
-    'local tiers hold the fixture reader, folder readers and fixed smoke set only',
+    'local tiers hold the fixture and doc readers, folder readers and fixed smoke set only',
   );
   t.diagnostic(`local ${plan.tests.length}, deferred to pre-queue ${plan.deferredTests.length}`);
 });

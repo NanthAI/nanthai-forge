@@ -8,6 +8,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'vite';
 import { packageDocuments, packageDocumentData, readDocument } from '../scripts/package-documents.mjs';
+import { agentGuidePaths, checkAgentGuides } from '../scripts/docs-agent-prompts.mjs';
 import {
   llmDocuments,
   llmsFullPaths,
@@ -100,6 +101,16 @@ test('the hosted Vite build emits linked LLM files, every packaged doc and crawl
     assert.equal(readFileSync(join(output, path), 'utf8'), readDocument(root, path));
   }
   for (const path of packageDocumentData) assert.equal(readFileSync(join(output, path), 'utf8'), read(path));
+  for (const path of agentGuidePaths) {
+    const page = `/${path.slice(0, -3)}/`;
+    const html = readFileSync(join(output, page, 'index.html'), 'utf8');
+    assert.ok(html.includes('Give this to your agent'), page);
+    assert.ok(html.includes(`Read https://dev.forge.nanthai.tech/${path}.\n`), page);
+    assert.ok(llms.includes(`](/${path}): `), page);
+    assert.ok(full.includes(`Source: /${path}\n\n`) || full.includes(`](/${path})`), page);
+    assert.ok(crawlable(robots, page), page);
+    assert.ok(crawlable(robots, `/${path}`), path);
+  }
   let previous = -1;
   for (const path of llmsFullPaths) {
     const marker = `Source: ${path === 'README.md' ? `${githubBlob}README.md` : `/${path}`}\n\n`;
@@ -120,6 +131,25 @@ test('the hosted Vite build emits linked LLM files, every packaged doc and crawl
   ])
     assert.ok(!full.includes(`Source: /${internal}`), `${internal} stays out of llms-full`);
   assert.equal(robots, read('web/public/robots.txt'));
+});
+
+test('docs generation rejects a how-to with no agent prompt or Markdown twin', () => {
+  const source = { source: '# Guide\n\nFollow these steps.' };
+  const guides = new Map(agentGuidePaths.map(path => [path, source]));
+  assert.doesNotThrow(() => checkAgentGuides(guides));
+  for (const newGuide of [
+    'docs/guides/new-how-to.md',
+    'docs/operations/new-runner.md',
+    'docs/new-setup.md',
+  ]) {
+    guides.set(newGuide, source);
+    assert.throws(() => checkAgentGuides(guides), {
+      message: `How-to page needs an agent prompt: ${newGuide}`,
+    });
+    guides.delete(newGuide);
+  }
+  guides.delete('docs/quickstart.md');
+  assert.throws(() => checkAgentGuides(guides), /How-to page needs a Markdown twin: docs\/quickstart\.md/);
 });
 
 test('llms-full is curated: listed in the package inventory and without internal plans', () => {

@@ -12,6 +12,8 @@ import { packageDocuments, readDocument } from './package-documents.mjs';
 import { generatedReferencePaths } from './docs-output-paths.mjs';
 import { docsReference } from './docs-reference.ts';
 import { DocsFrame, type DocsGroup } from '../web/src/ds/DocsFrame.tsx';
+import { DocsAgentPrompt } from '../web/src/ds/DocsAgentPrompt.tsx';
+import { agentGuidePrompt } from './docs-agent-prompts.mjs';
 
 // A newcomer's path: first landing, then everyday tasks, then lookup and trust.
 const routes: [string, string[]][] = [
@@ -118,8 +120,10 @@ export function docsSite(root: string): Plugin {
         ids.set(key, count + 1);
         return createElement(tag, { id: count ? `${key}-${count}` : key }, children);
       };
+    const prompt = agentGuidePrompt(path);
     const body = renderToStaticMarkup(
       <DocsFrame groups={groups} current={current}>
+        {prompt && <DocsAgentPrompt {...prompt} />}
         <Markdown
           remarkPlugins={[remarkGfm]}
           components={{

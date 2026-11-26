@@ -33,6 +33,11 @@ body:has(.docs-shell) { margin: 0; }
   .md .docs-table table { margin-bottom: 0; }
   .md details { margin-block: var(--s-3); }
   .md summary { cursor: pointer; color: var(--text-2); }
+  .docs-agent-prompt { margin-block: var(--s-3) var(--s-5); font-size: var(--t-meta); }
+  .docs-agent-prompt > button[hidden] { display: none; }
+  .md .docs-agent-prompt details { margin-block: var(--s-2) 0; }
+  .md .docs-agent-prompt pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .docs-agent-prompt .docs-copy-status:empty { display: block; }
   .docs-copy { display: flex; gap: var(--s-3); align-items: center; margin-bottom: var(--s-4); padding-top: var(--s-2); }
   .docs-copy-status { color: var(--text-2); font-size: var(--t-meta); white-space: normal; }
   .docs-footer { display: flex; flex-wrap: wrap; gap: var(--s-4); border-top: var(--rule) solid var(--line); margin-top: var(--s-12); padding-top: var(--s-5); max-width: var(--m-read); font-size: var(--t-small); }

@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { packageDocuments, packageDocumentData, readDocument } from './package-documents.mjs';
 import { AGENT_DEFAULTS, BOARD_LINE, agentDefaultLines } from './agent-default-lines.mjs';
+import { agentGuidePaths, checkAgentGuides } from './docs-agent-prompts.mjs';
 
 import { coreVerbs, landSaveForm } from './agent-verb-forms.mjs';
 
@@ -126,12 +127,16 @@ function describe(path, source) {
 // output and vendor notice trees stay out. A missing listed file throws (ENOENT) and fails the build.
 export function llmDocuments(root) {
   const documents = packageDocuments.map(path => describe(path, readDocument(root, path)));
-  const known = new Set(packageDocuments);
+  const byPath = new Map(documents.map(doc => [doc.path, doc]));
+  checkAgentGuides(byPath);
   const full = llmsFullPaths.map(path => {
-    if (path.startsWith('docs/') && !known.has(path))
-      throw new Error(`llms-full source is not in packageDocuments: ${path}`);
-    return describe(path, readDocument(root, path));
+    if (path === 'README.md') return describe(path, readDocument(root, path));
+    const doc = byPath.get(path);
+    if (!doc) throw new Error(`llms-full source is not in packageDocuments: ${path}`);
+    return doc;
   });
+  const included = new Set(llmsFullPaths);
+  const moreGuides = agentGuidePaths.filter(path => !included.has(path)).map(path => byPath.get(path));
   const measuredSource = full.find(doc => doc.path === 'docs/why-forge.md').source;
   const measured = /<!-- agent-measurements:start -->\n([\s\S]*?)\n<!-- agent-measurements:end -->/.exec(
     measuredSource,
@@ -161,9 +166,10 @@ export function llmDocuments(root) {
     `## Measured results\n\n${measured}\n\nMethod, sources and caveats: [Why Forge](/docs/why-forge.md).\n\n` +
     `## Reference\n\n${links(reference)}\n\n` +
     `## Optional\n\n${links(rest)}\n\n` +
-    `## Full text\n\n- [Curated documentation](/llms-full.txt): The README and ${llmsFullPaths.length - 1} user and agent guides, concatenated. Plans, status, research, license disclosures and the other documents are linked above, not included.\n`;
+    `## Full text\n\n- [Curated documentation](/llms-full.txt): The README, ${llmsFullPaths.length - 1} user and agent guides in full and links to more how-to guides.\n`;
   const text =
     `${introduction}The README and the user and agent guides follow in a fixed order. Plans, status, research, license disclosures and the architecture reference are separate documents linked from /llms.txt.\n\n` +
+    `## More how-to guides\n\n${links(moreGuides)}\n\n` +
     full
       .map(
         doc =>
