@@ -12,6 +12,7 @@
 // real runner's ingest, source resolve and the prove action on top of these rows.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { synthetic, states } from './hosted-landing-batches-fixture.mjs';
 import { fixture, drain, settle, pendingTasks } from './hosted-stale-check-fixture.mjs';
 import { HOLD_ORDER, MEASURED, measuredProblems } from './keep-the-run-scenarios.mjs';
@@ -39,6 +40,13 @@ async function measureScenario(t, name) {
   // A wall-clock composedAt can change whether a fake-time queue claim rearms the stall alarm.
   // The fixture's Date.now override also drives new Date() through this shared clock.
   storageClock(t, { elapsed: true });
+  // Timing history compresses the check run UUID. Use repeatable, distinct UUIDs
+  // with hash-like entropy so a replay measures the same bytes.
+  let nextId = 0;
+  t.mock.method(crypto, 'randomUUID', () => {
+    const hex = createHash('sha256').update(`keep-the-run:${nextId++}`).digest('hex');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+  });
   const [scenario, mode, ...flags] = name.split(', ');
   const has = flag => flags.includes(flag);
   const follower = has('C1 follower');
