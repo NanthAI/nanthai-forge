@@ -6,35 +6,31 @@ import { digest } from '../dist/hash.js';
 import { moduleUrl } from './convex-module.mjs';
 import { setup } from './hosted-overlaps-fixture.mjs';
 import { hostedOverlapAdvice, mergeOverlapChanges, boundOverlapChanges } from '../dist/hosted-overlap.js';
-import { lineBaseTag } from '../dist/hosted-overlap-evidence.js';
+import {
+  bucketRows,
+  delta,
+  entry,
+  hex,
+  read,
+  readyLanding,
+  rowOf,
+  sweep,
+  trackChange,
+  unprunedOverlapQuery,
+} from './hosted-overlap-buckets-fixture.mjs';
 
 // Item 411727ba, Fable verdict dc29dc4f: a Lane's saved change entries live in 64 hash buckets, so the first-write
 // hook's peer read loads one bucket per peer instead of every peer's whole list (621 KB with sweep-size peers).
 const buckets = await import(moduleUrl('../convex/projectHostedOverlapChanges.ts'));
-const overlaps = await import(moduleUrl('../convex/projectHostedOverlaps.ts'));
 const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 const tracking = await import(moduleUrl('../convex/projectHostedOverlapStore.ts'));
 
-const hex = n => digest(`blob-${n}`);
 const prng = seed => () => {
   seed = (seed + 0x6d2b79f5) | 0;
   let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
   t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
   return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
 };
-/** A synthetic saved change; `links` adds cross-file symbol facts. */
-const entry = (path, n, links) => ({
-  path,
-  before: { blob: hex(n), mode: 'file' },
-  after: { blob: hex(n + 1), mode: 'file' },
-  evidence: {
-    baseBlob: hex(n),
-    ranges: [{ start: n % 7, end: (n % 7) + 2 }],
-    symbols: [`name${n}`],
-    ...(links ? { symbolLinks: links } : {}),
-  },
-  lines: [n % 9, n % 4, lineBaseTag(hex(n))],
-});
 const pathOf = (i, rand) =>
   `${['src', 'web/src', 'convex', 'docs/é', 'tests'][Math.floor(rand() * 5)]}/f${i}.ts`;
 const listOf = (size, seed, links) => {
@@ -166,52 +162,6 @@ test('advice reads the same peers whether a peer holds its whole list or only th
   }
 });
 
-const delta = (path, n = 1) => entry(path, n);
-const trackChange = (s, who, paths, intent) =>
-  s.transaction(
-    'track-change',
-    {
-      _handler: async ctx => {
-        const row = await records.readHostedRecord(ctx, {
-          projectId: s.projectId,
-          actor: 'owner',
-          kind: 'lane',
-          key: who.id,
-        });
-        const current = JSON.parse(row.value);
-        await records.writeHostedRecord(ctx, {
-          projectId: s.projectId,
-          actor: 'owner',
-          authorityEpoch: 1,
-          expectedVersion: current.version,
-          record: {
-            ...current,
-            head: String(current.version + 1).padStart(64, 'e'),
-            version: current.version + 1,
-            sourceVersion: current.sourceVersion + 1,
-          },
-          overlap: { baseSequence: 0, intent, changes: paths },
-        });
-      },
-    },
-    {},
-  );
-const read = async (s, laneId, args) => {
-  const reply = JSON.parse(
-    await s.transaction('projectHostedOverlaps:read', overlaps.read, {
-      projectId: s.projectId,
-      laneId,
-      ...args,
-    }),
-  );
-  return { reply, io: s.counts.at(-1) };
-};
-const rowOf = (s, laneId) =>
-  [...s.tables.projectHostedOverlapLanes.values()].find(row => row.laneId === laneId);
-const bucketRows = (s, laneId) =>
-  [...s.tables.projectHostedOverlapChanges.values()].filter(row => row.laneId === laneId);
-const sweep = (count, tag = 'sweep') =>
-  Array.from({ length: count }, (_, i) => delta(`${tag}/file-${i}.txt`, i));
 test('hook read: a sweep-size peer costs one bucket, not its whole list', async t => {
   const { s, lane: mine, peer } = await setup(t);
   await trackChange(s, peer, [...sweep(540), delta('a.txt', 900)], 'Peer sweep');
@@ -261,19 +211,15 @@ const wholeListDb = db =>
       });
     },
   });
-const wholeListRead = async (s, laneId, args) =>
-  JSON.parse(
-    await s.transaction(
-      'projectHostedOverlaps:read',
-      {
-        ...overlaps.read,
-        _handler: (ctx, input) => overlaps.read._handler(over(ctx, { db: wholeListDb(ctx.db) }), input),
-      },
-      { projectId: s.projectId, laneId, ...args },
-    ),
-  );
+const query = await unprunedOverlapQuery();
+const wholeListRead = (s, laneId, args) =>
+  read(s, laneId, args, {
+    ...query,
+    _handler: (ctx, input) => query._handler(over(ctx, { db: wholeListDb(ctx.db) }), input),
+  });
 
 test('every read mode answers as the whole saved list does (bucket selection parity)', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-10-02T00:00:00Z') });
   const { s, lane: mine, peer } = await setup(t);
   await trackChange(s, peer, [...sweep(540), delta('a.txt', 900), delta('b/two.txt', 903)], 'Peer sweep');
   await trackChange(
@@ -282,20 +228,34 @@ test('every read mode answers as the whole saved list does (bucket selection par
     [delta('a.txt', 901), delta('sweep/file-3.txt', 902), delta('b/two.txt', 904)],
     'My change',
   );
-  const modes = [
+  const parity = async mode =>
+    assert.equal(
+      (await read(s, mine.id, mode)).wire,
+      (await wholeListRead(s, mine.id, mode)).wire,
+      `reply of ${JSON.stringify(mode)}`,
+    );
+  await parity({});
+  readyLanding(s);
+  for (const mode of [
     {},
-    { path: 'a.txt' },
-    { path: 'sweep/file-3.txt' },
+    { path: 'a.txt', board: { after: 0, claim: true } },
+    { path: 'sweep/file-3.txt', detail: true },
     { path: 'not-saved.txt' },
     { detail: true },
     { scope: ['sweep/'] },
     { scope: ['b/', 'a.txt'] },
     { paths: true },
-  ];
-  const bucketed = [];
-  for (const mode of modes) bucketed.push((await read(s, mine.id, mode)).reply);
-  for (const [i, mode] of modes.entries())
-    assert.deepEqual(bucketed[i], await wholeListRead(s, mine.id, mode), `reply of ${JSON.stringify(mode)}`);
+  ])
+    await parity(mode);
+  await trackChange(
+    s,
+    mine,
+    [entry('mine.ts', 908, { exports: ['mine'], refs: ['peer.ts#peer'] })],
+    'Mine links',
+  );
+  await trackChange(s, peer, [entry('peer.ts', 909, { exports: ['peer'], refs: [] })], 'Peer links');
+  for (const mode of [{}, { detail: true }, { path: 'peer.ts' }, { presence: {}, path: 'mine.ts' }])
+    await parity(mode);
 });
 
 test('the hook read does not grow with the peer: 5 files and 540 files read about the same', async t => {

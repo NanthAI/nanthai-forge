@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import { v } from 'convex/values';
+import type { Id } from './_generated/dataModel';
+import type { QueryCtx } from './server';
 import { projectQuery as query } from './cliServer';
 import { accessibleProject, activeProject } from './projectAuthority';
 import { readHostedPresence, dormantHostedPresence } from './projectHostedPresence';
@@ -8,7 +10,14 @@ import { dormantCutoff, liveOpenOverlapLanes } from './projectHostedDormancy';
 import { hostedStartMain } from './projectHostedChannels';
 import { readHostedRecord } from './projectHostedRecords';
 import { hostedLaneSchema } from '../src/hosted-lane';
-import { hostedOverlapAdvice, IDLE_NOTICE_MS, supersededSummary } from '../src/hosted-overlap';
+import {
+  hostedOverlapAdvice,
+  IDLE_NOTICE_MS,
+  sameResolution,
+  sameStack,
+  supersededSummary,
+} from '../src/hosted-overlap';
+import { presenceMayShare } from '../src/hosted-presence';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { safeRelative } from '../src/safe-relative';
@@ -37,7 +46,42 @@ const savedPaths = (changes: string) => {
   }
 };
 
-/** One finite agent read. No source objects, Work hydration, scheduler or subscription. */
+/** Called only when the active-head and open-peer windows can still be complete. */
+async function dormantHeadsComplete(
+  ctx: QueryCtx,
+  projectId: Id<'hostedProjects'>,
+  cutoff: number | null,
+  unmatched: readonly { key: string }[],
+  sawOtherOpen: boolean,
+) {
+  if (!unmatched.length) return true;
+  if (cutoff === null) return false;
+  if (unmatched.length <= 16 && !sawOtherOpen) {
+    // Presence is one row per open Lane. Paused/ready Lanes are open but absent from the
+    // active-head window. Without them, all dormant rows fit in the original 101-row window.
+    const otherOpen = await ctx.db
+      .query('projectHostedRecordHeads')
+      .withIndex('by_project_and_kind_and_status', q =>
+        q.eq('projectId', projectId).eq('kind', 'lane').gte('status', 'paused').lte('status', 'ready'),
+      )
+      .first();
+    if (!otherOpen) {
+      const rows = await Promise.all(
+        unmatched.map(header =>
+          ctx.db
+            .query('projectHostedPresence')
+            .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', header.key))
+            .unique(),
+        ),
+      );
+      return rows.every(row => row !== null && row.at <= cutoff);
+    }
+  }
+  const dormant = await dormantHostedPresence(ctx, projectId, cutoff);
+  return unmatched.every(header => dormant.has(header.key));
+}
+
+/** The CLI and first-write hook make one-shot HTTP reads. No source objects, Work hydration or scheduler. */
 export const read = query({
   args: {
     projectId: v.id('hostedProjects'),
@@ -130,10 +174,17 @@ export const read = query({
       const current = mine && mine.head === lane.head && mine.baseHead === lane.base.head ? mine : null;
       // The row says without a read whether it saved nothing (the idle skip below).
       const savedNothing = current?.pathSummary.pathCount === 0;
+      const pathSet = path ? new Set([path]) : undefined;
+      // On main a path-only read uses only that path, including its own automatic claim decision.
+      const focusPath = !paths && !detail && !presence && lane.base.head === main.head ? pathSet : undefined;
       const focus = current
         ? {
             ...current,
-            changes: savedNothing ? '[]' : await overlapLaneChanges(ctx, current),
+            changes: savedNothing
+              ? '[]'
+              : focusPath
+                ? await overlapLaneEntries(ctx, current, focusPath)
+                : await overlapLaneChanges(ctx, current),
             baseSequence,
             ...links,
           }
@@ -190,6 +241,7 @@ export const read = query({
         ? await readPeers()
         : ([[], []] as Awaited<ReturnType<typeof readPeers>>);
       const versions = new Map(headers.map(header => [header.key, header.version]));
+      let sawOtherOpen = false;
       // Newest-first windows hold current work, but retained stale active Lanes can still push
       // a live peer out of the 51-row window (2026-10-30: 125 active heads hid every peer).
       // An exact indexed head read keeps such a peer's currency check correct.
@@ -202,6 +254,7 @@ export const read = query({
             )
             .unique();
           if (head?.status === 'active') versions.set(peer.laneId, head.version);
+          else if (head?.status === 'paused' || head?.status === 'ready') sawOtherOpen = true;
         }
       const plans = new Map();
       for (const peer of peers)
@@ -222,25 +275,27 @@ export const read = query({
       const unmatched = headers.filter(
         header => !peers.some(peer => peer.laneId === header.key && peer.recordVersion === header.version),
       );
-      // Dormant Lanes stay active heads but are left out of the peers on purpose: their slim presence
-      // rows excuse them. Read only when an active head has no peer row.
-      const dormantLanes =
-        cutoff !== null && unmatched.length ? await dormantHostedPresence(ctx, projectId, cutoff) : null;
+      // Dormant Lanes stay active heads but are left out of the peers on purpose.
       const complete =
         peers.length <= 50 &&
         headers.length <= 50 &&
-        unmatched.every(header => dormantLanes?.has(header.key));
-      // A peer's entries are read only as far as this read can use them (Item 411727ba): a path read needs the entry
-      // of that path, a default read the entries of the paths the caller saved (the whole list only when both sides
-      // carry cross-file symbol facts), scope and detail reads the whole list. The advice function sees the same
-      // entries it would have used from the whole list.
+        (await dormantHeadsComplete(ctx, projectId, cutoff, unmatched, sawOtherOpen));
+      // Keep every current peer in the window for ordering and completeness. Only its bucket
+      // reads can be pruned. Exact path summaries can reject a peer; Bloom hits still need the bucket.
       const mineSaved = new Set(savedPaths(focus.changes));
       const mineFacts = !path && !detail && !scope?.length && hasSymbolFacts(focus.changes);
       const peerChanges = async (peer: (typeof currentPeers)[number]) => {
-        if (!peer.open || peer.laneId === laneId) return '[]';
-        if (path) return overlapLaneEntries(ctx, peer, new Set([path]));
+        if (!peer.open || peer.laneId === laneId || peer.pathSummary.pathCount === 0) return '[]';
+        // Advice skips related Lanes, but the board still needs to hide a claim after a related
+        // Lane saves that path.
+        if (!(pathSet && boardCursor?.claim) && (sameResolution(focus, peer) || sameStack(focus, peer)))
+          return '[]';
+        if (pathSet)
+          return presenceMayShare(peer.pathSummary, pathSet) ? overlapLaneEntries(ctx, peer, pathSet) : '[]';
         if (detail || scope?.length || (mineFacts && peer.symbolFacts)) return overlapLaneChanges(ctx, peer);
-        return overlapLaneEntries(ctx, peer, mineSaved);
+        return presenceMayShare(peer.pathSummary, mineSaved)
+          ? overlapLaneEntries(ctx, peer, mineSaved)
+          : '[]';
       };
       const peerViews = await Promise.all(
         currentPeers.map(async peer => ({ ...peer, changes: await peerChanges(peer) })),
@@ -339,7 +394,7 @@ export const read = query({
               ? {
                   autoClaim: {
                     open: lane.state === 'active',
-                    saved: new Set(savedPaths(focus.changes)),
+                    saved: mineSaved,
                     // Peers already in memory: their open state and saved paths cost no read.
                     peers: (peerLane: string) => {
                       const peer = peerViews.find(row => row.laneId === peerLane);

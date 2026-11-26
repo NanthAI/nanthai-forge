@@ -6,6 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { finishFixture, landingApi, code, compose } from './hosted-finish-fixture.mjs';
+import { unprunedOverlapQuery } from './hosted-overlap-buckets-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { withdrawReceipt } from '../dist/hosted-agent-withdraw.js';
 import { lowerVerb, parseVerbForm } from '../dist/agent-verbs.js';
@@ -335,8 +336,13 @@ test('D1 replay: the Lane’s new head supersedes its queued sync-required entry
       },
       {},
     );
-    const read = () =>
-      f.tx('overlaps', overlapApi.read, { projectId: f.projectId, laneId: own.id }, 'owner').then(outcome);
+    const unpruned = await unprunedOverlapQuery();
+    const read = async () => {
+      const args = { projectId: f.projectId, laneId: own.id };
+      const reply = await f.tx('overlaps', overlapApi.read, args, 'owner');
+      assert.equal(reply, await f.tx('overlaps', unpruned, args, 'owner'));
+      return outcome(reply);
+    };
     const { state } = await begin(f);
     const checking = await read();
     assert.equal(checking.stackOffer, undefined);

@@ -5,6 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { moduleUrl } from './convex-module.mjs';
+import { unprunedOverlapQuery } from './hosted-overlap-buckets-fixture.mjs';
 import { syncFixture } from './hosted-sync-fixture.mjs';
 import { restackAfterSave, restackOperationId } from '../dist/hosted-stack-restack.js';
 import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
@@ -18,8 +19,13 @@ const filesOf = (s, head) =>
   Object.fromEntries(
     JSON.parse(s.objects.get(head)).files.map(file => [file.path, s.objects.get(file.blob).toString()]),
   );
-const hintOf = async (s, laneId) =>
-  JSON.parse(await s.call('overlapRead', overlaps.read, { projectId: s.projectId, laneId })).stack;
+const unpruned = await unprunedOverlapQuery();
+const hintOf = async (s, laneId) => {
+  const args = { projectId: s.projectId, laneId, path: 'c.txt' };
+  const reply = await s.call('overlapRead', overlaps.read, args);
+  assert.equal(reply, await s.call('overlapRead', unpruned, args));
+  return JSON.parse(reply).stack;
+};
 
 /** A parent Lane with p.txt and a child stacked on its saved head that adds c.txt. */
 async function stacked() {
