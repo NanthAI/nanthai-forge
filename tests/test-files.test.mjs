@@ -83,6 +83,45 @@ test('file supervisor preserves assertion failures and successful file totals', 
   assert.match(success.output, /# pass 1/);
 });
 
+test('5113e5cd: synthetic server telemetry never floods the shard log or hides a test verdict', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'forge-test-files-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const file = join(root, 'noisy.mjs');
+  writeFileSync(
+    file,
+    `import test from 'node:test';
+    import assert from 'node:assert/strict';
+    test('noisy passing test', () => {
+      for (let sequence = 0; sequence < 4096; sequence++) {
+        console.error('FORGE_R2_COUNT ' + JSON.stringify({projectId: 'fixture', sequence, a: 1, b: 0}));
+        console.error('FORGE_PROJECT_EXECUTION {"projectId":"fixture","name":"Synthetic"}');
+        console.log('FORGE_CALLER web');
+      }
+    });
+    test('failing test with a useful diagnostic', () => {
+      console.error('FORGE_OTHER_DIAGNOSTIC retained');
+      assert.fail('synthetic assertion');
+    });`,
+  );
+  const { code, output } = await run([file], {
+    FORGE_TEST_EVENTS: '1',
+    FORGE_TEST_DIAGNOSTICS: '1',
+    FORGE_TEST_MAX_RETRIES: '0',
+  });
+  assert.equal(code, 1);
+  assert.ok(
+    Buffer.byteLength(output) < 8192,
+    'fixed fixture telemetry should not reach either output report',
+  );
+  assert.match(output, /FORGE_OTHER_DIAGNOSTIC retained/);
+  assert.match(output, /__FORGE_TEST_FAILURE__/);
+  const event = output.split('\n').find(line => line.startsWith('__FORGE_TESTS__'));
+  const report = JSON.parse(event.slice('__FORGE_TESTS__'.length));
+  assert.deepEqual(report.counts, { total: 2, failed: 1 });
+  assert.match(report.firstError, /synthetic assertion/);
+  assert.equal(report.complete, true);
+});
+
 test('dceb1bef: files of one run share one module cache, compile each module once, and never read stale output', async t => {
   const root = mkdtempSync(join(tmpdir(), 'forge-test-files-'));
   t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));

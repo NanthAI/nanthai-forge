@@ -770,6 +770,11 @@ and idempotent. The supervisor passes no OIDC or provider credentials into proje
 commands. Full logs stay in Actions; Forge retains a redacted tail of at most
 64 KiB per job through checksum-bound R2 PUT and verified commit.
 
+Forge's own test-file supervisor omits routine synthetic R2 counters, project
+execution markers and caller markers from its logs and failure excerpts. Test
+fixtures can still inspect those records where they are emitted. Assertion
+diagnostics and per-file verdicts stay in the shard output.
+
 A dispatch reservation is committed before GitHub IO. Unknown replies retain that
 reservation and are never dispatched again. GitHub has no dispatch idempotency
 key: a process failure between reservation and the HTTP call can therefore leave

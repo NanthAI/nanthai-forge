@@ -141,6 +141,9 @@ export async function runFiles(
       }, timeoutMs);
       for (const stream of [child.stdout, child.stderr]) {
         createInterface({ input: stream }).on('line', line => {
+          // Synthetic Convex telemetry can emit hundreds of thousands of lines per shard (5113e5cd).
+          // Fixtures still see these records in-process. Omit them from TAP and failure excerpts.
+          if (/^(?:# )?FORGE_(?:R2_COUNT|PROJECT_EXECUTION|CALLER) /.test(line)) return;
           if (process.env.FORGE_TEST_DIAGNOSTICS === '1') diagnostics.push(line);
           const comment = /^# (?!Subtest: )(.*)$/.exec(line);
           if (comment && !/^\s*at |^Node\.js v/.test(comment[1]) && loadError.length < 32)
