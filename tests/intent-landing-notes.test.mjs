@@ -249,7 +249,7 @@ test('an Item reopened onto a successor Intent shows the notes of every Intent i
   );
 });
 
-test('a revert posts a matching reverted note on the reverted Item, once', async t => {
+test('the first revert of a recovered landing records its Item even with an unmarked Intent', async t => {
   const f = await revertFixture(t);
   markLinked(f);
   const receipt = await f.landOriginal();
@@ -269,6 +269,12 @@ test('a revert posts a matching reverted note on the reverted Item, once', async
   );
   const originalNote = landedNotes.find(row => row.receiptId === receipt.id);
   assert(originalNote, 'the original landing noted its Item');
+  assert.equal(originalNote.itemId, originalNote.intentId, 'completion records the Item binding');
+  const intentHead = [...f.tables.projectHostedRecordHeads.values()].find(
+    row => row.kind === 'intent' && row.key === originalNote.intentId,
+  );
+  f.patch('projectHostedRecordHeads', intentHead._id, { planningItemId: undefined });
+  assert(![...f.tables.projectIntentLandingNotes.values()].some(row => row.kind === 'reverted'));
   // The compensating landing's scheduled notice (state.request.revertOf in production), run twice.
   const input = {
     projectId: f.projectId,
@@ -281,6 +287,7 @@ test('a revert posts a matching reverted note on the reverted Item, once', async
   const reverted = [...f.tables.projectIntentLandingNotes.values()].filter(row => row.kind === 'reverted');
   assert.equal(reverted.length, 1, 'one reverted note; a replayed notice posts nothing new');
   assert.equal(reverted[0].intentId, originalNote.intentId, 'on the reverted landing’s Item');
+  assert.equal(reverted[0].itemId, originalNote.itemId, 'the revert retains the original Item binding');
   assert.equal(reverted[0].revertOf, receipt.id);
   assert.equal(reverted[0].receiptId, final.acceptance.receiptId);
   assert.deepEqual(reverted[0].laneIds, originalNote.laneIds);
@@ -299,6 +306,15 @@ test('a revert posts a matching reverted note on the reverted Item, once', async
   assert.match(text, /^Reverted: receipt /);
   assert(text.includes(receipt.id.slice(0, 8)));
   assert(text.includes(final.acceptance.receiptId.slice(0, 8)));
+
+  // A markerless legacy Intent still gets its existing receipt link repaired on notice replay.
+  f.patch('projectHostedRecordHeads', intentHead._id, { planningItemId: undefined });
+  f.patch('projectIntentLandingNotes', originalNote._id, { revertedBy: undefined });
+  await f.c.run('legacyRevertNoticeReplay', revertNotice.noticeRevert, input);
+  assert.equal(
+    f.tables.projectIntentLandingNotes.get(originalNote._id).revertedBy,
+    final.acceptance.receiptId,
+  );
 });
 
 test('a landing note reads as a system comment with a stable UUID id and no person in its text', () => {

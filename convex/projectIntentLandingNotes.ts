@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 // Issue 3a733ee8: a landing posts its receipt to its Item, including landings the queue makes after
-// the agent stopped. The landing writes one small row per Item-started Intent (it never reads an Item: the
-// Item→Intent link is a one-way chain), and the Item's comment read walks that chain and returns the
-// rows as `system` comments.
+// the agent stopped. The landing writes one small row per Item-started Intent using the Item binding
+// already held on the Intent head. The Item's comment read returns the rows as `system` comments.
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { v } from 'convex/values';
@@ -44,7 +43,7 @@ export function landingPublisher(
 export async function postIntentLandingNote(
   ctx: MutationCtx,
   projectId: Id<'hostedProjects'>,
-  note: LandingNote,
+  note: LandingNote & { itemId: string },
 ) {
   const old = await ctx.db
     .query('projectIntentLandingNotes')
@@ -67,6 +66,7 @@ export async function postIntentLandingNote(
   await ctx.db.insert('projectIntentLandingNotes', {
     projectId,
     intentId: note.intentId,
+    itemId: note.itemId,
     receiptId: note.receiptId,
     kind: note.kind,
     at: note.at,
@@ -99,6 +99,7 @@ export async function markNoteReverted(
     )
     .unique();
   if (original && !original.revertedBy) await ctx.db.patch(original._id, { revertedBy });
+  return original?.itemId;
 }
 
 /** A note sits at its landing time, the key it was selected and paged by (never its creation time: a

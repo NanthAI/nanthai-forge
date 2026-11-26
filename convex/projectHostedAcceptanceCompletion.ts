@@ -338,6 +338,7 @@ export async function completeAcceptedHeads(ctx: MutationCtx, input: CompletionI
     if (head?.planningItemId)
       await postIntentLandingNote(ctx, input.projectId, {
         intentId,
+        itemId: head.planningItemId,
         receiptId: receipt.id,
         kind: 'landed',
         at: receipt.at,

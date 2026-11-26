@@ -17,6 +17,15 @@ export function landingNoteOrder(row: Pick<NoteRow, '_creationTime' | 'intentId'
   return `${row._creationTime.toFixed(6).padStart(22, '0')}:${landingNoteId(row)}`;
 }
 
+/** Item membership is an indexed projection. Capsule bytes have the original body on both sides of the fill. */
+export function landingNoteCapsuleBody<Row extends { _id: string; itemId?: unknown }>(
+  row: Row,
+): Omit<Row, 'itemId'> {
+  const body = { ...row };
+  delete body.itemId;
+  return body;
+}
+
 /** The row and its index position survive retries, while the canonical body moves out of Convex. */
 export async function retainLandingNoteReference(
   ctx: MutationCtx,
@@ -26,6 +35,7 @@ export async function retainLandingNoteReference(
   await ctx.db.replace(row._id, {
     projectId: row.projectId,
     intentId: row.intentId,
+    ...(row.itemId === undefined ? {} : { itemId: row.itemId }),
     receiptId: row.receiptId,
     kind: row.kind,
     at: row.at,

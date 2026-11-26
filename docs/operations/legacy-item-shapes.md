@@ -23,6 +23,24 @@ The job `convex/legacyItemShapes.ts` is not on main. It lives in the pinned in-b
 
 Landing notes the conversion writes are new rows, but every reader selects, pages and shows a note by its landing time (`at`, indexed as `by_project_and_intent_and_at`), never by its row's creation time, so a converted landing sits among the comments and landings of its day, not at the newest end, and a page of the discussion, the landing history or the Item audit never fills with late-written old landings. A landing note names the revert that took it out (`revertedBy`, written when the revert is accepted), so the link shows on any page without a read per page.
 
+## Dev landing note Item links
+
+Stage A stores an optional Item id and an Item-time index on the existing hot and archived note rows.
+For the one-off dev fill, page `projectIntentLandingNoteFill:count` with `projectId` and `cursor` starting
+at null. Post each project's missing-note total and the recoverable and orphan counts with receipt samples
+before applying. Stop if any project has over 500 orphans or if orphans exceed 10% of its notes. The
+deployment's billed I/O ceiling is twice the summed estimate, capped at 100 MB.
+
+Start each `fill` page with the id from `remaining`. Supply the census's orphan row ids as
+`deleteOrphans` and use `maxRows` to shorten the default 64-row page when only a smaller page fits the
+remaining budget. A lost reply can retry the same first-row pin. The fill recovers a surviving Item through
+the receipt's Candidate or its attributed Lanes and follows duplicate links. It removes an unrecoverable
+orphan's note row, which also holds the archived reference when present. The acceptance receipt and the
+shared capsule are retained. A census mismatch or ambiguous or unavailable evidence stops the page before
+writes. Both census and fill accept a smaller `maxRows` on the original cursor or first-row pin if
+provenance reads exceed the transaction budget. Verify `remaining` returns null for every project and
+record the provider-billed read and write bytes against the census.
+
 ### Landing note links and times (second job)
 
 The in-between release that holds the marker job (`legacyWorkMarkerRows`, [legacy work layout](legacy-work-layout.md#p8-prod-order) step 6), main State `b4fc6b6fa19a6bd23f9bfa2537d552a4620fd2e70e74bd44b1af0d546a591712` (landing receipt 60fce116), also holds `convex/legacyLandingNotes.ts`; neither job is on main. Notes written before it carry no `revertedBy`, and a note archived to a capsule before it carries no `at`. The job sets both from rows that already exist: a `reverted` note names itself on its original `landed` note (one indexed read each), and an archived note takes its receipt's time (one receipt read each; a note whose receipt is gone is listed in `blocked` and stops the release until the owner decides). It must run after the F7 steps above and before main, because main makes `at` required on archived notes and the deploy then validates every stored row.

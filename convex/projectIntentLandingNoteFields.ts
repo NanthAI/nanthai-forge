@@ -14,6 +14,7 @@ export const landingNoteBy = v.object({
 const identity = {
   projectId: v.id('hostedProjects'),
   intentId: v.string(),
+  itemId: v.optional(v.string()),
   receiptId: v.string(),
   kind: v.union(v.literal('landed'), v.literal('reverted')),
   /** The landing time, the key every reader selects, pages and shows a note by (Item c0af6cfa). */
@@ -49,5 +50,7 @@ export const intentLandingNoteTables = {
   )
     .index('by_project_and_receipt_and_intent_and_kind', ['projectId', 'receiptId', 'intentId', 'kind'])
     // index-order: caller: convex/projectIntentLandingNoteArchive.ts#landingNoteWindow; order: the newest notes of one Intent by landing time (`at`), the key every reader selects, pages and shows by.
-    .index('by_project_and_intent_and_at', ['projectId', 'intentId', 'at']),
+    .index('by_project_and_intent_and_at', ['projectId', 'intentId', 'at'])
+    // index-order: caller: convex/projectItemLandingHistory.ts; order: one newest-first Item range across Intents.
+    .index('by_project_and_item_and_at', ['projectId', 'itemId', 'at']),
 };

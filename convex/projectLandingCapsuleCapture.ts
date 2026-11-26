@@ -11,6 +11,7 @@ import { batchRow, batchSchema } from './projectHostedLandingBatchState';
 import { loadLanding } from './projectHostedLandingStore';
 import { settleLeakedBatch } from './projectHostedLandingBatchSettle';
 import { canonicalPayload } from '../src/hosted-source-operation';
+import { landingNoteCapsuleBody } from './projectIntentLandingNoteArchive';
 import { LANDING_CAPSULE_TABLES } from '../src/hosted-landing';
 import { capsuleOwnerKind, capsuleControlKey, capsuleControlRow } from './projectLandingCapsuleLedger';
 import { capsuleIndexKind } from './projectLandingCapsuleIndex';
@@ -191,6 +192,8 @@ const kept = (input: CaptureInput, scope: CapsuleScope, row: Row) => {
     return 'request' in row && JSON.parse(String(row.request)).projectId === input.projectId;
   return true;
 };
+const captureRow = (scope: CapsuleScope, row: Row) =>
+  canonicalPayload(scope.table === 'projectIntentLandingNotes' ? landingNoteCapsuleBody(row) : row);
 const captureArgs = {
   projectId: v.id('hostedProjects'),
   submissionId: v.string(),
@@ -208,7 +211,7 @@ export const page = internalMutation({
     if (!query) return canonicalPayload({ rows: [], isDone: true, cursor: null, shared: true });
     const page = await query.paginate(capsulePageOptions(input.cursor));
     return canonicalPayload({
-      rows: page.page.filter(row => kept(input, scope, row)).map(row => canonicalPayload(row)),
+      rows: page.page.filter(row => kept(input, scope, row)).map(row => captureRow(scope, row)),
       isDone: page.isDone,
       cursor: page.isDone ? null : page.continueCursor,
     });
@@ -243,7 +246,7 @@ export const pages = internalMutation({
       for await (const row of query) {
         if (++scanned > batchScopeRows) fits = false;
         else if (kept(input, scope, row)) {
-          const text = canonicalPayload(row);
+          const text = captureRow(scope, row);
           rows.push(text);
           bytes += new TextEncoder().encode(text).length;
           if (bytes > capsulePageBytes) fits = false;

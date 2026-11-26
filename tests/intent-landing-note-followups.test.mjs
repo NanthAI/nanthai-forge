@@ -15,8 +15,10 @@ import { landingNoteId, landingNoteText } from '../dist/intent-landing-note.js';
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
 import { landingFixture } from './hosted-landing-fixture.mjs';
 import { ticketState } from './landing-ticket-fixture.mjs';
+import { indexStorage } from './convex-index-cost.mjs';
 
 const notes = await import(moduleUrl('../convex/projectIntentLandingNotes.ts'));
+const schema = (await import(moduleUrl('../convex/schema.ts'))).default;
 const workIndex = await import(moduleUrl('../convex/projectWorkIndex.ts'));
 const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 const { read: archiveSelection } = await import(moduleUrl('../convex/projectJournalRead.ts'));
@@ -133,6 +135,7 @@ test('an independent or unmarked legacy landing posts no Item note and schedules
     ['notes only', { closes: false }],
   ]) {
     const result = {};
+    let plannedNote;
     for (const kind of ['planned', 'legacy', 'independent']) {
       const f = await acceptanceFixture();
       const policy = policyPreset('supervised');
@@ -174,6 +177,7 @@ test('an independent or unmarked legacy landing posts no Item note and schedules
       await f.materialize(receipt.id);
       const meter = f.counts.at(-1);
       const stored = notesOf(f, intentId);
+      if (kind === 'planned') [plannedNote] = stored;
       assert.deepEqual(
         stored.map(note => [note.receiptId, note.laneIds]),
         kind === 'planned' ? [[receipt.id, [lane.laneId]]] : [],
@@ -193,9 +197,22 @@ test('an independent or unmarked legacy landing posts no Item note and schedules
     );
     assert.deepEqual(result.independent.written, result.legacy.written, name);
     assert.equal(result.planned.ranges - result.independent.ranges, 1, name);
+    const { itemId, ...previousNote } = plannedNote;
+    assert.equal(itemId, plannedNote.intentId);
+    const before = Buffer.byteLength(JSON.stringify(previousNote));
+    const after = result.planned.writeBytesByTable.projectIntentLandingNotes;
+    const index = indexStorage(
+      schema,
+      { projectIntentLandingNotes: new Map([[plannedNote._id, plannedNote]]) },
+      index => index.indexDescriptor === 'by_project_and_item_and_at',
+    );
+    assert.equal(index.entries, 1, 'the Item index adds one key per note');
+    assert(after - before + index.keyBytes <= 300, 'the Item projection stays within twice its byte model');
     t.diagnostic(
       `${name}: ${result.planned.writes} → ${result.independent.writes} writes, ` +
-        `${result.planned.writeBytesByTable.projectIntentLandingNotes} note bytes saved`,
+        `completion read ${result.planned.documents} documents across ${result.planned.ranges} ranges ` +
+        `(${result.planned.readBytes} B), wrote ${before} → ${after} B per note, ` +
+        `Item index key +${index.keyBytes} B`,
     );
   }
 });

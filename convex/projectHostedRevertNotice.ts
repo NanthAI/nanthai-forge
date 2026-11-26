@@ -103,16 +103,20 @@ export async function noticeRevert(ctx: MutationCtx, input: Revert) {
     });
     if (posted === 'posted') notes++;
   }
-  const { needsFix, itemNoteIntentId } = await markIntent(ctx, project, original, revert, lanes[0], {
+  const { needsFix, itemNote } = await markIntent(ctx, project, original, revert, lanes[0], {
     ...(input.auto ? {} : { by: input.actor, ...(input.agent ? { agent: input.agent } : {}) }),
     ...first,
   });
   // Issue 3a733ee8: the reverted Intent's Item gets a system note matching its landing note, and the landing
   // note names the revert (Item c0af6cfa).
-  if (itemNoteIntentId) {
-    await markNoteReverted(ctx, input.projectId, itemNoteIntentId, original.id, revert.id);
+  const originalItem = itemNote
+    ? await markNoteReverted(ctx, input.projectId, itemNote.intentId, original.id, revert.id)
+    : undefined;
+  const itemId = itemNote?.itemId ?? originalItem;
+  if (itemNote && itemId) {
     await postIntentLandingNote(ctx, input.projectId, {
-      intentId: itemNoteIntentId,
+      intentId: itemNote.intentId,
+      itemId,
       receiptId: revert.id,
       kind: 'reverted',
       at: revert.at,
@@ -146,15 +150,17 @@ async function markIntent(
 ) {
   const key = { projectId: project._id, actor: project.owner };
   const candidate = await readHostedRecord(ctx, { ...key, kind: 'candidate', key: original.candidate.id });
-  if (!candidate) return { needsFix: false, itemNoteIntentId: null };
+  if (!candidate) return { needsFix: false, itemNote: null };
   const intentId = hostedRecordSchema.options[3].parse(JSON.parse(candidate.value)).intentId;
   const row = await readHostedRecord(ctx, { ...key, kind: 'intent', key: intentId });
-  const itemNoteIntentId = row?.planningItemId === independentIntentItem ? null : intentId;
-  if (!row) return { needsFix: false, itemNoteIntentId };
+  if (!row) return { needsFix: false, itemNote: null };
+  // A legacy head can use the original note's recovered Item binding from the revert-link lookup.
+  const itemNote =
+    row.planningItemId === independentIntentItem ? null : { intentId, itemId: row.planningItemId };
   const intent = hostedRecordSchema.options[0].parse(JSON.parse(row.value));
   // Main-audit recovery already wrote its richer notice for this receipt; an abandoned Intent stays closed.
   if (intent.status === 'abandoned' || intent.needsFix?.receiptId === original.id)
-    return { needsFix: false, itemNoteIntentId };
+    return { needsFix: false, itemNote };
   const notice = {
     state: 'reverted' as const,
     receiptId: original.id,
@@ -198,7 +204,7 @@ async function markIntent(
       }),
     },
   });
-  return { needsFix: true, itemNoteIntentId };
+  return { needsFix: true, itemNote };
 }
 
 export const accepted = internalMutation({

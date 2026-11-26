@@ -23,7 +23,14 @@ const capture = await import(moduleUrl('../convex/projectLandingCapsuleCapture.t
 const { landingNoteWindow } = await import(moduleUrl('../convex/projectIntentLandingNoteArchive.ts'));
 const { postIntentLandingNote } = await import(moduleUrl('../convex/projectIntentLandingNotes.ts'));
 
-async function withLandingNote(h) {
+const itemId = '00000000-0000-4000-8000-000000000003';
+function capsuleNoteBody(note) {
+  const body = { ...note };
+  delete body.itemId;
+  return body;
+}
+
+async function withLandingNote(h, binding = { itemId }) {
   const ticket = [...h.f.tables.projectHostedLandingRequests.values()].find(
     row => row.submissionId === h.state.id,
   );
@@ -31,6 +38,7 @@ async function withLandingNote(h) {
   const note = {
     projectId: h.f.projectId,
     intentId: '00000000-0000-4000-8000-000000000002',
+    ...binding,
     receiptId: acceptance.receiptId,
     kind: 'landed',
     at: '2026-01-01T00:00:00.000Z',
@@ -71,7 +79,7 @@ test('S1 packs one verified complete object, removes bounded canonical copies an
         return [row._id, row];
       }),
     ),
-    before,
+    new Map([...before].map(([id, row]) => [id, capsuleNoteBody(row)])),
   );
   for (const table of [
     'projectHostedLandingObservations',
@@ -101,6 +109,7 @@ test('S1 packs one verified complete object, removes bounded canonical copies an
     [h.state.id],
   );
   assert.equal(archive[0]._id, note._id, 'the note keeps its indexed position');
+  assert.equal(archive[0].itemId, note.itemId, 'the reference retains the Item binding');
   assert.equal(archive[0].actor, undefined, 'the full note remains only in the capsule');
   const posted = await h.f.tx(
     'replayArchiveNote',
@@ -146,20 +155,22 @@ test('S1 verification failure preserves every canonical history row and publishe
   assert(![...h.f.tables.projectFinishReadRows.values()].some(row => row.kind === store.capsuleKind));
 });
 
-test('S1 lost publication response resumes the same verified object without repeating the PUT', async t => {
+test('an Item binding filled after capsule publication survives removal without another PUT', async t => {
   const h = await fixture(t);
-  const note = await withLandingNote(h);
+  const note = await withLandingNote(h, {});
   const notes = h.f.tables.projectIntentLandingNotes.size;
   h.losePublish();
   await assert.rejects(h.pack(), /Synthetic lost published response/);
   const pointer = JSON.parse(
     [...h.f.tables.projectFinishReadRows.values()].find(row => row.kind === store.capsuleKind).value,
   );
+  h.f.patch('projectIntentLandingNotes', note._id, { itemId });
   const result = await h.pack();
   assert.equal(result.pointer.sha256, pointer.sha256);
   assert.equal(h.requests.filter(method => method === 'PUT').length, 1);
   assert.equal(h.f.tables.projectHostedLandingAttempts.size, 0);
   assert.equal(h.f.tables.projectIntentLandingNotes.size, notes);
+  assert.equal(h.f.tables.projectIntentLandingNotes.get(note._id).itemId, itemId);
   assert.equal(
     h.f.tables.projectIntentLandingNotes.get(note._id).capsule,
     h.state.id,
@@ -175,6 +186,7 @@ test('overlapping capsule packers keep one verified landing note reference', asy
   assert.equal(first.pointer.sha256, second.pointer.sha256);
   const kept = h.f.tables.projectIntentLandingNotes.get(note._id);
   assert.equal(kept.capsule, h.state.id);
+  assert.equal(kept.itemId, note.itemId);
   assert.equal(h.f.tables.projectIntentLandingNotes.size, notes);
   const archived = decodeLandingCapsule(
     h.objects.get(first.pointer.sha256),
@@ -184,7 +196,7 @@ test('overlapping capsule packers keep one verified landing note reference', asy
   );
   assert.deepEqual(
     archived.tables.projectIntentLandingNotes.map(JSON.parse).find(row => row._id === note._id),
-    note,
+    capsuleNoteBody(note),
   );
 });
 

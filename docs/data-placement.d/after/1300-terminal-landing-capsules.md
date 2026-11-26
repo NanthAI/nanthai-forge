@@ -19,6 +19,10 @@ verified pointer precedes bounded removal of duplicate Convex copies. Reuse
 aliases, canonical acceptance receipts/compose selections, exact transaction
 ledgers and shared metric/control projections remain in Convex. Compact per-note
 references retain the original creation order and point to verified capsule bytes.
+New note rows and their archive references carry the Item ID from the Intent head.
+Convex indexes that field with the project and landing time. The capsule body
+keeps the original shape, so filling an Item ID can run between capsule capture
+and removal without rewriting the object.
 A fixed bootstrap
 cursor/revision is charged per project, separately from landing history.
 
@@ -45,3 +49,30 @@ until the existing check-binding write consumes it. If no run ever binds, it rem
 request until the request is removed by existing cleanup or project deletion; there is no new
 expiry or retention rule. It prevents exact-run reuse from being counted twice, adds no lookup or
 new table, and changes no source-byte or history placement.
+
+### Landing-note Item ID backfill
+
+Wait for the optional-field schema and Item index to deploy to Forge dev. For
+every dev project, call `projectIntentLandingNoteFill:count` with its `projectId`
+and `cursor: null`. Follow `next` until null. Sum the rows for the deployment and
+record the estimate of 1,500 billed DB I/O bytes per note before applying any page.
+
+For each project, call `projectIntentLandingNoteFill:remaining` and pass its first
+note ID as `first` to `projectIntentLandingNoteFill:fill` with the same project ID.
+Each mutation patches up to 64 rows, leaving their other fields intact. If a
+reply is lost, reconcile its execution in the spend ledger before continuing. A
+retry with the same first row cannot patch the following page. A note whose
+Intent head has no Item stops the transaction and goes to the lead for review
+before retry or cutover.
+
+Use the dev [spend ledger](../../operations/convex-spend.md) to account for the
+fill's actual billed I/O, including confirmation and any retries. Record the
+read-only count separately. Run one page at a time and reserve room for the page
+and its verification using the known billed page costs. Use `maxRows` to shorten
+the next page if needed. Proceed only when the page fits within the lower of
+twice the counted estimate and 100,000,000 bytes per deployment. Stop if
+completion usage is missing or the next call's cost cannot be bounded. Record the
+actual calls, bytes and wall time. Verify each project with a null result from
+`remaining`, which reads at most one row. Finish and verify the dev Plan
+Lane-mark pass on each remaining project within its own 1 MB budget before the
+reader cutover removes the legacy roll-up.
