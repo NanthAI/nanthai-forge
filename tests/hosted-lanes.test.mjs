@@ -800,63 +800,116 @@ test('planned start gives the Intent the Issue id, adds sibling Lanes, continues
   await assert.rejects(s.begin(s.input({ ...planned, intentId: first.intentId }), 'stranger'));
 });
 
-test('incident 846c635b: planned start reads and selects only the newest execution Intent before the creation boundary', async t => {
-  const costs = [];
-  for (const history of [4, 14, 17, 24]) {
+function seedFinishedIntents(s, issue, history, creatorAccountId = 'owner') {
+  let id = issue;
+  for (let i = 0; i < history; i++, id = successorIntentId(id)) {
+    const { record, ref, value } = hostedRecordValue({
+      kind: 'intent',
+      id,
+      version: 1,
+      at: '2026-11-10T00:00:00.000Z',
+      outcome: 'Retained Item work',
+      constraints: '',
+      creatorAccountId,
+      assigneeAccountIds: [],
+      base: { head, receiptId: 'main-0' },
+      status: 'completed',
+    });
+    const indexed = {
+      projectId: s.projectId,
+      kind: 'intent',
+      key: id,
+      version: record.version,
+      ...hostedRecordIndex(record),
+    };
+    const bodyId = s.insert('projectHostedRecordBodies', { projectId: s.projectId, value });
+    const recordId = s.insert('projectHostedRecords', {
+      ...indexed,
+      bodyId,
+      digest: ref.digest,
+      bytes: ref.bytes,
+    });
+    // The root may predate the marker. Follow-up starts have always kept the Item's id on their head.
+    s.insert('projectHostedRecordHeads', {
+      ...indexed,
+      recordId,
+      ...(i > 0 ? { planningItemId: issue } : {}),
+    });
+  }
+  return id;
+}
+
+test('incident 846c635b: planned start continues an Item after 24 finished Intents with constant reads', async t => {
+  let firstReads;
+  for (const history of [4, 14, 24, 1_000]) {
     const s = await setup();
     const issue = randomUUID();
-    let id = issue;
-    for (let i = 0; i < history; i++, id = successorIntentId(id)) {
-      const { record, ref, value } = hostedRecordValue({
-        kind: 'intent',
-        id,
-        version: 1,
-        at: '2026-11-10T00:00:00.000Z',
-        outcome: 'Retained Item work',
-        constraints: '',
-        creatorAccountId: 'owner',
-        assigneeAccountIds: [],
-        base: { head, receiptId: 'main-0' },
-        status: 'completed',
-      });
-      const indexed = {
-        projectId: s.projectId,
-        kind: 'intent',
-        key: id,
-        version: record.version,
-        ...hostedRecordIndex(record),
-      };
-      const bodyId = s.insert('projectHostedRecordBodies', { projectId: s.projectId, value });
-      const recordId = s.insert('projectHostedRecords', {
-        ...indexed,
-        bodyId,
-        digest: ref.digest,
-        bytes: ref.bytes,
-      });
-      // The root may predate the marker. Follow-up starts have always kept the Item's id on their head.
-      s.insert('projectHostedRecordHeads', {
-        ...indexed,
-        recordId,
-        ...(i > 0 ? { planningItemId: issue } : {}),
-      });
-    }
+    seedPlanItem(s, issue, 'Retained Item work');
+    const id = seedFinishedIntents(s, issue, history);
     const input = s.input({ kind: 'planned', intentId: issue, outcome: 'More work on this Item' });
-    const operations = s.tables.projectHostedOperations.size;
-    if (history >= 17) {
-      await assert.rejects(s.call('start', start.start, input), code('INTENT_CLOSED'));
-      assert.equal(s.counts.at(-1).writes, 0);
-      assert.equal(s.tables.projectHostedOperations.size, operations);
-      assert.equal(s.tables.projectHostedRecordHeads.size, history);
-    } else {
-      const reply = JSON.parse(await s.call('start', start.start, input));
-      assert.equal(reply.intentId, id);
-      assert.equal(reply.lane.intentId, id);
-      const { documents, ranges, readBytes } = s.counts.at(-1);
-      costs.push({ documents, ranges, readBytes });
-      t.diagnostic(JSON.stringify({ history, documents, ranges, readBytes }));
-    }
+    const reply = JSON.parse(await s.call('start', start.start, input));
+    assert.equal(reply.intentId, id);
+    assert.equal(reply.lane.intentId, id);
+    const { documents, ranges, readBytes, writeBytes } = s.counts.at(-1);
+    t.diagnostic(JSON.stringify({ history, documents, ranges, readBytes, writeBytes }));
+    firstReads ??= { documents, ranges };
+    assert.deepEqual({ documents, ranges }, firstReads, 'finished Intent history must not add reads');
+    assert.ok(documents <= 31 && ranges <= 31, 'planned start read budget');
+    // Synthetic IDs widen as the fixture adds rows.
+    assert.ok(readBytes <= 7_750 && writeBytes <= 7_950, 'planned start byte budget');
   }
-  assert.deepEqual(costs[0], costs[1], 'adding ten retained Intents must not add reads or ranges');
+});
+
+test('concurrent planned starts join one successor without granting exact Intent access', async t => {
+  const s = await setup();
+  const issue = randomUUID();
+  seedPlanItem(s, issue, 'Retained Item work');
+  s.insert('projectContributors', { projectId: s.projectId, contributor: 'member' });
+  s.insert('projectContributors', { projectId: s.projectId, contributor: 'other' });
+  const successor = seedFinishedIntents(s, issue, 24, 'member');
+  const planned = { kind: 'planned', intentId: issue, outcome: 'Follow up' };
+  let ownerStart;
+  s.decorateContext(ctx => {
+    const insert = ctx.db.insert;
+    ctx.db.insert = async (table, row) => {
+      if (
+        !ownerStart &&
+        (await ctx.auth.getUserIdentity()).subject === 'member' &&
+        table === 'projectHostedRecordHeads' &&
+        row.kind === 'intent' &&
+        row.key === successor
+      )
+        ownerStart = await s.begin(s.input(planned));
+      return insert(table, row);
+    };
+  });
+  const memberInput = s.input(planned);
+  const memberStart = await s.begin(memberInput, 'member');
+  assert.equal(ownerStart.intentId, successor);
+  assert.equal(memberStart.intentId, successor);
+  assert.notEqual(ownerStart.lane.laneId, memberStart.lane.laneId);
+  const { documents, ranges, retries } = s.counts.at(-1);
+  assert.equal(retries, 1, 'the member retries after the owner commits');
+  t.diagnostic(JSON.stringify({ documents, ranges, retries }));
+  await assert.rejects(s.begin(s.input(planned), 'other'), code('PROJECT_UNAVAILABLE'));
+  await assert.rejects(
+    s.begin(s.input({ kind: 'existing', intentId: successor }), 'member'),
+    code('PROJECT_UNAVAILABLE'),
+  );
+  const intent = JSON.parse(
+    await s.invoke('intent', reads.intent, { projectId: s.projectId, intentId: successor }),
+  );
+  await s.call('complete', {
+    _handler: ctx =>
+      records.writeHostedRecord(ctx, {
+        projectId: s.projectId,
+        actor: 'owner',
+        authorityEpoch: 1,
+        expectedVersion: intent.version,
+        record: { ...intent, version: intent.version + 1, status: 'completed' },
+      }),
+  });
+  assert.deepEqual(await s.begin(memberInput, 'member'), memberStart, 'the original Lane remains replayable');
 });
 
 test('a purge committed during planned start fences its retry without retaining an Intent or Lane', async () => {
@@ -966,9 +1019,7 @@ test('an explicit existing-Intent start cannot join an Intent-born Item during i
   assert.equal(s.tables.projectHostedOverlapLanes.size, 1);
 });
 
-async function knownItemLane() {
-  const s = await setup();
-  const itemId = randomUUID();
+function seedPlanItem(s, itemId, title) {
   const backupId = 'fixture-backup';
   const generationId = s.insert('projectWorkGenerations', {
     projectId: s.projectId,
@@ -996,9 +1047,15 @@ async function knownItemLane() {
     key: itemId,
     parent: '',
     position: 1,
-    value: JSON.stringify({ id: itemId, kind: 'issue', status: 'open', title: 'Pending purge' }),
-    planning: { text: 'Pending purge', kind: 'issue', status: 'open', open: true, initiativeId: '' },
+    value: JSON.stringify({ id: itemId, kind: 'issue', status: 'open', title }),
+    planning: { text: title, kind: 'issue', status: 'open', open: true, initiativeId: '' },
   });
+}
+
+async function knownItemLane() {
+  const s = await setup();
+  const itemId = randomUUID();
+  seedPlanItem(s, itemId, 'Pending purge');
   const first = await s.begin(s.input({ kind: 'planned', intentId: itemId, outcome: 'Pending purge' }));
   const read = () =>
     s.invoke('lane', reads.detail, { projectId: s.projectId, laneId: first.lane.laneId }).then(JSON.parse);

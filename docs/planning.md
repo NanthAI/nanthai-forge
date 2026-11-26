@@ -36,9 +36,12 @@ constraints, and uses no model. Retrying the start returns the same Lane and doe
 `nforge agent ROOT set-policy '{"autoCreatePlanningItem":false}'`. Pass `true` to re-enable it. This changes
 future starts only. Archive a captured Item to remove it from the Plan without stopping its Lane.
 
-Starting from an Issue selects its latest execution Intent by creation, not the first open Intent in its
-history. If that Intent has finished, a new Lane continues the Issue on its successor. Select an older
-Intent by its own ID to work on it again; reopening it does not make it the default for the Issue.
+Starting from an Issue selects its newest execution Intent by creation using one indexed lookup.
+If that Intent has finished, the same start creates its successor and opens the Lane there.
+The read cost stays bounded as the Issue accumulates landings. Reopened older Intents remain
+available by exact Intent ID, while Issue starts still select the newest one.
+When concurrent Item starts create a successor, project writers permitted on its finished predecessor
+can also join the active successor through the Item.
 
 ## Title-only capture and optional agent refinement
 
@@ -79,12 +82,10 @@ Open an Item from the Plan, including its Done and Dropped lists. **Text** rende
 The owner and current project writers can edit the text, add or edit a checklist line, mark it moved, reopen it, or remove it with Undo. **Tick and post** saves the tick and its decision comment together. A stale line edit retries only if it can still identify the unchanged line; a stale prose edit keeps the draft, offers the versions to compare and then lets you resume the draft against the newer version. New Item capture takes an optional Markdown description above the checklist. Readers cannot change Items. Managing the rest of the Plan, including shelving and deleting Items, remains owner-only.
 
 Work lists Lanes with their Intent titles and recorded saves. Full history pages newest-first by
-Lane creation after membership is verified with the stamp-preserving writers deployed. An earlier
-repair receipt does not enable the new readers: until the project is reverified, the legacy list is
-open-first and planned starts keep the bounded chain lookup. A purge already in progress keeps the
-Intent set recorded when it began, even if a legacy writer removed a membership stamp.
+Lane creation through the Item membership index. A legacy purge already in progress keeps the
+Intent set recorded when it began.
 
-To see open Lanes, use `lanes {planningItemId}`. After verification it starts with the newest Intent
+To see open Lanes, use `lanes {planningItemId}`. It starts with the newest Intent
 and reads only active Lane heads; an empty page with a cursor can still have older open work, so
 pass the cursor to continue. Use `lanes {intentId}` to read one specific Intent. A landing links to Code at the accepted State,
 with its recorded check and changed-file count when available. Related

@@ -9,7 +9,7 @@
 const CORE = [
   /^convex\/projectHosted(?:Landing|Finish|Acceptance|Queue|Compose|Gate|Check|Batch|ScopedRecheck|LandGates|Reuse|EarlyResolution|MainAudit|ActionsWake|ActionsDirect|ActionsReports|ActionsVerdict|Holders|Superseded|LaneFinish|OwnerReview|OwnerGrant|Keep)[^/]*\.ts$/,
   /^convex\/(?:projectAcceptance|projectLandingProof|schedulerCancel)[^/]*\.ts$/,
-  /^convex\/projectHostedSyncPublish\.ts$/,
+  /^convex\/projectHosted(?:Start|SyncPublish)\.ts$/,
   /^convex\/projectMetric(?:AliasWriter|ComposeMembership)\.ts$/,
   // The source step repair wake (incident e62d834b, review 308f217c): its arm, move, expiry and terminal
   // cancel. The source store, pool and fan-out only call these at their own scheduling points; their

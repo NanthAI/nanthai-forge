@@ -8,7 +8,7 @@ import { sourceAuthorship } from '../src/work-actor-types';
 import { mutation, receiptMutation, type MutationCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
 import { activeProject } from './projectAuthority';
-import { beginHostedOperation, finishHostedOperation } from './projectHostedOperations';
+import { beginHostedOperation, finishHostedOperation, hostedOperationRow } from './projectHostedOperations';
 import { readHostedRecord, recordHead, writeHostedRecord } from './projectHostedRecords';
 import { hostedStartMain } from './projectHostedChannels';
 import {
@@ -18,7 +18,7 @@ import {
   hostedLaneSelectionSchema,
   hostedStartResultSchema,
 } from '../src/hosted-lane';
-import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operation';
+import { canonicalPayload, hostedOperationSchema, hostedPayloadHash } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import type { GuardCandidates } from '../src/hosted-lane';
 import { guardSetReply } from './projectLandingSpeed';
@@ -30,10 +30,11 @@ import { isStored } from './projectObjectFields';
 import { findObject } from './projectObjectFind';
 import { openSiblingLanes } from './projectHostedStartPeers';
 import { dormantCutoff } from './projectHostedDormancy';
-import { intentFinished, maxIntentChain, successorIntentId } from '../src/hosted-intent-chain';
+import { intentFinished, successorIntentId } from '../src/hosted-intent-chain';
 import { executeCommand } from './projectWorkCommand';
 import { selectedGeneration } from './projectWorkIndexStore';
 import { latestItemIntentHead } from './projectItemIntentHeads';
+import { itemIntentPage } from './projectItemIntentPages';
 import { agentHooks } from './projectHostedRecordFields';
 import type { AgentHooks } from '../src/hosted-lane';
 
@@ -219,27 +220,60 @@ async function execute(
       // A journal-owned status is planning history, not execution: the first Lane pins it as active.
       if (!intent.base?.receiptId) unpinned = intent;
       else if (payload.intent.kind === 'planned' && intentFinished(intent.status)) {
-        // Keep the existing creation boundary until every reader and purge is safe beyond it.
-        // This temporary check derives ids in memory; it does not read any earlier Intent.
-        let id = payload.intent.intentId;
-        let hop = 0;
-        for (; id !== intent.id && hop < maxIntentChain; hop++) id = successorIntentId(id);
-        invariant(
-          hop < maxIntentChain,
-          'INTENT_CLOSED',
-          'This Issue already continued on many finished Intents. Open a new Issue for the next piece of work.',
-        );
         plannedExists = false;
         targetIntentId = successorIntentId(intent.id);
       }
       if (plannedExists) overlapIntent = intent.outcome;
       if (!intentFinished(intent.status)) recovery = intent.needsFix;
-      // A planned start on an unpinned Intent is the start that used to create it: any project member.
+      const planned = payload.intent.kind === 'planned';
+      // The first Lane on an unpinned planned Intent is open to any project writer.
+      let allowed =
+        (unpinned && planned) ||
+        project.owner === actor ||
+        intent.creatorAccountId === actor ||
+        intent.assigneeAccountIds.includes(actor);
+      if (!allowed && planned && plannedExists && selectedHead) {
+        // A concurrent start may have just created the active successor. A writer eligible on
+        // its finished predecessor can join through the Item selector, without changing the
+        // successor's assignees or the exact-Intent selector's access.
+        const {
+          heads: [previous],
+        } = await itemIntentPage(
+          ctx,
+          projectId,
+          payload.intent.intentId,
+          [selectedHead._creationTime, selectedHead._id],
+          1,
+          'desc',
+        );
+        if (
+          previous?.status &&
+          intentFinished(previous.status) &&
+          successorIntentId(previous.key) === intent.id
+        ) {
+          const predecessor = await readHostedRecord(ctx, {
+            projectId,
+            actor,
+            kind: 'intent',
+            key: previous.key,
+            selectedHead: previous,
+          });
+          if (predecessor) {
+            const original = hostedIntentSchema.parse(JSON.parse(predecessor.value));
+            allowed =
+              intentFinished(original.status) &&
+              (original.creatorAccountId === actor || original.assigneeAccountIds.includes(actor));
+          }
+        }
+      }
+      if (!allowed && planned) {
+        // Later Intent selection cannot invalidate this writer's own completed operation.
+        // beginHostedOperation below still checks the actor-bound request and its payload hash.
+        const old = await hostedOperationRow(ctx, projectId, actor, payload.operationId);
+        allowed = !!(old && hostedOperationSchema.parse(JSON.parse(old.value)).terminal);
+      }
       invariant(
-        (unpinned && payload.intent.kind === 'planned') ||
-          project.owner === actor ||
-          intent.creatorAccountId === actor ||
-          intent.assigneeAccountIds.includes(actor),
+        allowed,
         'PROJECT_UNAVAILABLE',
         'Select an Intent created by or assigned to this account on this Forge project.',
       );

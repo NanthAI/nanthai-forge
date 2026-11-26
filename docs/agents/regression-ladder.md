@@ -144,6 +144,7 @@ removed, skipped or moved out of `tests/*.test.mjs`, or when this page stops nam
 | `573ae136` | Frictions 7a05167d, b70dccdf, 0ed89858: touching a file refused a save or landing on a credential-shaped line main already held, or on a key name assigned a property access in code. The hosted Actions plan now drops findings main's copy of the file holds (one per occurrence), while a literal moved into a new file still fails |
 | `1cb3caa2` | A queue proof a peer landing made stale in a unit its replay ran: the planner keeps it while the Lane kept its proven bytes, and the landing check re-runs the replay |
 | `789b7b21` | `nforge agent ROOT open` into a folder that does not exist yet redirected into Forge's addressed state dir instead of creating ROOT and its checkout (breaking `scripts/bench-t3code/forge-arm.mjs:137`); checkout-creating commands now keep ROOT while address-only commands keep `59f0e296` behaviour |
+| `846c635b` | Planned start opens a successor after 24 finished Intents and stays within the same read budget at 1,000 |
 | `8b7ab7a9` | Dry N=3 bench cells forge-n3-r1-dry-a1-20261124T070718 and forge-n3-r1-dry-a2-20261124T074857 repacked about 2.11 MB per clean batch terminal quantum after losing the exact main physical descriptor across an action boundary. |
 | `843dc73a` | Hosted checks retain exact shard groups, pool units, machine selections and the original timing inputs for replay. |
 | `a61e2106` | A fresh hosted project with no check or runner publishes an unchecked receipt through the normal finish and main CAS. |

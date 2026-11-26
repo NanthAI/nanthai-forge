@@ -60,6 +60,7 @@ test('core queue paths are classified by path: queue, finish, acceptance and lan
     'convex/projectHostedQueueAhead.ts',
     'convex/projectHostedCheckDispatch.ts',
     'convex/projectHostedActionsVerdict.ts',
+    'convex/projectHostedStart.ts',
     'src/landing-overtake.ts',
     'src/hosted-landing-admission.ts',
     // The source step repair wake (e62d834b, review 308f217c).

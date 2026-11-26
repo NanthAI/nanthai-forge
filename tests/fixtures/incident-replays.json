@@ -14628,6 +14628,16 @@
         "src/scoped-recheck-policy.ts"
       ],
       "test": "a standard machine check retains the exact selection emitted by its command in its one shard"
+    },
+    {
+      "incident": "846c635b",
+      "what": "Planned start opens a successor after 24 finished Intents and stays within the same read budget at 1,000",
+      "file": "tests/hosted-lanes.test.mjs",
+      "paths": [
+        "convex/projectHostedStart.ts",
+        "convex/projectMetricAliasWriter.ts"
+      ],
+      "test": "incident 846c635b: planned start continues an Item after 24 finished Intents with constant reads"
     }
   ]
 }
