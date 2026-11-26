@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { packageDocuments, packageDocumentData, readDocument } from './package-documents.mjs';
 import { AGENT_DEFAULTS, BOARD_LINE, agentDefaultLines } from './agent-default-lines.mjs';
 import { agentGuidePaths, checkAgentGuides } from './docs-agent-prompts.mjs';
@@ -9,6 +10,11 @@ import { agentGuidePaths, checkAgentGuides } from './docs-agent-prompts.mjs';
 import { coreVerbs, landSaveForm } from './agent-verb-forms.mjs';
 
 const repository = 'https://github.com/NanthAI/nanthai-forge/blob/main';
+const skillPath = 'skills/forge-agent/SKILL.md';
+const productSummary =
+  'Forge is a source host and workspace for people and AI agents changing the same code at the same time. Agents work in their existing tools, and checks run in your CI. Forge coordinates concurrent work with isolated Lanes, recorded checks and accepted Channels.';
+const developmentStatus =
+  'Forge is in open development. Build the CLI from source to try the development service. An npm release, a public production service and live Forge billing are still planned.';
 
 // Explicit inventory of what `llms-full.txt` carries: the README and the guides a user or agent
 // needs. Internal plans, status/backlog/roadmap, research, license disclosures and the long
@@ -25,20 +31,24 @@ export const llmsFullPaths = [
   'docs/guides/plan.md',
   'docs/guides/review.md',
   'docs/guides/access.md',
+  'docs/guides/secrets.md',
   'docs/guides/oversight.md',
   'docs/guides/billing.md',
   'docs/guides/export.md',
   'docs/concepts.md',
   'docs/agents.md',
+  'docs/operations/self-hosted-runner.md',
+  'docs/operations/runner-fallback.md',
+  'docs/operations/github-actions-checks.md',
+  'docs/readable-urls.md',
+];
+// Keep the long references one click away from the smaller, task-focused full text.
+const fullTextReferences = [
   'docs/agents/briefings.md',
   'docs/agents/workflow.md',
   'docs/parallel-work-defaults.md',
   'docs/security.md',
   'docs/workflows.md',
-  'docs/operations/self-hosted-runner.md',
-  'docs/operations/runner-fallback.md',
-  'docs/operations/github-actions-checks.md',
-  'docs/readable-urls.md',
 ];
 // Soft size line, in bytes. Crossing it only warns: the file is a sum over every Lane's docs, so a
 // hard limit fails combined landings that each pass alone (2026-11-05). Trim when you see the warning.
@@ -68,9 +78,10 @@ const agentRules = [
 
 // The public page's "Give this to your agent" prompt sends agents here and asks them to explain before acting
 // (web/index.html, tests/landing-page.test.mjs). Keep both in step: no install, sign-in or import before the person says so.
-export const sentHere =
+const sentHere =
   'If a person sent you here with the prompt from the Forge public page, explain before you act. Tell them, in a few plain lines: what Forge would change about how they and their agents land work in this repository; what it could cost or save in CI minutes against their current flow, quoting the measured results below as one published benchmark on one repository, not a promise; and what you need from them to try it on one small change. Do not install, sign in, import a repository or change any file until they say so.\n\n' +
-  'Forge is in open development. It is not published to npm and there is no public production service yet, so nothing is charged (the public page shows the prices planned for launch); trying it today means building from source ([quickstart](/docs/quickstart.md)). Current state: [status](/docs/status.md).';
+  developmentStatus +
+  ' See the [quickstart](/docs/quickstart.md) to try it and [status](/docs/status.md) for current capabilities.';
 
 const startHere = new Set([
   'docs/README.md',
@@ -123,6 +134,40 @@ function describe(path, source) {
   return { path, title, note: note.length > 200 ? `${note.slice(0, 197)}…` : note, source };
 }
 
+function measuredEvidence(source) {
+  const measured = /<!-- agent-measurements:start -->\n([\s\S]*?)\n<!-- agent-measurements:end -->/.exec(
+    source,
+  )?.[1];
+  if (!measured) throw new Error('Why Forge is missing the shared agent measurements block.');
+  return measured;
+}
+
+function syncSkill(root, measured, write = false) {
+  const path = join(root, skillPath);
+  const source = readFileSync(path, 'utf8');
+  let skill = source;
+  const blocks = [
+    ['scope', `${productSummary}\n\n${developmentStatus}`, 'Regenerate the forge-agent product scope.'],
+    ['workflow', workflow, 'Regenerate the forge-agent workflow block from the CLI verb contract.'],
+    [
+      'measurements',
+      measured,
+      'Copy the current Why Forge measurement block to forge-agent before building.',
+    ],
+  ];
+  for (const [name, body, failure] of blocks) {
+    const start = `<!-- agent-${name}:start -->`;
+    const end = `<!-- agent-${name}:end -->`;
+    const current = new RegExp(`${start}\\n[\\s\\S]*?\\n${end}`).exec(skill)?.[0];
+    const expected = `${start}\n${body}\n${end}`;
+    if (!current || (!write && current !== expected))
+      throw new Error(`${failure} Run node scripts/llm-documents.mjs --write-skill.`);
+    skill = skill.replace(current, () => expected);
+  }
+  if (write && skill !== source) writeFileSync(path, skill);
+  return skill;
+}
+
 // The packaged inventory is already public. Never scan the workspace: unlisted docs, private
 // output and vendor notice trees stay out. A missing listed file throws (ENOENT) and fails the build.
 export function llmDocuments(root) {
@@ -136,22 +181,13 @@ export function llmDocuments(root) {
     return doc;
   });
   const included = new Set(llmsFullPaths);
-  const moreGuides = agentGuidePaths.filter(path => !included.has(path)).map(path => byPath.get(path));
-  const measuredSource = full.find(doc => doc.path === 'docs/why-forge.md').source;
-  const measured = /<!-- agent-measurements:start -->\n([\s\S]*?)\n<!-- agent-measurements:end -->/.exec(
-    measuredSource,
-  )?.[1];
-  if (!measured) throw new Error('Why Forge is missing the shared agent measurements block.');
-  const skill = readFileSync(join(root, 'skills/forge-agent/SKILL.md'), 'utf8');
-  if (!skill.includes(`<!-- agent-workflow:start -->\n${workflow}\n<!-- agent-workflow:end -->`))
-    throw new Error('Regenerate the forge-agent workflow block from the CLI verb contract.');
-  if (!skill.includes(`<!-- agent-measurements:start -->\n${measured}\n<!-- agent-measurements:end -->`))
-    throw new Error('Copy the current Why Forge measurement block to forge-agent before building.');
+  const additional = new Set([...agentGuidePaths, ...fullTextReferences]);
+  const moreGuides = documents.filter(doc => !included.has(doc.path) && additional.has(doc.path));
+  const measured = measuredEvidence(byPath.get('docs/why-forge.md').source);
+  const skill = syncSkill(root, measured);
 
   const links = selected => selected.map(doc => `- [${doc.title}](/${doc.path}): ${doc.note}`).join('\n');
-  const summary =
-    'Forge is a source host and workspace for people and AI agents changing the same code at the same time. Isolated Lanes, recorded checks and accepted Channels coordinate concurrent work.';
-  const introduction = `# NanthAi:Forge\n\n> ${summary}\n\n`;
+  const introduction = `# NanthAi:Forge\n\n> ${productSummary}\n\n`;
   const reference = documents.filter(doc => referenceDocs.has(doc.path));
   const rest = documents.filter(
     doc => !startHere.has(doc.path) && !agentDocs.has(doc.path) && !referenceDocs.has(doc.path),
@@ -161,15 +197,15 @@ export function llmDocuments(root) {
     `- [README](${repository}/README.md): ${describe('README.md', full[0].source).note}\n\n` +
     `## For agents\n\n${agentRules.map(rule => `- ${rule}`).join('\n')}\n\n` +
     `${links(documents.filter(doc => agentDocs.has(doc.path)))}\n` +
-    `- [forge-agent skill](${repository}/skills/forge-agent/SKILL.md): ${describe('skills/forge-agent/SKILL.md', skill).note}\n\n` +
+    `- [forge-agent skill](${repository}/${skillPath}): ${describe(skillPath, skill).note}\n\n` +
     `## Licence\n\nForge is licensed AGPL-3.0-only, copyright 2026 Ferdinando Valsecchi: [LICENSE.md](${repository}/LICENSE.md). Outside contributions need a contributor agreement and are closed for now.\n\n` +
     `## Measured results\n\n${measured}\n\nMethod, sources and caveats: [Why Forge](/docs/why-forge.md).\n\n` +
     `## Reference\n\n${links(reference)}\n\n` +
     `## Optional\n\n${links(rest)}\n\n` +
-    `## Full text\n\n- [Curated documentation](/llms-full.txt): The README, ${llmsFullPaths.length - 1} user and agent guides in full and links to more how-to guides.\n`;
+    `## Full text\n\n- [Curated documentation](/llms-full.txt): The README, ${llmsFullPaths.length - 1} user and agent guides in full and links to guides and references.\n`;
   const text =
-    `${introduction}The README and the user and agent guides follow in a fixed order. Plans, status, research, license disclosures and the architecture reference are separate documents linked from /llms.txt.\n\n` +
-    `## More how-to guides\n\n${links(moreGuides)}\n\n` +
+    `${introduction}${developmentStatus}\n\n` +
+    `## More guides and references\n\n${links(moreGuides)}\n\n` +
     full
       .map(
         doc =>
@@ -183,3 +219,10 @@ export function llmDocuments(root) {
     ...packageDocumentData.map(path => ({ fileName: path, source: readFileSync(join(root, path), 'utf8') })),
   ];
 }
+
+if (
+  process.argv[2] === '--write-skill' &&
+  process.argv[1] &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+)
+  syncSkill(process.cwd(), measuredEvidence(readDocument(process.cwd(), 'docs/why-forge.md')), true);

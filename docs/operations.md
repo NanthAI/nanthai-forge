@@ -1849,7 +1849,7 @@ A missing variable fails the write with `R2_NOT_CONFIGURED`; Forge never falls b
 
 ## Self-host
 
-The same Convex schema runs on the pinned official local Convex backend (SQLite and local files). The launcher supports macOS arm64 and Linux x64. It is a loopback development setup with no TLS, public ingress or production guarantee.
+Self-hosting Forge is possible but unsupported. The documented setup runs the same Convex schema on a pinned local Convex backend (SQLite and local files) on macOS arm64 or Linux x64. It binds to loopback for development. See [Self-hosted check runner](operations/self-hosted-runner.md) to run checks on your own machine for a hosted project.
 
 ```sh
 npm ci --ignore-scripts
@@ -1882,7 +1882,7 @@ After the save writer deploys, invoke `projectMetricSaveHeadBackfill:start` once
 
 **Storage:** a self-hosted instance stores bytes in R2 like every deployment; there is no Convex byte mode. Set the `R2_*` settings, or `R2_ENDPOINT` for another S3-compatible bucket. Without them, every byte write fails with `R2_NOT_CONFIGURED`. File-inclusive snapshots hold only legacy copies, not the bucket. The launcher accepts an optional private dotenv file as a third `start` argument. It sets native S3 storage with five buckets (`S3_STORAGE_EXPORTS_BUCKET`, `_SNAPSHOT_IMPORTS_`, `_MODULES_`, `_FILES_`, `_SEARCH_`) and `AWS_*` credentials. Changing the argument on an existing database does not move its files. Restore a snapshot into a fresh instance instead.
 
-`node scripts/selfhost-smoke.mjs` runs the repeatable check against the pinned public repo `sindresorhus/is-plain-obj`. It needs a read-only `GITHUB_TOKEN`. It starts a local S3-compatible bucket and points each fresh or restored instance at it through `R2_ENDPOINT`, and runs an end-to-end Convex Auth passkey sign-up, owner-isolated Secret Object creation/reveal, negative origin/signature/JWT checks, refresh-token rotation, live sign-out revocation and returning passkey sign-in across snapshot restore, restart and pin upgrade/rollback (`scripts/selfhost-auth.mjs`). On failure it reports the stage, a command label with private arguments withheld, exit status and a bounded, secret-redacted diagnostic tail, including the import job error when acquisition fails. Raw diagnostics remain in the invocation’s private temporary directory; deployment environment contents are never printed.
+`node scripts/selfhost-smoke.mjs` runs the repeatable check against the pinned public repo `sindresorhus/is-plain-obj`. It needs a read-only `GITHUB_TOKEN`. It starts a local S3-compatible bucket and points each fresh or restored instance at it through `R2_ENDPOINT`, and runs an end-to-end Convex Auth passkey sign-up, negative origin/signature/JWT checks, refresh-token rotation, live sign-out revocation and returning passkey sign-in across snapshot restore, restart and pin upgrade/rollback (`scripts/selfhost-auth.mjs`). On failure it reports the stage, a command label with private arguments withheld, exit status and a bounded, secret-redacted diagnostic tail, including the import job error when acquisition fails. Raw diagnostics remain in the invocation’s private temporary directory; deployment environment contents are never printed.
 
 **Licenses:** All of Forge's original code, including the launcher and client, is AGPL-3.0-only (see [LICENSE.md](../LICENSE.md)). The downloaded Convex backend has its own FSL-1.1-Apache-2.0 terms. Inventories: [npm](dependency-licenses.md) and [native backend](native-dependency-licenses.md). The native one is partial and not an SBOM.
 

@@ -1,5 +1,7 @@
 ## Secrets for checks
 
+For the owner walkthrough from device approval to running a command in CI, see [Set up sealed team secrets](../../guides/secrets.md).
+
 Check definitions declare environment variable names in `env` and sensitive
 names in `credentials`. On the Forge runner both select values already present in
 the runner process; they do not read the Checks set yet. Missing variables there
@@ -154,7 +156,7 @@ Checks values.
 
 ### Settings and the retired store
 
-The **Settings → Secrets** page is value-free: its names-only read covers names in
+The **Settings → Landing and checks → Open Secrets** page is value-free: its names-only read covers names in
 Development and Checks, holders, waiting computers, rotation state and recent changes.
 It has no value field, reveal control or public sample-data route. The older Secret
 Objects, their server keyring and their web dotenv import are retired; see

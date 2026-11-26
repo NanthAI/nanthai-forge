@@ -17,6 +17,7 @@ Get a change from an idea to main, with people and agents working together.
 | Read a change, record findings or map pull-request habits | [Review and land](guides/review.md) |
 | Connect a terminal or understand who holds a Lane | [Devices, sign-ins and holders](guides/access.md) |
 | Find public code or share a project | [Browse or share a public project](guides/access.md#browse-or-share-a-public-project) |
+| Set up Development or CI secrets | [Set up sealed team secrets](guides/secrets.md) |
 | Keep several Lanes moving | [Oversee the work](guides/oversight.md) |
 | Send Forge events to a host or a local command | [Connect a host to Forge events](guides/event-feed.md) |
 | Fix a failed check | [When a check fails](guides/review.md#when-a-check-fails) |

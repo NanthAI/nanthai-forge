@@ -5,10 +5,10 @@ and `nforge secret repin` use a stable device sign-in. Values never belong in
 arguments or replies. `--file` makes the stdin/prompt value a file-shaped secret;
 `run` supplies its private temporary path. A piped value (not `--file`) loses exactly
 one trailing newline, so `echo TOKEN | nforge secret set X` stores `TOKEN`; a second
-newline is kept. With `--file` stdin bytes are kept exactly. Agent markers and non-interactive input permit new names
-only; changes/removals require a person until the proposals slice. The server's
-storage gate requires the owner account's unrestricted stable device credential;
-value authority is the owner device signature in the verified roster.
+newline is kept. With `--file` stdin bytes are kept exactly. Agent markers and non-interactive input make
+changes or removals of existing names into [proposals](#sealed-proposals). The server requires an
+unrestricted stable device with project write access. The project owner initializes the set, and the
+verified roster determines which devices can sign each subsequent change.
 
 Device signing and agreement keys are independent. Their account binding, set
 keys, wraps, padded values, hiding value commitments, per-name change signatures,

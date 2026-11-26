@@ -5,6 +5,12 @@ description: Concise recorded Forge Intent/Lane/check/acceptance workflow and op
 
 Use ordinary file tools for source questions. For delivery, use the installed `nforge` in a hosted clone or Lane (`nforge host ROOT` hosts a folder). Sign in with `nforge login` before cloning/downloading, including public projects; public web viewing stays open.
 
+<!-- agent-scope:start -->
+Forge is a source host and workspace for people and AI agents changing the same code at the same time. Agents work in their existing tools, and checks run in your CI. Forge coordinates concurrent work with isolated Lanes, recorded checks and accepted Channels.
+
+Forge is in open development. Build the CLI from source to try the development service. An npm release, a public production service and live Forge billing are still planned.
+<!-- agent-scope:end -->
+
 `nforge agent ROOT VERB [--MODE] --help` gives parameters; `help TOPIC` gives one how-to. `nforge docs agents/hosted` is generated from the enforced contract. Use `--command-file FILE` for nested JSON. Refusals name `{code,message,next,learn}`: follow `next`, reading `learn` once. First-write hooks are advisory; `help hosted` explains opting out.
 
 <!-- agent-workflow:start -->
@@ -26,7 +32,7 @@ Optionally send `tokens` with `land --save`: a whole number, the tokens your own
 ## Write a good planning Item
 
 - Read the live backlog with `planning {status:"active",reconcile:false}`. Before filing, check once with `planning {search:"outcome words",status:"all",limit:10}`. If an Item already covers it, comment there; don't page for a duplicate check.
-- Capture with `put-planning-item {kind:"item",title:"Resume an interrupted checkout without losing edits"}`. A title is enough. Say what will be true, not what you will investigate. Add the named `initiativeId`, if known; Idea, Task and Bug are labels, not hierarchy. Use `status:"proposed"` for a suggestion; make it Planned only with clear approval, and record who gave it.
+- Capture with `put-planning-item {kind:"issue",title:"Resume an interrupted checkout without losing edits"}`. A title is enough. Say what will be true, not what you will investigate. Add the named `initiativeId`, if known; Idea, Task and Bug are labels, not hierarchy. Use `status:"proposed"` for a suggestion; make it Planned only with clear approval, and record who gave it.
 - When refining, add why it matters, the scope, and observable `- [ ]` Done-when lines. Prefer “Retrying the original operation returns the same Lane id” to “Retries work.” Link relevant paths or Item ids. State what is still unknown; don't invent estimates or evidence.
 - Split work if its parts can land separately. Name their common outcome with `fields.parentId`. Record findings and decisions in discussion, not as silent changes to the Item. Apply agreed edits with `expectedVersion`.
 - Keep AI refinement separate from capture. Use `planning {id:"ITEM",refine:true}` before asking a model for suggestions; if `refinement.enabled` is false, stop the model path. Capture and refinement do not start work: `start {planningItemId}` does.

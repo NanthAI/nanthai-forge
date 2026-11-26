@@ -86,6 +86,8 @@ const firstChecks = {
   'docs/guides/people.md': 'Check the repository or folder, deployment and account access first.',
   'docs/guides/plan.md': 'Check the project and search for an existing matching Item first.',
   'docs/guides/review.md': 'Check the Candidate, exact source and required check result first.',
+  'docs/guides/secrets.md':
+    'Check the project, device reach and whether the value is for Development or Checks first.',
   'docs/operations.md': 'Check the deployment, project and current operating state first.',
   'docs/operations/ci-status-checks.md':
     'Check the repository, CI provider and current required check first.',

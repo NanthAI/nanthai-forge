@@ -2,6 +2,7 @@
 // Copyright 2026 Ferdinando Valsecchi
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -123,6 +124,10 @@ test('the hosted Vite build emits linked LLM files, every packaged doc and crawl
     previous = position;
   }
   assert.equal((full.match(/^Source: /gm) ?? []).length, llmsFullPaths.length);
+  for (const path of ['docs/agents/workflow.md', 'docs/security.md', 'docs/workflows.md']) {
+    assert.ok(full.includes(`](/${path})`), path);
+    assert.ok(!full.includes(`Source: /${path}\n`), `${path} stays available as a reference link`);
+  }
   for (const internal of [
     'docs/phase5-plan.md',
     'docs/status.md',
@@ -170,8 +175,8 @@ test('llms-full is curated: listed in the package inventory and without internal
 });
 
 // 00c3f715: the public page's copied prompt points here and asks the agent to explain first; llms.txt says the same.
-test('llms.txt answers the public page prompt explain-first and states the development status', () => {
-  const llms = llmDocuments(root)[0].source;
+test('the public prompt explains first and both LLM files and the skill share the development status', () => {
+  const [{ source: llms }, { source: full }] = llmDocuments(root);
   const page = read('web/index.html');
   const section = llms.split('## If someone sent you here\n\n')[1]?.split('\n\n## Start here')[0] ?? '';
   assert.ok(llms.indexOf('## If someone sent you here') < llms.indexOf('## Start here'));
@@ -181,8 +186,15 @@ test('llms.txt answers the public page prompt explain-first and states the devel
   assert.match(section, /Do not install, sign in, import a repository or change any file until they say so/);
   assert.match(
     section,
-    /not published to npm and there is no public production service yet, so nothing is charged/,
+    /An npm release, a public production service and live Forge billing are still planned/,
   );
+  const skill = read('skills/forge-agent/SKILL.md');
+  const scope = /<!-- agent-scope:start -->\n([\s\S]+?)\n<!-- agent-scope:end -->/.exec(skill)?.[1];
+  assert.ok(scope);
+  for (const paragraph of scope.split('\n\n')) {
+    assert.ok(llms.includes(paragraph));
+    assert.ok(full.includes(paragraph));
+  }
   assert.match(section, /\(\/docs\/quickstart\.md\)[\s\S]*\(\/docs\/status\.md\)/);
   // The prompt the page copies asks for the same three answers and forbids installing.
   const prompt = /<pre id="prompt" data-prompt>([\s\S]*?)<\/pre>/.exec(page)?.[1] ?? '';
@@ -310,6 +322,13 @@ test('generation uses only the explicit inventory and reflects source edits dete
   const next = llmDocuments(fixture);
   assert.match(next[0].source, /\[Why Forge now\?\]\(\/docs\/why-forge.md\): Changed public documentation\./);
   assert.match(next[1].source, /Changed public documentation\./);
+  const skill = 'skills/forge-agent/SKILL.md';
+  put(skill, read(skill).replace('Forge is in open development.', 'Stale scope from a previous build.'));
+  assert.throws(() => llmDocuments(fixture), /Regenerate the forge-agent product scope/);
+  execFileSync(process.execPath, [join(root, 'scripts/llm-documents.mjs'), '--write-skill'], {
+    cwd: fixture,
+  });
+  assert.deepEqual(llmDocuments(fixture), next);
   // A listed source that is missing fails the build instead of shipping a partial file.
   for (const path of [packageDocuments[0], llmsFullPaths[0], 'docs/security.md', ...packageDocumentData]) {
     const copy = readFileSync(join(fixture, path), 'utf8');
@@ -318,7 +337,7 @@ test('generation uses only the explicit inventory and reflects source edits dete
     put(path, copy);
   }
   // Size is reported, never a build failure (combined Lanes would fail landings that pass alone).
-  put('docs/security.md', `# Security\n\n${'x'.repeat(llmsFullWarnBytes)}\n`);
+  put('docs/guides/plan.md', `# Plan\n\n${'x'.repeat(llmsFullWarnBytes)}\n`);
   const huge = llmDocuments(fixture)[1].source;
   assert.ok(Buffer.byteLength(huge) > llmsFullWarnBytes);
 });
@@ -350,8 +369,8 @@ test('five Lanes each adding 2 KB of docs on the real files still generate llms-
   const addition = `\n## Lane note\n\n${'Lane documentation sentence.\n'.repeat(80).slice(0, 2048)}\n`;
   for (const path of [
     'docs/quickstart.md',
-    'docs/security.md',
-    'docs/workflows.md',
+    'docs/guides/plan.md',
+    'docs/guides/secrets.md',
     'docs/concepts.md',
     'docs/agents.md',
   ])

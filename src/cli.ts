@@ -31,7 +31,7 @@ Usage:
   nforge watch ROOT [--mine | --lanes ID,…] [--json] [--on-landing CMD]
   nforge docs [name]
   nforge run [--root ROOT] [--set development|checks] [--only A,B] [--show] -- COMMAND [ARGS...]
-  nforge secret set|list|rm|repin|resolve [options]
+  nforge secret --help   # Development and Checks, CI machine keys, proposals and revocation
   nforge --version
   nforge agent ROOT queue '{}'   # hosted landing queue
   nforge queue list|cancel OPERATION|prioritize OPERATION   # local command recovery

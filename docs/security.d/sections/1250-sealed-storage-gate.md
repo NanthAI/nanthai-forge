@@ -49,10 +49,9 @@ checked against the stored head the way every holder pinned there checks it:
 versions, floor, tombstones, unchanged records, and the author and change
 signature of every changed name. Every record, changed or not, must name an
 author on the roster or among its former signers, so no step can drop a former
-signer that a record still names; readers apply the same rule. Forge stores no
-proposals yet, so a head with a proposal record is refused
-(`SECRETS_NOT_ALLOWED`) until the server-owned proposal store can check its
-Development author. A Checks or Production genesis or roster step reads the
+signer that a record still names; readers apply the same rule. Development accepts a
+proposal record only when the write answers the matching waiting proposal.
+A Checks or Production genesis or roster step reads the
 stored Development roster (one indexed read) and must meet the cross-set owner
 rule: every owner account on the new roster has a Development owner device. With
 no Development set it is refused. A value write on an unchanged roster does not

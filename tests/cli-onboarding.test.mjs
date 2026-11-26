@@ -21,9 +21,9 @@ function cli(args, env = {}) {
 test('packaged docs work outside a project, with discoverable help and safe names', () => {
   assert.match(cli(['--help']).stdout, /^Forge is a source host/);
   assert.match(cli(['--help']).stdout, /nforge docs quickstart/);
-  assert.match(cli(['docs']).stdout, /docs\/quickstart.md/);
+  assert.ok(cli(['docs']).stdout.split('\n').includes('docs/quickstart.md'));
   assert.match(cli(['docs', '--help']).stdout, /nforge docs \[name\]/);
-  assert.match(cli(['docs', 'quickstart']).stdout, /Import GitHub source into a hosted project/);
+  assert.match(cli(['docs', 'quickstart']).stdout, /^# From a project to your first landing\n/);
   assert.match(cli(['docs', 'agent']).stdout, /Forge/);
   assert.match(cli(['agent', '--help']).stdout, /nforge docs agent/);
   const denied = spawnSync(process.execPath, [cliPath, 'docs', '../package.json'], { encoding: 'utf8' });

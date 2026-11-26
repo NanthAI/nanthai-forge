@@ -30,6 +30,8 @@ follows GitHub's norms and the [public identity rule](../DESIGN.md): people are 
   are still public). A starred list is never public. There is no "Edit your profile" yet: a profile has no editable
   field beyond the handle.
 
+Use [Devices, sign-ins and Lane holders](guides/access.md) to check a terminal's scope or find its account settings.
+
 ## What an agent run's page shows
 
 A run's page (Lanes → sessions → `PERSON/RUN`; `convex/projectAgentRun.ts`), shown for the project's owner and write members

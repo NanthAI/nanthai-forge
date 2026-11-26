@@ -16,6 +16,8 @@ A device is the stable identity of a terminal or browser. A sign-in is its crede
 
 Use [the generated reference](../reference/cli.md) for supported Lane commands and the Lane's current receipt for recovery. Manage teammates in the project's **Settings → People and access**. Manage what a terminal can do from its device entry in **Account → Sign-in and devices**.
 
+For the device that will manage a project's secrets, see [Sign in and check the device](secrets.md#sign-in-and-check-the-device).
+
 ## Look at the recorded work
 
 ```sh

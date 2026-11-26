@@ -172,10 +172,14 @@ test('docs are static, contract-generated and usable without account or backend 
       await page.goto(`${origin}/docs/guides/agents/`);
       assert.equal(await page.locator('h1').innerText(), 'Start a Lane and land it');
       assert.ok(await page.locator('pre').filter({ hasText: 'nforge mcp ROOT --agent' }).first().isVisible());
-      await page
-        .getByRole('link', { name: 'Import GitHub source into a hosted project', exact: true })
-        .click();
-      assert.equal(await page.locator('h1').innerText(), 'Import GitHub source into a hosted project');
+      // This link and heading use the title from docs/quickstart.md.
+      const quickstart = page.getByRole('link', {
+        name: 'From a project to your first landing',
+        exact: true,
+      });
+      assert.equal(await quickstart.getAttribute('href'), '/docs/quickstart/');
+      await quickstart.click();
+      assert.equal(await page.locator('h1').innerText(), 'From a project to your first landing');
       await noJs.close();
     },
   );

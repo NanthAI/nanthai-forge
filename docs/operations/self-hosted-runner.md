@@ -1,5 +1,7 @@
 # Self-hosted check runner
 
+Use this guide to run checks for an existing Forge project. The [local Forge service setup](../operations.md#self-host) is a separate development procedure.
+
 A project can run checks on its own Linux host, VM, container, macOS or Windows
 machine without GitHub ([qualified platforms](#qualified-platforms)). The provider is `self-hosted`, with a stable UUID `machineId`,
 pinned `runtime` and `environmentFingerprint`, `platform: {os, arch}` using Node
