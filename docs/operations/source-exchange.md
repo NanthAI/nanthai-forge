@@ -1501,6 +1501,9 @@ the observed pin and releases the pending command; an unknown outcome retains it
 Coordinate this command with the cutover's seeded source/Work pins and queue drain.
 A switch to `server` before hosted main is seeded returns `SOURCE_UNAVAILABLE`.
 Complete the original seed and drain the owner before switching.
+A bound cutover accepts the exact bootstrap State and its hosted bootstrap
+receipt when no local main move has been accepted. Once main has an accepted
+move, the cutover pins its head and receipt.
 If an earlier legacy transition left the project and main epochs out of sync,
 the owner can run a new transition with a new operation ID, the project's
 current authority as `expected`, and its current mode as `mode`.

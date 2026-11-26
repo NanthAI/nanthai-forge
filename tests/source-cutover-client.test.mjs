@@ -4,7 +4,8 @@ import test from 'node:test';
 import { backupPreview } from './project-backup-fixture.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { writeFileSync, readFileSync } from 'node:fs';
+import { writeFileSync, readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { getFunctionName } from 'convex/server';
 import { recoveryFixture } from './recovery-fixture.mjs';
@@ -12,8 +13,19 @@ import { acceptanceFixture } from './hosted-acceptance-fixture.mjs';
 import { cutoverFixture, cutover } from './source-cutover-fixture.mjs';
 import { boundCutoverPins, cutoverBoundProject } from '../dist/source-cutover-client.js';
 import { readHostState, updateHostState } from '../dist/host-binding.js';
-async function setup(t) {
-  const r = await recoveryFixture(t),
+import { initNative } from '../dist/native-work.js';
+import { WorkStore } from '../dist/work-store.js';
+
+function bootstrapFixture(t) {
+  const root = mkdtempSync(join(tmpdir(), 'forge-cutover-bootstrap-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  writeFileSync(join(root, 'index.txt'), 'synthetic bootstrap\n');
+  const { head } = initNative(root);
+  return { root, main: { head, id: `bootstrap:${head}` }, work: { store: WorkStore.open(root) } };
+}
+
+async function setup(t, bootstrap = false) {
+  const r = bootstrap ? bootstrapFixture(t) : await recoveryFixture(t),
     base = await acceptanceFixture();
   Object.assign(base.main, {
     head: r.main.head,
@@ -42,6 +54,32 @@ async function setup(t) {
     f.cutoverCall('cutoverClient', cutover[getFunctionName(ref).split(':')[1]], args);
   return { r, f, store, request, client: { query: call, mutation: call } };
 }
+
+test('fresh native bootstrap cuts over from the exact validated head and bootstrap receipt', async t => {
+  const f = await setup(t, true);
+  assert.equal(f.store.revision(), 0);
+  assert.deepEqual(f.store.load().channelMoves, []);
+  assert.equal((await cutoverBoundProject(f.store, f.request, true, f.client)).dryRun, true);
+  const receipt = await cutoverBoundProject(f.store, f.request, false, f.client);
+  assert.equal(receipt.authority.mode, 'server');
+  assert.equal(receipt.main.head, f.r.main.head);
+  assert.equal(receipt.main.receipt.id, f.r.main.id);
+  assert.deepEqual(readHostState(f.store).binding.sourceAuthority, receipt.authority);
+});
+
+test('fresh native bootstrap with matching bytes refuses a different hosted receipt', async t => {
+  const f = await setup(t, true);
+  const main = f.request.pins.main;
+  f.f.patch('projectHostedChannels', f.f.mainId, {
+    selection: JSON.stringify({ ...main, receipt: { ...main.receipt, id: randomUUID() } }),
+  });
+  const request = { ...f.request, pins: await f.f.pins() };
+  await assert.rejects(cutoverBoundProject(f.store, request, true, f.client), { code: 'CHANNEL_CHANGED' });
+  await assert.rejects(cutoverBoundProject(f.store, request, false, f.client), { code: 'CHANNEL_CHANGED' });
+  assert.equal(f.f.tables.projectSourceCutovers.size, 0);
+  assert.equal(readHostState(f.store).authorityTransition, undefined);
+});
+
 test('bound dry-run reads fresh authenticated pins and changes neither owner nor hosted data', async t => {
   const f = await setup(t),
     hosted = structuredClone(f.f.tables),

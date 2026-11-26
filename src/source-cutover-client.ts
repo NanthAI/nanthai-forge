@@ -31,12 +31,17 @@ function requireLocalReady(store: StoreAccess, request: ReturnType<typeof cutove
   store.locked(() => {
     requireOwnerDrained(store);
     const data = store.load(),
-      main = nativeChannels(data).find(c => c.name === 'main');
-    invariant(
-      main?.head === request.pins.main.head && main?.moveId === request.pins.main.receipt.id,
-      'CHANNEL_CHANGED',
-      'The prepared owner must match hosted main and its exact receipt.',
-    );
+      main = nativeChannels(data).find(c => c.name === 'main'),
+      hosted = request.pins.main;
+    // A seed with no accepted main selects nativeHead and assigns its bootstrap receipt.
+    const matches = main
+      ? main.head === hosted.head && main.moveId === hosted.receipt.id
+      : data.nativeHead === hosted.head &&
+        hosted.receipt.id === `bootstrap:${hosted.head}` &&
+        hosted.receipt.kind === 'native' &&
+        hosted.receipt.previousHead === null &&
+        hosted.receipt.previousReceiptId === null;
+    invariant(matches, 'CHANNEL_CHANGED', 'The prepared owner must match hosted main and its exact receipt.');
     if (request.mode === 'server')
       invariant(
         store.revision() === request.pins.ownerRevision,
