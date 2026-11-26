@@ -30,10 +30,15 @@ during deployment. On an unconverted deployment, use the optional-field Stage A 
 at State `bd1b4e2f03fb12965905bc368937e7d7e7d8c1970ee879b7114082d47fa6593b`
 (receipt `69dc50e4`) for the one-off migration. Complete the markerless-Intent and orphan
 censuses before applying the fill. The migration is available in that pinned source.
-For the one-off dev fill, page `projectIntentLandingNoteFill:count` with `projectId` and `cursor` starting
-at null. Post each project's missing-note total and the recoverable and orphan counts with receipt samples
-before applying. Stop if any project has over 500 orphans or if orphans exceed 10% of its notes. The
-deployment's billed I/O ceiling is twice the summed estimate, capped at 100 MB.
+Before the one-off dev fill, run `node scripts/landing-note-cutover.mjs NAME`. The census walks every
+`hostedProjects` row, including deleted and purging projects, and reports missing hot and archived links
+by project. Post the counts before changing data. For each reported active project, page
+`projectIntentLandingNoteFill:count` with `projectId` and `cursor` starting at null. Post the recoverable
+and orphan counts with receipt samples before applying. Stop if any project has over 500 orphans or if
+orphans exceed 10% of its notes. The deployment's billed I/O ceiling is twice the summed estimate,
+capped at 100 MB. For an owner-confirmed deletion, resume the recorded purge and let it remove the
+notes. If the purge is blocked, an approved targeted cleanup can remove its identified notes. Resolve any
+missing links on a restorable project before tightening the schema.
 
 Start each `fill` page with the id from `remaining`. Supply the census's orphan row ids as
 `deleteOrphans` and use `maxRows` to shorten the default 64-row page when only a smaller page fits the
@@ -41,10 +46,12 @@ remaining budget. A lost reply can retry the same first-row pin. The fill recove
 the receipt's Candidate or its attributed Lanes and follows duplicate links. It removes an unrecoverable
 orphan's note row, which also holds the archived reference when present. The acceptance receipt and the
 shared capsule are retained. A census mismatch or ambiguous or unavailable evidence stops the page before
-writes. Both census and fill accept a smaller `maxRows` on the original cursor or first-row pin if
-provenance reads exceed the transaction budget. Verify `remaining` returns null for every project and
-record the provider-billed read and write bytes against the census. Complete and verify Plan Lane-mark
-coverage for legacy Lane heads before switching the roll-up to indexed Item membership.
+writes. Both Stage A count and fill accept a smaller `maxRows` on the original cursor or first-row pin if
+provenance reads exceed the transaction budget. Verify `remaining` returns null for every active project
+that needed filling and record the provider-billed read and write bytes against the census. Run
+`node scripts/landing-note-cutover.mjs NAME --verify` before deploying. It exits unsuccessfully if any
+project still has missing links. Complete and verify Plan Lane-mark coverage for legacy Lane heads
+before switching the roll-up to indexed Item membership.
 
 ### Landing note links and times (second job)
 

@@ -10,6 +10,7 @@ export const purgePageBudget = { rows: 1000, bytes: 4 * 1024 * 1024, chunk: 8 } 
 
 /** Serialized size estimate, counting byte fields by length. */
 export function documentBytes(value: unknown): number {
+  if (typeof value === 'bigint') return 8; // Convex stores BigInt as a signed int64.
   if (value instanceof ArrayBuffer) return value.byteLength;
   if (ArrayBuffer.isView(value)) return value.byteLength;
   if (Array.isArray(value)) return value.reduce((n: number, item) => n + documentBytes(item), 2);

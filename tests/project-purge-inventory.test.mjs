@@ -675,6 +675,35 @@ test('411727ba row 5: orphan purge of a capsule pointer removes its pins body an
   assert(result.bytes > Buffer.byteLength(JSON.stringify(row)), 'cleanup meters the removed pins body');
 });
 
+test('project deletion meters a stored int64 and reaches its landing-note rows', async () => {
+  const s = state([]);
+  const projectId = 'purging-project';
+  s.tables.hostedProjects.set(projectId, {
+    ...sample(schema.tables.hostedProjects.validator.json),
+    _id: projectId,
+    _creationTime: 1,
+    removal: 'deleting',
+  });
+  s.tables.projectMetricFacts.set('legacy-metric', {
+    _id: 'legacy-metric',
+    _creationTime: 2,
+    projectId,
+    legacy: { counters: [-(2n ** 63n)] },
+  });
+  for (const [id, owner] of [
+    ['old-note', projectId],
+    ['foreign-note', 'another-project'],
+  ]) {
+    s.tables.projectIntentLandingNotes.set(id, { _id: id, _creationTime: 3, projectId: owner });
+  }
+
+  const done = await rowsPage.purgeProjectRowsPage(s.ctx, s.tables.hostedProjects.get(projectId));
+  assert.equal(done, true);
+  assert.equal(s.tables.projectMetricFacts.size, 0);
+  assert.deepEqual([...s.tables.projectIntentLandingNotes.keys()], ['foreign-note']);
+  assert.equal(s.tables.hostedProjects.get(projectId).purge.rows, 2);
+});
+
 test('project purge drains non-creation-ordered suffix indexes with the same row page bound and preserves foreign rows', async () => {
   for (const reversed of [false, true]) {
     const s = state([]);
