@@ -583,6 +583,55 @@ test('a close reads no body page: its landing rows, the Intent’s earlier rows 
   assert.equal(closed.landings, requests.length);
 });
 
+test('the Stats table reads app and model from the existing receipt and resolves person handles at the boundary', async t => {
+  const f = await batchesFixture(t);
+  await f.drain();
+  const subject = 'user_ExampleAccount';
+  f.insert('forgeAccounts', { owner: subject, handle: 'ada' });
+  const day = '2026-11-18';
+  const at = `${day}T10:00:00.000Z`;
+  const landings = Array.from({ length: 12 }, (_, i) =>
+    statsApi.statsLanding(
+      {
+        id: String(i),
+        at,
+        actor: { kind: i < 7 ? 'agent' : 'person', id: subject },
+        ...(i < 7 ? { agentRun: `run-${i}`, agentClient: 'codex:gpt-6.2-sol' } : {}),
+      },
+      {
+        at: `${day}T09:55:00.000Z`,
+        counts: { runnerSeconds: 240, discardedRunnerSeconds: 60 },
+      },
+    ),
+  );
+  f.insert('projectStatsDays', {
+    projectId: f.projectId,
+    day,
+    value: JSON.stringify(statsDay(day, landings)),
+  });
+  const raw = await f.tx('statsAgents', statsApi.read, {
+    projectId: f.projectId,
+    from: day,
+    to: day,
+    part: 'agents',
+  });
+  assert(!raw.includes(subject));
+  const reply = JSON.parse(raw);
+  assert.deepEqual(
+    reply.agentRows.map(row => row.identity),
+    [
+      { kind: 'agent', app: 'codex', model: 'gpt-6.2-sol' },
+      { kind: 'person', person: 'ada' },
+    ],
+  );
+  assert.deepEqual(
+    reply.agentRows.map(row => row.landings),
+    [7, 5],
+  );
+  assert.equal(f.counts.at(-1).readDocumentsByTable.projectStatsDays, 1);
+  assert.equal(f.counts.at(-1).readDocumentsByTable.projectHostedAcceptances, undefined);
+});
+
 test('a discarded check whose minutes are not known yet is not a first try', () => {
   const receipt = { id: 'receipt', at: '2026-11-18T10:00:00.000Z' };
   const state = (counts = {}) => ({

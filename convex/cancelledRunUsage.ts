@@ -2,6 +2,7 @@
 // Copyright 2026 Ferdinando Valsecchi
 import { checkPin, type HostedCheckRun } from '../src/hosted-check';
 import type { HostedLandingState } from '../src/hosted-landing';
+import { adjustAgentStats } from '../src/stats-agents';
 import type { StatsDay, StatsLanding } from '../src/stats-estimate';
 
 export function cancelledUsageRepository(provider: HostedCheckRun['configuration']) {
@@ -99,13 +100,13 @@ export function adjustClosedRunnerDay(
     counted: day.firstTry.counted + deltaCounted,
     first: day.firstTry.first + deltaFirst,
   };
-  const who = day.who.map(([name, n, first, counted]) =>
-    name === (after.who ?? '')
-      ? ([name, n, first + deltaFirst, counted + deltaCounted] as [string, number, number, number])
-      : ([name, n, first, counted] as [string, number, number, number]),
-  );
   // The GitHub side is priced per window from run counts (src/stats-estimate.ts#statsWindow), and Forge's side from
   // every run's own row, so a late price changes only the landed-path tallies here; the replay stays as closed.
   void reruns;
-  return { ...day, runner, firstTry, who };
+  return {
+    ...day,
+    runner,
+    firstTry,
+    ...(day.byAgent ? { byAgent: adjustAgentStats(day.byAgent, before, after) } : {}),
+  };
 }

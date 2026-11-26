@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-// Stats charts (Item a61d3c91): landings per day, where work waited, agents by first-try rate and the months of a
+// Stats charts (Item a61d3c91): landings per day, where work waited, agent setups and people and the months of a
 // period. Every chart prints its values on the chart and offers the same figures as a table; all but landings per day
 // are fold bodies, read only once their fold is opened.
 import { useState, type CSSProperties, type ReactNode } from 'react';
 import { Key, Table } from '../../ds';
-import { A } from '../frames';
-import { Bars } from './Compare';
+import { agentAppLabels, type AgentApp } from '../start/agent-apps';
 import {
   clock,
   dayName,
@@ -169,64 +168,116 @@ export function Waited({ stops }: { stops: StatsWaited['stops'] }) {
   );
 }
 
-/** By agent: how many agents (and people) land at each first-try rate, in four fixed buckets, never a list that
- * grows with the agents. Each landing's own timing is on its Lane page, found from History by who landed it. */
-export function ByWho({ r, historyHref }: { r: StatsAgents; historyHref: string }) {
-  if (!r.agents) return <p className="stats-note">Nobody landed in this period.</p>;
-  const rows = [...r.buckets, ...(r.notCounted.agents ? [{ label: 'Not counted', ...r.notCounted }] : [])];
-  const buckets = r.buckets.length;
-  const shares = scale(rows.map(row => row.agents));
-  type Row = (typeof rows)[number];
-  // "100% first try: 2 agents, 5 landings"; the one row that is not a rate reads "Not counted: 1 agent, 3 landings".
-  const said = (row: Row, i: number) =>
-    `${i === buckets ? row.label : `${row.label} first try`}: ${plural(row.agents, 'agent')}, ${plural(row.landings, 'landing')}`;
+type AgentRow = StatsAgents['agentRows'][number];
+
+function attributionLabel(row: AgentRow) {
+  const { identity } = row;
+  if (identity.kind === 'other') return 'Other';
+  if (identity.kind === 'person')
+    return identity.person ? `@${identity.person}` : 'Person · handle unavailable';
+  const app = identity.app;
+  const name =
+    app === 'antigravity'
+      ? 'Antigravity'
+      : app
+        ? (agentAppLabels[app as AgentApp] ?? app)
+        : 'Agent app not recorded';
+  return `${name} · ${identity.model ?? 'model not recorded'}`;
+}
+
+function attributionHint(row: AgentRow, minimum: number) {
+  if (row.identity.kind !== 'other')
+    return row.firstTryGap === null
+      ? null
+      : `First try ${row.firstTryGap} percentage points below the project.`;
+  const { small, legacy, overflow, unattributed } = row.identity.reasons;
+  return [
+    small ? `${plural(small, 'landing')} from setups or people with fewer than ${minimum} each` : null,
+    legacy ? `${plural(legacy, 'landing')} from older summaries without setup or person details` : null,
+    overflow ? `${plural(overflow, 'landing')} whose setup or person fell outside the stored summary` : null,
+    unattributed ? `${plural(unattributed, 'landing')} without a recorded setup or person` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+function agentMeasure(value: string | null, recorded: number, total: number) {
+  if (value === null) return 'Not recorded';
   return (
     <>
-      <p className="stats-readout">
-        {plural(r.agents, 'agent or person', 'agents and people')} by first-try rate
-        {r.others ? `; ${plural(r.others, 'more landing')} from others not split` : ''}.
-      </p>
-      <ChartOr
-        caption="Agents by first-try rate"
-        table={
-          <Table<Row>
-            caption="Agents by first-try rate"
-            columns={[
-              { key: 'b', title: 'First try', cell: row => row.label },
-              { key: 'a', title: 'Agents', numeric: true, cell: row => int(row.agents) },
-              { key: 'n', title: 'Landings', numeric: true, cell: row => int(row.landings) },
-            ]}
-            rows={rows}
-            rowKey={row => row.label}
-          />
-        }
-        chart={
-          <>
-            <div className="stats-buckets">
-              <Bars
-                label={rows.map(said).join('. ')}
-                rows={rows.map((row, i) => ({
-                  name: row.label,
-                  sub: plural(row.landings, 'landing'),
-                  hover: said(row, i),
-                  value: int(row.agents),
-                  share: row.agents ? shares[i]! : 0,
-                  kind: i === buckets ? 'ink' : 'forge',
-                  apart: i === buckets,
-                }))}
-              />
-            </div>
-          </>
-        }
-      />
-      <p className="stats-readout">
-        Each landing’s timing is on its Lane page:{' '}
-        <A href={historyHref} className="lk">
-          History, by who landed it
-        </A>
-        .
-      </p>
+      {value}
+      {recorded < total ? (
+        <small className="stats-cell-note">
+          {int(recorded)} of {int(total)} recorded
+        </small>
+      ) : null}
     </>
+  );
+}
+
+export function ByWho({ r }: { r: StatsAgents }) {
+  // The public identity rule can omit the handle. Use the sorted position as the key in that case.
+  const rows = r.agentRows.map((row, index) => ({ ...row, key: `${attributionLabel(row)}/${index}` }));
+  if (!rows.length) return <p className="stats-note">Nobody landed in this period.</p>;
+  return (
+    <div className="stats-by-agent">
+      <Table
+        caption="Landings by agent setup and person"
+        columns={[
+          {
+            key: 'who',
+            title: 'Agent setup or person',
+            cell: row => {
+              const hint = attributionHint(row, r.minimum);
+              return (
+                <>
+                  {attributionLabel(row)}
+                  {hint ? <small className="stats-cell-note">{hint}</small> : null}
+                </>
+              );
+            },
+          },
+          { key: 'n', title: 'Landings', numeric: true, cell: row => int(row.landings) },
+          {
+            key: 'first',
+            title: 'First try',
+            numeric: true,
+            cell: row =>
+              agentMeasure(
+                row.firstTryRate === null ? null : percent(row.firstTryRate),
+                row.counted,
+                row.landings,
+              ),
+          },
+          {
+            key: 'time',
+            title: 'Median time to main',
+            numeric: true,
+            cell: row =>
+              agentMeasure(
+                row.toMainSeconds === null
+                  ? null
+                  : `${row.approximate ? '≈' : ''}${duration(row.toMainSeconds)}`,
+                row.timed,
+                row.landings,
+              ),
+          },
+          {
+            key: 'ci',
+            title: 'CI minutes per landing',
+            numeric: true,
+            cell: row =>
+              agentMeasure(
+                row.ciMinutesPerLanding === null ? null : minutes(row.ciMinutesPerLanding),
+                row.priced,
+                row.landings,
+              ),
+          },
+        ]}
+        rows={rows}
+        rowKey={row => row.key}
+      />
+    </div>
   );
 }
 

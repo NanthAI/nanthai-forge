@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import { z } from 'zod';
+import { byAgentSchema, statsDayAgents } from './stats-agents.js';
+import { distMedian, exactDist, type StatsDist } from './stats-distribution.js';
 import {
   DISCARD_CAUSES,
   STATS_STOP_CAUSES,
@@ -18,8 +20,8 @@ import {
 /** One accepted landing, from fields its receipt and landing row already hold. Times are epoch ms. */
 export type StatsLanding = {
   id: string;
-  /** Public agent handle or person handle that sent it to land; null when unknown. */
-  who: string | null;
+  /** Group key derived from the receipt attribution. */
+  attribution?: string;
   submittedAt: number;
   landedAt: number;
   /** Queue -> check -> landing stops, when the row recorded them. */
@@ -41,8 +43,6 @@ export type StatsLanding = {
 export const STATS_COMPARE_MIN_LANDINGS = 50;
 /** Landings a day close reads; a busier day is marked partial, never silently truncated. */
 export const STATS_DAY_MAX_LANDINGS = 1_000;
-/** People and agents listed per day; the rest add up under `others`. */
-export const STATS_DAY_MAX_WHO = 40;
 
 export function median(values: readonly number[]) {
   if (!values.length) return null;
@@ -94,8 +94,10 @@ const statsDayV1Schema = z
     toMain: ints,
     stops: z.object({ queue: ints, check: ints, land: ints }).strict(),
     replay: z.object({}).passthrough(),
-    who: z.array(z.tuple([z.string(), z.number().int(), z.number().int(), z.number().int()])),
-    others: z.number().int().nonnegative(),
+    // Accepted only on older summaries. They held run names, never setup or person identities.
+    who: z.unknown().optional(),
+    others: z.unknown().optional(),
+    byAgent: byAgentSchema.optional(),
   })
   .strict();
 const tallySchema = z
@@ -266,17 +268,6 @@ export function statsDay(
   width: number = MERGE_QUEUE_CONCURRENCY,
 ): StatsDayV2 {
   const landings = [...input].sort((a, b) => a.landedAt - b.landedAt).slice(0, STATS_DAY_MAX_LANDINGS);
-  const tally = new Map<string, [number, number, number]>();
-  for (const l of landings) {
-    const row = tally.get(l.who ?? '') ?? [0, 0, 0];
-    row[0]++;
-    if (l.attempts !== null) {
-      row[2]++;
-      if (l.attempts === 1) row[1]++;
-    }
-    tally.set(l.who ?? '', row);
-  }
-  const ranked = [...tally].sort((a, b) => b[1][0] - a[1][0] || a[0].localeCompare(b[0]));
   const counted = landings.filter(l => l.attempts !== null);
   const priced = landings.filter(l => known(l.runnerSeconds) && known(l.discardedRunnerSeconds));
   const reported = landings.filter(l => known(l.tokens ?? null)).map(l => Math.round(l.tokens!));
@@ -351,8 +342,7 @@ export function statsDay(
       },
       ...(width === MERGE_QUEUE_CONCURRENCY ? {} : { width }),
     },
-    who: ranked.slice(0, STATS_DAY_MAX_WHO).map(([who, [n, first, counted]]) => [who, n, first, counted]),
-    others: ranked.slice(STATS_DAY_MAX_WHO).reduce((s, [, [n]]) => s + n, 0),
+    ...(landings.length ? { byAgent: statsDayAgents(landings) } : {}),
     ...(reported.length
       ? { tokens: { reported: reported.length, total: reported.reduce((s, n) => s + n, 0) } }
       : {}),
@@ -367,50 +357,6 @@ const minutesOf = (t: { runs: number; seconds: number; unknown: number }) => ({
 /** Why a window shows no comparison: too few landings yet, days closed before every run was recorded (or whose runs
  * could not be read), or no solo full check to price a GitHub run. */
 export type CompareGap = 'landings' | 'not-recorded' | 'no-solo';
-
-/** Sorted seconds standing for `n` values: every value while `n` is `v.length`, else evenly spaced quantiles of them (a
- * month's rollup keeps at most STATS_DIST_SAMPLES), each sample standing for n / v.length values. */
-export type StatsDist = { n: number; v: number[] };
-/** Samples a month rollup keeps per distribution: its medians stay within one sample's share of the exact one. */
-export const STATS_DIST_SAMPLES = 400;
-const exactDist = (v: readonly number[] | null): StatsDist[] =>
-  v?.length ? [{ n: v.length, v: [...v] }] : [];
-/** Each sample with its weight, sorted by value. */
-const weighted = (parts: readonly StatsDist[]) => {
-  const pairs: Array<[number, number]> = [];
-  for (const p of parts) if (p.v.length) for (const x of p.v) pairs.push([x, p.n / p.v.length]);
-  return pairs.sort((a, b) => a[0] - b[0]);
-};
-/** The median of several distributions, each sample weighted by the values it stands for: the plain median (the mean
- * of the two middle values for an even count) when every part holds every value. */
-export function distMedian(parts: readonly StatsDist[]) {
-  const pairs = weighted(parts);
-  if (!pairs.length) return null;
-  const half = pairs.reduce((s, [, w]) => s + w, 0) / 2;
-  let at = 0;
-  for (let i = 0; i < pairs.length; i++) {
-    at += pairs[i]![1];
-    if (at > half + 1e-9) return pairs[i]![0];
-    if (at >= half - 1e-9) return i + 1 < pairs.length ? (pairs[i]![0] + pairs[i + 1]![0]) / 2 : pairs[i]![0];
-  }
-  return pairs.at(-1)![0];
-}
-/** One stored distribution for several: every value while they fit in `samples`, else `samples` evenly spaced
- * quantiles. */
-export function distOf(parts: readonly StatsDist[], samples = STATS_DIST_SAMPLES): StatsDist {
-  const pairs = weighted(parts);
-  const n = parts.reduce((s, p) => s + (p.v.length ? p.n : 0), 0);
-  if (pairs.length <= samples && pairs.every(([, w]) => w === 1)) return { n, v: pairs.map(([x]) => x) };
-  const v: number[] = [];
-  let at = 0,
-    i = 0;
-  for (let k = 0; k < samples; k++) {
-    const rank = ((k + 0.5) * n) / samples;
-    while (i < pairs.length - 1 && at + pairs[i]![1] <= rank) at += pairs[i++]![1];
-    v.push(pairs[i]![0]);
-  }
-  return { n, v };
-}
 
 type Tally = { runs: number; seconds: number; unknown: number };
 const tally = (): Tally => ({ runs: 0, seconds: 0, unknown: 0 });
@@ -432,8 +378,6 @@ export type StatsTotals = {
   priced: number;
   acceptedSeconds: number;
   discardedSeconds: number;
-  who: Array<[string, number, number, number]>;
-  others: number;
   /** Landings that reported agent tokens, and their sum. Optional: month rollups written before it lack it. */
   tokens?: { reported: number; total: number } | undefined;
   toMain: StatsDist[];
@@ -478,8 +422,6 @@ export const noTotals = (): StatsTotals => ({
   priced: 0,
   acceptedSeconds: 0,
   discardedSeconds: 0,
-  who: [],
-  others: 0,
   tokens: { reported: 0, total: 0 },
   toMain: [],
   stops: { queue: [], check: [], land: [] },
@@ -518,8 +460,6 @@ export function dayTotals(d: StatsDay): StatsTotals {
   t.priced = d.runner.priced;
   t.acceptedSeconds = d.runner.acceptedSeconds;
   t.discardedSeconds = d.runner.discardedSeconds;
-  t.who = d.who.map(row => [...row]);
-  t.others = d.others;
   if (d.schema === 2 && d.tokens) t.tokens = { ...d.tokens };
   t.toMain = exactDist(d.toMain);
   t.stops = {
@@ -572,11 +512,6 @@ export function dayTotals(d: StatsDay): StatsTotals {
 const widthsOf = (t: StatsTotals) => t.cmp.widths ?? (t.cmp.days > 0 ? [MERGE_QUEUE_CONCURRENCY] : []);
 /** Two windows' totals as one (sums in order, so a window of days adds exactly as its days do). */
 export function addTotals(a: StatsTotals, b: StatsTotals): StatsTotals {
-  const who = new Map<string, [number, number, number]>();
-  for (const [name, n, first, c] of [...a.who, ...b.who]) {
-    const row = who.get(name) ?? [0, 0, 0];
-    who.set(name, [row[0] + n, row[1] + first, row[2] + c]);
-  }
   return {
     days: a.days + b.days,
     landings: a.landings + b.landings,
@@ -587,8 +522,6 @@ export function addTotals(a: StatsTotals, b: StatsTotals): StatsTotals {
     priced: a.priced + b.priced,
     acceptedSeconds: a.acceptedSeconds + b.acceptedSeconds,
     discardedSeconds: a.discardedSeconds + b.discardedSeconds,
-    who: [...who].map(([name, row]) => [name, ...row]),
-    others: a.others + b.others,
     tokens: {
       reported: (a.tokens?.reported ?? 0) + (b.tokens?.reported ?? 0),
       total: (a.tokens?.total ?? 0) + (b.tokens?.total ?? 0),
@@ -794,13 +727,5 @@ export function statsFigures(t: StatsTotals) {
               sensitivity: { fast: distMedian(cmp.fast), slow: distMedian(cmp.slow) },
             },
           },
-    who: [...t.who]
-      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-      .map(([name, n, first, c]) => ({
-        who: name || null,
-        landings: n,
-        firstTryRate: c ? first / c : null,
-      })),
-    others: t.others,
   };
 }

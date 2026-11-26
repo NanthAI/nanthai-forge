@@ -136,6 +136,27 @@ read, table, timer or idle work. It carries CI usage only; compose request count
 scope. All carried waste is charged once to the successor's accepted UTC day, including when its
 submission and predecessor checks were on the previous day. Previously closed days are not rewritten.
 
+### By agent
+
+The fold groups accepted landings by declared agent app and model or by Forge person. A setup whose
+receipt has no model says “model not recorded.” Older day and month summaries held run names and
+grouped by-hand work together, so their landings appear in Other with that reason. A normal day close or
+the existing re-close uses the attribution already on the landing receipts.
+
+The table ranks rows by landings. Other combines setups and people with fewer than five landings in the
+period, older summaries, missing attribution and attribution past the existing summary bounds
+(40 groups per day, 200 per closed month). It names the landing count for each reason it contains.
+First-try rate uses landings with recorded attempts. The median measures time from the land request to main.
+All-time medians marked approximate use weighted samples from closed months. CI minutes come from the
+accepted check and discarded checks tied to each landing, including its share of a batch. Landings without
+either cost figure are excluded from the CI average. A row gives its sample count when any measured figure
+covers only part of its landings. A hint appears when at least five attempts were recorded and the row's
+first-try rate is at least 20 percentage points below the project's.
+
+Closing the day and rolling the month use their existing reads and writes. Opening the fold uses the existing
+range or All time query. The response uses Forge's public identity mapping for each distinct displayed person.
+There is no idle work.
+
 ### Own-history replay
 
 The contract is `src/stats-estimate.ts` with `src/stats-runs.ts` (Item `a61d3c91`). It is pure and
@@ -201,14 +222,14 @@ shows only the measured figures.
   one at a time.
 - `statsDay(day, landings, runs, carry)`: one closed UTC day as a `StatsDay` (`statsDaySchema`,
   schema 2): counts, sorted seconds for medians, every run by cause, the solo checks, both replays
-  and what the next day starts behind, and landings by who (at most 40, the rest under `others`). A
+  and what the next day starts behind, and the setup and person breakdown. A
   day past 1,000 landings (`STATS_DAY_MAX_LANDINGS`), or past the runs the close reads, is marked
   `partial`. Days closed by the
   first method (schema 1) stay readable and leave the CI figures, counted (`daysWithoutRuns`);
   `projectStats:recloseDays` rebuilds them.
 - `statsWindow(days)`: what Stats shows for a window of closed days: `measured`, `comparison`
   (null under 50 landings, when a day was not recorded, or with no solo full check to price it;
-  `compare.gap` names which), and `who`.
+  `compare.gap` names which).
 
 Days are additive (`dayTotals`, `addTotals`, `statsFigures`), so a range's figures are the sum of its days and its
 medians are exact. A closed month is also kept as one rollup row (`projectStatsMonths`, `statsMonth`): its sums, and

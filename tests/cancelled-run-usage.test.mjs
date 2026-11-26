@@ -77,7 +77,7 @@ test('cancelled provider jobs count their actual elapsed runner minutes across U
 
 const landing = (patch = {}) => ({
   id: 'r',
-  who: 'builder',
+  attribution: 'agent:codex:gpt-6.2-sol',
   submittedAt: 0,
   landedAt: 600_000,
   checkStartedAt: 60_000,
@@ -107,6 +107,11 @@ test('a late correction adjusts a closed UTC day without rebuilding its queue re
   assert.deepEqual(corrected.toMain, closed.toMain);
   assert.deepEqual(corrected.stops, closed.stops);
   assert.equal(corrected.firstTry.first, 0, 'a discarded check found late is not a first try');
+  assert.deepEqual(
+    corrected.byAgent,
+    statsDay('2026-11-17', [after]).byAgent,
+    'the setup gets the same first-try and runner accounting as a fresh close',
+  );
   assert.equal(closed.runner.acceptedSeconds, 0, 'unpriced landing contributes no accepted-only numerator');
   const unknownAccepted = landing({ runnerSeconds: null });
   const stillUnknown = landing({
@@ -290,7 +295,7 @@ test('cancelled usage stays pending until completion, is shared once, and correc
   const synthetic = Array.from({ length: 998 }, (_, i) =>
     landing({
       id: `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`,
-      who: `synthetic-${i}`,
+      attribution: `agent:codex:synthetic-${i}`,
       discardedRunnerSeconds: 0,
       attempts: 1,
     }),

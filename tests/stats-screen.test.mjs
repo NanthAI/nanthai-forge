@@ -6,7 +6,7 @@
 // its assumptions behind "How this is worked out", runs without minutes are named, never zero, a window
 // under the minimum shows only measured figures, every chart has its table and prints its values, the period picker
 // re-aggregates the page (this month, last month, a custom range), per-day bars keep a fixed width from the left at 1,
-// 2 and 31 days, an empty month says so, agents come in four first-try buckets, and axe passes at 1440 and 390 in
+// 2 and 31 days, an empty month says so, agent setups and people form a table, and axe passes at 1440 and 390 in
 // both themes with no horizontal page scroll.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -38,13 +38,13 @@ async function fixture(out) {
     import {useState} from 'react';
     import ${JSON.stringify(join(root, 'web/src/app/app.css'))};
     const min = 60000, base = Date.UTC(2026, 10, 1), now = Date.UTC(2026, 10, 19, 12);
-    const agents = ['amber-fox', 'still-heron', 'copper-moth', 'quiet-otter', 'by hand'];
+    const agents = ['agent:codex:gpt-6.2-sol', 'agent:claude-code:sonnet', 'agent:antigravity:', 'person:example', 'person:another'];
     function day(start, count) {
       return Array.from({length: count}, (_, i) => {
         const at = start + 8 * 3600000 + i * 4 * min;
-        return {id: 'l' + start + '-' + i, who: agents[i % agents.length], submittedAt: at, landedAt: at + 6 * min + (i % 3) * min,
+        return {id: 'l' + start + '-' + i, attribution: sample === 'dominant' && i >= count - 2 ? 'agent:codex:rare' : agents[i % agents.length], submittedAt: at, landedAt: at + 6 * min + (i % 3) * min,
           checkStartedAt: at + 40000, checkEndedAt: at + 40000 + 302000, runnerSeconds: i % 17 === 0 ? null : 250,
-          discardedRunnerSeconds: i % 17 === 0 ? null : (i % 11 === 0 ? 250 : 0), attempts: sample === 'notCounted' && agents[i % agents.length] === 'by hand' ? null : sample === 'dominant' ? (agents[i % agents.length] === 'by hand' ? 2 : 1) : i % 11 === 0 ? 2 : 1, ranInFull: i % 4 === 0,
+          discardedRunnerSeconds: i % 17 === 0 ? null : (i % 11 === 0 ? 250 : 0), attempts: sample === 'notCounted' && agents[i % agents.length] === 'person:example' ? null : sample === 'dominant' ? (agents[i % agents.length] === 'person:example' ? 2 : 1) : i % 11 === 0 ? 2 : 1, ranInFull: i % 4 === 0,
           ...(sample === 'tokens' && i % 3 === 0 ? {tokens: 2000000 + i * 1000} : {})};
       });
     }
@@ -75,8 +75,7 @@ async function fixture(out) {
       tokens: nov,
       // Today so far (Item 580b1a1a): the open day's provisional row, counted up to 10:00 UTC.
       today: [...nov, [dayAt(2026, 10, 19), 12]],
-      // By agent: one agent whose landings never report their attempts (Not counted); and four agents at 100% with one
-      // under 50%, so the middle buckets are zero.
+      // By agent: one person without recorded attempts, and a setup below the first-try baseline beside a rare setup.
       notCounted: [[base, 30]],
       dominant: [[base, 30]],
       notMeasured: [[dayAt(2026, 9, 31), 30], [base, 30], [base + 86400000, 30]],
@@ -131,7 +130,7 @@ async function fixture(out) {
       // Each fold's part, recorded so the test can tell an unopened fold made no read.
       const usePart = part => ((window.foldReads ??= new Set()).add(part), statsRangeReply(days, period, part));
       const live = new URLSearchParams(location.search).get('live');
-      return h(StatsView, {data, period, busy: new URLSearchParams(search).has('busy'), now, liveLanded: live === null ? null : Number(live), usePart, historyHref: '/example/tidepool/lanes/history', onPeriod: setSearch});
+      return h(StatsView, {data, period, busy: new URLSearchParams(search).has('busy'), now, liveLanded: live === null ? null : Number(live), usePart, onPeriod: setSearch});
     }
     createRoot(document.getElementById('root')).render(h(ConvexProvider, {client},
       h(ProjectFrame, {route, name: 'tidepool', projects: [], controls: {onPalette(){}, onKeys(){}, onPicker(){}, viewerHandle: 'example'}},
@@ -379,83 +378,49 @@ test('stats: short headline, one freshness line, today so far, comparison, table
     'Total \\d+:\\d\\d',
   ])
     assert.match(waited, new RegExp(name), `${name} is labelled on the chart`);
-  const byAgent = await page.getByRole('region', { name: 'By agent' }).textContent();
-  assert.match(byAgent, /100%.*75–99%.*50–74%.*Under 50%/, 'four fixed first-try buckets');
-  assert.doesNotMatch(byAgent, /amber-fox|still-heron/, 'no list that grows with the agents');
-  // By agent is horizontal rows, one per bucket from 100% down (not vertical bars that read as dates on an axis).
-  const rows = page.getByRole('region', { name: 'By agent' }).locator('.hb .hrow');
-  assert.equal(await rows.count(), 4);
-  assert.deepEqual(
-    await rows.locator('.hlab').evaluateAll(nodes => nodes.map(n => n.firstChild?.textContent)),
-    ['100%', '75–99%', '50–74%', 'Under 50%'],
-  );
-  assert.match(await rows.first().locator('.hlab small').textContent(), /\d+ landings?/);
-  assert.match(await rows.first().locator('.hlab').getAttribute('title'), /^100% first try: /);
-  const byAgentRows = async (sample, width) => {
-    const p = await open(width, sample);
-    await p.getByRole('button', { name: 'By agent' }).click();
-    return p;
-  };
+  const tableName = 'Landings by agent setup and person';
+  const byAgent = page.getByRole('table', { name: tableName });
+  assert.deepEqual(await byAgent.getByRole('columnheader').allTextContents(), [
+    'Agent setup or person',
+    'Landings',
+    'First try',
+    'Median time to main',
+    'CI minutes per landing',
+  ]);
+  const named = byAgent.locator('tbody tr');
+  assert.equal(await named.count(), 5);
+  assert.match(await named.allTextContents().then(rows => rows.join(' ')), /Codex · gpt-6.2-sol/);
+  assert.match(await byAgent.textContent(), /Antigravity · model not recorded/);
   for (const width of [1440, 390]) {
-    const counted = await byAgentRows('notCounted', width);
-    const set = counted.getByRole('region', { name: 'By agent' }).locator('.hb .hrow');
-    assert.equal(await set.count(), 5, `${width}: four buckets and Not counted`);
+    const counted = await open(width, 'notCounted');
+    await counted.getByRole('button', { name: 'By agent' }).click();
+    const person = counted
+      .getByRole('table', { name: tableName })
+      .getByRole('row')
+      .filter({ hasText: '@example' });
+    assert.equal(await person.getByRole('cell').nth(2).textContent(), 'Not recorded');
+    const dominant = await open(width, 'dominant');
+    await dominant.getByRole('button', { name: 'By agent' }).click();
+    const rows = dominant.getByRole('table', { name: tableName }).locator('tbody tr');
+    const counts = await rows
+      .locator('td:nth-child(2)')
+      .allTextContents()
+      .then(cells => cells.map(Number));
     assert.deepEqual(
-      await set.evaluateAll(nodes => nodes.map(n => n.hasAttribute('data-apart'))),
-      [false, false, false, false, true],
-      `${width}: only Not counted is set apart`,
+      counts,
+      [...counts].sort((a, b) => b - a),
     );
-    assert.equal(await set.last().locator('i.ink').count(), 1, `${width}: Not counted is ink`);
-    assert.equal(
-      (await set.locator('i.forge').count()) + 1,
-      await set.locator('i').count(),
-      `${width}: the rest are Forge's series`,
-    );
-    assert.equal(
-      await set
-        .last()
-        .locator('.hlab')
-        .evaluate(n => n.firstChild?.textContent),
-      'Not counted',
-    );
-    assert.match(await set.last().locator('.hlab small').textContent(), /^\d+ landings?$/);
-    const hover = await set.last().locator('.hlab').getAttribute('title');
-    assert.match(hover, /^Not counted: \d+ agents?, \d+ landings?$/, 'the row that is no rate says so');
     assert.match(
-      await counted
-        .getByRole('region', { name: 'By agent' })
-        .locator('[role=img]')
-        .getAttribute('aria-label'),
-      /\. Not counted: \d+ agents?, \d+ landings?$/,
+      await rows.last().textContent(),
+      /Other.*2 landings from setups or people with fewer than 5 each/,
     );
-    await counted.getByRole('button', { name: 'Table: Agents by first-try rate' }).click();
-    assert.equal(
-      await counted.getByRole('table', { name: 'Agents by first-try rate' }).locator('tbody tr').count(),
-      5,
+    assert.match(
+      await rows.filter({ hasText: '@example' }).textContent(),
+      /First try \d+ percentage points below the project/,
     );
-    await counted.getByRole('button', { name: 'Chart: Agents by first-try rate' }).click();
-    if (width === 390)
-      assert.equal(
-        await counted
-          .locator('.hb .hlab')
-          .evaluateAll(nodes => nodes.every(n => n.scrollWidth <= n.clientWidth)),
-        true,
-        'bucket labels are not clipped at 390',
-      );
-    // One bucket holds most agents: the largest bar is the full rail, the smaller one is visible, a zero bucket has no bar.
-    const dom = await byAgentRows('dominant', width);
-    const widths = await dom
-      .getByRole('region', { name: 'By agent' })
-      .locator('.hb .hrow')
-      .evaluateAll(nodes => nodes.map(n => n.querySelector('i')?.getBoundingClientRect().width ?? 0));
-    assert(
-      widths[0] > 0 && widths[3] > 0 && widths[3] < widths[0],
-      `${width}: bars follow the counts ${widths}`,
-    );
-    assert(Math.abs(widths[3] * 4 - widths[0]) < 2, `${width}: one agent is a quarter of four`);
-    assert.deepEqual([widths[1], widths[2]], [0, 0], `${width}: a zero bucket draws no bar`);
+    assert.equal(await dominant.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   }
-  for (const caption of ['Landings per day', 'Agents by first-try rate']) {
+  for (const caption of ['Landings per day']) {
     await page.getByRole('button', { name: `Table: ${caption}` }).click();
     assert.equal(await page.getByRole('table', { name: caption }).count(), 1, `${caption} has its table`);
     await page.getByRole('button', { name: `Chart: ${caption}` }).click();

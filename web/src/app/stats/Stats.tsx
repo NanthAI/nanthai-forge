@@ -154,7 +154,6 @@ function StatsRead(props: PlaceProps) {
       busy={busy}
       now={now}
       liveLanded={flow ? mainToday(flow, now).landed : null}
-      historyHref={hrefFor({ ...props.route, place: 'lanes', section: 'history', rest: '' })}
       usePart={usePart}
       onPeriod={search => navigate(`${location.pathname}${search ? `?${search}` : ''}`)}
     />
@@ -167,7 +166,6 @@ export function StatsView({
   busy = false,
   now,
   liveLanded = null,
-  historyHref,
   usePart,
   onPeriod,
 }: {
@@ -177,7 +175,6 @@ export function StatsView({
   now: number;
   /** Landings today from the shell's live feed (src/flow-day.ts `mainToday`), the top bar's figure; null without it. */
   liveLanded?: number | null;
-  historyHref: string;
   usePart: UsePart;
   /** The new address query for a chosen period ('' is this month). */
   onPeriod: (search: string) => void;
@@ -285,14 +282,12 @@ export function StatsView({
             <Part usePart={usePart} part="waited" body={(r: StatsWaited) => <Waited stops={r.stops} />} />
           )}
         </Fold>
-        <Fold id="agents" title="By agent" hint={hintAsOf('agents and people by first-try rate', asOf)}>
-          {() => (
-            <Part
-              usePart={usePart}
-              part="agents"
-              body={(r: StatsAgents) => <ByWho r={r} historyHref={historyHref} />}
-            />
-          )}
+        <Fold
+          id="agents"
+          title="By agent"
+          hint={asOf ? hintAsOf('agent setups and people', asOf) : undefined}
+        >
+          {() => <Part usePart={usePart} part="agents" body={(r: StatsAgents) => <ByWho r={r} />} />}
         </Fold>
         {(data.perMonth?.length ?? 0) > 1 ||
         (data.perDay.length > 0 && data.perDay[0]![0].slice(0, 7) !== data.perDay.at(-1)![0].slice(0, 7)) ? (
@@ -390,7 +385,7 @@ function Fold({
 }: {
   id: string;
   title: string;
-  hint: string;
+  hint?: string | undefined;
   children: () => ReactNode;
 }) {
   const state = useFold(`stats-${id}`, false);

@@ -56,8 +56,8 @@ async function patchClosedDay(
   }
 }
 
-const { id, at, agentRun, actor } = hostedAcceptanceSchema.shape;
-const statsReceipt = z.object({ id, at, agentRun, actor });
+const { id, at, agentRun, agentClient, authorship, actor } = hostedAcceptanceSchema.shape;
+const statsReceipt = z.object({ id, at, agentRun, agentClient, authorship, actor });
 
 async function readReceipt(ctx: MutationCtx, projectId: Id<'hostedProjects'>, receiptId: string) {
   try {

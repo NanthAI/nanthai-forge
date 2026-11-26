@@ -67,8 +67,11 @@
   .stats-stops i.l { background: var(--passed); }
   .stats-stops b { color: var(--text); font-family: var(--font-mono); font-weight: var(--w-strong); font-variant-numeric: tabular-nums; margin-left: 4px; }
   .stats-stops .sum { margin-left: auto; }
-  /* By agent: four fixed buckets, then the not counted, drawn as the page's horizontal bars (.hb). */
-  .stats-buckets { margin-inline: var(--gut); }
+
+  .stats-by-agent .tbl th { white-space: normal; }
+  .stats-by-agent .tbl td:first-child { min-inline-size: 12ch; }
+  .stats-cell-note { display: block; color: var(--text-3); font-size: var(--t-meta); }
+
   @container (max-width: 720px) {
     /* The method reads as prose on a phone: each term above its explanation. */
     .stats-how-body .kv { grid-template-columns: minmax(0, 1fr); row-gap: 2px; padding-inline: 0; }

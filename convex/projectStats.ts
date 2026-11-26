@@ -43,6 +43,7 @@ import { landingRequestOriginalDb } from './projectLandingRequestBody';
 import { workRecordOriginalDb } from './projectWorkRecordWriter';
 import { metricRunKind } from './projectMetricReadProjection';
 import { makeFunctionReference } from 'convex/server';
+import { statsAttribution } from '../src/stats-agents';
 import {
   STATS_PARTS,
   STATS_RANGE_MAX_DAYS,
@@ -75,7 +76,7 @@ const ms = (iso: string | undefined) => {
 };
 /** One accepted landing for the replay, from its receipt and landing row only. */
 export function statsLanding(
-  receipt: Pick<HostedAcceptance, 'id' | 'at' | 'agentRun' | 'actor'>,
+  receipt: Pick<HostedAcceptance, 'id' | 'at' | 'agentRun' | 'agentClient' | 'authorship' | 'actor'>,
   state: HostedLandingState | null,
   pending = 0,
   /** An earlier submission of the same Intent ended without landing before this one (metrics 5.1's retry rule). */
@@ -96,7 +97,7 @@ export function statsLanding(
     Boolean(state?.counts?.discardedRunnerUnknown);
   return {
     id: receipt.id,
-    who: receipt.agentRun ?? (receipt.actor?.kind === 'person' ? 'by hand' : null),
+    attribution: statsAttribution(receipt),
     submittedAt: ms(state?.timing?.submittedAt) ?? ms(state?.at) ?? landedAt,
     landedAt,
     checkStartedAt: ms(state?.timing?.checkReservedAt),

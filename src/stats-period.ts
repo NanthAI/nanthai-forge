@@ -1,11 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import { z } from 'zod';
+import { distOf } from './stats-distribution.js';
+import {
+  byAgentSchema,
+  statsAgentFigures,
+  statsDayAgentRows,
+  statsMonthAgentRows,
+  statsMonthAgents,
+} from './stats-agents.js';
 import {
   STATS_COMPARE_MIN_LANDINGS,
   addTotals,
   dayTotals,
-  distOf,
   noTotals,
   statsFigures,
   statsWindow,
@@ -41,26 +48,6 @@ export function previousRange(range: StatsRange): StatsRange {
   return { from: utc(at(range.from) - n * 86_400_000), to: utc(at(range.from) - 86_400_000) };
 }
 
-/** First-try buckets for "By agent": a fixed four, so the list never grows with the number of agents. */
-export const FIRST_TRY_BUCKETS = [
-  { label: '100%', min: 1 },
-  { label: '75–99%', min: 0.75 },
-  { label: '50–74%', min: 0.5 },
-  { label: 'Under 50%', min: 0 },
-] as const;
-type Who = ReturnType<typeof statsWindow>['who'];
-export function firstTryBuckets(who: Who) {
-  const buckets = FIRST_TRY_BUCKETS.map(b => ({ label: b.label, agents: 0, landings: 0 }));
-  const notCounted = { agents: 0, landings: 0 };
-  for (const row of who) {
-    const rate = row.firstTryRate;
-    const into = rate === null ? notCounted : buckets[FIRST_TRY_BUCKETS.findIndex(b => rate >= b.min)]!;
-    into.agents++;
-    into.landings += row.landings;
-  }
-  return { buckets, notCounted };
-}
-
 /** What one read returns: `head` (opened with the page: the headline figures and landings per day) or one fold,
  * fetched only once that fold is opened. Every part reads the same day rows; each returns only its own figures.
  * `trend` (a range only) also reads the range just before it. */
@@ -90,8 +77,6 @@ const joinCover = (a: StatsCover, b: StatsCover): StatsCover => ({
   notMeasured: a.notMeasured + b.notMeasured,
 });
 
-/** People and agents a month rollup lists by name; the rest add up under `others`. */
-export const STATS_MONTH_MAX_WHO = 200;
 const int = z.number().int().nonnegative();
 const ints = z.array(int);
 const dists = z.array(z.object({ n: int, v: ints }).strict()).max(1);
@@ -108,8 +93,9 @@ const totalsSchema = z
     priced: int,
     acceptedSeconds: z.number().nonnegative(),
     discardedSeconds: z.number().nonnegative(),
-    who: z.array(z.tuple([z.string(), int, int, int])).max(STATS_MONTH_MAX_WHO),
-    others: int,
+    who: z.unknown().optional(),
+    others: z.unknown().optional(),
+    byAgent: byAgentSchema.optional(),
     tokens: z.object({ reported: int, total: int }).strict().optional(),
     toMain: dists,
     stops: z.object({ queue: dists, check: dists, land: dists }).strict(),
@@ -164,8 +150,8 @@ const one = (list: StatsTotals['toMain']) => (list.length ? [distOf(list)] : [])
 /** A month's rollup from its day rows (oldest first). */
 export function statsMonth(month: string, rows: readonly StatsDay[]): StatsMonth {
   const days = rows.filter(d => d.day.startsWith(month));
-  const t = days.filter(d => !notMeasured(d)).reduce((s, d) => addTotals(s, dayTotals(d)), noTotals());
-  const ranked = [...t.who].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const measured = days.filter(d => !notMeasured(d));
+  const t = measured.reduce((s, d) => addTotals(s, dayTotals(d)), noTotals());
   const { cmp, tokens, ...rest } = t;
   return statsMonthSchema.parse({
     schema: 1,
@@ -175,8 +161,7 @@ export function statsMonth(month: string, rows: readonly StatsDay[]): StatsMonth
       ...rest,
       // A month without reports stores nothing more, as a day does (review 23927f12 finding 2).
       ...(tokens?.reported ? { tokens } : {}),
-      who: ranked.slice(0, STATS_MONTH_MAX_WHO),
-      others: t.others + ranked.slice(STATS_MONTH_MAX_WHO).reduce((s, [, n]) => s + n, 0),
+      ...(t.landings ? { byAgent: statsMonthAgents(measured) } : {}),
       toMain: one(t.toMain),
       stops: { queue: one(t.stops.queue), check: one(t.stops.check), land: one(t.stops.land) },
       cmp: {
@@ -228,6 +213,11 @@ function trendLine(rows: readonly StatsDay[], range: StatsRange) {
   };
 }
 
+function projectRate(counts: readonly { first: number; counted: number }[]) {
+  const counted = counts.reduce((sum, n) => sum + n.counted, 0);
+  return counted ? counts.reduce((sum, n) => sum + n.first, 0) / counted : null;
+}
+
 /** A reply's parts from a window's figures. */
 function reply(
   base: {
@@ -245,13 +235,13 @@ function reply(
   figures: ReturnType<typeof statsFigures>,
   bars: { perDay: Array<[string, number | null]>; perMonth: Array<[string, number]> | null },
   months: () => ReturnType<typeof monthLine>[],
+  agents: () => ReturnType<typeof statsAgentFigures>,
 ) {
-  const { who, measured, ...window } = figures;
+  const { measured, ...window } = figures;
   const { stops, ...headline } = measured;
   const head = { schema: 2 as const, part, ...base, landings: window.landings };
   if (part === 'waited') return { ...head, stops };
-  if (part === 'agents')
-    return { ...head, agents: who.length, others: window.others, ...firstTryBuckets(who) };
+  if (part === 'agents') return { ...head, ...agents() };
   if (part === 'months') return { ...head, months: months() };
   return {
     ...head,
@@ -305,6 +295,7 @@ export function statsRangeReply(
           rows.filter(d => d.day.startsWith(month) && notMeasured(d)).length,
         ),
       ),
+    () => statsAgentFigures(days.flatMap(statsDayAgentRows), projectRate(days.map(d => d.firstTry))),
   );
 }
 
@@ -337,10 +328,20 @@ export function statsAllReply(
     statsFigures(totals),
     { perDay: [], perMonth: all.map(m => [m.month, m.totals.landings]) },
     () => all.map(m => monthLine(m.month, statsFigures(m.totals), m.cover.notMeasured)),
+    () =>
+      statsAgentFigures(
+        [
+          ...months.flatMap(m => statsMonthAgentRows(m.totals)),
+          ...tail
+            .filter(d => !notMeasured(d) && !months.some(m => d.day.startsWith(m.month)))
+            .flatMap(statsDayAgentRows),
+        ],
+        totals.counted ? totals.first / totals.counted : null,
+      ),
   );
 }
 export type StatsHead = Extract<ReturnType<typeof statsRangeReply>, { perDay: unknown }>;
 export type StatsWaited = Extract<ReturnType<typeof statsRangeReply>, { stops: unknown }>;
-export type StatsAgents = Extract<ReturnType<typeof statsRangeReply>, { buckets: unknown }>;
+export type StatsAgents = Extract<ReturnType<typeof statsRangeReply>, { agentRows: unknown }>;
 export type StatsMonths = Extract<ReturnType<typeof statsRangeReply>, { months: unknown }>;
 export type StatsTrend = Extract<ReturnType<typeof statsRangeReply>, { current: unknown }>;

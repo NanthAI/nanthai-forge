@@ -5,6 +5,7 @@
 // quantiles, so its medians stay within a sample's share; the self-trend sets a range beside the same number of days
 // just before it; a day left not measured is not a closed day in the covered-days words.
 import test from 'node:test';
+import { distMedian, STATS_DIST_SAMPLES } from '../dist/stats-distribution.js';
 import assert from 'node:assert/strict';
 import { moduleUrl } from './convex-module.mjs';
 
@@ -27,7 +28,7 @@ function day(name, n, carry = est.NO_CARRY) {
     const id = `${name}-${i}`;
     landings.push({
       id,
-      who: ['amber-fox', 'still-heron', 'by hand'][i % 3],
+      attribution: ['agent:codex:gpt-6.2-sol', 'agent:claude-code:sonnet', 'person:example'][i % 3],
       submittedAt: at,
       landedAt: at + (5 + (i % 4)) * MIN,
       checkStartedAt: at + 30_000,
@@ -126,7 +127,7 @@ test('All time from month rollups gives the figures its days give', () => {
   for (const m of months) period.statsMonthSchema.parse(JSON.parse(JSON.stringify(m)));
   const all = period.statsAllReply(months, nov);
   const every = [...sep, ...oct, ...nov];
-  const { who, measured, ...window } = est.statsWindow(every);
+  const { measured, ...window } = est.statsWindow(every);
   const { stops, ...headline } = measured;
   assert(window.comparison, 'enough landings to compare');
   near(all.window, { ...window, measured: headline });
@@ -139,7 +140,11 @@ test('All time from month rollups gives the figures its days give', () => {
   ]);
   near(period.statsAllReply(months, nov, 'waited').stops, stops);
   const agents = period.statsAllReply(months, nov, 'agents');
-  assert.equal(agents.agents, who.length);
+  assert.equal(agents.agentRows.length, 3);
+  assert.equal(
+    agents.agentRows.reduce((n, row) => n + row.landings, 0),
+    agents.landings,
+  );
   const byMonth = period.statsAllReply(months, nov, 'months').months;
   assert.deepEqual(
     byMonth.map(m => [m.month, m.landings]),
@@ -156,22 +161,22 @@ test('a month rollup keeps at most 400 samples a distribution, its median within
   // About 30 days of 60 landings: 1,800 times to main, past what a rollup keeps.
   const month = days(Array.from({ length: 30 }, (_, i) => [`2026-10-${String(i + 1).padStart(2, '0')}`, 60]));
   const rolled = period.statsMonth('2026-10', month);
-  assert.equal(rolled.totals.toMain[0].v.length, est.STATS_DIST_SAMPLES);
+  assert.equal(rolled.totals.toMain[0].v.length, STATS_DIST_SAMPLES);
   assert.equal(rolled.totals.toMain[0].n, 1_800);
   assert(JSON.stringify(rolled).length < 40_000, `rollup size: ${JSON.stringify(rolled).length}`);
   const exact = est.statsWindow(month).measured.toMainSeconds;
   const sampled = est.statsFigures(rolled.totals).measured.toMainSeconds;
   const sorted = month.flatMap(d => d.toMain).sort((a, b) => a - b);
-  const share = Math.ceil(sorted.length / est.STATS_DIST_SAMPLES);
+  const share = Math.ceil(sorted.length / STATS_DIST_SAMPLES);
   const mid = sorted.length >> 1;
   assert(
     sampled >= sorted[mid - share] && sampled <= sorted[mid + share],
     `${sampled} vs ${exact}: within one sample's share of the middle`,
   );
   // Unit weights give the plain median, even counts their middle mean.
-  assert.equal(est.distMedian([{ n: 4, v: [1, 2, 3, 10] }]), 2.5);
+  assert.equal(distMedian([{ n: 4, v: [1, 2, 3, 10] }]), 2.5);
   assert.equal(
-    est.distMedian([
+    distMedian([
       { n: 3, v: [1, 2, 3] },
       { n: 1, v: [9] },
     ]),
@@ -179,7 +184,7 @@ test('a month rollup keeps at most 400 samples a distribution, its median within
   );
   // A sample standing for many values outweighs single values.
   assert.equal(
-    est.distMedian([
+    distMedian([
       { n: 100, v: [50] },
       { n: 3, v: [1, 2, 3] },
     ]),

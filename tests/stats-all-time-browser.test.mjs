@@ -32,7 +32,7 @@ async function fixture(out) {
     const min = 60000, now = Date.UTC(2026, 10, 19, 12);
     function landings(name, n) {
       const start = Date.parse(name + 'T08:00:00Z');
-      return Array.from({length: n}, (_, i) => ({id: name + i, who: ['amber-fox', 'still-heron'][i % 2], submittedAt: start + i * 4 * min,
+      return Array.from({length: n}, (_, i) => ({id: name + i, attribution: ['agent:codex:gpt-6.2-sol', 'agent:claude-code:sonnet'][i % 2], submittedAt: start + i * 4 * min,
         landedAt: start + i * 4 * min + (6 + i % 3) * min, checkStartedAt: start + i * 4 * min + 40000, checkEndedAt: start + i * 4 * min + 340000,
         runnerSeconds: 250, discardedRunnerSeconds: 0, attempts: i % 5 === 0 ? 2 : 1, ranInFull: true}));
     }
@@ -58,7 +58,7 @@ async function fixture(out) {
       const reply = part => all ? statsAllReply(months, tail, part)
         : statsRangeReply(inRange(days, period), period, part, part === 'trend' ? inRange(days, previousRange(period)) : []);
       const usePart = part => ((window.foldReads ??= new Set()).add(part), reply(part));
-      return h(StatsView, {data: reply('head'), period, now, usePart, historyHref: '/example/tidepool/lanes/history', onPeriod: setSearch});
+      return h(StatsView, {data: reply('head'), period, now, usePart, onPeriod: setSearch});
     }
     createRoot(document.getElementById('root')).render(h(ConvexProvider, {client},
       h(ProjectFrame, {route, name: 'tidepool', projects: [], controls: {onPalette(){}, onKeys(){}, onPicker(){}, viewerHandle: 'example'}},
