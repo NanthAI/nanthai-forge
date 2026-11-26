@@ -107,9 +107,10 @@ export function validateHostedCliCommand(
         input.peer,
         input.approval,
         input.main,
+        input.deploy,
       ].filter(Boolean).length === 1,
       'BAD_ARGUMENT',
-      'Choose exactly one of runId, operationIds, peer, approval or main. Run nforge agent ROOT wait --help.',
+      'Choose exactly one of runId, operationIds, peer, approval, main or deploy. Run nforge agent ROOT wait --help.',
     );
   }
 }

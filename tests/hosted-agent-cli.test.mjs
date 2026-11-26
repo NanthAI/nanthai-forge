@@ -24,7 +24,43 @@ import { LAND_CHILD_ENV } from '../dist/hosted-land-child-env.js';
 import { agentFixture } from './hosted-agent-fixture.mjs';
 import { hostedAgentHelp } from '../dist/hosted-agent-help.js';
 import { slimReceipt } from '../dist/receipt-slim.js';
+import { deployWaitHooks } from '../dist/hosted-deploy-wait.js';
 const errorCode = expected => error => error.code === expected;
+
+test('friction b270db8c: the CLI accepts a deploy-only wait and rejects a second selector', async t => {
+  const s = agentFixture(t);
+  http(t, s);
+  const receiptId = randomUUID();
+  const deploy = { receiptId, target: 'convex' };
+  const command = { ...s.address, deploy, timeoutSeconds: 0 };
+  const exitCode = process.exitCode;
+  t.after(() => {
+    process.exitCode = exitCode;
+    delete deployWaitHooks.subscribe;
+  });
+  const wait = input =>
+    agentCli([s.root, 'wait', JSON.stringify(input)], { beforeDispatch: async () => true });
+  await assert.rejects(wait({ ...command, main: 'green' }), errorCode('BAD_ARGUMENT'));
+
+  deployWaitHooks.subscribe = () => ({
+    onUpdate(_query, args, onValue) {
+      assert.equal(args.receiptId, receiptId);
+      assert.equal(args.target, 'convex');
+      queueMicrotask(() =>
+        onValue(
+          JSON.stringify({
+            deploy: { sequence: 12, receiptId, target: 'convex', state: 'deployed', deploys: {} },
+          }),
+        ),
+      );
+      return () => {};
+    },
+    close: async () => {},
+  });
+  const response = await wait(command);
+  assert.equal(response.result.reason, 'deploy');
+  assert.equal(response.result.deploy.receiptId, receiptId);
+});
 /** One client session for this test (as Claude Code sets it): an identical start replays only within it. */
 function agentSession(t, id) {
   const previous = {
