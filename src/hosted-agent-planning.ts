@@ -72,6 +72,7 @@ type Workspace = {
   sourceRevision?: number;
   likelyDuplicates?: unknown;
   planningFilteredReads?: boolean;
+  planningActiveReads?: boolean;
   capabilities?: { planning?: boolean };
   rollupCatchup?: {
     state: 'running' | 'partial' | 'complete';
@@ -215,16 +216,10 @@ const compact = (item: PlanningReadItem, intent?: string) =>
         }),
     ...(intent ? { intent } : {}),
   });
-function decode(cursor: string | null, ws: Workspace, waitingIndexed?: boolean): string | null {
-  if (cursor === null) return null;
-  const bound = decodeBound(cursor, ws);
-  invariant(waitingIndexed === bound.waitingIndexed, 'WORK_STALE', stale);
-  return bound.cursor;
-}
 function decodeBound(
   cursor: string,
   ws?: Workspace,
-): { generationId: string; cursor: string | null; waitingIndexed?: boolean } {
+): { generationId: string; cursor: string | null; waitingIndexed?: boolean; activeIndexed?: true } {
   invariant(cursor.startsWith(cursorPrefix), 'BAD_ARGUMENT', 'Use the returned planning cursor.');
   try {
     const bound = JSON.parse(Buffer.from(cursor.slice(cursorPrefix.length), 'base64url').toString());
@@ -240,11 +235,11 @@ function decodeBound(
     throw new ForgeError('BAD_ARGUMENT', 'Use the returned planning cursor.');
   }
 }
-const encode = (ws: Workspace, cursor: string, waitingIndexed?: boolean) =>
+const encode = (ws: Workspace, cursor: string, waitingIndexed?: boolean, activeIndexed?: true) =>
   cursorPrefix +
-  Buffer.from(JSON.stringify({ generationId: ws.generationId, cursor, waitingIndexed })).toString(
-    'base64url',
-  );
+  Buffer.from(
+    JSON.stringify({ generationId: ws.generationId, cursor, waitingIndexed, activeIndexed }),
+  ).toString('base64url');
 
 /** A planning detail lists the newest 50 comments; older ones continue with `commentsCursor`, which
  * names its Item, so a list cursor or another Item's cursor is refused (f0d0fdd6). */
@@ -934,17 +929,28 @@ async function readPlanning(
     };
   }
   const keep = await rowFilter(input);
-  const indexed = Boolean(filtered && ws.planningFilteredReads && Object.keys(planningFilter).length);
-  // Older projections still page the canonical Item rows. A cursor pins its route until the next fresh read.
+  const supplied = readCursor();
+  const bound = supplied === null ? null : decodeBound(supplied, ws);
+  // An older cursor continues on its original index after a deploy. A fresh read can use the active range.
+  const activeIndexed = Boolean(
+    status === 'active' && filtered && ws.planningActiveReads && (!bound || bound.activeIndexed),
+  );
+  const listFilter = activeIndexed ? { ...planningFilter, status: 'active' } : planningFilter;
+  const indexed = Boolean(filtered && ws.planningFilteredReads && Object.keys(listFilter).length);
   const waitingIndexed = waitingOn === undefined ? undefined : indexed;
-  let cursor = decode(readCursor(), ws, waitingIndexed);
+  invariant(
+    !bound || (waitingIndexed === bound.waitingIndexed && activeIndexed === Boolean(bound.activeIndexed)),
+    'WORK_STALE',
+    stale,
+  );
+  let cursor = bound?.cursor ?? null;
   let scanned = 0;
   let done = false;
   let matches: PlanningReadItem[] = [];
   // A schedule covers every open Issue it can reach in the bounded pages, not just the first match.
   for (let pages = 0; pages < maxPages && !done && (input.schedule || !matches.length); pages++) {
     const result = await page(port, ws, 'planningItems', cursor, input.limit, {
-      ...(indexed ? { planningFilter } : {}),
+      ...(indexed ? { planningFilter: listFilter } : {}),
       ...(planningHistory ? { planningHistory } : {}),
     });
     scanned += result.page.length;
@@ -1020,7 +1026,7 @@ async function readPlanning(
           },
         }
       : {}),
-    nextCursor: done ? null : prefix + encode(ws, cursor!, waitingIndexed),
+    nextCursor: done ? null : prefix + encode(ws, cursor!, waitingIndexed, activeIndexed ? true : undefined),
     ...(emptyPlan
       ? {
           next: 'The project owner can use nforge agent ROOT put-planning-item or MCP forge_planning (action put-planning-item) with {"kind":"issue","title":"TITLE","status":"proposed"}.',

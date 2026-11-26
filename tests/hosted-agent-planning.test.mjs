@@ -2879,11 +2879,17 @@ test('filtered planning and one-read Initiative counts charge only matching rows
   // This fixture loads legacy roots directly, before the counter's writer existed.
   await s.ctx.db.delete(planCounterRow(s, generationId)._id);
   const initiativeId = randomUUID();
-  const statuses = ['open', 'open', 'proposed', 'in-progress', 'abandoned'];
+  const statuses = new Map([
+    [0, 'open'],
+    [120, 'open'],
+    [240, 'proposed'],
+    [360, 'in-progress'],
+    [390, 'abandoned'],
+  ]);
   const items = Array.from({ length: 1500 }, (_, i) => ({
     id: randomUUID(),
     kind: 'issue',
-    status: statuses[i] ?? 'closed',
+    status: statuses.get(i) ?? 'closed',
     initiativeId: i < 397 ? initiativeId : randomUUID(),
     version: 1,
     previousVersion: 0,
@@ -2960,6 +2966,27 @@ test('filtered planning and one-read Initiative counts charge only matching rows
   });
   assert.deepEqual(afterRows, beforeRows);
   assert.equal(afterRows.length, 2);
+  // Friction 70f28437: three of four active Items fill the first combined page
+  // even when each one is more than a raw page away from its neighbors.
+  const active = { ...filter, status: 'active', limit: 3 };
+  const activeCallStart = p.calls.length;
+  let firstActive;
+  const activeCost = await meter.cost(async () => {
+    firstActive = await list(p, active);
+  });
+  assert.equal(firstActive.items.length, 3);
+  assert(firstActive.nextCursor);
+  assert.equal(p.calls.length - activeCallStart, 3);
+  assert(activeCost.documents <= 20, 'the page reads matching roots and Item rows, not the settled backlog');
+  const lastActive = await list(p, { ...active, cursor: firstActive.nextCursor });
+  assert.equal(lastActive.items.length, 1);
+  assert.equal(lastActive.nextCursor, null);
+  assert.deepEqual(
+    new Set([...firstActive.items, ...lastActive.items].map(item => item.id)),
+    new Set(
+      items.filter(item => ['open', 'proposed', 'in-progress'].includes(item.status)).map(item => item.id),
+    ),
+  );
   const expected = {
     proposed: 1,
     open: 2,
@@ -2992,6 +3019,7 @@ test('filtered planning and one-read Initiative counts charge only matching rows
   // Growth in closed items, including closed members of this Initiative, changes no filtered read bytes.
   for (let i = 0; i < 500; i++) await add({ ...items[100], id: randomUUID() }, 1500 + i);
   assert.deepEqual(await meter.cost(() => allPages(p, filter)), after);
+  assert.deepEqual(await meter.cost(() => list(p, active)), activeCost);
   assert(speedBudgets.costs.some(entry => entry.metric === 'planningFilteredReadBytes'));
   assert(speedBudgets.costs.some(entry => entry.metric === 'planningCountsReadBytes'));
   withinLedger({
@@ -3004,6 +3032,7 @@ test('filtered planning and one-read Initiative counts charge only matching rows
       closedGrowth: 500,
       filteredBefore: before,
       filteredAfter: after,
+      activeFirstPage: activeCost,
       countBefore: beforeCount,
       countAfter: count,
     }),

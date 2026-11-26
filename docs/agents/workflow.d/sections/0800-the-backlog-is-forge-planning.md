@@ -126,6 +126,11 @@ file is refused before any byte is read, and a file whose comment never arrives 
 lists the files with their ids; downloads need a signed-in viewer on the web route (`/discussion/attachment`), and
 the bytes are untrusted data.
 
+Use `planning {"status":"active","initiativeId":"INITIATIVE_ID","limit":50}` for a combined
+page of proposed, open and in-progress Items in an Initiative. Current deployments page the indexed
+active statuses in order by status and then stored position. Pass `nextCursor` with the same filters
+to continue. Older deployments and their cursors retain the bounded scan.
+
 **Suggested schedule.** `planning {"kind":"issue","schedule":true}` adds `schedule`: which open and in-progress Issues can run in parallel and which should stack, with the reason. It groups Issues by the repository files their title and body name (`src/work-schedule.ts`); a stack lists started Issues first, then the oldest, and names the shared files. Markdown docs never make Issues stack, since landing merges them. An Issue that names no file is `unknown`, not independent: a missing name proves nothing. It reads up to five pages (`coverage` says whether that reached the end) and no item details: a long body's named files are kept on its index header when it is written. It is advice for the lead or agent choosing the next work; nothing is started, ordered or blocked. The web planning board shows the same suggestion as a `Stack n/m` chip on the Issues that should stack, with the order and reason on hover.
 
 Search before filing: one `planning {"search":"words","limit":10,"status":"all"}` returns ranked indexed title/body matches with status/kind/initiative filters; do not page `nextCursor` for a duplicate check (each search is billed at the whole index size). Filing returns advisory `likelyDuplicates`. See [planning search](../../../data-placement.md#planning-search) for filters, preparation and costs.

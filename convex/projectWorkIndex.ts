@@ -91,6 +91,7 @@ export const workspace = query({
         githubMirror: await githubMirrorStatus(ctx, project),
         generationId: generation._id,
         planningFilteredReads: generation.planningSearchVersion === 2,
+        planningActiveReads: generation.planningSearchVersion === 2,
         backupId: generation.backupId,
         backupDigest: backup.digest,
         sourceTransport: backup.transport,

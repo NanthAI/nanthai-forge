@@ -4,7 +4,7 @@ import { planningRecordTable } from './projectWorkRecordTables';
 import { getDocumentSize, v, type Infer } from 'convex/values';
 import type { QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
-import type { PaginationOptions } from 'convex/server';
+import type { IndexRange, PaginationOptions } from 'convex/server';
 import { record, recordPartition } from './projectWorkIndexStore';
 import { hostedRecordValue } from './hostedRecordValue';
 import { readsStore, storeItemRow } from './projectWorkStoreReads';
@@ -29,6 +29,7 @@ export const planningFilter = v.object({
       v.literal('abandoned'),
       v.literal('archived'),
       v.literal('deleted'),
+      v.literal('active'),
     ),
   ),
   initiativeId: v.optional(v.string()),
@@ -36,18 +37,37 @@ export const planningFilter = v.object({
 });
 type Filter = Infer<typeof planningFilter>;
 
+type StatusRange = {
+  eq(field: 'planning.status', value: string): IndexRange;
+  gte(
+    field: 'planning.status',
+    value: string,
+  ): {
+    lte(field: 'planning.status', value: string): IndexRange;
+  };
+};
+
+function statusRange(q: StatusRange, status: NonNullable<Filter['status']>) {
+  // In the stored status order, in-progress, open and proposed are one contiguous range.
+  return status === 'active'
+    ? q.gte('planning.status', 'in-progress').lte('planning.status', 'proposed')
+    : q.eq('planning.status', status);
+}
+
 /** Search roots already carry all three filters, including on pre-deploy rows. Ordinary indexes
  * read only matching roots, without text-search billing, fragments, a backfill or extra writes. */
 async function matchingSelectors(ctx: QueryCtx, generationId: Id<'projectWorkGenerations'>, filter: Filter) {
   const rows = ctx.db.query(await planningRecordTable(ctx, generationId));
   if (filter.initiativeId !== undefined && filter.kind !== undefined && filter.status !== undefined)
     return rows.withIndex('by_planning_initiativeId_and_kind_and_status', q =>
-      q
-        .eq('generationId', generationId)
-        .eq('collection', 'planningSearch')
-        .eq('planning.initiativeId', filter.initiativeId!)
-        .eq('planning.kind', filter.kind!)
-        .eq('planning.status', filter.status!),
+      statusRange(
+        q
+          .eq('generationId', generationId)
+          .eq('collection', 'planningSearch')
+          .eq('planning.initiativeId', filter.initiativeId!)
+          .eq('planning.kind', filter.kind!),
+        filter.status!,
+      ),
     );
   if (filter.initiativeId !== undefined && filter.kind !== undefined)
     return rows.withIndex('by_planning_initiativeId_and_kind', q =>
@@ -59,19 +79,23 @@ async function matchingSelectors(ctx: QueryCtx, generationId: Id<'projectWorkGen
     );
   if (filter.initiativeId !== undefined && filter.status !== undefined)
     return rows.withIndex('by_planning_initiativeId_and_status', q =>
-      q
-        .eq('generationId', generationId)
-        .eq('collection', 'planningSearch')
-        .eq('planning.initiativeId', filter.initiativeId!)
-        .eq('planning.status', filter.status!),
+      statusRange(
+        q
+          .eq('generationId', generationId)
+          .eq('collection', 'planningSearch')
+          .eq('planning.initiativeId', filter.initiativeId!),
+        filter.status!,
+      ),
     );
   if (filter.kind !== undefined && filter.status !== undefined)
     return rows.withIndex('by_planning_kind_and_status', q =>
-      q
-        .eq('generationId', generationId)
-        .eq('collection', 'planningSearch')
-        .eq('planning.kind', filter.kind!)
-        .eq('planning.status', filter.status!),
+      statusRange(
+        q
+          .eq('generationId', generationId)
+          .eq('collection', 'planningSearch')
+          .eq('planning.kind', filter.kind!),
+        filter.status!,
+      ),
     );
   if (filter.initiativeId !== undefined)
     return rows.withIndex('by_planning_initiativeId', q =>
@@ -86,10 +110,7 @@ async function matchingSelectors(ctx: QueryCtx, generationId: Id<'projectWorkGen
     );
   if (filter.status !== undefined)
     return rows.withIndex('by_planning_status', q =>
-      q
-        .eq('generationId', generationId)
-        .eq('collection', 'planningSearch')
-        .eq('planning.status', filter.status!),
+      statusRange(q.eq('generationId', generationId).eq('collection', 'planningSearch'), filter.status!),
     );
   return rows.withIndex('by_generation_and_collection_and_position', q =>
     q.eq('generationId', generationId).eq('collection', 'planningSearch'),
@@ -114,7 +135,8 @@ async function matching(ctx: QueryCtx, generationId: Id<'projectWorkGenerations'
   // These predicates refine only the selected bucket, within the existing per-page rows and bytes limits.
   const selectors = [
     ['planning.kind', kind],
-    ['planning.status', status],
+    ['planning.status', status === 'active' ? undefined : status],
+    ['planning.open', status === 'active' ? true : undefined],
     ['planning.initiativeId', initiativeId],
   ] as const;
   return rows.filter(q =>
@@ -162,6 +184,7 @@ async function counterCounts(
   if (
     filter.initiativeId !== undefined ||
     filter.waitingOn !== undefined ||
+    filter.status === 'active' ||
     generation.planningSearchVersion !== 2
   )
     return false;
