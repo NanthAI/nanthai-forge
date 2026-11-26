@@ -42,7 +42,6 @@ const references = new Set([
   'docs/operations/legacy-storage-cleanup.md',
   'docs/operations/legacy-view-rows.md',
   'docs/operations/legacy-work-layout.md',
-  'docs/operations/legacy-work-store-mode.md',
   'docs/operations/optimistic-landing.md',
   'docs/operations/product-analytics.md',
   'docs/operations/storage-compaction.md',

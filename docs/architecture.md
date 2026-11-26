@@ -834,9 +834,8 @@ page advances no record. A verified empty Work seed does not run an import page.
 Archived Work uses the same canonical write helpers when it is first initialized.
 
 Hosted Work has one record format. Ordinary writes update the retained record and
-the transactional planning projections in one mutation. Deployments with legacy
-mode fields or comparison rows use the pinned releases in the
-[P8 runbook](operations/legacy-work-store-mode.md) before applying the current schema.
+the transactional planning projections in one mutation. A fresh deployment uses
+the current schema for every project, including projects moved by verified import.
 
 Primary commands retain their operation, request, actor, time and Work revision
 on their immutable version. Older event rows and the event-window frontier remain
