@@ -472,10 +472,7 @@ test('a whole-repo command that names no file is advisory when base fails the sa
     })[0];
   const preExisting = judge(['changed.txt'], { 'changed.txt': Buffer.from('old text\n') });
   assert.equal(preExisting.outcome, 'pre-existing');
-  assert.match(
-    preExisting.advisory,
-    /fails the same way on the Lane's base: pre-existing on main, not blocking/,
-  );
+  assert.match(preExisting.advisory, /pre-existing on the Lane's base: same diagnostic, not blocking/);
   const added = judge(['notes/debt.txt'], { 'notes/debt.txt': Buffer.from('clean\n') });
   assert.equal(added.outcome, 'failed');
   assert.match(added.excerpt, /passes on the Lane's base: this change causes it/);
@@ -527,6 +524,51 @@ test('a failure naming an untouched file the base copy does not name is new: the
   assert.equal(result.outcome, 'failed');
   assert.deepEqual(result.files, ['b.txt']);
   assert.match(result.excerpt, /new compared with the Lane's base: b\.txt/);
+});
+
+test('c717a2c2: a new source file can change the diagnostic on an already-failing generated file', t => {
+  const dir = mkdtempSync(join(tmpdir(), 'forge-static-scope-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const root = join(dir, 'lane');
+  mkdirSync(root);
+  writeFileSync(join(root, 'generated.js'), '');
+  writeFileSync(join(root, 'new-source.js'), '');
+  const check = {
+    name: 'check generated module',
+    command: [
+      process.execPath,
+      '-e',
+      "const added = require('fs').existsSync('new-source.js'); console.error('generated.js: ' + (added ? 'new import fails' : 'old import fails')); process.exit(1)",
+    ],
+    inputs: null,
+    source: 'declared',
+  };
+  const run = (base, command = check.command, hasBaseFile) =>
+    runStaticChecks(root, [{ ...check, command }], process.env, 10_000, {
+      changed: ['new-source.js'],
+      base,
+      hasBaseFile,
+      scratch: join(dir, 'scratch'),
+    })[0];
+  assert.equal(run(() => null).outcome, 'unjudged');
+  assert.equal(run(undefined).outcome, 'unjudged');
+  const longDiagnostic = [
+    ...check.command.slice(0, 2),
+    check.command[2].replace('process.exit(1)', "console.error('x'.repeat(17_000)); process.exit(1)"),
+  ];
+  assert.equal(run(() => null, longDiagnostic).outcome, 'unjudged');
+  const staleGenerated = [
+    ...check.command.slice(0, 2),
+    "console.error('generated.js: new import fails'); process.exit(1)",
+  ];
+  assert.equal(
+    run(
+      () => null,
+      staleGenerated,
+      () => false,
+    ).outcome,
+    'unjudged',
+  );
 });
 
 test('past the output scan cap a changed path is still found and refuses; a capped scan claims nothing', t => {

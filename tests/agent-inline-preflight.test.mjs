@@ -992,6 +992,12 @@ const pretty = value => `${JSON.stringify(value, null, 2)}\n`;
 const treeConfig = pretty({
   preflight: { static: [{ name: 'style', command: ['node', 'scripts/style.mjs'] }] },
 });
+function cacheFixtureSource(s) {
+  const objects = join(clientCacheRoot(s.root), 'objects');
+  mkdirSync(objects, { recursive: true });
+  for (const [id, bytes] of s.objects) writeFileSync(join(objects, id), bytes, { mode: 0o600 });
+}
+
 async function treeFixture(t, base, lane) {
   const files = {
     ...common,
@@ -1003,6 +1009,7 @@ async function treeFixture(t, base, lane) {
   s.caps.agentDefaults = effectiveAgentDefaults({ preflight: 'advise' });
   s.caps.features = ['land-gates'];
   await s.transport().dispatch('open', { laneId: s.lane.laneId });
+  cacheFixtureSource(s);
   const mutate = s.exchange.client.mutation;
   s.exchange.client.mutation = async (ref, args) => {
     const text = await mutate(ref, args);
@@ -1038,8 +1045,59 @@ test('incident 060fb653: a clean change lands when main already fails the format
   assert.deepEqual(style.files, ['legacy.md']);
   assert.match(
     result.result.defaults.preflight.staticAdvisory,
-    /^style: fails only in files this Lane does not change \(legacy\.md\): pre-existing on main, not blocking/,
+    /^style: pre-existing on the Lane's base \(legacy\.md\): same diagnostic, not blocking/,
   );
+});
+
+test('9134b5fb: a resolution Lane compares static failures and test changes with the merged base', async t => {
+  const testFile = 'tests/docs.test.mjs';
+  const testOnMain = `${common[testFile]}\ntest('kept on main', () => {});\n`;
+  // The original base and the Lane fail. The merged base passes with the switch off, and
+  // newer main passes even with it on. A copy that retains the Lane's switch falsely fails.
+  const config = pretty({
+    preflight: {
+      static: [
+        {
+          name: 'compare',
+          command: [
+            process.execPath,
+            '-e',
+            "const fs = require('fs'); if (fs.readFileSync('switch.txt', 'utf8') === 'on' && fs.readFileSync('README.md', 'utf8') !== 'Fixed\\n') { console.error('README diagnostic'); process.exit(1); }",
+          ],
+        },
+      ],
+    },
+  });
+  const s = await treeFixture(
+    t,
+    { 'README.md': 'Before', 'forge.json': config, 'switch.txt': 'on' },
+    { 'README.md': 'After\n', [testFile]: testOnMain, 'forge.json': config, 'switch.txt': 'on' },
+  );
+  const original = s.main.head;
+  const mergedBase = JSON.parse(s.objects.get(original));
+  const stateWith = updates => {
+    for (const [path, contents] of Object.entries(updates)) {
+      const bytes = Buffer.from(contents);
+      const blob = digest(bytes);
+      s.objects.set(blob, bytes);
+      mergedBase.files.find(file => file.path === path).blob = blob;
+    }
+    const bytes = Buffer.from(JSON.stringify(mergedBase));
+    const head = digest(bytes);
+    s.objects.set(head, bytes);
+    return head;
+  };
+  const merged = stateWith({ 'README.md': 'Before\n', [testFile]: testOnMain, 'switch.txt': 'off' });
+  s.main.head = stateWith({ 'README.md': 'Fixed\n', 'switch.txt': 'on' });
+  cacheFixtureSource(s);
+  rememberConflictPaths(s.root, s.lane.laneId, [], undefined, false, undefined, {
+    head: merged,
+    base: original,
+  });
+  const { result } = await s.transport().dispatch('preflight', { run: true });
+  assert.equal(result.weakenedTests, undefined);
+  assert.equal(result.outcome, 'failed');
+  assert.match(result.receipt.static[0].excerpt, /passes on the Lane's base/);
 });
 
 test('incident 060fb653: the same base still refuses a change whose own file is unformatted, without a base run', async t => {

@@ -33,8 +33,8 @@ export async function savedChangedPaths(
   transport: Pick<HostedAgentTransport, 'root' | 'exchange' | 'query'>,
   lane: { base: string; head: string },
   projected: { paths: string[]; complete: boolean } | undefined,
-  /** `lane.base` is not the Lane's recorded base (laneChangeBase): the projection measures from that
-   * one, so the manifests answer, and the projection is only the fallback. */
+  /** The projection measures from the recorded base. A resolution with a different base must
+   * use manifests or leave the changed paths unknown. */
   ownBase = false,
 ): Promise<SavedChangedPaths | undefined> {
   if (projected?.complete && !ownBase) return { ...projected, source: 'projection' };
@@ -64,7 +64,7 @@ export async function savedChangedPaths(
       .map(item => item.path);
     return { paths, complete: true, source: 'manifests', ...(main ? { mainHead: main } : {}) };
   } catch {
-    return projected;
+    return ownBase ? undefined : projected;
   }
 }
 
@@ -88,8 +88,8 @@ export function cachedObject(root: string, id: string): Buffer | null {
 
 /** The Lane base's file entries from the base State manifest already on this machine; null when
  * that manifest is not cached. No server call. */
-export function baseStateFiles(root: string, marker: HostedLaneCheckoutMarker) {
-  const bytes = cachedObject(root, marker.selection.base.head);
+export function baseStateFiles(root: string, head: string) {
+  const bytes = cachedObject(root, head);
   if (!bytes) return null;
   try {
     return parseNativeState(bytes).files;
@@ -102,7 +102,7 @@ export function baseStateFiles(root: string, marker: HostedLaneCheckoutMarker) {
  * machine (the checkout's own cache or the machine object store). No server call. `null` when that
  * manifest is not cached: a missing observation never becomes "no changes" or a count. */
 export function pathsAgainstBase(root: string, marker: HostedLaneCheckoutMarker): string[] | null {
-  const base = baseStateFiles(root, marker);
+  const base = baseStateFiles(root, marker.selection.base.head);
   return base
     ? reviewPaths(base, marker.state.files)
         .filter(item => item.status !== 'unchanged')

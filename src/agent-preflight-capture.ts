@@ -196,6 +196,7 @@ export function spawnCaptured(
     const capturedOptions: SpawnSyncOptions = { ...options, stdio: ['ignore', fd, fd] };
     const reader = openSync(file, 'r');
     let tail = Buffer.alloc(0);
+    let truncated = false;
     const decoder = stream.onText ? new StringDecoder('utf8') : undefined;
     const chunk = Buffer.alloc(64 * 1024);
     /** Copies whatever the child has written since the last call to our stderr, the scanner and the tail. */
@@ -211,7 +212,10 @@ export function spawnCaptured(
           }
         if (decoder) stream.onText!(decoder.write(chunk.subarray(0, read)));
         tail = Buffer.concat([tail, chunk.subarray(0, read)]);
-        if (tail.length > TAIL_BYTES * 2) tail = tail.subarray(tail.length - TAIL_BYTES);
+        if (tail.length > TAIL_BYTES * 2) {
+          truncated = true;
+          tail = tail.subarray(tail.length - TAIL_BYTES);
+        }
       }
     };
     try {
@@ -223,7 +227,11 @@ export function spawnCaptured(
       closeSync(fd);
       drain();
       if (decoder) stream.onText!(decoder.end());
-      return { ...run, tail: tail.subarray(Math.max(0, tail.length - TAIL_BYTES)).toString('utf8') };
+      return {
+        ...run,
+        tail: tail.subarray(Math.max(0, tail.length - TAIL_BYTES)).toString('utf8'),
+        truncated: truncated || tail.length > TAIL_BYTES,
+      };
     } finally {
       closeSync(reader);
     }

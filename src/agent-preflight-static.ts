@@ -42,7 +42,7 @@ export type StaticCheck = {
   typecheck?: TypecheckStep;
 };
 /** `failed` blocks the landing; every other outcome is reported and never blocks. `pre-existing`: the
- * check fails only in files the Lane does not change, or fails the same way on the Lane's base.
+ * check reproduces the same diagnostic on the Lane's base.
  * `unjudged`: it failed, but whether the change caused it is unknown (changed paths unknown, no base
  * copy to compare, or its program is not installed here); the landing check still runs it.
  * `forge-metadata`: it fails only on files Forge itself writes into the Lane (forgeWritten), which are
@@ -66,6 +66,10 @@ export type StaticCheckResult = {
 export type StaticScope = {
   changed: string[] | null;
   base?: ((path: string) => Buffer | null | undefined) | undefined;
+  /** The full base delta before paths already on newer main are dropped from `changed`. */
+  comparisonPaths?: () => string[];
+  /** Generated files in the scratch copy may still reflect Lane inputs. */
+  hasBaseFile?: (path: string) => boolean;
   scratch?: string | undefined;
   /** A directory that outlives the run, for checks' own caches (each check gets a folder of its own). */
   cache?: string | undefined;
@@ -208,10 +212,9 @@ export function selectStaticChecks(checks: StaticCheck[], changedPaths: string[]
  * not counted as a pass or a failure: the landing check still runs it.
  *
  * With SCOPE, a failure blocks only when it is the change's: the output names a changed file (fast,
- * no second run), or the check passes on a copy of the Lane's base. A failure only in files the Lane
- * does not touch, or one the base copy shows too, is pre-existing on main and advisory. Checks are
- * opaque repository commands, so files are read from their output; a check that names none is
- * compared with its base run. Without SCOPE every failure blocks. */
+ * no second run), or the check passes on a copy of the Lane's base. A diagnosis reproduced on the
+ * base copy is pre-existing and advisory. Checks are opaque repository commands, so files are
+ * read from their output. Without SCOPE every failure blocks. */
 export function runStaticChecks(
   root: string,
   checks: StaticCheck[],
@@ -221,7 +224,9 @@ export function runStaticChecks(
 ): StaticCheckResult[] {
   let base: string | null | undefined;
   const baseCopy = () =>
-    base === undefined ? (base = scope?.changed ? copyBase(root, scope.changed, scope) : null) : base;
+    base === undefined
+      ? (base = scope?.changed ? copyBase(root, scope.comparisonPaths?.() ?? scope.changed, scope) : null)
+      : base;
   const changed = new Set(scope?.changed ?? []);
   const known = (dir: string) => (path: string) => isFile(join(dir, path));
   const hints = scope?.changed ? changedHints(scope.changed, scope) : undefined;
@@ -346,11 +351,6 @@ function judge(
       advisory: `fails only on files Forge writes into the Lane (${list(head.forge)}), never this change's input; ignore .forge/ in this tool's configuration to silence it; ${NOT_BLOCKING}`,
     };
   const untouched = head.paths;
-  const preExisting = {
-    outcome: 'pre-existing' as const,
-    files: untouched,
-    advisory: `fails only in files this Lane does not change (${list(untouched)}): pre-existing on main, ${NOT_BLOCKING}`,
-  };
   const uncertain = (scan: Found) => ({
     outcome: 'unjudged' as const,
     advisory: `failed, and its output could not be fully attributed to files (${
@@ -361,12 +361,10 @@ function judge(
   if (!dir)
     return !certain
       ? uncertain(head)
-      : untouched.length
-        ? preExisting
-        : {
-            outcome: 'unjudged',
-            advisory: `failed without naming a file this Lane changes, and no copy of the Lane's base was available to compare; ${NOT_BLOCKING}`,
-          };
+      : {
+          outcome: 'unjudged',
+          advisory: `failed without naming a file this Lane changes, and no copy of the Lane's base was available to compare; ${NOT_BLOCKING}`,
+        };
   const found = mentions(dir, known(dir), changed);
   const [command, ...args] = check.command as [string, ...string[]];
   const before = spawnCaptured(command, args, { cwd: dir, env, timeout: timeoutMs }, false, {
@@ -380,15 +378,13 @@ function judge(
       ...(untouched.length ? { files: untouched } : {}),
       excerpt: `${failureExcerpt(run.tail)} (passes on the Lane's base: this change causes it)`.slice(0, 700),
     };
-  if (before.errorCode || before.status === 127)
+  if (before.errorCode || before.status === null || before.status === 127)
     return !certain
       ? uncertain(head)
-      : untouched.length
-        ? preExisting
-        : {
-            outcome: 'unjudged',
-            advisory: `failed, and its run on the Lane's base did not finish (${before.errorCode ?? `exit ${before.status}`}), so it cannot tell whether the failure is new; ${NOT_BLOCKING}`,
-          };
+      : {
+          outcome: 'unjudged',
+          advisory: `failed, and its run on the Lane's base did not finish (${before.errorCode ?? `exit ${before.status}`}), so it cannot tell whether the failure is new; ${NOT_BLOCKING}`,
+        };
   // A capped or partial scan on either side cannot say which failures are new.
   if (!certain) return uncertain(head);
   if (onBase.overflow || onBase.partial) return uncertain(onBase);
@@ -405,16 +401,18 @@ function judge(
           700,
         ),
       };
-    return preExisting;
   }
-  if (sameFailure(run.tail, root, before.tail, dir))
+  const { hasBaseFile } = scope;
+  const generated = hasBaseFile && untouched.some(path => !hasBaseFile(path));
+  if (!generated && !run.truncated && !before.truncated && sameFailure(run.tail, root, before.tail, dir))
     return {
       outcome: 'pre-existing',
-      advisory: `fails the same way on the Lane's base: pre-existing on main, ${NOT_BLOCKING}`,
+      ...(untouched.length ? { files: untouched } : {}),
+      advisory: `pre-existing on the Lane's base${untouched.length ? ` (${list(untouched)})` : ''}: same diagnostic, ${NOT_BLOCKING}`,
     };
   return {
     outcome: 'unjudged',
-    advisory: `fails on this Lane and on its base with different output and names no file, so it cannot tell whether the change adds a failure; ${NOT_BLOCKING}`,
+    advisory: `fails on the Lane and its base, but the full diagnostic could not be matched; ${NOT_BLOCKING}`,
   };
 }
 

@@ -1789,6 +1789,7 @@ export class HostedAgentTransport {
               laneId,
               head,
               ...(tree ? { tree } : {}),
+              ...(changeBase ? { base: changeBase } : {}),
             },
             advice,
             selected?.laneId === laneId && selected.head === head
@@ -2723,7 +2724,7 @@ export class HostedAgentTransport {
       false,
       changed?.complete ? changed.paths : null,
       // Preflight takes its own `nforge heavy` slot; wrapped in `nforge heavy`, it reuses that one.
-      { heavySlot: true, afterHeavyWait: () => checkSource(true) },
+      { heavySlot: true, comparisonBase: base, afterHeavyWait: () => checkSource(true) },
     );
     // Nothing failed (passed, NOT COMPLETE, or this machine's environment): the next step is to land,
     // since the landing check runs every test; only a failure sends the agent back to fix and rerun.

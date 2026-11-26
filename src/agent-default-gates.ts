@@ -46,7 +46,7 @@ const command = (root: string, verb: string, body: Record<string, unknown>) =>
 export function finishGates(
   root: string,
   defaults: EffectiveAgentDefaults | undefined,
-  lane: { laneId: string; head: string; tree?: string },
+  lane: { laneId: string; head: string; tree?: string; base?: string },
   advice: Advice | undefined,
   runRequired: boolean | (() => void) = false,
   replayBudgetRefusal = false,
@@ -56,6 +56,7 @@ export function finishGates(
   if (defaults.preflight !== 'off') {
     const heavyOptions = {
       heavySlot: true,
+      ...(lane.base ? { comparisonBase: lane.base } : {}),
       ...(typeof runRequired === 'function' ? { afterHeavyWait: runRequired } : {}),
     };
     let receipt = readPreflightReceipt(root, lane.laneId);

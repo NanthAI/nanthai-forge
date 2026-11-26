@@ -486,8 +486,9 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   or submission, naming the check, its diagnostics and its declared `fix` command (otherwise its
   recheck command). Only the change's own static failures refuse: a failure that names a file the
   Lane adds, edits or renames into, or one its run on a temporary local copy of the Lane's base does
-  not show (a whole-repo command that names no file is compared that way). A failure only in files
-  the Lane does not touch, or the same failure on base, is `pre-existing` (on main) and one advisory
+  not show (a whole-repo command that names no file is compared that way). A resolution Lane uses
+  the main State it merged in as its comparison base. A diagnostic reproduced on that base is
+  `pre-existing` and one advisory
   line; a failure only on files Forge writes into the Lane (the root `.forge/` folder and root `node_modules` link) is
   `forge-metadata` and never refuses, whatever the tool's configuration covers; when it cannot be
   judged (unknown changed paths, no cached base bytes, program not installed) it is `unjudged` and

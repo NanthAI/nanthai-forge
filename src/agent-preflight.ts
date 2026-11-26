@@ -71,6 +71,7 @@ import {
   typecheckEnv,
 } from './preflight-typecheck.js';
 import { baseStateFiles, cachedObject } from './hosted-changed-paths.js';
+import { reviewPaths } from './source-review-format.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import type { NativeFile } from './state/format.js';
 import { sourceTree } from './source-tree.js';
@@ -1338,21 +1339,28 @@ const stoppedCommand = (root: string, laneId: string) =>
 /** What judges a static failure (src/agent-preflight-static.ts): the saved changed paths and, in a
  * hosted Lane, each one's base bytes from the base State manifest and objects already on this machine
  * (no server call). Elsewhere, or when they are not cached, there is no base copy to compare with. */
-function staticScope(root: string, changed: string[] | null): StaticScope {
+function staticScope(root: string, changed: string[] | null, comparisonBase?: string): StaticScope {
   let marker: ReturnType<typeof readHostedLaneCheckout> = null;
   try {
     marker = readHostedLaneCheckout(root);
   } catch {
     /* Not a hosted Lane: no base copy. */
   }
-  const files = marker && changed ? baseStateFiles(root, marker) : null;
   // A folder for checks that keep a cache, and (with CHANGED) hints so they do less on a small change.
   const cache = join(clientCacheRoot(root), 'agent', 'preflight', 'static-cache');
+  if (!marker || !changed) return { changed, cache };
+  const files = baseStateFiles(root, comparisonBase ?? marker.selection.base.head);
   if (!files) return { changed, cache };
   const base = new Map(files.map(file => [file.path, file]));
+  const saved = marker.state.files;
   return {
     changed,
     cache,
+    comparisonPaths: () =>
+      reviewPaths(files, saved)
+        .filter(item => item.status !== 'unchanged')
+        .map(item => item.path),
+    hasBaseFile: path => base.has(path),
     scratch: join(clientCacheRoot(root), 'static-base'),
     base: path => {
       const file = base.get(path);
@@ -1570,6 +1578,8 @@ export function runPreflight(
    * land gate's inline run set it; a fixture run inside a test (already in its runner's slot) does not. */
   options: {
     heavySlot?: boolean;
+    /** Static failure comparison uses the same base as selection, including after conflict resolution. */
+    comparisonBase?: string;
     /** The saved source pin must still match after this run waited for its slot. */
     afterHeavyWait?: () => void;
     quick?: boolean;
@@ -1652,7 +1662,7 @@ export function runPreflight(
       if (staticResults.some(result => result.outcome === 'failed')) exitCode = 1;
     } else if (plan.static?.selected.length) {
       const checks = plan.static.selected.map(check => ({ ...check, inputs: null }));
-      const scope = changed === undefined ? undefined : staticScope(root, changed);
+      const scope = changed === undefined ? undefined : staticScope(root, changed, options.comparisonBase);
       const kinds = new Set(
         checks.map(check =>
           isTypecheck(check) || isTypecheckCommand(check) ? 'typecheck' : commandKind(check.command),
