@@ -28,7 +28,7 @@ import {
   type AutonomyPolicy,
 } from '../src/autonomy-policy';
 import { invariant } from '../src/errors';
-import { acceptancePolicyDigest, ownerGated } from '../src/policy-digest';
+import { acceptancePolicyDigest, ownerGated, weakensBootstrapGovernance } from '../src/policy-digest';
 import { policyImpactReceipt } from './projectHostedLandingPolicyImpact';
 import { policyImpactMessage } from '../src/policy-impact-receipt';
 import { report } from './errors';
@@ -85,14 +85,18 @@ const settingRuleValidator = v.union(
 );
 const POLICY_KEY = settingKey('policy');
 /** What a held edit is pinned to: the parts an agent may not change alone, so a later edit of agent
- * defaults or notifications does not void the owner's pending grant. */
-const policyBase = (policy: AutonomyPolicy) =>
+ * defaults or notifications does not void the owner's pending grant. A deploy edit replaces the
+ * complete deploy settings. Its versioned pin includes them, and older requests keep their pin. */
+const DEPLOY_POLICY_BASE = 'deploys:';
+const policyBase = (policy: AutonomyPolicy, pinDeploys = false) =>
+  (pinDeploys ? DEPLOY_POLICY_BASE : '') +
   digest(
     canonicalPayload({
       acceptance: acceptancePolicyDigest(policy),
       unchecked: policy.acceptance.withoutCheck ?? null,
       mirror: policy.githubMirror ?? null,
       ...(policy.mainAudit ? { mainAudit: policy.mainAudit } : {}),
+      ...(pinDeploys ? { deploys: policy.deploys ?? null } : {}),
     }),
   );
 function parsePolicyCommand(text: string) {
@@ -379,11 +383,12 @@ export const set = mutation({
         );
       if (command.githubMirror && policy.githubMirror?.autoPush)
         await requireStoredRepositoryBinding(ctx, input.projectId, policy.githubMirror.repo);
-      const rule: SettingRule = !device
-        ? 'owner-person'
-        : ownerGated(previous, policy)
-          ? await agentSettingRule(ctx, input.projectId, user)
-          : 'no-gate-change';
+      let rule: SettingRule = 'owner-person';
+      if (device) {
+        if (weakensBootstrapGovernance(previous, policy)) rule = 'held';
+        else if (ownerGated(previous, policy)) rule = await agentSettingRule(ctx, input.projectId, user);
+        else rule = 'no-gate-change';
+      }
       if (command.dryRun) {
         const impactAt = new Date().toISOString();
         const impact = await policyImpactReceipt(ctx, project._id, previous, policy);
@@ -406,7 +411,7 @@ export const set = mutation({
           requester: user.subject,
           request,
           summary: `Policy change (${changedFields(command).join(', ') || 'no fields'}) from an agent sign-in.`,
-          base: policyBase(previous),
+          base: policyBase(previous, command.deploys !== undefined),
         });
         return heldPolicyReply(row, previous, command.operationId);
       }
@@ -442,7 +447,7 @@ export async function applyApprovedPolicy(
   const { command, request } = parsePolicyCommand(text);
   const previous = effectivePolicy(project);
   invariant(
-    base === policyBase(previous),
+    base === policyBase(previous, base?.startsWith(DEPLOY_POLICY_BASE)),
     'POLICY_CHANGED',
     'Project policy changed since this request; decline it and ask the builder to request the change again.',
   );

@@ -377,6 +377,33 @@ test('lifecycle ownership/CAS/reused request denials do not reveal or mutate ano
     e => e.data.code === 'WORK_OPERATION_CHANGED',
   );
 });
+test('read-only devices cannot trash, restore, or request a project rename', async t => {
+  for (const action of ['trash', 'restore', 'rename']) {
+    await t.test(action, async subtest => {
+      const now = Date.parse('2026-01-01T00:00:00Z');
+      subtest.mock.timers.enable({ apis: ['Date'], now });
+      const s = fixture();
+      if (action === 'restore') await modules.projectLifecycle.trash._handler(s.ctx, s.operation());
+      const before = structuredClone(s.tables.hostedProjects.get('project'));
+      s.tables.cliCredentials.set('device', {
+        _id: 'device',
+        credentialId: 'device',
+        owner: 'owner',
+        scope: 'cli',
+        expiresAt: now + 60_000,
+        settings: { projects: { kind: 'all' }, source: 'read' },
+      });
+      s.ctx.auth.getUserIdentity = async () => ({ subject: 'owner', forgeCredential: 'device' });
+      const input = { ...s.operation(), ...(action === 'rename' ? { name: 'Another name' } : {}) };
+      await assert.rejects(
+        modules.projectLifecycle[action]._handler(s.ctx, input),
+        error => error.data?.code === 'AUTH_SCOPE_DENIED',
+      );
+      assert.deepEqual(s.tables.hostedProjects.get('project'), before);
+      if (action === 'rename') assert.equal(s.tables.projectHostedApprovals.size, 0);
+    });
+  }
+});
 test('Trash revokes team links with the direct grants, so a restore starts with none (b6588425)', async () => {
   const s = fixture();
   (s.tables.projectTeams ??= new Map()).set('link', {

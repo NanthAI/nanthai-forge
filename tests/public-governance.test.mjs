@@ -823,7 +823,91 @@ test('an owner-account agent changing the check entry file holds for the owner p
   );
 });
 
-test('owner-device settings writes apply before the first landing and are held for the owner person after it', async () => {
+test('an owner device must request approval to weaken governance before the first landing', async t => {
+  const cases = [
+    ['clear default owner approval paths', { governanceVersion: 1, acceptance: { ownerApprovalPaths: [] } }],
+    [
+      'narrow default owner approval paths',
+      { governanceVersion: 1, acceptance: { ownerApprovalPaths: ['.github/workflows/**'] } },
+    ],
+    ['clear protected paths', { acceptance: { protectedPaths: [] } }],
+    ['narrow a protected glob', { acceptance: { protectedPaths: ['.env.example', 'ops/prod/**'] } }],
+    ['reset protected paths through a preset', { preset: 'trusted' }],
+    [
+      'enable unchecked writers',
+      { acceptance: { withoutCheck: { mode: 'writers', people: [], teams: [] } } },
+    ],
+    ['add an auto actor', { acceptance: { autoActors: ['agent-one', 'agent-two'] } }],
+    [
+      'enable a deploy target',
+      { deploys: { targets: [{ name: 'preview', label: 'Preview', environment: 'preview' }] } },
+    ],
+  ];
+  for (const [name, fields] of cases) {
+    await t.test(name, async () => {
+      const f = await publicFixture();
+      const before = policyPreset('trusted');
+      before.acceptance.protectedPaths.push('ops/**');
+      before.acceptance.autoActors = ['agent-one'];
+      f.patch('hostedProjects', f.projectId, { autonomyPolicy: before });
+      ownerDevice(f);
+      const command = { action: 'set-policy', operationId: randomUUID(), ...fields };
+      const set = (value = command) =>
+        f.transaction(
+          'policy',
+          modules.projectAutonomy.set,
+          { projectId: f.projectId, command: JSON.stringify(value) },
+          DEVICE,
+        );
+      const held = await set();
+      assert.equal(held.rule, 'held');
+      assert.equal(held.approval.id, 'setting:policy');
+      assert.deepEqual(await set(), held);
+      assert.equal((await set({ ...command, dryRun: true })).rule, 'held');
+      const project = f.tables.hostedProjects.get(f.projectId);
+      assert.deepEqual(project.autonomyPolicy, before);
+      assert.equal(f.tables.projectPolicyChanges.size, 0);
+    });
+  }
+});
+
+test('a deploy approval becomes stale when the owner edits deploy settings', async () => {
+  const f = await publicFixture();
+  ownerDevice(f);
+  const production = { name: 'production', label: 'Production', environment: 'production' };
+  const preview = { name: 'preview', label: 'Preview', environment: 'preview' };
+  const set = (targets, actor) =>
+    f.transaction(
+      'policy',
+      modules.projectAutonomy.set,
+      { projectId: f.projectId, command: policyCommand({ deploys: { targets } }) },
+      actor,
+    );
+  await set([production], 'owner');
+  const held = await set([production, preview], DEVICE);
+  assert.equal(held.rule, 'held');
+  const request = JSON.parse(
+    await f.transaction('observe', modules.projectHostedApprovals.observe, {
+      projectId: f.projectId,
+      laneId: held.approval.id,
+      detail: 1,
+    }),
+  );
+  await set([], 'owner');
+  await assert.rejects(
+    f.transaction('decide', modules.projectHostedApprovals.decide, {
+      projectId: f.projectId,
+      operationId: randomUUID(),
+      laneId: held.approval.id,
+      decision: 'grant',
+      head: request.currentHead,
+    }),
+    code('POLICY_CHANGED'),
+  );
+  assert.deepEqual(f.tables.hostedProjects.get(f.projectId).autonomyPolicy.deploys.targets, []);
+});
+
+test('ordinary owner-device setup applies before the first landing and needs the owner person after it', async () => {
   const f = await publicFixture();
   ownerDevice(f);
   const settings = {
@@ -849,9 +933,10 @@ test('owner-device settings writes apply before the first landing and are held f
       ),
   };
   // Bootstrap: no accepted landing yet, so an agent's setup writes still apply directly.
-  const boot = await settings.policy(DEVICE, policyCommand({ acceptance: { protectedPaths: ['boot/**'] } }));
+  const protectedPaths = ['.env.example', 'boot/**'];
+  const boot = await settings.policy(DEVICE, policyCommand({ acceptance: { protectedPaths } }));
   assert.equal(boot.rule, 'bootstrap');
-  assert.deepEqual(boot.policy.acceptance.protectedPaths, ['boot/**']);
+  assert.deepEqual(boot.policy.acceptance.protectedPaths, protectedPaths);
   const bootDefinition = await settings.definition(DEVICE);
   assert.equal(bootDefinition.rule, 'bootstrap');
   f.rawChecks.definition = bootDefinition;
@@ -886,7 +971,7 @@ test('owner-device settings writes apply before the first landing and are held f
   const command = policyCommand({ acceptance: { protectedPaths: [] } });
   const held = await settings.policy(DEVICE, command);
   assert.equal(held.rule, 'held');
-  assert.deepEqual(held.policy.acceptance.protectedPaths, ['boot/**']);
+  assert.deepEqual(held.policy.acceptance.protectedPaths, protectedPaths);
   assert.equal(held.approval.id, 'setting:policy');
   assert.match(held.approval.next, /wait '\{"approval":"setting:policy"\}'/);
   assert.deepEqual(await settings.policy(DEVICE, command), held, 'a retry returns the same request');
@@ -944,7 +1029,7 @@ test('owner-device settings writes apply before the first landing and are held f
   assert.equal(page.live, true);
   assert.deepEqual(page.change.acceptance, { protectedPaths: [] });
   // Item 16093ed1: the page compares the policy now with the policy the grant would leave.
-  assert.deepEqual(page.compare.before.acceptance.protectedPaths, ['boot/**']);
+  assert.deepEqual(page.compare.before.acceptance.protectedPaths, protectedPaths);
   assert.deepEqual(page.compare.after.acceptance.protectedPaths, []);
   const definitionPage = await observe(heldDefinition.approval.id);
   assert.equal(definitionPage.compare.subject, 'verify');

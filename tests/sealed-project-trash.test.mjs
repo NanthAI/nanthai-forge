@@ -37,15 +37,14 @@ async function joined(h, t, o, account) {
   clear(await m.client.read());
   return m;
 }
-/** The owner's own trash or restore, as the web or an owner device calls it, at the project's current revision. */
-function move(h, action, db = h.s.ctx) {
+/** The owner person's trash or restore at the project's current revision. */
+function move(h, action, ctx = h.s.ctx) {
   const project = h.s.tables.hostedProjects.get(h.project);
   return h.s.transaction(() =>
-    lifecycle[action]._handler(db, {
-      projectId: h.project,
-      operationId: randomUUID(),
-      expectedRevision: project.revision,
-    }),
+    lifecycle[action]._handler(
+      { ...ctx, auth: { getUserIdentity: async () => ({ subject: h.account }) } },
+      { projectId: h.project, operationId: randomUUID(), expectedRevision: project.revision },
+    ),
   );
 }
 const grants = h => [...h.s.tables.projectContributors.values()].filter(r => r.projectId === h.project);

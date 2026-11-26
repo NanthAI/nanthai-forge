@@ -186,8 +186,11 @@ its retained replies. MCP uses `forge_work_overview` action `board`.
   project has an accepted landing: nothing changed yet. Hand `approval.url` to the
   owner, then `wait {"approval":"setting:…"}` (the printed id); it returns when they
   grant (the change is applied as sent) or decline. Rerun the original command with
-  the same `operationId` to read the applied receipt. Before the first landing (new,
-  scratch or bench projects) and for edits no landing depends on (`agentDefaults`,
-  `notify`, the `preset` label) the write applies directly; every result names its
+  the same `operationId` to read the applied receipt. Even before the first landing,
+  removing owner-approval or protected path rules, widening who can land unchecked,
+  adding auto-accept actors, removing the last auto-accept restriction, or enabling
+  deploy targets requires the owner person. Other setup edits apply directly before
+  the first landing. Edits no landing depends on can apply directly after it as well.
+  Every result names its
   `rule` (`owner-person`, `owner-approved`, `bootstrap`, `no-gate-change`, `held`).
   Never work around a held change.

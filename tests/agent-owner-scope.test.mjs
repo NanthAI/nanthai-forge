@@ -61,20 +61,22 @@ test('owner device credentials cannot permanently delete projects, run Your data
     assert.equal(s.tables.accountOperations.size, 0);
   }
 });
-test('owner devices retain reversible trash and restore', async () => {
+test('project trash and restore require the owner person even on a write-enabled device', async () => {
   const s = fixture();
-  await modules.projectLifecycle.trash._handler(s.ctx, {
-    projectId: 'project',
-    operationId: randomUUID(),
-    expectedRevision: 1,
-  });
-  assert.equal(s.tables.hostedProjects.get('project').removal, 'trash');
-  await modules.projectLifecycle.restore._handler(s.ctx, {
-    projectId: 'project',
-    operationId: randomUUID(),
-    expectedRevision: 2,
-  });
-  assert.equal(s.tables.hostedProjects.get('project').removal, undefined);
+  const device = s.ctx.auth.getUserIdentity;
+  for (const [action, expectedRevision, removal] of [
+    ['trash', 1, 'trash'],
+    ['restore', 2, undefined],
+  ]) {
+    const input = { projectId: 'project', operationId: randomUUID(), expectedRevision };
+    s.ctx.auth.getUserIdentity = device;
+    await assert.rejects(modules.projectLifecycle[action]._handler(s.ctx, input), denied);
+    assert.equal(s.tables.hostedProjects.get('project').revision, expectedRevision);
+
+    s.ctx.auth.getUserIdentity = async () => ({ subject: 'owner' });
+    await modules.projectLifecycle[action]._handler(s.ctx, input);
+    assert.equal(s.tables.hostedProjects.get('project').removal, removal);
+  }
 });
 
 test('a retained account plan refuses devices on advance, and devices cannot start any cleanup', async () => {

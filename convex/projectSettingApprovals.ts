@@ -25,7 +25,7 @@ export type SettingRule =
   | 'owner-person'
   /** The owner person granted an agent's request; the change was applied as requested. */
   | 'owner-approved'
-  /** An agent on a project with no accepted landing yet: setup (scratch, zoo, bench) applies directly. */
+  /** An agent's ordinary setup on a project with no accepted landing yet applies directly. */
   | 'bootstrap'
   /** An agent's policy edit that changes nothing a landing depends on (agent defaults, notifications…). */
   | 'no-gate-change'
@@ -52,7 +52,7 @@ export function settingKey(origin: SettingOrigin, item?: string) {
   return `setting:${origin}${item ? `:${item}` : ''}`;
 }
 
-/** Direct for the owner person; for an agent, direct only before the project's first accepted landing.
+/** For settings that qualify for bootstrap, direct for an agent only before the first accepted landing.
  * One indexed read, only for an agent's settings write; nothing on the landing path. */
 export async function agentSettingRule(
   ctx: MutationCtx,

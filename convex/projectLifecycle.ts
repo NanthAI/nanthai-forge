@@ -13,7 +13,7 @@ import { requireOwnerPerson } from './ownerPerson';
 import { isDeviceIdentity, mutation } from './cliServer';
 import { heldReplay, holdSetting, settingKey, settingReply } from './projectSettingApprovals';
 import type { ApprovalRow } from './projectHostedApprovalStore';
-import { activeOwnedProject } from './projectAuthority';
+import { activeOwnedProject, requireDeviceWrite } from './projectAuthority';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { internalMutation, type MutationCtx } from './server';
 import type { Doc, Id } from './_generated/dataModel';
@@ -46,16 +46,19 @@ export async function transition(
    * on a new owner transition, after authority and replay and before the revision check. */
   options: { confirmed?: boolean; guard?: (project: Doc<'hostedProjects'>) => Promise<void> } = {},
 ): Promise<RestoreReceipt | null> {
-  const user = await ctx.auth.getUserIdentity(),
-    project = await ctx.db.get(input.projectId);
+  if (action !== 'delete') await requireDeviceWrite(ctx, input.projectId);
+  const user = await requireOwnerPerson(
+    ctx,
+    action === 'delete' ? 'permanently delete projects' : `${action} projects`,
+  );
+  // Restore and retries need the retained row even when the project is in Trash.
+  const project = await ctx.db.get(input.projectId);
   projectExecution(
     ctx,
     input.projectId,
-    user && project?.owner === user.subject ? project.name : undefined,
-    user && project?.owner === user.subject ? project.key : undefined,
+    project?.owner === user.subject ? project.name : undefined,
+    project?.owner === user.subject ? project.key : undefined,
   );
-  invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to manage your Forge project.');
-  if (action === 'delete') await requireOwnerPerson(ctx, 'permanently delete projects');
   // Delete reconciliation has no existence oracle.
   if (action === 'delete' && (!project || project.owner !== user.subject)) return null;
   invariant(
@@ -193,19 +196,9 @@ export const rename = mutation({
   returns: v.union(v.null(), v.string()),
   handler: async (ctx, input) => {
     try {
-      const user = await ctx.auth.getUserIdentity(),
-        project = await ctx.db.get(input.projectId);
-      projectExecution(
-        ctx,
-        input.projectId,
-        user && project?.owner === user.subject ? project.name : undefined,
-        user && project?.owner === user.subject ? project.key : undefined,
-      );
-      invariant(
-        user && project?.owner === user.subject && !project.removal,
-        'PROJECT_UNAVAILABLE',
-        'This Forge project is unavailable with the current account.',
-      );
+      const user = await ctx.auth.getUserIdentity();
+      invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to rename this Forge project.');
+      const project = await activeOwnedProject(ctx, input.projectId, user.subject);
       if (isDeviceIdentity(user)) return await holdRename(ctx, project, user.subject, input);
       await applyRename(ctx, project, input);
       return null;

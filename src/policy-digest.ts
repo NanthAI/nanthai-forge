@@ -4,6 +4,7 @@ import { digest } from './state/hash.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { protectedPathMatcher, type AutonomyPolicy } from './autonomy-policy.js';
 import { boardAudience, effectiveAgentDefaults } from './agent-parallel-defaults.js';
+import { effectiveOwnerApprovalPaths } from './owner-approval-paths.js';
 
 /** The part of the policy that decides what a landing may accept: gate, mode, protected paths, auto
  * actors, checks, lifecycle and enforced trust. The preset is only a label (any edit turns it into
@@ -254,3 +255,44 @@ export const ownerGated = (previous: AutonomyPolicy, policy: AutonomyPolicy) =>
   Object.values(OWNER_GATE).some(
     rule => typeof rule === 'object' && 'held' in rule && rule.held(previous, policy),
   );
+
+const removesEntry = (before: readonly string[], after: readonly string[]) => {
+  const retained = new Set(after);
+  return before.some(entry => !retained.has(entry));
+};
+
+function widensUnchecked(before: AutonomyPolicy['acceptance']['withoutCheck'], after: typeof before) {
+  if (!after || after.mode === 'owner' || before?.mode === 'writers') return false;
+  if (after.mode === 'writers') return true;
+  return (
+    removesEntry(after.people, before?.mode === 'selected' ? before.people : []) ||
+    removesEntry(after.teams, before?.mode === 'selected' ? before.teams : [])
+  );
+}
+
+/** Changes that need a person even when other settings edits qualify as bootstrap setup. */
+export function weakensBootstrapGovernance(previous: AutonomyPolicy, policy: AutonomyPolicy) {
+  const before = previous.acceptance,
+    after = policy.acceptance;
+  const oldActors = before.autoActors ?? [],
+    newActors = after.autoActors ?? [];
+  const oldTargets = new Map(previous.deploys?.targets.map(target => [target.name, target]));
+  return (
+    removesEntry(
+      effectiveOwnerApprovalPaths(before.ownerApprovalPaths),
+      effectiveOwnerApprovalPaths(after.ownerApprovalPaths),
+    ) ||
+    removesEntry(before.protectedPaths, after.protectedPaths) ||
+    widensUnchecked(before.withoutCheck, after.withoutCheck) ||
+    removesEntry(newActors, oldActors) ||
+    (oldActors.length > 0 && newActors.length === 0) ||
+    (policy.deploys?.targets.some(target => {
+      const old = oldTargets.get(target.name);
+      return (
+        !old ||
+        (target.githubActions !== undefined && target.githubActions.workflow !== old.githubActions?.workflow)
+      );
+    }) ??
+      false)
+  );
+}
