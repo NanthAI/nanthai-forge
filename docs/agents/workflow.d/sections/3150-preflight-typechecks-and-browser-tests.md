@@ -1,5 +1,17 @@
 ### Preflight typechecks and browser tests
 
+Inline preflight in `land --save` checks the saved Lane. Standalone preflight
+also uses the saved Lane, but can test edits made while waiting for a local slot.
+Such a run reports `workingTree:true` and leaves the saved Lane's receipt alone.
+If an ordinary Lane has yet to incorporate current main, both commands stop
+before running tests or using a saved preflight result and print the Lane's
+exact `save --sync` command. Run it, follow any conflict
+resolution it reports, then rerun preflight or land. Landing rechecks its main
+pin when preparing composition, so a pass on the earlier source cannot be
+submitted against a new base. Plan-only preflight can still preview the saved files.
+Standalone preflight on a sync resolution uses the main that was merged into its
+draft. The landing checks against the main it selects for composition.
+
 **Typechecks.** Preflight reads the project's own typecheck script (`typecheck`,
 `type-check`, `check:types`, `check-types` or `types:check` in `package.json`),
 so it typechecks the same TypeScript projects the landing check does without a

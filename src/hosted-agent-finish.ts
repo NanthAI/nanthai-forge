@@ -22,7 +22,11 @@ import { assertSavedCheckout } from './hosted-save-receipt-state.js';
 import { composeAgentSource, composedRevertOf, selectAgentLane } from './hosted-agent-source.js';
 import { hostedRecoveryCommand, recoverHostedCandidate } from './hosted-agent-resolution.js';
 import { settleCheckOnlyCompose } from './hosted-check-only-compose.js';
-import { inPlaceResolution, refuseUnsavedResolution } from './hosted-conflict-precheck.js';
+import {
+  inPlaceResolution,
+  preflightBaseRefusal,
+  refuseUnsavedResolution,
+} from './hosted-conflict-precheck.js';
 import {
   agentSourceOutcome,
   checkLogsKey,
@@ -694,7 +698,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
   // No early settings read for ordinary landings. When a proof is flagged, reuse the
   // selection at submission so projects with custom checks still read it just once.
   let selectedCheck: ReturnType<typeof checkSelection> | undefined;
-  let checkProof: ((mainHead: string) => Promise<void>) | undefined;
+  let beforeCompose: ((mainHead: string) => Promise<void>) | undefined;
   // A Candidate the caller named is its pin; one this finish composed is rebuilt when main moves.
   const pinnedCandidate = command.candidateId !== undefined;
   if (command.tokens !== undefined && session.landingTokens)
@@ -893,6 +897,10 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
     };
     // An extra source input or a stacked parent can change the proof comparison.
     const proofApplies = () => !command.dependencies.length && !command.after && !command.composeOperationId;
+    let usedPreflight = false;
+    const retained = command.composeOperationId ?? session.journal.get<string>('finish-compose-operation');
+    const checkPreflightBase = (main: string | undefined) =>
+      savedMarker && preflightBaseRefusal(session.root, savedMarker, main);
     // One check selection read for a flagged proof, reused at submission.
     let standardCheck: Promise<boolean> | undefined;
     const standard = () =>
@@ -927,7 +935,12 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
       // only when the local preview found a gap. Main moved since the preview: compose decides.
       if (proof && proofApplies() && (await standard())) {
         const main = await session.query<{ head?: string }>('projectHostedChannels:current', {});
-        if (main?.head === proof.main) refusals.push(queueProofRefusal(proof, next));
+        if (main?.head === proof.main) {
+          // A stale proof already tells the builder to sync before refreshing it.
+          const sync = !proof.refresh && !retained && !refusals.length && checkPreflightBase(main.head);
+          if (sync) throw sync;
+          refusals.push(queueProofRefusal(proof, next));
+        }
       }
       const error = cheapRefusalError(refusals);
       if (error) throw error;
@@ -940,12 +953,22 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
         savedMarker?.selection.head === selection.head ? savedMarker.tree : undefined,
         command.message,
         early,
+        main => {
+          usedPreflight = true;
+          // A retained compose pins its source. Let it reconcile before judging a newer main.
+          if (retained && session.journal.get(`compose:${retained}`)) return;
+          const sync = checkPreflightBase(main);
+          if (sync) throw sync;
+        },
       );
       const proof = advice.queueProof as QueueProofPreview | undefined;
-      if (proof && proofApplies()) {
-        checkProof = async mainHead => {
+      if (usedPreflight || (proof && proofApplies())) {
+        beforeCompose = async mainHead => {
+          // Compose can see a newer main after tests ran, including on a prepare retry.
+          const sync = usedPreflight && checkPreflightBase(mainHead);
+          if (sync) throw sync;
           // Use the main compose already reads. A finding for a superseded comparison is advisory.
-          if (proof.main !== mainHead) return;
+          if (!proof || !proofApplies() || proof.main !== mainHead) return;
           if (!(await standard())) return;
           throw cheapRefusalError([queueProofRefusal(proof, next)])!;
         };
@@ -982,7 +1005,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
         }),
         composeOperationId,
         false,
-        checkProof,
+        beforeCompose,
         noteLandCompose,
       );
     } catch (error) {

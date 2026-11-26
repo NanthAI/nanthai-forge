@@ -35,6 +35,7 @@ import {
   pendingConflictPaths,
   resolutionContinuation,
   laneChangeBase,
+  preflightBaseRefusal,
 } from './hosted-conflict-precheck.js';
 import { clientCacheRoot, rootSibling } from './root-paths.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -1780,12 +1781,13 @@ export class HostedAgentTransport {
           tree?: string,
           message?: string,
           early?: Parameters<NonNullable<HostedAgentSession['finishGates']>>[4],
+          beforePreflight?: Parameters<NonNullable<HostedAgentSession['finishGates']>>[5],
         ) => {
           await this.protectedNotice(readHostedLaneCheckout(root));
           const read = await this.overlapAdvice(laneId, capabilities.agentDefaults?.preflight !== 'off');
           const selected = readHostedLaneCheckout(root)?.selection;
           const changeBase = selected ? laneChangeBase(root, selected) : undefined;
-          const advice =
+          const advice: typeof read & { changedPaths?: SavedChangedPaths | undefined } =
             capabilities.agentDefaults?.preflight !== 'off' && selected?.laneId === laneId
               ? {
                   ...read,
@@ -1797,6 +1799,7 @@ export class HostedAgentTransport {
                   ),
                 }
               : read;
+          const main = advice.changedPaths?.mainHead ?? advice.behindMain.head ?? this.knownMain;
           if (advice.changedPaths?.complete) this.protectedPaths(advice.changedPaths.paths);
           // The paths this landing carries, so its check failure can teach the next preflight.
           if (advice.changedPaths?.complete) rememberLandingPaths(root, laneId, advice.changedPaths.paths);
@@ -1840,6 +1843,7 @@ export class HostedAgentTransport {
                   )
               : false,
             journal.get(finishRefusedKey) === 'PREFLIGHT_BUDGET_EXCEEDED',
+            () => beforePreflight?.(main),
           );
           Object.assign(gates, hostedChecks);
           // Weakened-test flags advise (never refuse); a reason line in the message clears them.
@@ -2690,6 +2694,16 @@ export class HostedAgentTransport {
       `The last preflight of this saved head stopped no file for time and left no failed test files to rerun alone; run preflight without "retry": ${hostedRecoveryCommand(root, 'preflight', { laneId })}.`,
     );
     const advice = await readHostedOverlapAdvice(this, laneId, true);
+    if (command.run && advice.overlaps?.head && advice.overlaps.head !== marker.selection.head) {
+      const parameters = { message: 'Bring the Lane binding up to date' };
+      const command = hostedRecoveryCommand(root, 'save', parameters);
+      throw new ForgeError(
+        'WORK_STALE',
+        `The hosted Lane's saved head differs from this checkout's. Run ${command}, then rerun preflight.`,
+        undefined,
+        { next: { action: 'save', ...parameters }, command },
+      );
+    }
     // A resolution Lane a sync made is measured from the head the sync merged in (593fc2d7).
     const base = laneChangeBase(root, marker.selection);
     const changed = await savedChangedPaths(
@@ -2698,6 +2712,16 @@ export class HostedAgentTransport {
       advice.changedPaths,
       base !== marker.selection.base.head,
     );
+    // Standalone resolution preflight has an explicit target: the main merged into the draft.
+    // Inline land still compares its source with the main it is about to compose on.
+    if (command.run && base === marker.selection.base.head) {
+      const stale = preflightBaseRefusal(
+        root,
+        marker,
+        changed?.mainHead ?? advice.behindMain.head ?? this.knownMain,
+      );
+      if (stale) throw stale;
+    }
     if (changed?.complete) this.protectedPaths(changed.paths);
     const hostedChecks = await this.preflightHostedChecks(root, marker, base, changed);
     if (hostedChecks?.queueProof)
@@ -3231,6 +3255,8 @@ export type HostedAgentSession = {
       queueProof?: import('./hosted-agent-finish.js').QueueProofPreview | undefined;
       dirty?: boolean;
     }) => Promise<void>,
+    /** Called before local preflight runs or a stored result is used. */
+    beforePreflight?: (main: string | undefined) => void,
   ) => Promise<
     Record<string, unknown> & ReturnType<typeof import('./preflight-hosted-checks.js').reportPreflightChecks>
   >;

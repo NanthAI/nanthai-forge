@@ -12,6 +12,7 @@ import { shellQuote } from './shell-quote.js';
 import { ForgeError } from './errors.js';
 import { conflictFinishOptions, type ConflictFinishOptions } from './hosted-conflict-finish-options.js';
 import { cliVerb } from './agent-verbs.js';
+import type { HostedLaneCheckoutMarker } from './hosted-lane-checkout-marker.js';
 
 const pathFor = (root: string) => join(clientCacheRoot(root), 'conflict-paths.json');
 export type ConflictContinuation = {
@@ -139,6 +140,33 @@ export function rememberConflictPaths(
 export function laneChangeBase(root: string, selection: { laneId: string; base: { head: string } }) {
   const merged = context(root, selection.laneId)?.merged;
   return merged && merged.base === selection.base.head ? merged.head : selection.base.head;
+}
+
+/** Ordinary Lane composition adds current main. Stack and early-resolution preflight checks the
+ * Lane's pinned input, whose parent and exact composed checks are managed by the hosted queue. */
+export function preflightBaseRefusal(
+  root: string,
+  marker: HostedLaneCheckoutMarker,
+  main: string | undefined,
+) {
+  const { selection, state } = marker;
+  if (
+    !main ||
+    selection.earlyResolution ||
+    (selection.stack && !selection.stack.detached) ||
+    main === laneChangeBase(root, selection) ||
+    main === selection.head ||
+    state.parents.includes(main)
+  )
+    return;
+  const parameters = { laneId: selection.laneId };
+  const command = `nforge agent ${shellQuote(root)} save --sync ${shellQuote(JSON.stringify(parameters))}`;
+  return new ForgeError(
+    'WORK_STALE',
+    `Main ${main.slice(0, 12)} is newer than this Lane's preflight source. Sync with ${command}, then rerun your command on the updated Lane.`,
+    undefined,
+    { next: { action: 'sync', ...parameters }, command },
+  );
 }
 /** The original Lane this folder's retained resolution was made for, when known. */
 export function inPlaceOrigin(root: string) {

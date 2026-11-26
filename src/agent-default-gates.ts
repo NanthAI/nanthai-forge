@@ -65,6 +65,7 @@ export function finishGates(
   advice: Advice | undefined,
   runRequired: boolean | (() => void) = false,
   replayBudgetRefusal = false,
+  beforePreflight?: () => void,
 ): Record<string, unknown> {
   const advisories: Record<string, unknown> = {};
   if (!defaults) return advisories;
@@ -78,6 +79,7 @@ export function finishGates(
     const sameSource =
       receipt?.laneId === lane.laneId &&
       (receipt.tree && lane.tree ? receipt.tree === lane.tree : receipt.head === lane.head);
+    if (sameSource) beforePreflight?.();
     // A full preflight run of this head: neither static-only nor land's quick head run.
     const fullRun = sameSource && receipt && !receipt.staticOnly && !receipt.quick ? receipt : null;
     const recordRun = (run: PreflightReceipt, reused: boolean) => {
@@ -86,6 +88,7 @@ export function finishGates(
     const preflightRecovery = () =>
       advisories.localPreflight ? { localPreflight: advisories.localPreflight } : {};
     const runLocal: typeof runPreflight = (...args) => {
+      beforePreflight?.();
       const result = runPreflight(...args);
       recordRun(result, false);
       return result;

@@ -65,6 +65,147 @@ async function fixture(t, policy = 'require', reader = common['tests/docs.test.m
   return s;
 }
 
+function acceptMainFile(s) {
+  const previousHead = s.main.head;
+  const state = JSON.parse(s.objects.get(previousHead));
+  const bytes = Buffer.from('New main source\n');
+  const blob = digest(bytes);
+  s.objects.set(blob, bytes);
+  const next = Buffer.from(
+    JSON.stringify({
+      ...state,
+      parents: [previousHead],
+      files: [...state.files, { path: 'main-only.txt', blob, mode: 'file' }],
+    }),
+  );
+  const head = digest(next);
+  s.objects.set(head, next);
+  s.main.head = head;
+  s.main.receipt = { ...s.main.receipt, id: randomUUID(), previousHead };
+  return { path: 'main-only.txt', blob, mode: 'file' };
+}
+
+test('friction f84ba249: an ordinary Lane behind main gets the sync command before local preflight runs', async t => {
+  const s = await fixture(
+    t,
+    'require',
+    `import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+test('validate the README alongside current main', () => {
+  assert.equal(fs.readFileSync(new URL('../README.md', import.meta.url), 'utf8'), 'After\\n');
+  assert.equal(fs.readFileSync(new URL('../main-only.txt', import.meta.url), 'utf8'), 'New main source\\n');
+});`,
+  );
+  const mainFile = acceptMainFile(s);
+  const laneId = s.lane.laneId;
+  const recovery = error => {
+    assert.equal(error.code, 'WORK_STALE');
+    assert.deepEqual(error.recovery.next, { action: 'sync', laneId });
+    assert.equal(
+      error.recovery.command,
+      `nforge agent '${realpathSync(s.root)}' save --sync '{"laneId":"${laneId}"}'`,
+    );
+    assert.equal(readPreflightReceipt(s.root, laneId), null);
+    return true;
+  };
+  await assert.rejects(s.transport().dispatch('preflight', { run: true }), recovery);
+  for (const options of [{}, { after: randomUUID() }])
+    await assert.rejects(
+      submitHostedLand(
+        s.root,
+        { message: 'Validate the updated source', ...options },
+        s.address,
+        s.transport(),
+      ),
+      recovery,
+    );
+  assert(!s.calls.some(call => call.name === 'projectHostedCompose:prepare'));
+
+  // Return the source worker's merged result to the normal sync and checkout apply paths.
+  const mutate = s.exchange.client.mutation;
+  s.exchange.client.mutation = async (ref, args) => {
+    const response = await mutate(ref, args);
+    if (getFunctionName(ref) !== 'projectHostedSyncJobs:submit') return response;
+    const from = structuredClone(s.lane);
+    const state = JSON.parse(s.objects.get(from.head));
+    const bytes = Buffer.from(
+      JSON.stringify({ ...state, parents: [s.main.head, from.head], files: [...state.files, mainFile] }),
+    );
+    const head = digest(bytes);
+    s.objects.set(head, bytes);
+    Object.assign(s.lane, {
+      head,
+      version: from.version + 1,
+      sourceVersion: from.sourceVersion + 1,
+      base: { head: s.main.head, receiptId: s.main.receipt.id },
+    });
+    const reply = JSON.parse(response);
+    Object.assign(reply.outcome.result, {
+      status: 'merged',
+      lane: s.lane,
+      from: {
+        laneId,
+        head: from.head,
+        version: from.version,
+        sourceVersion: from.sourceVersion,
+      },
+    });
+    return JSON.stringify(reply);
+  };
+  await s.transport().dispatch('sync', { laneId });
+  const preflight = await s.transport().dispatch('preflight', { run: true });
+  assert.equal(preflight.result.outcome, 'passed');
+  assert.equal(preflight.result.receipt.head, s.lane.head);
+});
+
+test('friction f84ba249: a main move after preflight cannot submit against the new base', async t => {
+  const s = await fixture(t);
+  const query = s.exchange.client.query;
+  s.exchange.client.query = async (ref, args) => {
+    if (
+      getFunctionName(ref) === 'projectHostedChannels:current' &&
+      s.main.head === s.lane.base.head &&
+      readPreflightReceipt(s.root, s.lane.laneId)?.passed
+    )
+      acceptMainFile(s);
+    return query(ref, args);
+  };
+  await assert.rejects(
+    submitHostedLand(s.root, { message: 'Main moved' }, s.address, s.transport()),
+    error => error.code === 'WORK_STALE' && error.recovery.next.action === 'sync',
+  );
+  assert(readPreflightReceipt(s.root, s.lane.laneId)?.passed);
+  assert(!s.calls.some(call => call.name === 'projectHostedCompose:prepare'));
+  const from = s.calls.length;
+  await assert.rejects(
+    submitHostedLand(s.root, { message: 'Retry after main moved' }, s.address, s.transport()),
+    error => error.code === 'WORK_STALE' && error.recovery.next.action === 'sync',
+  );
+  assert(!s.calls.slice(from).some(call => call.name === 'projectHostedComposeSelection:page'));
+});
+
+test('friction f84ba249: a saved Lane head from another checkout stops preflight before tests', async t => {
+  const s = await fixture(t);
+  const query = s.exchange.client.query;
+  s.exchange.client.query = (ref, args) =>
+    getFunctionName(ref) === 'projectHostedOverlaps:read'
+      ? Promise.resolve(
+          JSON.stringify({
+            overlaps: { head: digest('other saved head') },
+            behindMain: { head: s.main.head, commits: 0, conflictingPaths: [], more: 0, coverage: 'hosted' },
+            changedPaths: { paths: ['README.md'], complete: true },
+          }),
+        )
+      : query(ref, args);
+  await assert.rejects(s.transport().dispatch('preflight', { run: true }), error => {
+    assert.equal(error.code, 'WORK_STALE');
+    assert.deepEqual(error.recovery.next, { action: 'save', message: 'Bring the Lane binding up to date' });
+    return true;
+  });
+  assert.equal(readPreflightReceipt(s.root, s.lane.laneId), null);
+});
+
 test('30c48b36: standalone preflight tests the edited workspace after queuing and leaves saved evidence alone', async t => {
   const s = await fixture(
     t,

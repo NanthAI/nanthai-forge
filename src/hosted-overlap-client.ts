@@ -11,6 +11,7 @@ import { exactConflictsSchema } from './hosted-conflict-notice.js';
 import { readBoardCompatible, type boardReadPosition } from './board-local.js';
 
 const advice = z.object({
+  overlaps: z.object({ head: z.string().optional() }).optional(),
   behindMain: z.object({
     head: z.string().optional(),
     baseHead: z.string().optional(),
@@ -57,7 +58,7 @@ export async function readHostedOverlapAdvice(
   board?: ReturnType<typeof boardReadPosition>,
   /** Declared scope of a fresh Lane (start scope.paths); sent only to servers with overlap-scope. */
   scope?: string[],
-) {
+): Promise<z.infer<typeof advice>> {
   try {
     const read = (cursor = board) =>
       transport.query('projectHostedOverlaps:read', {
