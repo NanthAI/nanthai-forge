@@ -791,6 +791,13 @@ with a provider-outage reason. The same lookup can settle an already-bound first
 that failed before Forge took its plan, including when its completion webhook was lost.
 Healthy startup cancels that deadline in its existing write. There are no project scans, active-run pollers, or idle scheduled functions.
 
+Authorized shard preflight records when a shard began and a bounded wait
+deadline. The supervisor uses the runner's `FORGE_CHECK_TIMEOUT_MINUTES` when
+exposed to it, or the workflow's 90-minute default. If the landing alarm fires within that window, the wait
+reports checking and counts that start as progress. Forge moves the one-shot
+alarm to the recorded deadline so it can report an expired check or recover a
+lost terminal wake. The alarm does no polling.
+
 When a CI adapter reports a failed run and Forge's expected job plan is missing, the result is check
 infrastructure (runner setup, OIDC or Forge's job API), not runner capacity and not the code: it
 settles `runner-unavailable` (so the same platform retry and budget apply) with the reason `Check
@@ -822,7 +829,7 @@ Each descriptor batch costs two Convex calls regardless of download concurrency.
 A 6,000-file full fetch uses three source reads (one manifest read and two file
 batches), down from sixteen; transaction headroom can split sparse or large
 metadata batches further. Recipe metadata and leaves add their own bounded reads. Grants expire after five minutes. GitHub/R2
-requests are separate. Each job has one pre-spawn query with no nested call or
+requests are separate. Each job has one pre-spawn authorization with no nested call or
 polling. Timing history adds one indexed planning read and one terminal read/write;
 capability bootstrap adds two calls/check and initially at most two indexed run
 reads. Plan retries may leave unused small metadata objects; retention is unchanged.
@@ -1285,7 +1292,7 @@ no shard can finish before its slowest file, so more shards past that point only
 runner minutes. The count is also capped by Convex calls per check: jobs times calls per
 job stays within 48 (eight jobs at six calls, the cost before results carried their log).
 A server advertising `results.inlineLog` takes the bounded log inside the result call,
-so a job makes four calls (preflight query, result action, output and result
+so a job makes four calls (preflight, result action, output and result
 mutations) and a check may use twelve jobs; older servers keep six calls and eight jobs.
 A result whose request would crowd the 512 KiB metadata window keeps the separate
 output upload. The runner setting `concurrencyBudget` includes the static job and
@@ -1615,19 +1622,18 @@ The new Actions runner checks live permission before spawning tests and prints
 The existing OIDC planning session supplies a run-specific signed preflight ticket
 in the `X-Forge-Actions-Preflight` response header, leaving the oldest session JSON
 shape unchanged. The fixed supervisor retains it beside the plan, outside the
-project command environment. A shard calls the read-only
-`projectHostedActionsPreflight:check` query once before spawn. This is one Convex
-function invocation with no HTTP action, nested function, refresh or polling. It
-verifies the ticket, current actor/authority epoch and exact execution/fence, then
-returns only active/cancelled. The ticket uses a separate signature domain and
-grants no source access, result publication, provider IO or signing authority. Its
-lifetime inherits the original run; it introduces no additional expiry or user step.
+project command environment. A shard calls preflight once before spawn. The
+`session.shardStart` capability selects the mutation that records shard startup.
+Runners with only `session.preflight` use the read-only query. The mutation
+authenticates the supervisor ticket before reading project data. Both paths
+then verify current actor and authority epoch, and exact execution and fence. Both
+return active or cancelled in one Convex call with no HTTP action, nested call,
+refresh or polling.
 
-The `session.preflight` capability gates this query and all its request fields.
-A new runner on an old server uses the original saved-plan path and existing
-result refusal points, sending no unsupported query or new session fields. An old
-runner on a new server ignores the header and retains its existing 403 stop behavior.
-Deploy the backend before publishing the new runner modules and supervisor script.
+The ticket inherits the original run's lifetime and permits preflight and one
+timestamp per planned shard. Source access, result publication, provider IO and signing
+authority use their existing independent authorizations. Runners without live
+preflight support use the existing result refusal points.
 
 Direct App-backed Actions cancellation schedules one provider cancel action. It
 uses the existing project/repository binding and an installation token requesting

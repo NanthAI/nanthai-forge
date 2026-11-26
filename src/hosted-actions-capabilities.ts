@@ -4,6 +4,7 @@ import type { z } from 'zod';
 import type { directCommandSchema } from './hosted-actions-direct.js';
 import { invariant } from './errors.js';
 export const actionsPreflightCapability = 'session.preflight';
+export const actionsShardStartCapability = 'session.shardStart';
 /** Larger source descriptor windows, with a transaction-bounded prefix reply. */
 export const actionsSourceBatchCapability = 'source.batch';
 /** Trusted recipe leaves arrive in the same current-access descriptor window. */
@@ -47,6 +48,7 @@ export const hostedActionsCapabilities = [
   actionsSourceStateCapability,
   actionsSourceStateV2Capability,
   actionsPreflightCapability,
+  actionsShardStartCapability,
   actionsInlineLogCapability,
   actionsPoolCapability,
   actionsToolchainsCapability,
@@ -58,7 +60,7 @@ export const hostedActionsCapabilities = [
   'results.packed',
 ] as const;
 /** Batched jobs use only their existing preflight; result collection is fixed work per run.
- * Legacy Convex function calls per Actions job: preflight query, then either output
+ * Legacy Convex function calls per Actions job: one preflight, then either output
  * (action + mutation) and result (action + session + result mutations), or one
  * result action with its output and result mutations. */
 export const actionsJobCalls = (capabilities: readonly string[]) =>

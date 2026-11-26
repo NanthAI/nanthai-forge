@@ -28,6 +28,7 @@ import { cancelHostedLanding } from './projectHostedLandingCancel';
 import { holdsLandingOrder } from './projectHostedLandingOrder';
 import { releaseNoCarryWaiter } from './projectHostedLandingNoCarry';
 import { repairStalledCheck } from './projectHostedCheckReconcile';
+import { retainShardStart } from './projectHostedLandingCheckProgress';
 import { redriveLanding } from './projectHostedLandingRedrive';
 import { alertExhausted, exhaustLanding, exhaustedReason } from './projectHostedLandingExhaust';
 
@@ -173,6 +174,25 @@ export async function raiseLandingAlarm(ctx: MutationCtx, input: Stalled, now = 
     return null;
   }
   const token = { ...input, lastProgressAt: stall.lastProgressAt };
+  const checking = canonical?.phase === 'checking' && canonical.runId;
+  if (checking) {
+    // Reuse the check recovery read before publishing a stall. The existing report
+    // recovery still catches a lost completion even while a live shard owns the wait.
+    const check = await repairStalledCheck(ctx, { projectId: input.projectId, runId: checking }, now);
+    if (typeof check === 'object') {
+      const next = {
+        ...state,
+        version: state.version + 1,
+        observation: { ...state.observation },
+      };
+      retainShardStart(next, check.at);
+      delete next.observation.stall;
+      await writeLanding(ctx, canonical, next, canonical.runnable, true, row.alarm?.taskId, {
+        checkAlarmAt: check.until,
+      });
+      return null;
+    }
+  }
   // Only a Ready entry's repair replays settlement IO that can crash (2026-10-30
   // 14:20): it runs as its own task. Queued and checking repairs stay inline, as
   // before, so a batch waiting on slow CI costs one call per member.
@@ -195,7 +215,9 @@ export async function raiseLandingAlarm(ctx: MutationCtx, input: Stalled, now = 
   if (canonical) {
     // Consume the fired alarm in the progress write, rather than patching this row twice.
     await writeLanding(ctx, canonical, next, canonical.runnable, true, row.alarm?.taskId);
-    const redriven = inline ? await repairStalledLanding(ctx, { ...token, mode: 'alarm' }, now) : null;
+    const redriven = inline
+      ? await repairStalledLanding(ctx, { ...token, mode: 'alarm' }, now, Boolean(checking))
+      : null;
     // A live check keeps its own run lease and execution watchdog: no round follows.
     // A replayed driver (lost check wake or queue step after the run ended) has no
     // such owner, so one round sees the replay take or ends the entry (d910db6b).
@@ -256,6 +278,7 @@ export async function repairStalledLanding(
   ctx: MutationCtx,
   input: Stalled & { mode: RepairMode; reason?: string },
   now = Date.now(),
+  checkObserved = false,
 ) {
   const canonical = await landingRow(ctx, input);
   if (!canonical) {
@@ -291,7 +314,7 @@ export async function repairStalledLanding(
   }
   // A lost dispatch or a lost collection from an acknowledged execution has
   // no other owner until the watchdog (a7de3a93, cd63bbe9).
-  if (canonical.phase === 'checking' && canonical.runId)
+  if (!checkObserved && canonical.phase === 'checking' && canonical.runId)
     await repairStalledCheck(ctx, { projectId: input.projectId, runId: canonical.runId }, now);
   if (canonical.orderWait && canonical.phase === 'ready' && !(await aheadHoldsOrder(ctx, canonical))) {
     const finish = await finishRow(ctx, input);

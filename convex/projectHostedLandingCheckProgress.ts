@@ -7,10 +7,22 @@ import type { HostedLandingState } from '../src/hosted-landing';
 import type { HostedCheckRun } from '../src/hosted-check';
 import { digest } from '../src/state/hash';
 import { canonicalPayload } from '../src/hosted-source-operation';
+import { hostedLandingProgressAt } from '../src/hosted-landing-stall';
+
+export function retainShardStart(state: HostedLandingState, startedAt: number | undefined) {
+  if (startedAt === undefined || startedAt <= Date.parse(hostedLandingProgressAt(state))) return;
+  state.timing = { submittedAt: state.at, ...state.timing, ciProgressAt: new Date(startedAt).toISOString() };
+}
 
 /** Solo and shared runs retain the same observed progress, without changing
  * immutable attempt pins or treating provider activity as acceptance evidence. */
-export function retainCheckProgress(state: HostedLandingState, run: HostedCheckRun, now: number) {
+export function retainCheckProgress(
+  state: HostedLandingState,
+  run: HostedCheckRun,
+  now: number,
+  shardStartedAt?: number,
+) {
+  retainShardStart(state, shardStartedAt);
   const progress = digest(
     canonicalPayload({
       id: run.id,

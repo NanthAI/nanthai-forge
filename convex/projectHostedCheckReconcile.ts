@@ -26,13 +26,28 @@ export async function repairStalledCheck(
   ctx: MutationCtx,
   input: { projectId: Id<'hostedProjects'>; runId: string },
   now = Date.now(),
-): Promise<'none' | 'lookup' | 'interrupted' | 'reports'> {
+) {
   const exists = await ctx.db
     .query('projectHostedCheckRuns')
     .withIndex('by_project_and_run', q => q.eq('projectId', input.projectId).eq('runId', input.runId))
     .unique();
   if (!exists) return 'none';
   const observed = hostedCheckRunSchema.parse(JSON.parse(exists.value));
+  const activity = exists.shardActivity;
+  // A quiet job owns its wait through the timeout of the observed shard.
+  const live =
+    activity &&
+    observed.status === 'running' &&
+    !observed.cancelRequested &&
+    directActions(observed) &&
+    observed.executionId &&
+    observed.actions?.watchdog &&
+    observed.actions.fence === observed.fence &&
+    activity.at >= observed.actions.reservedAt &&
+    activity.at <= now &&
+    now < activity.until
+      ? activity
+      : null;
   // A bound execution can finish without delivering its collector or webhook.
   // A provider verdict alone cannot settle it: recover the prepared report inbox.
   const reports =
@@ -50,7 +65,7 @@ export async function repairStalledCheck(
     (!reports && !unacknowledgedDispatch(observed)) ||
     isMachineRunner(observed.configuration)
   )
-    return 'none';
+    return live ?? 'none';
   let selected: Awaited<ReturnType<typeof writableHostedCheck>>;
   try {
     // Authority moved: the new authority's own paths own this run.
@@ -71,7 +86,7 @@ export async function repairStalledCheck(
       { ...input, fence: run.fence, attempt: 0, stallRepair: true },
     );
     await ctx.db.patch(row._id, { reportRecovery: recovery });
-    return 'reports';
+    return live ?? 'reports';
   }
   const since = run.actions?.reservedAt ?? Date.parse(run.at);
   if (now - since < directActionsAckMs) return 'none';

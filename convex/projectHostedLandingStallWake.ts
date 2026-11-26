@@ -20,6 +20,7 @@ export async function landingAlarmPatch(
   state: HostedLandingState,
   consumedAlarm?: Id<'_scheduled_functions'>,
   canonicalRow?: Doc<'projectHostedLandingRequests'>,
+  notBefore?: number,
 ) {
   const projectId = state.projectId as Id<'hostedProjects'>;
   const canonical =
@@ -52,11 +53,12 @@ export async function landingAlarmPatch(
   // Same progress time: keep its alarm, or the supervisor round that follows a
   // raised stall (19328518); writes that make no progress must not cancel it.
   const consumed = row.alarm?.taskId === consumedAlarm && consumedAlarm !== undefined;
-  if (live && row.alarm?.lastProgressAt === at) return consumed ? { id: row._id, alarm: null } : null;
+  if (live && row.alarm?.lastProgressAt === at && (!consumed || notBefore === undefined))
+    return consumed ? { id: row._id, alarm: null } : null;
   if (row.alarm && !consumed) await cancelPendingTask(ctx, row.alarm.taskId);
   if (!pending) return row.alarm ? { id: row._id, alarm: null } : null;
   const taskId = await ctx.scheduler.runAfter(
-    Math.max(0, Date.parse(at) + LANDING_STALL_MS - Date.now()),
+    Math.max(0, Math.max(notBefore ?? 0, Date.parse(at) + LANDING_STALL_MS) - Date.now()),
     makeFunctionReference<'mutation'>('projectHostedLandingStall:alarm'),
     { projectId, submissionId: state.id, lastProgressAt: at },
   );

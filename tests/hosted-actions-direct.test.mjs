@@ -8,7 +8,7 @@ import { getFunctionName } from 'convex/server';
 import { checksFixture, code } from './hosted-checks-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { verifyActionsOidc, validateActionsClaims, actionsIssuer } from '../dist/github-actions-oidc.js';
-import { actionsPreflightSignature } from '../dist/hosted-actions-preflight.js';
+import { actionsPreflightBinding, actionsPreflightSignature } from '../dist/hosted-actions-preflight.js';
 import { hostedActionsCapabilities } from '../dist/hosted-actions-capabilities.js';
 import { hostedCheckRunSchema } from '../dist/hosted-check.js';
 import { hostedActionsRuntime } from '../dist/hosted-actions.js';
@@ -2893,6 +2893,40 @@ test('single-call preflight rechecks cancellation, authority and exact run/fence
   await assert.rejects(s.call(preflight, 'check', input), code('PROJECT_UNAVAILABLE'));
 });
 
+test('shard preflight records only the first authenticated start for the current dispatch', async t => {
+  const s = await fixture(t);
+  await s.bind();
+  await s.prepare();
+  const run = await s.status(s.run.id);
+  const input = {
+    ...s.id,
+    fence: run.fence,
+    signature: actionsPreflightSignature(run, 'synthetic-check-key'),
+    shard: '0',
+    timeoutMinutes: 90,
+    binding: JSON.stringify(actionsPreflightBinding(run)),
+  };
+  const stored = () => [...s.tables.projectHostedCheckRuns.values()].find(row => row.runId === run.id);
+  for (const change of [{ signature: '0'.repeat(64) }, { fence: run.fence + 1 }, { binding: '{}' }])
+    await assert.rejects(s.call(preflight, 'start', { ...input, ...change }), code('PROJECT_UNAVAILABLE'));
+  await assert.rejects(s.call(preflight, 'start', { ...input, shard: '99' }), code('EVIDENCE_CHANGED'));
+  assert.equal(stored().shardActivity, undefined);
+  const supervisor = {
+    _handler: ctx => preflight.start._handler({ ...ctx, auth: { getUserIdentity: async () => null } }, input),
+  };
+  assert.deepEqual(await s.transaction('proofOnlyShardStart', supervisor, {}), { status: 'active' });
+  const first = stored().shardActivity;
+  assert.deepEqual(first.started, [0]);
+  assert.equal(stored().shardStartedAt, first.at);
+  assert.deepEqual(await s.call(preflight, 'start', input), { status: 'active' });
+  assert.deepEqual(stored().shardActivity, first);
+  await s.cancel(run.id);
+  assert.deepEqual(await s.call(preflight, 'start', input), { status: 'cancelled' });
+  assert.deepEqual(stored().shardActivity, first);
+  s.patch('hostedProjects', s.projectId, { sourceAuthority: { mode: 'server', epoch: 2 } });
+  await assert.rejects(s.call(preflight, 'start', input), code('SOURCE_AUTHORITY_CHANGED'));
+});
+
 test('existing OIDC session issues preflight ticket in a header without changing oldest JSON or adding calls', async t => {
   const s = await fixture(t);
   await s.bind();
@@ -3865,7 +3899,7 @@ test('OIDC key refresh is shared, expires after ten minutes and unknown keys can
   assert.equal(requestCalls.length, 3);
 });
 
-test('keep the run F2: the first session after the plan stamps the shard start once, only with the switch on', async t => {
+test('planning and optional source sessions never stamp a check shard start', async t => {
   for (const on of [false, true]) {
     variables(t, { FORGE_QUEUE_KEEP_THE_RUN: on ? '1' : '0' });
     const s = await fixture(t);
@@ -3875,14 +3909,8 @@ test('keep the run F2: the first session after the plan stamps the shard start o
     assert.equal(row().shardStartedAt, undefined, "the plan job's own session is runner wait, not progress");
     await s.prepare();
     await s.call(sessions, 'session', s.input());
-    const first = row().shardStartedAt;
-    if (!on) {
-      assert.equal(first, undefined, 'switch off: no new write');
-      continue;
-    }
-    assert.equal(typeof first, 'number', 'the first shard session stamps the start');
-    await s.call(sessions, 'session', s.input());
-    assert.equal(row().shardStartedAt, first, 'one write per run');
+    await s.call(sessions, 'session', { ...s.input(), submodules: true });
+    assert.equal(row().shardStartedAt, undefined, 'only shard preflight records job activity');
   }
 });
 

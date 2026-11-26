@@ -189,7 +189,7 @@ export async function writeHostedCheck(
   mainMoveDecision?: Doc<'projectHostedCheckRuns'>['mainMoveDecision'],
   evidence?: Pick<
     Partial<Doc<'projectHostedCheckRuns'>>,
-    'timingHistoryGeneration' | 'machineSelection' | 'gateSelection'
+    'timingHistoryGeneration' | 'machineSelection' | 'gateSelection' | 'plannedAt'
   >,
 ) {
   const providerDelayChanged = run.failureReason?.startsWith('provider-delayed:') === true;

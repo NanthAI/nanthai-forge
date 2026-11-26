@@ -75,7 +75,7 @@ async function prepareLandingCheckOnce(
         projectId: claim.projectId,
         runId: batch.runId,
       });
-      retainCheckProgress(state, run, now);
+      retainCheckProgress(state, run, now, runRow.shardActivity?.at);
       const replay = checkReplay(run);
       if (hostedCheckTerminal(run)) {
         const semantic = semanticVerdict(

@@ -85,7 +85,7 @@ export async function batchesFixture(
       f.rawChecks.definition.digest,
     );
   if (runner) {
-    const configuration = { ...runner, runtime: f.rawChecks.runner.runtime };
+    const configuration = { runtime: f.rawChecks.runner.runtime, ...runner };
     f.rawChecks.configuration = await f.rawChecks.configure(
       { kind: 'runner', configuration },
       f.rawChecks.configuration.digest,

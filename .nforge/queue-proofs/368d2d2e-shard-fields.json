@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "thread:delegated-task:command%3Amcp%3Ab27c0cfd-b591-4fb5-8b75-2d736a541802%3Adelegate-task%3Aaa64d3ba-f391-4a29-b9c7-10b419197e80",
+  "review": {
+    "model": "gemini-4-neon",
+    "session": "thread:delegated-task:command%3Amcp%3A780cb442-cf5a-4020-83be-951188feac50%3Adelegate-task%3Abc61a4f1-24fe-4086-991b-84fd5d3a9fde",
+    "receipt": "f4de516b-0316-421e-9e1b-6c31503f49d0"
+  },
+  "changes": {
+    "convex/projectHostedCheckFields.ts": "ed985ee3968652137d7f8050d0bf2e29a4dbf38d3d30c3732fa062b8accc84f4"
+  },
+  "replay": {
+    "incident": "fa2c1383",
+    "test": "incident fa2c1383 wiring: the guards fail on the incident, stranded followers, a parked kept run, a stale-base restart and a dropped conflict",
+    "receipt": "f4de516b-0316-421e-9e1b-6c31503f49d0"
+  },
+  "exercised": {
+    "convex/projectHostedCheckFields.ts": {
+      "executed": [
+        "hostedCheckTables"
+      ],
+      "digest": "cb87dde1334f1175d80da342d2a1870b3b227e7fd4575815ffb8b433698e056c",
+      "units": [
+        [
+          "checkCause",
+          "951898d2c83b24b33455ecfb98acea9ce436ed50e52d985a280b89061f7ab66d"
+        ],
+        [
+          "checkGate",
+          "ffd015ffb9e883b99c8ce3a2a2e2b5310c7882382b94343b28baf37b1e6ef43a"
+        ],
+        [
+          "defineTable",
+          "b47c67ba5772cdb88aa4a6b681e8b5447b2dc09879b915898b6f088274e1b34b"
+        ],
+        [
+          "hostedCheckTables",
+          "dff2f47729ffb049a8c209f839f23510693c9d14aa69ac0f37693980cfa72d5a"
+        ],
+        [
+          "retainedCheckGate",
+          "522fc075ac39c5fdbf41e5c5447f315221c91361c20705d7fbab5a8dabd14e32"
+        ],
+        [
+          "setting",
+          "e4b5989ffb335184ea7cde43b0da61ff7b76bec56bf789d75a19ae3b8626620e"
+        ],
+        [
+          "v",
+          "c9b23930c9b094848cdb5f563a16f0a2f497fc28d7ea9a82afca6bc52741e95f"
+        ]
+      ],
+      "shell": "187707ea01849a4302b15cd7fbeae8042254ebbe610649249aca41f5a3def73d"
+    }
+  }
+}

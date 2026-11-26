@@ -264,8 +264,11 @@ export async function advanceLandingQueue(ctx: MutationCtx, claim: LandingClaim,
       };
     } else if (attempt.check) {
       const check = attempt.check;
-      const { run } = await loadHostedCheck(ctx, { projectId: claim.projectId, runId: check.runId });
-      retainCheckProgress(state, run, now);
+      const { row: runRow, run } = await loadHostedCheck(ctx, {
+        projectId: claim.projectId,
+        runId: check.runId,
+      });
+      retainCheckProgress(state, run, now, runRow.shardActivity?.at);
       replay = checkReplay(run);
       // An environment end (Item 0d14c456) counts toward the hold; failure path only, switch on.
       const environment = reviewing ? null : await environmentEndOf(ctx, claim.projectId, run);

@@ -29,6 +29,7 @@ import {
   actionsSourceBatchCapability,
 } from '../dist/hosted-actions-capabilities.js';
 import { z } from 'zod';
+import { actionsPreflightBinding } from '../dist/hosted-actions-preflight.js';
 import { ConvexHttpClient } from 'convex/browser';
 import { ActionsJobClient } from '../dist/hosted-actions-job-client.js';
 import {
@@ -222,16 +223,28 @@ function fixture(
       traffic.active--;
       return new Response(objects.get(String(url).split('/').at(-1)));
     }
-    if (url === 'https://convex.invalid/api/query') {
+    if (url === 'https://convex.invalid/api/query' || url === 'https://convex.invalid/api/mutation') {
       assert(capabilities?.includes(actionsPreflightCapability), 'old servers receive no new query');
       const body = JSON.parse(init.body);
-      assert.equal(body.path, 'projectHostedActionsPreflight:check');
+      assert.equal(
+        body.path,
+        url.endsWith('/mutation')
+          ? 'projectHostedActionsPreflight:start'
+          : 'projectHostedActionsPreflight:check',
+      );
       assert.deepEqual(body.args, [
         {
           projectId: run.projectId,
           runId: run.id,
           fence: run.fence,
           signature: 'a'.repeat(64),
+          ...(url.endsWith('/mutation')
+            ? {
+                shard: body.args[0].shard,
+                timeoutMinutes: 90,
+                binding: JSON.stringify(actionsPreflightBinding(run)),
+              }
+            : {}),
         },
       ]);
       calls.push({ kind: 'preflight' });
@@ -2609,7 +2622,7 @@ test('a one-leaf Actions recipe reads the signed raw representation even when lo
 });
 
 for (const flaky of [false, true])
-  test(`600 file reports (${flaky ? 'one flake' : 'clean'}) post one result and one pre-spawn query`, async t => {
+  test(`600 file reports (${flaky ? 'one flake' : 'clean'}) post one result and one pre-spawn call`, async t => {
     const s = fixture(t),
       candidate = join(s.directory, 'candidate');
     const prepared = await prepareActionsJob(s.client, candidate, join(s.directory, 'objects'));
@@ -3518,7 +3531,7 @@ test('cancel after planning exits neutrally before spawning a shard and accepts 
   assert.equal(s.calls.filter(command => command.kind === 'result').length, 0);
 });
 
-test('preflight uses one query with no nested invocation, OIDC refresh or timer; absent capability uses the oldest path', async t => {
+test('preflight uses one call with no OIDC refresh or timer and falls back on older servers', async t => {
   const bootstrap = fixture(t);
   await bootstrap.client.preflight();
   assert.equal(bootstrap.calls.filter(command => command.kind === 'session').length, 1);
@@ -3527,12 +3540,12 @@ test('preflight uses one query with no nested invocation, OIDC refresh or timer;
     0,
     'fresh bootstrap already checked cancellation',
   );
-  for (const capabilities of [[], hostedActionsCapabilities]) {
+  for (const capabilities of [[], [actionsPreflightCapability], hostedActionsCapabilities]) {
     const s = fixture(t, { capabilities });
     await prepareActionsJob(s.client, join(s.directory, 'candidate'), join(s.directory, 'objects'));
     const before = s.calls.length,
       oidc = s.traffic.oidc;
-    await s.client.preflight();
+    await s.client.preflight({ shard: 'static', timeoutMinutes: 90 });
     assert.equal(s.calls.length - before, capabilities.includes(actionsPreflightCapability) ? 1 : 0);
     assert.equal(s.traffic.oidc, oidc);
   }

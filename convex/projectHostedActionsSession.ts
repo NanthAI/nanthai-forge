@@ -22,7 +22,6 @@ import { hostedActionsCapabilities } from '../src/hosted-actions-capabilities';
 import { latestSourcePack } from './projectSourcePackStore';
 import { hostedTimingHistory } from './projectHostedTestTimings';
 import { submoduleAllowListSchema, type SubmoduleAllow } from '../src/submodule-allowlist';
-import { keepTheRunOn } from './projectHostedKeepSwitch';
 import { runnerTokenScope } from './githubBindingAccess';
 export const sessionArgs = {
   projectId: v.id('hostedProjects'),
@@ -147,12 +146,7 @@ export const session = internalMutation({
   // JSON text (Issue 0c457ae4): a finished run's reports are keyed by test file.
   returns: v.string(),
   handler: async (ctx, input) => {
-    const { row, run, project } = await actionsSession(ctx, input);
-    // Keep the run (fa2c1383, review 563c595b F2): the plan job opens its sessions before the plan
-    // exists, so the first session after it is the first test shard's runner. One write per run, and
-    // only with the switch on: the keep rule counts progress from here, never runner wait.
-    if (keepTheRunOn() && run.plan && row.shardStartedAt === undefined)
-      await ctx.db.patch(row._id, { shardStartedAt: Date.now() });
+    const { run, project } = await actionsSession(ctx, input);
     if (input.submodules)
       return JSON.stringify({
         run,

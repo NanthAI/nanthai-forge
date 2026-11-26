@@ -177,7 +177,9 @@ async function executeActiveActionsJob(
   // The plan artifact is a source pin, never a live execution permission. The pins-first gate runs
   // in the planning job right after the plan call, so it reuses that run and makes no Forge call
   // unless a pin fails; it rechecks authority before it reports (below).
-  const run = gate ? pinsGateRun(client) : await client.preflight();
+  const timeout = Number(process.env.FORGE_CHECK_TIMEOUT_MINUTES);
+  const timeoutMinutes = Number.isFinite(timeout) && timeout > 0 ? timeout : 90;
+  const run = gate ? pinsGateRun(client) : await client.preflight({ shard, timeoutMinutes });
   // Nothing after this point reads the runner's job tokens from the environment (Issue 3b67363d).
   client.holdRunnerTokens();
   lap('preflightMs');

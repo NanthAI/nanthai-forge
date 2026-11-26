@@ -13,6 +13,13 @@ import { finishFixture, desired } from './hosted-finish-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { policyPreset } from '../dist/autonomy-policy.js';
 import { LANDING_STALL_MS } from '../dist/landing-stall.js';
+import { hostedActionsRuntime } from '../dist/hosted-actions.js';
+import { actionsIssuer } from '../dist/github-actions-oidc.js';
+import { checkPin } from '../dist/hosted-check.js';
+import { savePin } from '../dist/hosted-save.js';
+import { ActionsJobClient } from '../dist/hosted-actions-job-client.js';
+import { actionsPreflightSignature } from '../dist/hosted-actions-preflight.js';
+import { hostedActionsCapabilities } from '../dist/hosted-actions-capabilities.js';
 const landingDriver = await import(moduleUrl('../convex/projectHostedLandingDriver.ts'));
 const control = await import(moduleUrl('../convex/projectHostedLandingControl.ts'));
 const prior = Object.fromEntries(Object.keys(synthetic).map(k => [k, process.env[k]]));
@@ -310,6 +317,228 @@ test('incident replay 2026-10-26 11:16/12:2x: a lost check callback is replayed 
   assert(
     landedAt - lostAt <= LANDING_STALL_MS + 5 * 60_000,
     `resumed ${(landedAt - lostAt) / 60_000} min later`,
+  );
+});
+
+async function browserShardLanding(t, { pickedUpLate, cohort, admissionCheck, planLate, end }) {
+  const direct = await import(moduleUrl('../convex/projectHostedActionsDirect.ts'));
+  const sessions = await import(moduleUrl('../convex/projectHostedActionsSession.ts'));
+  const plans = await import(moduleUrl('../convex/projectHostedActionsPlan.ts'));
+  const preflight = await import(moduleUrl('../convex/projectHostedActionsPreflight.ts'));
+  const feed = await import(moduleUrl('../convex/projectFeedWait.ts'));
+  const repository = 'synthetic/project';
+  const audience = 'https://forge.example';
+  const keyMaterial = 'synthetic-check-key';
+  for (const [key, value] of Object.entries({
+    CONVEX_SITE_URL: audience,
+    FORGE_GITHUB_REPO_BINDINGS: `hostedProjects-1=${repository}`,
+    FORGE_HOSTED_CHECK_KEY_SYNTHETIC: keyMaterial,
+  })) {
+    const saved = process.env[key];
+    process.env[key] = value;
+    t.after(() => {
+      if (saved === undefined) delete process.env[key];
+      else process.env[key] = saved;
+    });
+  }
+  const f = await batchesFixture(t, {
+    count: cohort ? 2 : 1,
+    batching: Boolean(cohort || admissionCheck),
+    admissionCheck,
+    requestCheck: !cohort && !admissionCheck,
+    runner: {
+      provider: 'github-actions',
+      repository,
+      runsOn: 'ubuntu-latest',
+      runtime: hostedActionsRuntime,
+      environmentFingerprint: 'd'.repeat(64),
+    },
+  });
+  const [{ state }] = f.entries;
+  const row = () => rowOf(f, state.id);
+  for (let tick = 0; !row()?.runId; tick++) {
+    assert(tick < 100, 'the landing binds its check');
+    await f.execute(f.pending()[0]);
+  }
+  const id = { projectId: f.projectId, runId: row().runId };
+  if (admissionCheck) assert.equal(row().admission?.status, 'checking');
+  if (cohort) {
+    assert(stateOf(f, state.id).batchId, 'the check belongs to a shared cohort');
+    assert(f.entries.every(entry => rowOf(f, entry.state.id).runId === id.runId));
+  }
+  const checkRow = () => [...f.tables.projectHostedCheckRuns.values()].find(r => r.runId === id.runId);
+  const reserved = JSON.parse(await f.tx('reserveActions', direct.reserve, id));
+  await f.tx('bindActions', direct.observe, {
+    ...id,
+    fence: reserved.fence,
+    outcome: 'accepted',
+    executionId: '123',
+  });
+  const session = () => ({
+    ...id,
+    claims: JSON.stringify({
+      iss: actionsIssuer,
+      aud: audience,
+      exp: f.now() / 1000 + 300,
+      nbf: f.now() / 1000 - 30,
+      iat: f.now() / 1000 - 30,
+      repository,
+      workflow_ref: `${repository}/.github/workflows/forge-check.yml@refs/heads/main`,
+      workflow_sha: 'a'.repeat(40),
+      ref: 'refs/heads/main',
+      event_name: 'workflow_dispatch',
+      run_id: '123',
+      run_attempt: '1',
+      runner_environment: 'github-hosted',
+      repository_visibility: 'private',
+    }),
+  });
+  const browser = 'tests/synthetic-browser.test.mjs';
+  const pins = {
+    head: reserved.request.expectedHead,
+    definition: reserved.check.definition,
+    selection: { scope: 'full', reason: 'synthetic', tests: [browser] },
+    groups: [[browser]],
+    standard: true,
+    interaction: false,
+    command: ['node', 'scripts/forge-check.mjs'],
+  };
+  const recipe = { ...pins, pin: checkPin(pins) };
+  await f.tx('openPlanningSession', sessions.session, session());
+  const alarm = () => f.pending().find(task => task._id === row().alarm?.taskId);
+  if (planLate) {
+    await f.execute(alarm());
+    assert.equal(stateOf(f, state.id).observation.stall?.code, 'LANDING_STALLED');
+  }
+  await f.tx('planActions', plans.prepare, {
+    ...session(),
+    recipe: JSON.stringify(recipe),
+    lockfile: 'e'.repeat(64),
+    selectionR2Key: `v1/p/${f.projectId}/o/${savePin(recipe.selection).sha256}`,
+    recipeR2Key: `v1/p/${f.projectId}/o/${savePin(recipe).sha256}`,
+    resultsBatch: true,
+  });
+  for (let tick = 0; f.pending()[0]?.scheduledTime <= f.now(); tick++) {
+    assert(tick < 30, 'the planned check settles its immediate wakes');
+    await f.execute(f.pending()[0]);
+  }
+  const wait = async () =>
+    (
+      await f.runAcceptance(
+        'waitForBrowserShard',
+        ctx => feed.feedWaitObservations(ctx, f.projectId, [state.operationId]),
+        {},
+      )
+    )[0];
+  if (pickedUpLate && !planLate) {
+    await f.execute(alarm());
+    assert.equal(
+      (await wait()).pending.stall?.code,
+      'LANDING_STALLED',
+      'the plan alone is not a shard start',
+    );
+  }
+  // Leave a gap after check planning. The browser shard records its authenticated preflight
+  // and stays quiet with zero result callbacks beyond the ordinary stall window.
+  f.advanceClock(3 * 60_000);
+  const shardStart = f.now();
+  // The current matrix job restores a planning bundle; it has no fresh OIDC session.
+  const client = new ActionsJobClient(audience, f.projectId, id.runId, async (url, init) => {
+    const { args } = JSON.parse(init.body);
+    const authorize = new URL(url).pathname === '/api/mutation' ? preflight.start : preflight.check;
+    return Response.json({ status: 'success', value: await f.tx('browserPreflight', authorize, args[0]) });
+  });
+  client.run = JSON.parse(checkRow().value);
+  client.capabilities = [...hostedActionsCapabilities];
+  client.preflightTicket = {
+    endpoint: audience,
+    signature: actionsPreflightSignature(client.run, keyMaterial),
+  };
+  const timeoutMinutes = 90;
+  await client.preflight({ shard: '0', timeoutMinutes });
+  if (pickedUpLate) {
+    const wake = f
+      .pending()
+      .find(task => task.name === 'projectHostedLandingDriver:checkWake' && task.args[0].runId === id.runId);
+    assert(wake, 'the late pickup wakes its landing');
+    await f.execute(wake);
+    if (!admissionCheck)
+      await f.execute(f.pending().find(task => task.name === 'projectHostedLandingDriver:drive'));
+    assert.equal((await wait()).pending.stall, undefined, 'late pickup clears the current stall');
+    if (admissionCheck) {
+      const delivered = [...f.tables.projectHostedLandingCheckWakes.values()].find(
+        row => row.runId === id.runId,
+      );
+      assert.equal(
+        row().checkWakeVersion,
+        delivered.version,
+        'the next wake page will not consume this admission twice',
+      );
+    }
+  }
+  f.advanceClock(LANDING_STALL_MS + 1);
+  const progressAlarm = alarm();
+  assert(progressAlarm, 'the landing has its ordinary one-shot alarm');
+  await f.execute(progressAlarm);
+  const observed = await wait();
+  assert.equal(observed.phase, 'checking');
+  assert.equal(observed.pending.stall, undefined);
+  assert.equal(observed.pending.lastProgressAt, new Date(shardStart).toISOString());
+  assert.equal(JSON.parse(checkRow().value).counts.completed, 0);
+  assert.equal(
+    alarm().scheduledTime,
+    shardStart + timeoutMinutes * 60_000,
+    'one alarm stays armed at the job deadline',
+  );
+  if (end === 'hung') {
+    await f.execute(alarm());
+    assert.equal(
+      (await wait()).pending.stall?.code,
+      'LANDING_STALLED',
+      'an expired shard is genuinely stalled',
+    );
+  }
+  if (end === 'lost-wake') {
+    const checks = await import(moduleUrl('../convex/projectHostedCheckStore.ts'));
+    await f.runAcceptance(
+      'finishBrowserShard',
+      async ctx => {
+        await direct.settleDirectActions(
+          ctx,
+          await checks.writableHostedCheck(ctx, id),
+          'failed',
+          'Synthetic check failure.',
+        );
+      },
+      {},
+    );
+    const wake = f.pending().find(task => task.name === 'projectHostedLandingDriver:checkWake');
+    assert(wake, 'the terminal result produced a wake to lose');
+    lose(f, wake);
+    await f.execute(alarm());
+    const replay = f
+      .pending()
+      .find(task => task.name === 'projectHostedLandingDriver:checkWake' && task.args[0].runId === id.runId);
+    assert(replay, 'the alarm replays the lost terminal wake');
+    await f.execute(replay);
+    const drive = f.pending().find(task => task.name === 'projectHostedLandingDriver:drive');
+    assert(drive, 'the retained check result is recovered even after the terminal wake was lost');
+    await f.execute(drive);
+    assert.notEqual((await wait()).phase, 'checking');
+  }
+}
+
+test('incident 368d2d2e: a long-running Actions browser shard keeps the landing wait active', async t => {
+  await t.test('the alarm detects an expired shard', t => browserShardLanding(t, { end: 'hung' }));
+  await t.test('the alarm recovers a lost terminal wake', t => browserShardLanding(t, { end: 'lost-wake' }));
+  await t.test('an admission shard starts after a genuine stall', t =>
+    browserShardLanding(t, { pickedUpLate: true, admissionCheck: true }),
+  );
+  await t.test('a shared cohort shard starts after a genuine stall', t =>
+    browserShardLanding(t, { pickedUpLate: true, cohort: true }),
+  );
+  await t.test('an admission shard starts promptly after a late plan', t =>
+    browserShardLanding(t, { pickedUpLate: true, admissionCheck: true, planLate: true }),
   );
 });
 

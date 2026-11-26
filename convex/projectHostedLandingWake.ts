@@ -303,27 +303,29 @@ async function wakeLandingCheckPage(
     }
     if (more || rows.length === 100) break;
   }
-  let run: Awaited<ReturnType<typeof loadHostedCheck>>['run'] | null = null,
+  let check: Awaited<ReturnType<typeof loadHostedCheck>> | null = null,
     woken = false;
   for (const row of rows) {
     if (row.admission?.status === 'checking' && row.admission.runId === input.runId) {
       await ctx.db.patch(row._id, { checkWakeVersion: version });
       // Progress writes wake too; only the run's own terminal result settles
       // admission, and an unsettled admission costs no queue tick.
-      run ??= (await loadHostedCheck(ctx, input)).run;
+      const { row: runRow, run } = (check ??= await loadHostedCheck(ctx, input));
+      const state = storedLandingStateSchema.parse(JSON.parse(row.value));
       if (hostedCheckTerminal(run)) {
         // A parked entry (fix D) is an event wait: it needs no queue tick, unless it held order.
         if (run.status !== 'passed') rememberGuardCheck(ctx, row.submissionId, run);
         if (await settleLandingAdmission(ctx, row, run)) woken = true;
       } else if (
         run.failureReason?.startsWith('provider-delayed:') ||
-        storedLandingStateSchema.parse(JSON.parse(row.value)).observation.pendingReason === 'pending-infra'
+        state.observation.pendingReason === 'pending-infra' ||
+        (state.observation.stall &&
+          (runRow.shardActivity?.at ?? 0) > Date.parse(state.observation.stall.lastProgressAt))
       ) {
-        const state = storedLandingStateSchema.parse(JSON.parse(row.value));
-        retainCheckProgress(state, run, Date.now());
+        retainCheckProgress(state, run, Date.now(), runRow.shardActivity?.at);
         await writeLanding(
           ctx,
-          row,
+          { ...row, checkWakeVersion: version },
           {
             ...state,
             version: state.version + 1,
@@ -343,7 +345,7 @@ async function wakeLandingCheckPage(
       row.phase === 'checking' &&
       !progressWakeDue(storedLandingStateSchema.parse(JSON.parse(row.value)).timing?.ciProgressAt, Date.now())
     ) {
-      run ??= (await loadHostedCheck(ctx, input)).run;
+      const { run } = (check ??= await loadHostedCheck(ctx, input));
       if (
         !hostedCheckTerminal(run) &&
         !run.failureReason?.startsWith('provider-delayed:') &&

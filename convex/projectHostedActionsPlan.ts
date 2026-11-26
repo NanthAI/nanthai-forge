@@ -226,6 +226,7 @@ export const prepare = internalMutation({
       // Older runners never echo a digest in the recipe, but they read the same slot.
       await writeHostedCheck(ctx, row._id, run, false, undefined, {
         timingHistoryGeneration: run.id,
+        plannedAt: Date.now(),
         gateSelection,
       });
     }

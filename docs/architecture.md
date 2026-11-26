@@ -2314,7 +2314,8 @@ including superseded attempts. Live batch peers keep their shared check running
 when an individual landing is cancelled. An explicit check-run cancellation stops
 the selected run, including a run shared by live landings.
 Direct Actions cancellation schedules the provider run-cancel API; restored jobs
-make one signed read-only preflight query before spawn, with no new heartbeat.
+make one signed preflight call before spawn. The first current shard records
+its start in that call, with no heartbeat.
 
 A pending entry with no progress for 15 minutes records a `LANDING_STALLED` observation
 (`src/landing-stall.ts`). For a queued entry the alarm also arms one drop deadline 60

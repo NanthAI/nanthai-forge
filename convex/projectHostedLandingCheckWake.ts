@@ -34,6 +34,8 @@ export async function notifyLandingCheck(
     /** Admission evaluation still waits for a terminal result. */
     terminal?: boolean;
     providerDelayed?: true;
+    shardStarted?: true;
+    onlyStalled?: true;
   },
 ) {
   // The current run binding owns completion in either live queue phase. A
@@ -60,9 +62,15 @@ export async function notifyLandingCheck(
     !waiting ||
     (input.terminal === false &&
       (waiting.admitting || (waiting.admission?.kept && waiting.admission.status === 'checking')) &&
-      !input.providerDelayed)
+      !input.providerDelayed &&
+      !input.shardStarted)
   )
     return;
+  if (input.onlyStalled) {
+    // A cohort member can already have an alarm when the first binding does not.
+    const state = JSON.parse(waiting.value) as { batchId?: string; observation: { stall?: unknown } };
+    if (!state.batchId && !state.observation.stall) return;
+  }
   const row = await checkWakeRow(ctx, { projectId: input.projectId, runId: input.runId });
   // Advance even while a fanout is in flight. Pages which already consumed a
   // progress event must see a later terminal event before that fanout retires.

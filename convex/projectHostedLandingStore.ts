@@ -214,6 +214,8 @@ export async function writeLanding(
     reservedCause?: ReplayCause;
     /** The new attempt's check progress was observed in this write (a bound proof judged at once). */
     freshProgress?: true;
+    /** Resume lost-result recovery at the running shard's recorded deadline. */
+    checkAlarmAt?: number;
   },
 ) {
   const hold = options?.hold;
@@ -396,7 +398,7 @@ export async function writeLanding(
     ? row.alarm
       ? { id: row._id, alarm: null }
       : null
-    : await landingAlarmPatch(ctx, state, consumedAlarm, row);
+    : await landingAlarmPatch(ctx, state, consumedAlarm, row, options?.checkAlarmAt);
   if (alarm && alarm.id !== row._id) await ctx.db.patch(alarm.id, { alarm: alarm.alarm });
   // The existing release lookup can supply the exact check when a withdrawal
   // ends a live run before its first landing progress update. Freeze once.

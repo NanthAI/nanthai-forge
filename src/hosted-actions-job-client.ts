@@ -16,7 +16,11 @@ import {
 import { mapSourceOrdered } from './hosted-source-parallel.js';
 import type { ResultBatchTargets } from './hosted-actions-result-batch.js';
 import { networkFetch } from './network-fetch.js';
-import { actionsPreflightTicketSchema, type ActionsPreflightTicket } from './hosted-actions-preflight.js';
+import {
+  actionsPreflightBinding,
+  actionsPreflightTicketSchema,
+  type ActionsPreflightTicket,
+} from './hosted-actions-preflight.js';
 import { checkObject, type HostedCheckRun } from './hosted-check.js';
 
 import type { SourceWorkerTransport } from './hosted-source-worker-reader.js';
@@ -31,6 +35,7 @@ import {
   actionsCommandForCapabilities,
   actionsRefusalReasons,
   actionsPreflightCapability,
+  actionsShardStartCapability,
   actionsSourceBatchCapability,
 } from './hosted-actions-capabilities.js';
 import {
@@ -253,7 +258,7 @@ export class ActionsJobClient {
     }
     return this.run;
   }
-  async preflight() {
+  async preflight(shard?: { shard: string; timeoutMinutes: number }) {
     // If bootstrap is already needed here, its live session is the pre-spawn check.
     if (!this.run) return this.session();
     const run = this.run;
@@ -265,15 +270,16 @@ export class ActionsJobClient {
     if (!this.capabilities.includes(actionsPreflightCapability)) return run; // oldest server
     const ticket = actionsPreflightTicketSchema.safeParse(this.preflightTicket);
     invariant(ticket.success, 'RUNNER_UNAVAILABLE', 'Pre-spawn authorization is unavailable.');
+    const starting = shard && this.capabilities.includes(actionsShardStartCapability);
     const reply = await retryActionsInfrastructure(async signal => {
       const response = await actionsInfrastructureResponse(
-        await this.request(`${ticket.data.endpoint}/api/query`, {
+        await this.request(`${ticket.data.endpoint}/api/${starting ? 'mutation' : 'query'}`, {
           method: 'POST',
           redirect: 'error',
           signal,
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
-            path: 'projectHostedActionsPreflight:check',
+            path: starting ? 'projectHostedActionsPreflight:start' : 'projectHostedActionsPreflight:check',
             format: 'convex_encoded_json',
             args: [
               {
@@ -281,6 +287,7 @@ export class ActionsJobClient {
                 runId: this.runId,
                 fence: run.fence,
                 signature: ticket.data.signature,
+                ...(starting ? { ...shard, binding: JSON.stringify(actionsPreflightBinding(run)) } : {}),
               },
             ],
           }),
