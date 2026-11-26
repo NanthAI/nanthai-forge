@@ -17,6 +17,8 @@ export const overviewSet = v.object({
    * confirms it by a code (confirm). */
   sharing: v.union(v.literal('automatic'), v.literal('confirm')),
   headVersion: v.number(),
+  /** Checks names beyond the first visible page, used to compare all live names with the source declarations. */
+  checksNamesAfterPage: v.optional(v.array(v.string())),
   /** Removed people still listed in this set, and the one command that takes them out. */
   takeOut: v.optional(
     v.array(

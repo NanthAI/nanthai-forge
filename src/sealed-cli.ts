@@ -10,7 +10,8 @@ import { localSealedIdentity } from './sealed-identity.js';
 import { SealedClient } from './sealed-client.js';
 import { hostedSealedTransport, sealedRead } from './sealed-transport.js';
 import { safeLabel, safeSecretName } from './sealed-display.js';
-import { checkSecretWriteName } from './secret-names.js';
+import { checksSetCommand, checkSecretWriteName, missingChecksNames } from './secret-names.js';
+import { readSecretExample } from './secret-env-example.js';
 
 export const sealedUsage =
   'nforge secret set NAME [--set checks] [--file] [--root ROOT] [--operation-id UUID]   (a piped value loses one trailing newline; --file keeps exact bytes)\nnforge secret list [--set checks] [--root ROOT]\nnforge secret rm NAME [--set checks] [--root ROOT] [--operation-id UUID]\nnforge secret machine add LABEL --set checks [--root ROOT] [--operation-id UUID]   (a person, on a terminal: shows the CI key once)\nnforge secret machine rm ID --set checks [--root ROOT] [--operation-id UUID]   (a person, on a terminal: removes the machine and re-keys Checks)\nnforge secret repin [--root ROOT]\nnforge secret resolve --operation-id UUID [--root ROOT]\nnforge secret unshare FINGERPRINT|DEVICE_ID|--marked [--root ROOT]\nnforge secret proposals [--root ROOT]\nnforge secret apply ID [--root ROOT]   (a person, on a terminal)\nnforge secret reject ID [--root ROOT]\nnforge secret import [FILE] [--keep] [--root ROOT]   (FILE defaults to the root .env; removed after a full import unless --keep)\nnforge secret import --restore [FILE] [--root ROOT]   (a person, on a terminal: writes Development values back to a new file)';
@@ -125,6 +126,22 @@ async function askYes(summary: string) {
     line.close();
   }
 }
+
+export function checksMachineSetupHint(root: string, valueNames: readonly string[]) {
+  let listed: string[];
+  try {
+    listed = readSecretExample(root).names;
+  } catch (error) {
+    // Unavailable template guidance must not prevent the owner from receiving the machine key.
+    if (error instanceof ForgeError) return '';
+    throw error;
+  }
+  const missing = missingChecksNames(listed, valueNames);
+  return missing.length
+    ? `No value in Checks for these names from .env.example. Set the values your check uses:\n${missing.map(checksSetCommand).join('\n')}\n`
+    : '';
+}
+
 export async function sealedCli(args: string[]) {
   if (!args.length || args.includes('--help') || args.includes('-h')) {
     process.stdout.write(
@@ -242,6 +259,8 @@ export async function sealedCli(args: string[]) {
       process.stdout.write(
         `Machine ${safeLabel(label!)} (id ${added.machineId.slice(0, 8)}) can now open Checks. Operation ${added.operationId}. Its key is shown once. Store it as the CI secret FORGE_SECRETS_KEY, given only to the step that runs nforge run:\n\n${added.bundle}\n\nIf the step runs from a Git mirror, set FORGE_PROJECT_ID to the project's ID. Run: nforge run --set checks --only NAME,NAME -- COMMAND\nWhoever holds this key opens every Checks value. Never give it to a step that runs untrusted code, such as a pull request from a fork.\n`,
       );
+      const hint = checksMachineSetupHint(runRoot, added.valueNames);
+      if (hint) process.stdout.write(hint);
     } else if (command === 'set' || command === 'rm') {
       const value = command === 'set' ? await readValue(file) : null;
       try {

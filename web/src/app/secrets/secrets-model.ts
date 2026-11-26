@@ -6,6 +6,7 @@
 // person copies and runs on a terminal.
 import type { FunctionReturnType } from 'convex/server';
 import type { api } from '../../../../convex/_generated/api';
+import { checksSetCommand } from '../../../../src/secret-names';
 
 export type Overview = Extract<FunctionReturnType<typeof api.sealedSecrets.overview>, { status: 'ok' }>;
 export type OverviewSet = Overview['sets'][number];
@@ -30,7 +31,7 @@ const shellWord = (value: string) =>
 export const setCommand = (name: string, kind: 1 | 2 | 3, set: SetKind = 1) =>
   set === 3
     ? null
-    : `nforge secret set ${shellWord(name)}${set === 2 ? ' --set checks' : ''}${kind === 2 ? ' --file' : ''}`;
+    : `${set === 2 ? checksSetCommand(shellWord(name)) : `nforge secret set ${shellWord(name)}`}${kind === 2 ? ' --file' : ''}`;
 export const applyCommand = (id: string) => `nforge secret apply ${shellWord(id)}`;
 export const rejectCommand = (id: string) => `nforge secret reject ${shellWord(id)}`;
 export const UNSHARE_MARKED = 'nforge secret unshare --marked';
@@ -66,7 +67,7 @@ export function needsOf(data: Overview) {
 export const nameTotal = (data: Overview) => data.sets.reduce((n, set) => n + (set.names?.total ?? 0), 0);
 
 /** The one sentence under the title: the first of these that is true (README "Copy"). */
-export function sentence(data: Overview) {
+export function sentence(data: Overview, missingChecks = false) {
   const needs = needsOf(data),
     names = nameTotal(data);
   const who =
@@ -96,7 +97,7 @@ export function sentence(data: Overview) {
   if (!names) return { lead: 'This project has no secrets yet.', rest: '' };
   return {
     lead: `${count(names, 'secret')} in ${count(data.sets.length, 'set')}.`,
-    rest: ' Nothing needs you.',
+    rest: missingChecks ? '' : ' Nothing needs you.',
   };
 }
 

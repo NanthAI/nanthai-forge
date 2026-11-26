@@ -285,15 +285,32 @@ function Container() {
   document.documentElement.dataset.ds = '';
   document.documentElement.dataset.theme = query.get('theme') ?? 'dark';
   const queries: { args: Record<string, unknown>; settle(result: unknown, error?: boolean): void }[] = [];
+  const actions: Record<string, unknown>[] = [];
   const client = {
     query: (_ref: unknown, args: Record<string, unknown>) =>
       new Promise((resolve, reject) =>
         queries.push({ args, settle: (result, error) => (error ? reject(result) : resolve(result)) }),
       ),
+    action: (_ref: unknown, args: Record<string, unknown>) => {
+      actions.push(args);
+      return Promise.resolve(JSON.stringify({ names: ['API_TOKEN', 'NPM_TOKEN'] }));
+    },
   };
   const data = (state('worst') as Extract<SecretsView, { status: 'ready' }>).data;
   (window as unknown as { secretsContainer: unknown }).secretsContainer = {
     queries: () => queries.map(q => q.args),
+    actions: () => actions,
+    checksSetup: (index: number, configured: boolean) =>
+      queries[index]!.settle({
+        ...data,
+        sets: [
+          development(),
+          checks({
+            names: configured ? { total: 101, page: [], next: 'A' } : { total: 0, page: [], next: null },
+            ...(configured ? { checksNamesAfterPage: ['API_TOKEN', 'NPM_TOKEN'] } : {}),
+          }),
+        ],
+      }),
     /** Answers query `index` with the worst-case overview. */
     overview: (index: number, patch: Record<string, unknown> = {}) =>
       queries[index]!.settle({ ...data, ...patch }),
@@ -352,7 +369,11 @@ function Container() {
           route={route}
           projectId={'project-1' as never}
           projectName="test-project"
-          feed={undefined}
+          feed={
+            query.has('checksSetup')
+              ? { lanes: [], more: 0, moreIsLowerBound: false, main: { head: 'a'.repeat(64) } }
+              : undefined
+          }
           viewerHandle="river"
         />
       </ProjectFrame>

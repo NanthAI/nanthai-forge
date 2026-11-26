@@ -64,6 +64,8 @@ nforge run --set checks --only SERVICE_API_KEY -- node -e "process.exit(process.
 
 Replace the example Node command with your check. The Forge runner's `credentials` field selects values already in its environment. Use the explicit `nforge run` wrapper for a sealed Checks value. A machine key can open every value in its Checks set. Use a check step you trust, without code from untrusted forks. [Checks and machine keys](../security.md#the-checks-set-and-machine-keys) gives the delivery and masking details.
 
+If a name from `.env.example` has no Checks value, machine add and the **Secrets** page's Checks row show the command to set it. CI also shows that command when a name the check declares has no value in Checks.
+
 Change a Checks value with `nforge secret set SERVICE_API_KEY --set checks` on the owner's terminal. To revoke a machine, run `nforge secret machine rm MACHINE_ID --set checks` there and remove its key from the CI provider. Forge re-keys the set. For any names listed for rotation, issue new credentials at their providers and set those new values in Checks. To replace a machine, add a new entry and give its key to the replacement. See the current rotation list with `nforge secret list --set checks`.
 
 ## Review an agent's proposal

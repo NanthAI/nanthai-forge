@@ -6,6 +6,7 @@ import { pipeline } from 'node:stream/promises';
 import type { Writable } from 'node:stream';
 import { ForgeError, invariant } from './errors.js';
 import { readSecretExample } from './secret-env-example.js';
+import { checksSetCommand } from './secret-names.js';
 import { secretRunEnvironment, type RunSecret } from './secret-run-environment.js';
 import { prepareSecretFileStorage, secretFileFolder } from './secret-run-files.js';
 import { secretMaskStream } from './secret-output-mask.js';
@@ -184,12 +185,18 @@ function checkDeclared(
   selected: ReturnType<typeof secretRunEnvironment>,
   listed: readonly string[],
 ) {
-  const missing = declared
-    .filter(name => !selected.selected.some(s => s.name === name) && selected.env[name] === undefined)
-    .map(name => `${name} (${listed.includes(name) ? 'no value in Checks' : 'not listed in .env.example'})`);
-  invariant(
-    !missing.length,
+  const missing = declared.filter(
+    name => !selected.selected.some(s => s.name === name) && selected.env[name] === undefined,
+  );
+  if (!missing.length) return;
+  const commands: string[] = [];
+  const details = missing.map(name => {
+    if (!listed.includes(name)) return `${name} (not listed in .env.example)`;
+    commands.push(checksSetCommand(name));
+    return `${name} (no value in Checks)`;
+  });
+  throw new ForgeError(
     'SECRETS_NOT_SET_UP',
-    `Check setup failed before the command ran; missing: ${missing.join(', ')}.`,
+    `Check setup failed before the command ran; missing: ${details.join(', ')}.${commands.length ? `\n${commands.join('\n')}` : ''}`,
   );
 }

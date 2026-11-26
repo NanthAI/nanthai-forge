@@ -51,6 +51,41 @@ export function secretNameKind(name: string): 'invalid' | 'denied' | 'routing' |
   return 'credential';
 }
 
+export type SecretNameNotice = { name: string; reason: string };
+
+/** Parse declarations without interpreting or returning example values. */
+export function parseSecretExample(text: string) {
+  const names = new Set<string>();
+  const notices: SecretNameNotice[] = [];
+  for (const raw of text.replace(/^\uFEFF/, '').split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    const declaration = line.replace(/^export\s+/, '');
+    const candidate = declaration.split(/[=\s#]/, 1)[0]!;
+    // Only NAME, NAME=value and export NAME=value. An inline comment is allowed.
+    const format = /^(?:export\s+)?([A-Z][A-Z0-9_]{0,63})(?:\s*=.*|\s*(?:#.*)?)$/.exec(line);
+    const kind = secretNameKind(candidate);
+    if (!format || kind === 'invalid' || kind === 'denied') {
+      notices.push({
+        name: candidate.replace(/[^A-Za-z0-9_]/g, '?').slice(0, 64) || '(invalid)',
+        reason: kind === 'denied' ? 'denied name' : 'invalid declaration',
+      });
+      continue;
+    }
+    if (names.has(candidate)) notices.push({ name: candidate, reason: 'duplicate declaration' });
+    names.add(candidate);
+  }
+  return { names: [...names], notices };
+}
+
+/** The name comes from a validated declaration or has already been quoted as a shell word. */
+export const checksSetCommand = (name: string) => `nforge secret set ${name} --set checks`;
+
+export function missingChecksNames(listed: readonly string[], present: readonly string[]) {
+  const values = new Set(present);
+  return listed.filter(name => !values.has(name));
+}
+
 /** Shared by future set/import/apply entry points and the current run path. */
 export function secretNameRefusal(name: string, agentWrite = false): string | null {
   const kind = secretNameKind(name);

@@ -28,7 +28,8 @@ import {
 import { safeRelative } from '../src/safe-relative';
 import { parseNativeState, type NativeFile } from '../src/state/format';
 import { readSubmodulePointers } from '../src/gitlink';
-import { reviewTextPage } from '../src/source-review-format';
+import { reviewTextPage, SHOW_MAX_BYTES } from '../src/source-review-format';
+import { parseSecretExample } from '../src/secret-names';
 
 const state = /^[a-f0-9]{64}$/;
 type Listed = {
@@ -44,7 +45,7 @@ const readArgs = {
   /** open: a folder and its ancestors, or a file with its folders and first page; more: the next page of one
    * folder; page: the next page of one file; changes: what changed from `base` to `state`; touched: which of up to
    * eight landings (their base and head States) changed `path`; entry: a file's blob and mode in the State, with no
-   * bytes read (a Markdown image's address). */
+   * bytes read (a Markdown image's address); secret-example-names: declarations from the root .env.example. */
   want: v.union(
     v.literal('open'),
     v.literal('more'),
@@ -52,6 +53,7 @@ const readArgs = {
     v.literal('changes'),
     v.literal('touched'),
     v.literal('entry'),
+    v.literal('secret-example-names'),
   ),
   path: v.optional(v.string()),
   base: v.optional(v.string()),
@@ -63,7 +65,8 @@ type ReadInput = ObjectType<typeof readArgs>;
 
 /** One Code read at an exact State, with current access checked around its bytes. */
 async function readCode(ctx: ActionCtx, input: ReadInput, actor: string): Promise<string> {
-  const path = input.path ?? '';
+  const exampleNames = input.want === 'secret-example-names';
+  const path = exampleNames ? '.env.example' : (input.path ?? '');
   invariant(
     state.test(input.state) &&
       (input.base === undefined || state.test(input.base)) &&
@@ -75,7 +78,7 @@ async function readCode(ctx: ActionCtx, input: ReadInput, actor: string): Promis
     'BAD_ARGUMENT',
     'Select an exact State and a path inside it.',
   );
-  const base = input.want === 'page' ? input.state : (input.base ?? input.state);
+  const base = exampleNames || input.want === 'page' ? input.state : (input.base ?? input.state);
   const canonical =
     actor !== '' && input.want !== 'changes' && input.want !== 'touched' && base === input.state;
   const select = () =>
@@ -98,6 +101,7 @@ async function readCode(ctx: ActionCtx, input: ReadInput, actor: string): Promis
         ids.map((sha256, index) => {
           const object = rows[index];
           invariant(object?.digest === sha256, 'SOURCE_CHANGED', 'The selected file changed while reading.');
+          if (exampleNames && object.size > SHOW_MAX_BYTES) return Buffer.alloc(0);
           return bytesFromRow(ctx, object, { sha256, size: object.size }, actor, true);
         }),
       );
@@ -171,6 +175,15 @@ async function openCode(
   files: NativeFile[],
   bytes: (ids: string[]) => Promise<Buffer[]>,
 ) {
+  if (input.want === 'secret-example-names') {
+    const entry = fileAt(files, path);
+    if (entry?.mode !== 'file' && entry?.mode !== 'executable') return { names: [] };
+    const [content] = await bytes([entry.blob]);
+    return {
+      names:
+        content && content.length <= SHOW_MAX_BYTES ? parseSecretExample(content.toString('utf8')).names : [],
+    };
+  }
   const page = async () => {
     const entry = fileAt(files, path);
     invariant(entry, 'NOT_FOUND', 'Choose a file from this source comparison.');

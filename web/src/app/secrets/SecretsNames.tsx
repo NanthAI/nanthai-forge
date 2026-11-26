@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-// Names: every set's names, A to Z, the first 100 a set. Never a value; the command to set one lives in Needs you.
+// Names: every set's names, A to Z, the first 100 a set, with setup guidance for missing Checks values.
 import { Band, Region, State, Who } from '../../ds';
+import { checksSetCommand } from '../../../../src/secret-names';
 import { SecretCommand } from './SecretCommand';
 import { count, exact, nameTotal, relative, setLabel, type Overview } from './secrets-model';
 
@@ -10,14 +11,16 @@ export function SecretsNames({
   now,
   onMore,
   busy,
+  missingChecks,
 }: {
   data: Overview;
   now: number;
   onMore: (kind: 1 | 2 | 3, part: 'names') => void;
   busy: boolean;
+  missingChecks: readonly string[];
 }) {
   const total = nameTotal(data);
-  if (!total)
+  if (!total && !missingChecks.length)
     return (
       <Region title="Names" count={0}>
         <div className="empty">
@@ -59,6 +62,17 @@ export function SecretsNames({
                 ) : undefined
               }
             />
+            {set.kind === 2 && missingChecks.length ? (
+              <div className="secret-checks-hint">
+                <p>
+                  No value in Checks for these names from <code>.env.example</code>. Set the values your check
+                  uses.
+                </p>
+                <pre className="mono" translate="no">
+                  {missingChecks.map(checksSetCommand).join('\n')}
+                </pre>
+              </div>
+            ) : null}
             {names.page.map(row => (
               <div className="row secret-name" key={row.name}>
                 <span className="secret-nm">

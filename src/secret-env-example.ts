@@ -3,34 +3,9 @@
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { ForgeError } from './errors.js';
-import { secretNameKind } from './secret-names.js';
+import { parseSecretExample } from './secret-names.js';
 
-export type SecretNameNotice = { name: string; reason: string };
-const displayName = (name: string) => name.replace(/[^A-Za-z0-9_]/g, '?').slice(0, 64) || '(invalid)';
-/** Read names only: example values are never interpreted, executed or included in notices. */
-export function parseSecretExample(text: string) {
-  const names = new Set<string>();
-  const notices: SecretNameNotice[] = [];
-  for (const raw of text.replace(/^\uFEFF/, '').split(/\r?\n/)) {
-    const line = raw.trim();
-    if (!line || line.startsWith('#')) continue;
-    const declaration = line.replace(/^export\s+/, '');
-    const candidate = declaration.split(/[=\s#]/, 1)[0]!;
-    // Only NAME, NAME=value and export NAME=value. An inline comment is allowed.
-    const format = /^(?:export\s+)?([A-Z][A-Z0-9_]{0,63})(?:\s*=.*|\s*(?:#.*)?)$/.exec(line);
-    const kind = secretNameKind(candidate);
-    if (!format || kind === 'invalid' || kind === 'denied') {
-      notices.push({
-        name: displayName(candidate),
-        reason: kind === 'denied' ? 'denied name' : 'invalid declaration',
-      });
-      continue;
-    }
-    if (names.has(candidate)) notices.push({ name: candidate, reason: 'duplicate declaration' });
-    names.add(candidate);
-  }
-  return { names: [...names], notices };
-}
+export { parseSecretExample, type SecretNameNotice } from './secret-names.js';
 
 /** Exact case and a real regular file keep the allow-list under the protected path.
  * O_NOFOLLOW plus inode comparison also refuses a link substituted between lookup/open. */

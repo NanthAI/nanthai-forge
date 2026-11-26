@@ -133,6 +133,44 @@ const memberReads = {
     projectCodeBrowse.read._handler(s.ctx, { projectId, state: s.head, want: 'open', path: '' }),
 };
 
+test('the source projection returns only root .env.example names and checks project access', async t => {
+  const s = await setup(t, 'private');
+  s.tables.hostedProjects.get('project').sourceAuthority = { mode: 'server', epoch: 1 };
+  const example = await upload(s, Buffer.from('export API_TOKEN=synthetic-placeholder\nPATH=/ignored\n'));
+  const other = await upload(s, Buffer.from('OTHER_TOKEN=synthetic-placeholder\n'));
+  const source = await upload(
+    s,
+    Buffer.from(
+      JSON.stringify({
+        schema: 1,
+        kind: 'forge-source-state',
+        parents: [s.head],
+        files: [
+          { path: '.env.example', mode: 'file', blob: example.sha256 },
+          { path: 'sub/.env.example', mode: 'file', blob: other.sha256 },
+        ],
+        message: '',
+        at: '2026-01-01T00:00:00Z',
+      }),
+    ),
+  );
+  s.tables.projectHostedStates.set('example', {
+    projectId: 'project',
+    head: source.sha256,
+    size: source.size,
+  });
+  const read = () =>
+    projectCodeBrowse.read._handler(s.ctx, {
+      projectId: 'project',
+      state: source.sha256,
+      want: 'secret-example-names',
+    });
+  s.caller('stranger');
+  assert.equal((await outcome(read)).code, 'PROJECT_UNAVAILABLE');
+  s.caller('writer');
+  assert.deepEqual(JSON.parse(await read()), { state: source.sha256, names: ['API_TOKEN'] });
+});
+
 test('signed-in Code opens a registered exact State without loading its stale Work backup', async t => {
   const s = await setup(t, 'private');
   const project = s.tables.hostedProjects.get('project');

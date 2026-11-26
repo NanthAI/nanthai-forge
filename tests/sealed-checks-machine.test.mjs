@@ -216,7 +216,9 @@ test('slice 5: a missing declared name fails setup by name before the command ru
       error.code === 'SECRETS_NOT_SET_UP' &&
       /^Check setup failed before the command ran; missing: /.test(error.message) &&
       /LISTED_NO_VALUE \(no value in Checks\)/.test(error.message) &&
+      /\nnforge secret set LISTED_NO_VALUE --set checks$/.test(error.message) &&
       /NOT_LISTED \(not listed in \.env\.example\)/.test(error.message) &&
+      !/nforge secret set NOT_LISTED/.test(error.message) &&
       !/API_TOKEN/.test(error.message),
   );
   assert.equal(existsSync(marker), false);
@@ -452,4 +454,24 @@ test('slice 5: an agent never sets a Checks value or adds a machine', async t =>
   const checks = await checksClient(agentDev);
   await assert.rejects(checks.write('API_TOKEN', synthetic('agent')), { code: 'PERSON_REQUIRED' });
   await assert.rejects(addMachine(checks, 'agent-ci'), { code: 'PERSON_REQUIRED' });
+});
+
+test('machine add prints the Checks setup command for declared names, even when Development has the value', async t => {
+  const { checksMachineSetupHint } = await import('../dist/sealed-cli.js');
+  const h = setup(t);
+  await h.client.write('API_TOKEN', synthetic('dev'));
+  const checks = await checksClient(h.client);
+  const tree = mkdtempSync(join(tmpdir(), 'forge-checks-example-'));
+  t.after(() => rmSync(tree, { recursive: true, force: true }));
+  writeFileSync(join(tree, '.env.example'), 'API_TOKEN=synthetic-placeholder\n');
+  const operationId = '1747867e-4916-4eb3-ac9f-5716ed3ec17e';
+  const added = await addMachine(checks, 'ci', { operationId });
+  assert.match(
+    checksMachineSetupHint(tree, added.valueNames),
+    /^No value in Checks[^\n]*\nnforge secret set API_TOKEN --set checks\n$/,
+  );
+  await checks.write('API_TOKEN', synthetic('checks'));
+  const replay = await addMachine(checks, 'ci', { operationId });
+  assert.equal(replay.machineId, added.machineId);
+  assert.equal(checksMachineSetupHint(tree, replay.valueNames), '');
 });

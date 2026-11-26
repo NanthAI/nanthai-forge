@@ -142,6 +142,7 @@ export async function overviewFor(
     };
     if (all) {
       const holders = holderRows(view, self, handleOf);
+      const names = nameRows(view, handleOf);
       const people = slice(holders.people, undefined, OVERVIEW_PAGE.people, (_r, i) =>
         String(i).padStart(6, '0'),
       );
@@ -160,7 +161,10 @@ export async function overviewFor(
             at: p.at,
           })),
         rotate: rotatePage(view, undefined, former),
-        names: slice(nameRows(view, handleOf), undefined, OVERVIEW_PAGE.names, r => r.name),
+        names: slice(names, undefined, OVERVIEW_PAGE.names, r => r.name),
+        ...(set.kind === 2 && names.length > OVERVIEW_PAGE.names
+          ? { checksNamesAfterPage: names.slice(OVERVIEW_PAGE.names).map(row => row.name) }
+          : {}),
         people,
         machines: holders.machines,
         waiting: view.joinRequests.map(j => ({

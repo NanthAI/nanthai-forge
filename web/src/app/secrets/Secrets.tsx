@@ -2,12 +2,13 @@
 // Copyright 2026 Ferdinando Valsecchi
 // Settings > Landing and checks > Secrets (Item 41a0df87, slice 4): names, what to rotate, proposals and holders. The
 // page is value-free and changes nothing: it makes one one-shot names-only read (sealedSecrets:overview) when it
-// opens, again on Refresh or Retry and once per "Show the next" page. No subscription, no timer, no idle cost, and
-// no value, ciphertext or key is ever read, shown or fetched.
+// opens, again on Refresh or Retry and once per "Show the next" page. The Checks hint takes one source names
+// projection from the accepted State per refresh. No subscription, no timer, no idle cost or secret values.
 import { useConvex } from 'convex/react';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { api } from '../../../../convex/_generated/api';
 import type { Id } from '../../../../convex/_generated/dataModel';
+import { missingChecksNames } from '../../../../src/secret-names';
 import { Key, Region } from '../../ds';
 import { A } from '../frames';
 import { crumbsFor, Head } from '../Place';
@@ -62,6 +63,7 @@ export function SecretsScreen({
   view,
   refreshing = false,
   busy = false,
+  missingChecks = [],
   onRefresh,
   onMore,
 }: {
@@ -72,6 +74,7 @@ export function SecretsScreen({
   refreshing?: boolean;
   /** A page read ("Show the next") is out. */
   busy?: boolean;
+  missingChecks?: readonly string[];
   onRefresh?: () => void;
   onMore?: (kind: SetKind, part: 'names' | 'people' | 'rotate') => void;
 }) {
@@ -92,7 +95,7 @@ export function SecretsScreen({
         ? { lead: 'Secrets are for people who can write.', rest: '' }
         : view.status === 'failed'
           ? { lead: 'Secrets could not be loaded.', rest: ' Nothing was changed.' }
-          : sentence(view.data);
+          : sentence(view.data, missingChecks.length > 0);
   const stamp =
     view.status === 'ready' ? view.shownAt : view.status === 'failed' ? view.lastShown : undefined;
   const head: ReactNode =
@@ -164,7 +167,13 @@ export function SecretsScreen({
         <div className="secret-frame">
           <div className="secret-main">
             <SecretsNeeds data={data} now={now} busy={busy} onMore={(kind, part) => onMore?.(kind, part)} />
-            <SecretsNames data={data} now={now} busy={busy} onMore={(kind, part) => onMore?.(kind, part)} />
+            <SecretsNames
+              data={data}
+              now={now}
+              busy={busy}
+              missingChecks={missingChecks}
+              onMore={(kind, part) => onMore?.(kind, part)}
+            />
           </div>
           <div className="secret-side">
             <SecretsHolders data={data} now={now} busy={busy} onMore={(kind, part) => onMore?.(kind, part)} />
@@ -180,21 +189,26 @@ const denied = (error: unknown) => accessDenied(errorCode(error));
 /** The page's one read and its pages. `convex.query` is one-shot: nothing subscribes to a set row, so a write by
  * anyone costs this page nothing, and there is no timer. Every read (open, Refresh, Retry) starts a new generation;
  * a reply from an older one is dropped, and a "Show the next" page is applied only to the snapshot that asked for it. */
-export default function Secrets({ route, projectId, projectName }: PlaceProps) {
+export default function Secrets({ route, projectId, projectName, feed }: PlaceProps) {
   const convex = useConvex();
   const [view, setView] = useState<SecretsView>({ status: 'loading' });
   const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [missingChecks, setMissingChecks] = useState<string[]>([]);
   const current = useRef<Id<'hostedProjects'> | null>(null);
   const generation = useRef(0);
+  const readyGeneration = useRef(0);
+  const exampleRead = useRef(0);
   const read = useCallback(
     async (id: Id<'hostedProjects'>, previous?: Overview) => {
       const mine = ++generation.current;
       setBusy(false);
+      setMissingChecks([]);
       const live = () => current.current === id && generation.current === mine;
       try {
         const result = await convex.query(api.sealedSecrets.overview, { projectId: id });
         if (!live()) return;
+        readyGeneration.current = mine;
         setView(
           result.status === 'reader'
             ? { status: 'reader' }
@@ -219,11 +233,36 @@ export default function Secrets({ route, projectId, projectName }: PlaceProps) {
     setView({ status: 'loading' });
     setBusy(false);
     setRefreshing(false);
+    setMissingChecks([]);
     if (projectId) void read(projectId);
     return () => {
       current.current = null;
     };
   }, [projectId, read]);
+  const state = feed === undefined ? undefined : (feed.main?.head ?? null);
+  // Wait for the project's existing main head. A later line update alone never repeats this read.
+  useEffect(() => {
+    if (
+      !projectId ||
+      state === undefined ||
+      view.status !== 'ready' ||
+      readyGeneration.current !== generation.current ||
+      exampleRead.current === generation.current
+    )
+      return;
+    const mine = (exampleRead.current = generation.current);
+    const checks = view.data.sets.find(set => set.kind === 2);
+    if (!state || !checks?.names || (checks.names.next && !checks.checksNamesAfterPage)) return;
+    const present = [...checks.names.page.map(row => row.name), ...(checks.checksNamesAfterPage ?? [])];
+    void convex
+      .action(api.projectCodeBrowse.read, { projectId, state, want: 'secret-example-names' })
+      .then(text => {
+        if (current.current !== projectId || generation.current !== mine) return;
+        const reply = JSON.parse(text) as { names?: string[] };
+        if (reply.names) setMissingChecks(missingChecksNames(reply.names, present));
+      })
+      .catch(() => undefined);
+  }, [convex, projectId, state, view]);
   const shown = view.status === 'ready' ? view.data : view.status === 'failed' ? view.previous : undefined;
   const lastAt =
     view.status === 'ready' ? view.shownAt : view.status === 'failed' ? view.lastShown : undefined;
@@ -273,6 +312,7 @@ export default function Secrets({ route, projectId, projectName }: PlaceProps) {
       view={view}
       refreshing={refreshing}
       busy={busy}
+      missingChecks={missingChecks}
       onRefresh={onRefresh}
       onMore={(kind, part) => void onMore(kind, part)}
     />

@@ -283,6 +283,7 @@ export async function addMachine(
             machineId: keys.id.toString('hex'),
             operationId,
             bundle: bundleFor(keys, state.pin.roster, state.pin.head.headVersion),
+            valueNames: state.pin.head.names.filter(name => name.kind !== 3).map(name => name.name),
           };
         } finally {
           discard(state);
@@ -369,6 +370,7 @@ export async function addMachine(
         machineId: keys.id.toString('hex'),
         operationId,
         bundle: bundleFor(keys, reply.roster, reply.head.headVersion),
+        valueNames: reply.head.names.filter(name => name.kind !== 3).map(name => name.name),
       };
     } finally {
       keys.enc.fill(0);

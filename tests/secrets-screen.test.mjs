@@ -291,6 +291,30 @@ test('Secrets: value-free screen, honest states, accessible themes, no sideways 
   });
 
   await t.test(
+    'the Checks row shows names-only setup commands and refresh clears them when configured',
+    async () => {
+      await page.goto(`${base}/fixture.html?container=1&checksSetup=1`);
+      await page.evaluate(() => window.secretsContainer.checksSetup(0, false));
+      const names = page.getByRole('region', { name: 'Names', exact: true });
+      const hint = names.locator('.secret-checks-hint');
+      await hint.waitFor();
+      assert.match(await hint.innerText(), /No value in Checks/);
+      assert.equal(
+        await hint.locator('pre').innerText(),
+        'nforge secret set API_TOKEN --set checks\nnforge secret set NPM_TOKEN --set checks',
+      );
+      assert.deepEqual(await page.evaluate(() => window.secretsContainer.actions()), [
+        { projectId: 'project-1', state: 'a'.repeat(64), want: 'secret-example-names' },
+      ]);
+      await page.getByRole('button', { name: 'Refresh' }).click();
+      await page.evaluate(() => window.secretsContainer.checksSetup(1, true));
+      await page.getByText('Show the next 100', { exact: true }).waitFor();
+      await page.waitForFunction(() => window.secretsContainer.actions().length === 2);
+      assert.equal(await hint.count(), 0);
+    },
+  );
+
+  await t.test(
     'empty, loading, reader, failed and nobody states say what happened and keep what was shown',
     async () => {
       await open('empty');
