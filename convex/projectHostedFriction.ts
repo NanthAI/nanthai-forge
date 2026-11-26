@@ -61,7 +61,6 @@ export const capture = mutation({
           ? old.value
           : canonicalPayload({ ...JSON.parse(old.value), likelyDuplicates: JSON.parse(savedHints) });
       }
-      await chargeAccountChannel(ctx, actor, 'friction');
       if (command.laneId)
         invariant(await recordHead(ctx, projectId, 'lane', command.laneId), 'NOT_FOUND', 'Lane not found.');
       // Build identity is evidence from the capturing CLI. A retry from another build
@@ -75,6 +74,7 @@ export const capture = mutation({
         at: new Date().toISOString(),
         count: 1,
       });
+      await chargeAccountChannel(ctx, actor, 'friction');
       const likelyDuplicates = await likelyPlanningDuplicates(
         ctx,
         project,
@@ -241,7 +241,6 @@ export const triage = mutation({
         replayRequest(old.request, request);
         return old.value;
       }
-      await chargeAccountChannel(ctx, actor, 'friction');
       const frictionIds: string[] = [];
       for (const ref of command.frictionIds)
         frictionIds.push((await resolveFriction(ctx, projectId, ref)).id);
@@ -255,6 +254,7 @@ export const triage = mutation({
         request,
         at: new Date().toISOString(),
       });
+      await chargeAccountChannel(ctx, actor, 'friction');
       await appendFriction(ctx, projectId, actor, record);
       return canonicalPayload(record);
     } catch (error) {

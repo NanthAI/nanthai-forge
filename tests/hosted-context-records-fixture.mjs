@@ -37,16 +37,25 @@ export function recordsFixture() {
     writes = 0;
   const get = s.ctx.db.get,
     insert = s.ctx.db.insert,
+    patch = s.ctx.db.patch,
+    replace = s.ctx.db.replace,
+    remove = s.ctx.db.delete,
     query = s.ctx.db.query;
   s.ctx.db.get = async (...args) => {
     const value = await get(...args);
     reads += value ? 1 : 0;
     return value;
   };
-  s.ctx.db.insert = async (...args) => {
-    writes++;
-    return insert(...args);
-  };
+  for (const [name, fn] of [
+    ['insert', insert],
+    ['patch', patch],
+    ['replace', replace],
+    ['delete', remove],
+  ])
+    s.ctx.db[name] = async (...args) => {
+      writes++;
+      return fn(...args);
+    };
   s.ctx.db.query = (...args) => {
     const q = query(...args);
     for (const method of ['unique', 'take', 'paginate']) {

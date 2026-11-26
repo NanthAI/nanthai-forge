@@ -254,3 +254,37 @@ test('2026-11-18 lead: triage links an Issue by a unique 8-character prefix unde
   });
   assert.equal(resolved.length, 3);
 });
+
+test('friction b6882574: refused friction capture and triage write nothing on any account-limit shard', async t => {
+  let pick = 0;
+  t.mock.method(Math, 'random', () => pick);
+  const s = fixture(t);
+  const { id } = (await file(s, 'alpha')).result;
+  const writes = s.counts().writes;
+  // Shard 0 exists; shard 1 does not. A refused triage or capture must touch neither shard.
+  for (const nextPick of [0.9, 0]) {
+    pick = nextPick;
+    await assert.rejects(
+      s.transport.dispatch('friction-triage', {
+        frictionIds: [randomUUID()],
+        status: 'dropped',
+        reason: 'unknown',
+      }),
+      code('NOT_FOUND'),
+    );
+    await assert.rejects(
+      s.transport.dispatch('friction-triage', { frictionIds: ['deadbeef'], status: 'open' }),
+      code('NOT_FOUND'),
+    );
+    await assert.rejects(
+      s.transport.dispatch('friction-triage', {
+        frictionIds: [id],
+        status: 'fixed',
+        laneId: randomUUID(),
+      }),
+      code('NOT_FOUND'),
+    );
+    await assert.rejects(file(s, 'missing lane', { laneId: randomUUID() }), code('NOT_FOUND'));
+  }
+  assert.equal(s.counts().writes, writes, 'refused friction capture and triage perform no database writes');
+});
