@@ -89,6 +89,7 @@ async function setup(t, { fromBase = false, protectedPath = false } = {}) {
     mkdirSync(objects, { recursive: true });
     writeFileSync(join(objects, baseline.sha256), s.objects.get(baseline.sha256));
     const policy = policyPreset('trusted');
+    policy.acceptance.ownerApprovalPaths = ['netlify.toml'];
     policy.agentDefaults = { preflight: 'off' };
     s.patch('hostedProjects', s.projectId, { autonomyPolicy: policy });
   }

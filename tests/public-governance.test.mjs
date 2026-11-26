@@ -337,7 +337,38 @@ test('check entry protection keeps unrelated project files and path-free checks 
   assert.match(reason(['.bench/ci.sh'], check), /protected paths \.bench\/ci\.sh/);
   assert.equal(reason(['.bench/other.sh', 'src/a.ts'], check), null);
   assert.equal(reason(['package.json'], { executable: 'npm', args: ['test'] }), null);
-  assert.match(reason(['scripts/forge-check.mjs'], check), /protected paths/);
+  const deployPaths = ['scripts/forge-check.mjs', 'netlify.toml', 'netlify/build.js', 'scripts/deploy.sh'];
+  assert.equal(reason(deployPaths, check), null);
+  assert.match(
+    reason(['scripts/forge-check.mjs'], { executable: 'node', args: ['scripts/forge-check.mjs'] }),
+    /protected paths/,
+  );
+  const legacy = {
+    ...policy,
+    acceptance: {
+      ...policy.acceptance,
+      ownerApprovalPaths: [
+        '.github/**',
+        'scripts/forge-check.mjs',
+        '.forge/**',
+        'forge.config.*',
+        'netlify.toml',
+        'netlify/**',
+        'scripts/deploy*',
+        'scripts/deploy/**',
+      ],
+    },
+  };
+  assert.equal(reason(deployPaths, check, legacy), null);
+  for (const path of ['.gitlab-ci.yml', '.github/workflows/build.yml', '.circleci/config.yml', 'Jenkinsfile'])
+    assert.match(reason([path], check, legacy), /protected paths/);
+  assert.match(
+    reason(['netlify.toml'], check, {
+      ...legacy,
+      acceptance: { ...legacy.acceptance, ownerApprovalPaths: ['netlify.toml'] },
+    }),
+    /protected paths/,
+  );
   const explicit = { ...policy, acceptance: { ...policy.acceptance, ownerApprovalPaths: ['deploy/**'] } };
   assert.match(
     reason(['.bench/ci.sh'], check, explicit),

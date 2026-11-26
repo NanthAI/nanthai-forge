@@ -56,7 +56,7 @@ ecosystem; rows that name an "any-ecosystem slice" Issue are live cases that sli
 | --- | --- | --- | --- | --- |
 | `src/standard-check.ts` | `check-entry` | 2 | defines the standard check entry | — (the predicate itself) |
 | `src/standard-check.ts` | `standard-from-args` | 2 | the one predicate for Forge's check | — (the predicate itself) |
-| `src/public-governance.ts` | `check-entry` | 1 | a default owner-approval path for Forge's own check script | their own check and setup entries, protected the same way (`definedCheckEntryPaths`) |
+| `src/owner-approval-paths.ts` | `check-entry` | 1 | recognizes the exact stored legacy approval list and applies the current CI defaults | their configured check and setup entries and their own path patterns |
 | `src/github-actions-workflow.ts` | `check-entry` | 2 | the workflow Forge generates for its standard check | their own configured command and workflow |
 | `src/hosted-actions-export.ts` | `check-entry` | 1 | the marker inside that generated workflow | their own configured command |
 | `scripts/script-impact.mjs` | `check-entry` | 1 | Forge's selector treats its check entry as global | their check entries are global-risk (`checkRunEntryPaths`) |

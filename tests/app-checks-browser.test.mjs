@@ -98,7 +98,13 @@ test('the owner connects CI from the workflows on main, and the agent steps incl
         return JSON.stringify({ state: HEAD, file: { available: true, path: args.path, blob: 'b', mode: 'file', page: { kind: 'text', text, offset: 0, nextOffset: null, totalCharacters: text.length } } });
       },
       mutation: async (ref, args) => {
-        window.calls.push({ name: getFunctionName(ref), args });
+        const name = getFunctionName(ref);
+        window.calls.push({ name, args });
+        if (name === 'projectAutonomy:set') {
+          const command = JSON.parse(args.command);
+          policy.acceptance = { ...policy.acceptance, ...command.acceptance };
+          return { policy };
+        }
         setup.check = { kind: 'ci-file', repository: 'example/parser', workflow: JSON.parse(args.request).change.configuration.ci.workflow, chosenAt: 1800000000000 };
         return JSON.stringify({ rule: 'runner' });
       },
@@ -348,6 +354,17 @@ test('the owner connects CI from the workflows on main, and the agent steps incl
     .getByText(/the change waits for your approval on the web\. Once it applies, landings waiting/)
     .waitFor();
   await layouts('checks-settings-open');
+  const ownerPaths = page.getByRole('textbox', { name: 'Repository path patterns' });
+  assert.match(await ownerPaths.inputValue(), /\.gitlab-ci\.yml/);
+  await ownerPaths.fill('ci/release/**');
+  await page.getByRole('button', { name: 'Save paths' }).click();
+  await page.waitForFunction(() => window.calls.some(call => call.name === 'projectAutonomy:set'));
+  const ownerEdit = await page.evaluate(() =>
+    JSON.parse(window.calls.find(call => call.name === 'projectAutonomy:set').args.command),
+  );
+  assert.deepEqual(ownerEdit.acceptance, { ownerApprovalPaths: ['ci/release/**'] });
+  assert.equal(ownerEdit.governanceVersion, 1);
+  assert.equal(await ownerPaths.inputValue(), 'ci/release/**');
 
   await page.goto('https://forge.test/example/parser/settings/checks?nomirror=1');
   await page.getByRole('link', { name: 'Turn on the mirror' }).waitFor();

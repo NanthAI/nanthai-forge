@@ -11,6 +11,7 @@ import { lanesFixture } from './hosted-lanes-fixture.mjs';
 import { acceptanceFixture } from './hosted-acceptance-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { policyPreset, policyReadView, samePolicy } from '../dist/autonomy-policy.js';
+import { governanceReason } from '../dist/public-governance.js';
 import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
 import { hostedAgentActions, hostedAgentCommandSchemas } from '../dist/hosted-agent-contract.js';
 import { printedReceipt } from '../dist/receipt-slim.js';
@@ -75,6 +76,35 @@ test('policy reads the effective policy with one query and nothing else', async 
   assert.equal((await run('policy')).result.preset, 'supervised', 'contributors can read');
   state.actor = 'stranger';
   await assert.rejects(run('policy'), code('PROJECT_UNAVAILABLE'));
+});
+
+test('an owner can read defaults and replace their review paths without removing check or setup protection', async t => {
+  const { run, s, projectId } = cli(t);
+  const before = (await run('policy')).result;
+  assert(before.acceptance.ownerApprovalPaths.includes('.gitlab-ci.yml'));
+  assert(!before.acceptance.ownerApprovalPaths.includes('netlify.toml'));
+  assert.equal(
+    s.tables.hostedProjects.get(projectId).autonomyPolicy.acceptance.ownerApprovalPaths,
+    undefined,
+  );
+  const { result } = await run('set-policy', {
+    governanceVersion: 1,
+    expectedPolicy: before,
+    acceptance: { mode: 'auto-on-pass', ownerApprovalPaths: ['ci/private/**'] },
+  });
+  assert.deepEqual(result.policy.acceptance.ownerApprovalPaths, ['ci/private/**']);
+  assert.deepEqual((await run('policy')).result.acceptance.ownerApprovalPaths, ['ci/private/**']);
+  const runner = {
+    executable: 'node',
+    args: ['tools/check.mjs'],
+    actions: { setup: { executable: 'bash', args: ['tools/setup.sh'] } },
+  };
+  const reason = path =>
+    governanceReason({ owner: 'owner' }, result.policy, { kind: 'agent', id: 'owner' }, [path], runner);
+  assert.match(reason('ci/private/job.yml'), /needs owner approval/);
+  assert.match(reason('tools/check.mjs'), /needs owner approval/);
+  assert.match(reason('tools/setup.sh'), /needs owner approval/);
+  assert.equal(reason('.gitlab-ci.yml'), null);
 });
 
 test('policy labels the retired field in both CLI outputs and preserves the full legacy policy result', async t => {

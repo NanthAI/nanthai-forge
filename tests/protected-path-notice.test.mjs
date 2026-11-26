@@ -21,33 +21,36 @@ const policy = (acceptance = {}, checkEntries = []) => ({
   checkEntries,
 });
 
-test('netlify incident: default, configured and check-entry paths name their existing approver; unrelated paths do not warn', () => {
-  assert.match(protectedPathNotice(policy(), ['netlify.toml']).message, /project owner/);
+test('default, configured and check-entry paths name their existing approver; unrelated paths do not warn', () => {
+  assert.match(protectedPathNotice(policy(), ['.github/workflows/check.yml']).message, /project owner/);
   assert.equal(protectedPathNotice(policy(), ['src/plain.ts']), undefined);
   const configured = policy({ ownerApprovalPaths: ['deploy/**'], protectedPaths: ['src/guarded.*'] }, [
     'tools/check.mjs',
   ]);
-  assert.equal(protectedPathNotice(configured, ['netlify.toml']), undefined);
+  assert.equal(protectedPathNotice(configured, ['.github/workflows/check.yml']), undefined);
   assert.deepEqual(protectedPathNotice(configured, ['deploy/job.yml']).paths, ['deploy/job.yml']);
   assert.match(protectedPathNotice(configured, ['src/guarded.ts']).message, /a person allowed to accept/);
   assert.match(protectedPathNotice(configured, ['tools/check.mjs']).message, /project owner/);
-  assert.equal(protectedPathNotice(policy({ ownerApprovalPaths: [] }), ['netlify.toml']), undefined);
+  assert.equal(
+    protectedPathNotice(policy({ ownerApprovalPaths: [] }), ['.github/workflows/check.yml']),
+    undefined,
+  );
   assert.equal(protectedPathNotice(policy({ ownerApprovalPaths: [], protectedPaths: [] }), null), undefined);
   assert.equal(protectedPathNotice(policy({ ownerApprovalPaths: [] }), null).coverage, 'unavailable');
   assert.equal(protectedPathNotice(policy(), null).coverage, 'unavailable');
 });
 
 test('a large change caps only the approval notice and reports omitted paths', () => {
-  const paths = Array.from({ length: 1000 }, (_, i) => `netlify/${i}.ts`);
+  const paths = Array.from({ length: 1000 }, (_, i) => `.github/workflows/${i}.ts`);
   const notice = protectedPathNotice(policy(), paths);
   assert.equal(notice.paths.length, 10);
   assert.equal(notice.more, 990);
-  const long = protectedPathNotice(policy(), ['netlify/' + 'x'.repeat(1500)]);
+  const long = protectedPathNotice(policy(), ['.github/workflows/' + 'x'.repeat(1500)]);
   assert.equal(long.paths.length, 0);
   assert.equal(long.more, 1);
 });
 
-async function fixture(t, path = 'netlify.toml', configured = policy()) {
+async function fixture(t, path = '.github/workflows/check.yml', configured = policy()) {
   const s = agentFixture(t, { base: { [path]: 'Before\n' }, lane: { [path]: 'After\n' } });
   if (configured) {
     s.caps.features = ['protected-path-notice'];
@@ -64,10 +67,10 @@ async function fixture(t, path = 'netlify.toml', configured = policy()) {
 test('the first save replies with approval before checking, while unrelated saves and older servers keep their reply and call count', async t => {
   const calls = [];
   for (const [path, configured, expected] of [
-    ['netlify.toml', policy(), true],
+    ['.github/workflows/check.yml', policy(), true],
     ['ordinary.txt', policy(), false],
-    ['netlify.toml', policy({ ownerApprovalPaths: [] }), false],
-    ['netlify.toml', null, false],
+    ['.github/workflows/check.yml', policy({ ownerApprovalPaths: [] }), false],
+    ['.github/workflows/check.yml', null, false],
   ]) {
     const s = await fixture(t, path, configured);
     const before = s.calls.length;
@@ -77,7 +80,7 @@ test('the first save replies with approval before checking, while unrelated save
     const notice = response.result.protectedPathNotice;
     assert.equal(Boolean(notice), expected);
     if (expected) {
-      assert.deepEqual(notice.paths, ['netlify.toml']);
+      assert.deepEqual(notice.paths, ['.github/workflows/check.yml']);
       assert.deepEqual(compactReplyDetail('save', response.result).protectedPathNotice, notice);
       assert.deepEqual(slimReceipt(response).result.protectedPathNotice, notice);
     }
@@ -90,7 +93,7 @@ test('the first save replies with approval before checking, while unrelated save
 test('direct preflight and land without prior explicit save both explain approval before work is submitted', async t => {
   const s = await fixture(t);
   const preflight = await s.transport().dispatch('preflight', { laneId: s.lane.laneId, run: false });
-  assert.deepEqual(preflight.result.protectedPathNotice.paths, ['netlify.toml']);
+  assert.deepEqual(preflight.result.protectedPathNotice.paths, ['.github/workflows/check.yml']);
   const printed = [];
   const write = process.stderr.write.bind(process.stderr);
   t.mock.method(process.stderr, 'write', (text, ...args) => {
@@ -106,17 +109,19 @@ test('direct preflight and land without prior explicit save both explain approva
   const land = await s
     .transport()
     .dispatch('finish', { operationId: randomUUID(), message: 'Land protected edit', accept: true });
-  assert.deepEqual(land.result.protectedPathNotice.paths, ['netlify.toml']);
+  assert.deepEqual(land.result.protectedPathNotice.paths, ['.github/workflows/check.yml']);
 });
 
 test('ad80e037: a protected file whose saved bytes equal main (merged in by a sync, or reverted) needs no approval notice, with no added call', async t => {
   const names = [];
   for (const known of [false, true, 'uncached']) {
     const s = await fixture(t);
-    const saved = readHostedLaneCheckout(s.root).state.files.find(file => file.path === 'netlify.toml');
+    const saved = readHostedLaneCheckout(s.root).state.files.find(
+      file => file.path === '.github/workflows/check.yml',
+    );
     // Main moved after the Lane's base and now holds exactly the Lane's bytes for the file.
     const main = JSON.parse(s.objects.get(s.main.head));
-    main.files = main.files.filter(file => file.path !== 'netlify.toml').concat(saved);
+    main.files = main.files.filter(file => file.path !== '.github/workflows/check.yml').concat(saved);
     const bytes = Buffer.from(JSON.stringify(main));
     const head = digest(bytes);
     if (known !== 'uncached') writeFileSync(join(clientCacheRoot(s.root), 'objects', head), bytes);
@@ -132,8 +137,8 @@ test('ad80e037: a protected file whose saved bytes equal main (merged in by a sy
       assert.equal(preflight.result.protectedPathNotice, undefined);
     } else {
       // No main manifest on this machine: the notice stays (a missing observation never hides it).
-      assert.deepEqual(save.result.protectedPathNotice.paths, ['netlify.toml']);
-      assert.deepEqual(preflight.result.protectedPathNotice.paths, ['netlify.toml']);
+      assert.deepEqual(save.result.protectedPathNotice.paths, ['.github/workflows/check.yml']);
+      assert.deepEqual(preflight.result.protectedPathNotice.paths, ['.github/workflows/check.yml']);
     }
   }
   for (const list of names.slice(1)) assert.deepEqual(list, names[0], 'the main comparison adds zero calls');
@@ -142,7 +147,7 @@ test('ad80e037: a protected file whose saved bytes equal main (merged in by a sy
   const marker = readHostedLaneCheckout(s.root);
   assert.deepEqual(
     checkoutProtectedPathNotice(s.root, marker, policy(), s.main.head).paths,
-    ['netlify.toml'],
+    ['.github/workflows/check.yml'],
     'the Lane changes the file against main: notice kept',
   );
 });
@@ -167,7 +172,7 @@ test('current and doubled manifests explain approval locally with constant serve
       start = performance.now(),
       heap = process.memoryUsage().heapUsed;
     const notice = checkoutProtectedPathNotice(s.root, marker, policy());
-    assert.deepEqual(notice.paths, ['netlify.toml']);
+    assert.deepEqual(notice.paths, ['.github/workflows/check.yml']);
     assert.equal(s.calls.length, calls);
     t.diagnostic(
       JSON.stringify({
@@ -183,12 +188,12 @@ test('current and doubled manifests explain approval locally with constant serve
 
 test('a prepared Candidate explains its protected approval before the landing check is enqueued', async t => {
   const s = await fixture(t);
-  s.candidate.governance = { version: 1, paths: ['netlify.toml'], ownerInputs: true };
+  s.candidate.governance = { version: 1, paths: ['.github/workflows/check.yml'], ownerInputs: true };
   const result = await s.transport().dispatch('finish', {
     candidateId: s.candidate.id,
     composeOperationId: randomUUID(),
     operationId: randomUUID(),
     accept: true,
   });
-  assert.deepEqual(result.result.protectedPathNotice.paths, ['netlify.toml']);
+  assert.deepEqual(result.result.protectedPathNotice.paths, ['.github/workflows/check.yml']);
 });

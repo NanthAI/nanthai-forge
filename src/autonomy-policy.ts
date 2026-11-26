@@ -3,6 +3,7 @@
 import { auditCadencePolicySchema, landingModeSchema } from './landing-mode.js';
 import { z } from 'zod';
 import { deploySettingsSchema } from './deploy-targets.js';
+import { effectiveOwnerApprovalPaths } from './owner-approval-paths.js';
 import { checkLogsSchema } from './check-log-policy.js';
 import { invariant } from './errors.js';
 import { SNAPSHOT_INTERVAL_MINUTES } from './lane-snapshot-interval.js';
@@ -192,6 +193,10 @@ export function effectivePolicy(data: { autonomyPolicy?: AutonomyPolicy | undefi
  * Landing evidence keeps the stored policy, so digests do not change when a default does. */
 export const policyReadView = (policy: AutonomyPolicy): AutonomyPolicy => ({
   ...policy,
+  acceptance: {
+    ...policy.acceptance,
+    ownerApprovalPaths: [...effectiveOwnerApprovalPaths(policy.acceptance.ownerApprovalPaths)],
+  },
   agentDefaults: {
     // Older CLIs parse this strictly: the frozen keys always, later keys only when stored (absent
     // means the documented default). See WIRE_AGENT_DEFAULT_KEYS.

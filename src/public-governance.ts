@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
+import { effectiveOwnerApprovalPaths } from './owner-approval-paths.js';
+export { DEFAULT_OWNER_APPROVAL_PATHS } from './owner-approval-paths.js';
 import { checkEntryPaths } from './first-check-risk.js';
 import {
   globPattern,
@@ -9,17 +11,6 @@ import {
   type AcceptanceActor,
 } from './autonomy-policy.js';
 
-export const DEFAULT_OWNER_APPROVAL_PATHS = [
-  '.github/**',
-  'scripts/forge-check.mjs',
-  '.forge/**',
-  // Source-controlled check/runner and future deployment definitions live here.
-  'forge.config.*',
-  'netlify.toml',
-  'netlify/**',
-  'scripts/deploy*',
-  'scripts/deploy/**',
-];
 type CommandLike = { executable: string; args: readonly string[] };
 /** A defined check: its command and the optional Actions setup command it runs first. */
 export type DefinedCheck = CommandLike & { actions?: { setup?: CommandLike } | undefined };
@@ -38,12 +29,10 @@ export function definedCheckEntryPaths(checks: DefinedChecks) {
   return [...paths].sort();
 }
 /** Paths that need owner approval by default: the listed ones plus the files every
- * defined check and setup action of the project runs, so any project's check entries
- * are protected, not only Forge's. An explicit `ownerApprovalPaths` list replaces the
- * built-in list; derived check entries remain protected. */
+ * defined check and setup action of the project runs. An explicit `ownerApprovalPaths`
+ * list replaces the built-in list; derived check entries remain protected. */
 export function ownerApprovalMatcher(policy: Pick<AutonomyPolicy, 'acceptance'>, checks?: DefinedChecks) {
-  const explicit = policy.acceptance.ownerApprovalPaths;
-  const patterns = (explicit ?? DEFAULT_OWNER_APPROVAL_PATHS).map(globPattern);
+  const patterns = effectiveOwnerApprovalPaths(policy.acceptance.ownerApprovalPaths).map(globPattern);
   const entries = definedCheckEntryPaths(checks);
   const matches = (path: string) => entries.includes(path) || patterns.some(pattern => pattern.test(path));
   return Object.assign(matches, { any: patterns.length + entries.length > 0 });

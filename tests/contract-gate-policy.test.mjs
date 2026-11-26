@@ -164,10 +164,15 @@ test('entry files of every defined check and setup action select the full gate, 
   const explicit = input();
   explicit.policy.acceptance.ownerApprovalPaths = ['deploy/**'];
   assert.equal(gateFor({ ...explicit, paths: ['.bench/ci.sh'], checks }).mode, 'full');
+  assert.equal(gateFor({ ...input(), paths: ['.gitlab-ci.yml'] }).mode, 'full');
+  assert.equal(gateFor({ ...input(), paths: ['scripts/forge-check.mjs'] }).mode, 'contract');
   assert.equal(
-    gateFor({ ...input(), paths: ['scripts/forge-check.mjs'] }).mode,
+    gateFor({
+      ...input(),
+      paths: ['scripts/forge-check.mjs'],
+      checks: [{ executable: 'node', args: ['scripts/forge-check.mjs'] }],
+    }).mode,
     'full',
-    'Forge default unchanged',
   );
 });
 test('team members: policy decides eligibility, the owner is only the default', () => {

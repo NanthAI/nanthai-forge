@@ -26,12 +26,25 @@ owner is a trusted OS process, not a sandbox for untrusted contributors.
 
 For server-authoritative public projects the default owner-approval list is:
 
-- `.github/**`
-- `scripts/forge-check.mjs`
-- `.forge/**`
-- `forge.config.*`
-- `netlify.toml` and `netlify/**`
-- `scripts/deploy*` and `scripts/deploy/**`
+- GitHub, GitLab, CircleCI, Buildkite, Forgejo and Woodpecker configuration
+- `Jenkinsfile`, `azure-pipelines.yml` and `bitbucket-pipelines.yml`
+- `.forge/**` and `forge.config.*`
+
+The project’s configured check commands and setup entry files are protected as well.
+A custom `acceptance.ownerApprovalPaths` list replaces the default patterns and
+keeps that check and setup protection. A stored copy of the exact previous default
+list uses the current defaults.
+
+Open **Settings → Landing and checks → Paths that need owner approval** to see or
+edit the patterns. In the CLI, `nforge agent ROOT policy` shows the current
+patterns under `acceptance.ownerApprovalPaths`. To replace them:
+
+```sh
+nforge x ROOT set-policy '{"governanceVersion":1,"acceptance":{"ownerApprovalPaths":["ci/**","tools/release.sh"]}}'
+```
+
+An empty list leaves only the project's check and setup entries in the
+owner-approval rule. Agent changes to this setting follow the approval flow below.
 
 The list applies on every project, public or private, to every agent, the owner's own
 agents included (any device sign-in, such as `nforge login`, is an agent); on a public

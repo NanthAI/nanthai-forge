@@ -23,6 +23,7 @@ import { landedAt } from '../code/code-words';
 import { checkWords, type SetupView } from '../start/setup-model';
 import type { PlaceProps } from '../screen-route';
 import { CheckRoutes } from './CheckRoutes';
+import { OwnerApprovalPaths } from './OwnerApprovalPaths';
 import { LandingSettings } from './LandingSettings';
 import { AwaitingFirstLanding, useFirstChecked } from './FirstLanding';
 import '../start/start.css';
@@ -233,6 +234,13 @@ export default function LandingChecks({ projectId, route, projectName, feed }: P
         ) : null}
       </Region>
       <Approvals facts={facts} projectId={projectId} onDone={refresh} />
+      <OwnerApprovalPaths
+        key={projectId}
+        policy={facts.policy}
+        projectId={projectId}
+        owner={owner}
+        onDone={refresh}
+      />
       <LandingSettings policy={facts.policy} landing={landing} owner={owner} />
       {/* One line that points at the Secrets page (Item 41a0df87): static, so this page makes no extra read. */}
       <Region title="Secrets" hint="names only">
