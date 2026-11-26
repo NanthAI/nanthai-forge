@@ -28,8 +28,9 @@ function setup() {
       projectId: 'project',
       ...patch,
     });
-  const rows = () => [...s.tables.clientErrors.values()];
-  return { s, report, rows };
+  const rows = () => [...s.tables.clientErrors.values()].filter(row => 'kind' in row);
+  const drops = () => [...s.tables.clientErrors.values()].filter(row => 'dropPosition' in row);
+  return { s, report, rows, drops };
 }
 
 test('client error reports take the user from auth, drop anonymous callers and reconcile retries', async () => {
@@ -91,6 +92,61 @@ test('a public project is attached only under current membership', async () => {
       ['reader', undefined],
       ['reader', undefined],
     ],
+  );
+});
+
+test('an account shares its daily report cap across projects and unattached reports, with counted overflow', async t => {
+  const now = Date.UTC(2026, 10, 26);
+  t.mock.timers.enable({ apis: ['Date'], now });
+  const { s, report, rows, drops } = setup();
+  s.tables.hostedProjects.set('other-project', {
+    ...s.tables.hostedProjects.get('project'),
+    _id: 'other-project',
+  });
+  const contexts = ['project', 'other-project', undefined];
+  for (let i = 0; i < 100; i++) {
+    assert.ok(await report({ projectId: contexts[i % contexts.length] }));
+  }
+  for (let i = 0; i < 20; i++) {
+    assert.equal(
+      await report({ operationId: `account-overflow-${i}`, projectId: contexts[i % contexts.length] }),
+      null,
+    );
+  }
+  assert.equal(await report({ operationId: 'account-overflow-0' }), null);
+  assert.equal(rows().length, 100);
+  assert.deepEqual(
+    drops().map(row => [row.dropPosition, row.dropDay]),
+    Array.from({ length: 20 }, (_, i) => [i + 1, now]),
+  );
+  assert.ok(drops().every(row => !('projectId' in row) && !('message' in row)));
+
+  t.mock.timers.setTime(now + 86_400_000);
+  assert.equal(await report({ operationId: 'account-overflow-0' }), null);
+  assert.ok(await report());
+  assert.equal(rows().length, 101);
+  assert.equal(drops().length, 20);
+});
+
+test('project members share the project report cap and visitors cannot spend its allowance', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.UTC(2026, 10, 26) });
+  const { s, report, rows, drops } = setup();
+  s.tables.hostedProjects.get('project').visibility = 'public';
+  for (let i = 0; i < 10; i++) {
+    const reader = `reader-${i}`;
+    s.tables.projectReaders.set(reader, { _id: reader, projectId: 'project', reader });
+    s.caller(reader);
+    for (let j = 0; j < 100; j++) assert.ok(await report());
+  }
+  s.caller('owner');
+  assert.equal(await report(), null);
+  assert.ok(await report({ projectId: undefined }));
+  s.caller('stranger');
+  assert.ok(await report());
+  assert.equal(rows().filter(row => row.projectId === 'project').length, 1_000);
+  assert.deepEqual(
+    drops().map(row => row.dropPosition),
+    [1],
   );
 });
 

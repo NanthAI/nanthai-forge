@@ -894,7 +894,18 @@ The hosted browser reports its own failures through one module, `web/src/error-c
 
 The client keeps only the URL path (no origin, credentials, query or fragment), strips query strings from URLs in messages and stacks, and redacts JWTs, bearer tokens, `fga_`/`sk_`/`rk_` tokens and `token=`/`secret:`/`password=`-style values. Thrown non-Error objects are never serialized. The same failure (kind, function, code, message, top stack frame) is sent at most once per ten minutes, at most ten reports per minute per page, and up to ten reports wait until a signed-in session attaches. Anonymous visitors send nothing. The build hash is the content hash of Vite's entry chunk (`assets/index-<hash>.js`), or `dev`.
 
-`clientErrors:report` is a retry-safe mutation keyed by the caller's auth subject and a client operation id. The user always comes from auth, never from arguments; anonymous calls are dropped. The server scrubs and clips every field again with the shared `src/client-error-text.ts` rules (message 500 characters, stack 4,000, route 300). A project id is attached only when the caller currently has read access to that project. `clientErrors:recent` lists a project's reports newest first, for the project owner only; reporters other than the owner appear as `reportedByYou: false`, never by account. The table is additive and has no retention rule.
+`clientErrors:report` identifies the caller through auth and drops anonymous calls. It checks account
+suspension and device write scope, and attaches a project only for current members. The server scrubs and
+clips fields with the shared `src/client-error-text.ts` rules (message 500 characters, stack 4,000, route 300).
+Each account can store 100 reports per UTC day across all contexts, and each project can receive 1,000
+member reports per UTC day. Indexed lookups read the highest stored position for each applicable scope.
+The mutation inserts one report with its positions or one compact drop receipt. Drop receipts hold
+the account, operation ID and daily drop position. That position counts overflow from both caps.
+A request with the same operation ID replays its original result while its row exists. All rate-limit
+reads happen on report submission.
+
+`clientErrors:recent` lists a project's reports newest first for its owner, with a `reportedByYou` flag.
+Scheduled check maintenance expires reports and drop receipts after 30 days in bounded pages.
 
 ## Hosted coordination paging
 

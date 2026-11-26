@@ -11,13 +11,58 @@ import { projectRole } from './projectRole';
 import { report as reportError } from './errors';
 import { invariant } from '../src/errors';
 import { clientErrorLimits as limit, clip, scrubRoute, scrubText } from '../src/client-error-text';
+import type { MutationCtx } from './server';
+import type { Id } from './_generated/dataModel';
+
+const dayMs = 86_400_000;
+const accountReportCap = 100;
+const projectReportCap = 1_000;
+
+async function reportPositions(
+  ctx: MutationCtx,
+  user: string,
+  projectId: Id<'hostedProjects'> | undefined,
+  reportDay: number,
+) {
+  // Index tails give both counters from the reports themselves, so an accepted report needs
+  // only its original insert. Concurrent inserts into these ranges conflict and retry.
+  const [account] = await ctx.db
+    .query('clientErrors')
+    .withIndex('by_user_reportDay_accountPosition', q => q.eq('user', user).eq('reportDay', reportDay))
+    .order('desc')
+    .take(1);
+  const accountPosition = (account && 'accountPosition' in account ? (account.accountPosition ?? 0) : 0) + 1;
+  if (accountPosition > accountReportCap) return null;
+  if (!projectId) return { reportDay, accountPosition };
+  const [project] = await ctx.db
+    .query('clientErrors')
+    .withIndex('by_projectId_reportDay_projectPosition', q =>
+      q.eq('projectId', projectId).eq('reportDay', reportDay),
+    )
+    .order('desc')
+    .take(1);
+  const projectPosition = (project && 'projectPosition' in project ? (project.projectPosition ?? 0) : 0) + 1;
+  return projectPosition > projectReportCap ? null : { reportDay, accountPosition, projectPosition };
+}
+
+async function recordDrop(ctx: MutationCtx, user: string, operationId: string, dropDay: number) {
+  // Keep one compact receipt for retry reconciliation, with no diagnostic payload or project attribution.
+  const [previous] = await ctx.db
+    .query('clientErrors')
+    .withIndex('by_user_dropDay_dropPosition', q => q.eq('user', user).eq('dropDay', dropDay))
+    .order('desc')
+    .take(1);
+  const dropPosition = (previous && 'dropPosition' in previous ? previous.dropPosition : 0) + 1;
+  await ctx.db.insert('clientErrors', { user, operationId, dropDay, dropPosition });
+  return null;
+}
 
 const optionalText = (value: string | undefined, max: number) => {
   const text = value === undefined ? '' : scrubText(value, max).trim();
   return text ? text : undefined;
 };
 
-/** Record one browser failure for the signed-in caller. Anonymous reports are dropped. */
+/** Record one browser failure for the signed-in caller. Anonymous and excess reports are dropped. */
 export const report = mutation({
   args: {
     operationId: v.string(),
@@ -46,7 +91,7 @@ export const report = mutation({
           q.eq('user', user.subject).eq('operationId', args.operationId),
         )
         .unique();
-      if (existing) return existing._id;
+      if (existing) return 'dropPosition' in existing ? null : existing._id;
       await assertAccountActive(ctx, user.subject);
       const id = args.projectId ? ctx.db.normalizeId('hostedProjects', args.projectId) : null;
       if (id) await requireDeviceWrite(ctx, id);
@@ -57,6 +102,9 @@ export const report = mutation({
         project && (project.visibility !== 'public' || (await projectRole(ctx, project, user.subject)))
           ? project._id
           : undefined;
+      const reportDay = Math.floor(Date.now() / dayMs) * dayMs;
+      const positions = await reportPositions(ctx, user.subject, projectId, reportDay);
+      if (!positions) return await recordDrop(ctx, user.subject, args.operationId, reportDay);
       const stack = optionalText(args.stack, limit.stack),
         functionName = optionalText(args.functionName, limit.functionName),
         code = optionalText(args.code, limit.code);
@@ -64,6 +112,7 @@ export const report = mutation({
         user: user.subject,
         operationId: args.operationId,
         ...(projectId ? { projectId } : {}),
+        ...positions,
         kind: args.kind,
         message: scrubText(args.message, limit.message) || 'Unknown error',
         ...(stack ? { stack } : {}),
@@ -107,18 +156,20 @@ export const recent = query({
         .paginate(paginationOpts);
       return {
         ...result,
-        page: result.page.map(row => ({
-          id: row._id,
-          at: row._creationTime,
-          kind: row.kind,
-          message: row.message,
-          ...(row.stack === undefined ? {} : { stack: row.stack }),
-          route: row.route,
-          build: row.build,
-          ...(row.functionName === undefined ? {} : { functionName: row.functionName }),
-          ...(row.code === undefined ? {} : { code: row.code }),
-          reportedByYou: row.user === user.subject,
-        })),
+        page: result.page
+          .filter(row => 'kind' in row)
+          .map(row => ({
+            id: row._id,
+            at: row._creationTime,
+            kind: row.kind,
+            message: row.message,
+            ...(row.stack === undefined ? {} : { stack: row.stack }),
+            route: row.route,
+            build: row.build,
+            ...(row.functionName === undefined ? {} : { functionName: row.functionName }),
+            ...(row.code === undefined ? {} : { code: row.code }),
+            reportedByYou: row.user === user.subject,
+          })),
       };
     } catch (error) {
       return reportError(error);

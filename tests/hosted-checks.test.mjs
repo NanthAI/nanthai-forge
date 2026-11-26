@@ -822,20 +822,19 @@ test('client error maintenance expires only older than 30 days in one retry-safe
   t.mock.method(Date, 'now', () => now);
   s.tables.clientErrors ??= new Map();
   s.tables.agentEvents ??= new Map();
-  const seed = (id, days) =>
+  const seed = (id, days, drop) =>
     s.tables.clientErrors.set(`clientErrors-${id}`, {
       _id: `clientErrors-${id}`,
       _creationTime: now - days * 86_400_000,
       user: 'synthetic',
       operationId: id,
-      kind: 'error',
-      message: 'synthetic',
-      route: '/',
-      build: 'test',
+      ...(drop
+        ? { dropDay: Math.floor((now - days * 86_400_000) / 86_400_000) * 86_400_000, dropPosition: 1 }
+        : { kind: 'error', message: 'synthetic', route: '/', build: 'test' }),
     });
   seed('young', 29);
-  seed('boundary', 30);
-  for (let i = 0; i < 12; i++) seed(`old-${i}`, 31);
+  seed('boundary', 30, true);
+  for (let i = 0; i < 12; i++) seed(`old-${i}`, 31, i === 0);
   // The failure log (Item 2c420916) expires on the same 30-day page.
   for (let i = 0; i < 10; i++)
     s.tables.projectFailures.set(`projectFailures-${i}`, {

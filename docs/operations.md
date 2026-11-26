@@ -1791,11 +1791,18 @@ You can select owned items for removal. Projects and imports use their normal fi
 
 ## Client error reports
 
-Signed-in hosted browsers record failures in the Convex `clientErrors` table (see [architecture](architecture.md#client-error-capture)). Each row holds the reporting account's auth subject, kind (`error`, `unhandledrejection`, `render`, `mutation`, `action`), scrubbed message and stack, route path, build hash, and when known the Convex function name, error code and project. Rows never hold source contents, URL query strings or recognized tokens.
+Signed-in hosted browsers record failures in the Convex `clientErrors` table (see [architecture](architecture.md#client-error-capture)). Each accepted report holds the reporting account's auth subject, kind (`error`, `unhandledrejection`, `render`, `mutation`, `action`), scrubbed message and stack, route path, build hash, and when known the Convex function name, error code and project. Reports omit source contents, URL query strings and recognized tokens.
 
-To read a project's reports, call `clientErrors:recent` with `{projectId, paginationOpts}` as the project owner; anyone else receives `PROJECT_UNAVAILABLE`. There is no browser view yet. Operators can also inspect the table in the Convex dashboard. Match `build` against the hashed `assets/index-<hash>.js` of a deployment to find the build that failed.
+The server accepts up to 100 reports per account and 1,000 per project each UTC day. Unattached reports
+count toward the account allowance. Reports that would exceed either cap return `null` and save a compact
+receipt in `clientErrors` with the operation ID and daily drop position. To read an account's total
+drops across both caps for a UTC day, inspect the greatest `dropPosition` in the
+`by_user_dropDay_dropPosition` index for that account and `dropDay` (UTC midnight in milliseconds).
 
-Reports are kept until removed by hand: there is no automatic retention, and they are not yet part of "Your Forge data" inventory or project and account deletion.
+To read a project's reports, call `clientErrors:recent` with `{projectId, paginationOpts}` as the project
+owner. Other callers receive `PROJECT_UNAVAILABLE`. Operators can inspect the table in the Convex
+dashboard. Match `build` against the hashed `assets/index-<hash>.js` of a deployment to find the build that
+failed. Scheduled check maintenance expires reports and drop receipts after 30 days in bounded pages.
 
 ## Sealed secrets and the retired Secret Objects
 
