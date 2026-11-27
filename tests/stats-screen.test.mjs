@@ -6,7 +6,7 @@
 // its assumptions behind "How this is worked out", runs without minutes are named, never zero, a window
 // under the minimum shows only measured figures, every chart has its table and prints its values, the period picker
 // re-aggregates the page (this month, last month, a custom range), per-day bars keep a fixed width from the left at 1,
-// 2 and 31 days, an empty month says so, agent setups and people form a table, and axe passes at 1440 and 390 in
+// 2 and 31 days, the first day shows live landings, an empty month says so, agent setups and people form a table, and axe passes at 1440 and 390 in
 // both themes with no horizontal page scroll.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -490,11 +490,16 @@ test('stats: short headline, one freshness line, today so far, comparison, table
       `${width}: ${shown} values shown on 31 bars`,
     );
   }
-  const empty = await open(390, 'none');
-  assert.match(await empty.locator('.sit').textContent(), /^No closed days in November 2026\./);
-  assert.deepEqual(await empty.locator('.stats-freshness').allTextContents(), [], 'nothing counted: no line');
-  await empty.getByLabel('Period').selectOption('last');
-  assert.match(await empty.locator('.sit').textContent(), /^No closed days in October 2026\./);
+  const firstDay = await open(390, 'none', 'dark', 'live=2');
+  assert.equal(await firstDay.locator('.sit').textContent(), '2 landings today.');
+  assert.match(await firstDay.locator('main').textContent(), /first hourly summary.*midnight UTC/);
+  assert.equal(await firstDay.getByRole('button', { name: 'Against the days before' }).count(), 0);
+  assert.equal(await firstDay.evaluate(() => window.foldReads?.size ?? 0), 0);
+  await firstDay.getByLabel('Period').selectOption('last');
+  assert.equal(await firstDay.locator('.sit').textContent(), 'No landing figures in October 2026.');
+  assert.match(await firstDay.locator('main').textContent(), /Try a longer period\./);
+  const empty = await open(390, 'none', 'dark', 'live=0&from=2026-11-19&to=2026-11-19');
+  assert.equal(await empty.locator('.sit').textContent(), 'No landings reported today.');
   const early = await open(390, 'early');
   assert.match(
     await early.locator('.sit').textContent(),

@@ -61,12 +61,12 @@
 
 | Scenario | What the user sees |
 |---|---|
-| A new project with too few landings | Figures say how many landings they need before a trend shows. |
+| The first landings arrive before the first hourly summary | Stats shows today's live landing count. It says when the first figures usually appear and when the reporting day ends. A range trend needs figures for the selected period and the same number of days before it. |
 | No CI minutes reported (own CI without timings) | Minutes read "not reported by your CI"; savings in minutes are not shown. |
 | At the plan's limit | Billing says landings wait in the queue and saves carry on; nothing is checked until the limit changes. |
 | Figures still loading | Each figure keeps its space and fills in once. |
 | A read failed | The figure says it could not be read and keeps the last value with its time. |
-| An empty window (no landings in it) | The figures say no landings in this window and offer a longer one. |
+| A window with no landing figures | Stats says there are no figures and offers a longer range if available. If today's live count reports zero and the window is today only, Stats says no landings were reported today. |
 
 ---
 
@@ -83,5 +83,5 @@
 - Billing with landings against the limit.
 - Stats with the four figures and trends.
 - Saved with its baseline and method disclosure.
-- The too-few-landings and not-reported states.
+- The first-day, empty-window and not-reported states.
 - The at-limit state in Billing.

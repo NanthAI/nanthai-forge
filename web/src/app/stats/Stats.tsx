@@ -183,9 +183,9 @@ export function StatsView({
   const picker = (
     <PeriodPicker key={`${period.kind}/${period.from}/${period.to}`} period={period} onPeriod={onPeriod} />
   );
-  if (read === undefined)
+  if (read === undefined || (busy && !('error' in read) && !read.cover.closed && !read.cover.notMeasured))
     return (
-      <Head trail={trail} sentence={<span aria-busy="true">Reading this project’s closed days…</span>}>
+      <Head trail={trail} sentence={<span aria-busy="true">Reading this project’s landing figures…</span>}>
         {picker}
       </Head>
     );
@@ -211,29 +211,40 @@ export function StatsView({
       {period.error}
     </p>
   ) : null;
-  if (!data.cover.closed && !data.cover.notMeasured)
+  if (!data.cover.closed && !data.cover.notMeasured) {
+    const hasLiveLandings = w.landings > 0;
+    const todayOnly = shown.live && period.kind !== 'all' && period.from === period.to;
+    const sentence = hasLiveLandings
+      ? `${plural(w.landings, 'landing')} today.`
+      : todayOnly
+        ? 'No landings reported today.'
+        : `No landing figures ${periodWords(period)}.`;
     return (
       <>
-        <Head
-          trail={trail}
-          sentence={
-            <>
-              <b>No closed days {periodWords(period)}.</b>
-              {freshness}
-            </>
-          }
-        >
+        <Head trail={trail} sentence={<b>{sentence}</b>}>
           {picker}
         </Head>
         {notice}
-        <Region title="Landings per day">
-          <div className="empty">
-            <h3>Nothing closed {periodWords(period)}</h3>
-            <p>Choose another period above.</p>
-          </div>
+        <Region title={data.perMonth ? 'Landings per month' : 'Landings per day'}>
+          <p className="stats-readout">
+            {hasLiveLandings ? (
+              <>
+                Today’s figures usually start with the first hourly summary. The reporting day ends at
+                midnight UTC.
+                {period.kind !== 'all'
+                  ? ' The trend compares this period with the same number of days before it, once both have figures.'
+                  : null}
+              </>
+            ) : period.kind === 'all' ? (
+              'Figures appear after Forge summarises the landings.'
+            ) : (
+              'Try a longer period.'
+            )}
+          </p>
         </Region>
       </>
     );
+  }
   return (
     <>
       <Head

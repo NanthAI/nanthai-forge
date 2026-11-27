@@ -343,6 +343,10 @@ shell's feed Stats already has, no extra read), in the page count and today's ba
 figures (first-try rate, CI minutes, medians, the comparison), which carry "as of 10:00 UTC" (or "through Sat 22 Nov"
 before today's first close) beside them, and the line then reads "Landings are live; the other figures count today up
 to 10:00 UTC." Every "today" in the app is the UTC project day (`sameUtcDay`, `mainToday` in src/flow-day.ts).
+Before the first hourly summary, Stats shows today's live landing count for a period that includes today. It explains
+that reporting days end at midnight UTC and a range trend compares the same number of days before the selected period
+once both have figures. A range with no summary says it has no figures and offers a longer period. A today-only range
+with a reported live zero says no landings were reported today.
 By agent shows agents in four first-try buckets (100%, 75–99%, 50–74%, under 50%), never a list per agent; each landing's own
 time to main and stops are on its Lane page.
 

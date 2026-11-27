@@ -6,6 +6,9 @@
 // figures only, marked "as of". Every "today" is the UTC project day, whatever the reader's time zone.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { build } from 'vite';
 import { moduleUrl } from './convex-module.mjs';
 
 const flowDay = await import(moduleUrl('../src/flow-day.ts'));
@@ -40,6 +43,85 @@ const dayRow = (iso, n, provisional) => {
   return provisional === undefined ? row : { ...row, provisional };
 };
 const monthPeriod = now => stats.periodOf(new URLSearchParams(''), now);
+
+// Compile the screen and its CSS imports as Vite does, without a server or a browser.
+const { output } = await build({
+  configFile: false,
+  logLevel: 'silent',
+  oxc: { jsx: { runtime: 'automatic' } },
+  build: {
+    ssr: 'web/src/app/stats/Stats.tsx',
+    write: false,
+    rolldownOptions: { output: { codeSplitting: false, paths: id => import.meta.resolve(id) } },
+  },
+});
+const screen = output.find(item => item.type === 'chunk' && item.isEntry);
+const { StatsView } = await import(
+  `data:text/javascript;base64,${Buffer.from(screen.code).toString('base64')}`
+);
+
+test('Stats renders the live first landing while the first hourly summary is still pending', () => {
+  const now = at('2026-11-23T04:15:00Z');
+  const selected = monthPeriod(now);
+  const live = flowDay.mainToday(feedOf(at('2026-11-23T04:05:00Z')), now).landed;
+  const data = period.statsRangeReply([], selected);
+  const shown = stats.withLiveToday(data, live, selected, now);
+  assert.equal(shown.data.window.landings, 1);
+  assert.deepEqual(shown.data.perDay, [['2026-11-23', 1]]);
+
+  const html = renderToStaticMarkup(
+    createElement(StatsView, { data, period: selected, now, liveLanded: live, usePart: assert.fail }),
+  );
+  assert.match(html, /<b>1 landing today\.<\/b>/);
+  assert.match(html, /first hourly summary/);
+  assert.match(html, /midnight UTC/);
+  assert.match(html, /same number of days before it/);
+});
+
+test('Stats describes a historical period with no summary without claiming it had no landings', () => {
+  const now = at('2026-11-23T04:15:00Z');
+  const selected = stats.periodOf(new URLSearchParams('period=last'), now);
+  const data = period.statsRangeReply([], selected);
+  const html = renderToStaticMarkup(
+    createElement(StatsView, { data, period: selected, now, liveLanded: 1, usePart: assert.fail }),
+  );
+  assert.match(html, /<b>No landing figures in October 2026\.<\/b>/);
+  assert.match(html, /Try a longer period\./);
+});
+
+test('Stats distinguishes a reported zero from a day with no summary or live count', () => {
+  const now = at('2026-11-23T04:15:00Z');
+  const selected = stats.periodOf(new URLSearchParams('from=2026-11-23&to=2026-11-23'), now);
+  const data = period.statsRangeReply([], selected);
+  const props = { data, period: selected, now, usePart: assert.fail };
+  assert.match(
+    renderToStaticMarkup(createElement(StatsView, { ...props, liveLanded: 0 })),
+    /<b>No landings reported today\.<\/b>/,
+  );
+  assert.match(renderToStaticMarkup(createElement(StatsView, props)), /<b>No landing figures from/);
+});
+
+test('Stats reads the newly selected period before calling it empty', () => {
+  const now = at('2026-11-23T04:15:00Z');
+  const data = period.statsRangeReply([], stats.periodOf(new URLSearchParams('period=last'), now));
+  const html = renderToStaticMarkup(
+    createElement(StatsView, { data, period: monthPeriod(now), now, busy: true, usePart: assert.fail }),
+  );
+  assert.match(html, /aria-busy="true">Reading this project’s landing figures/);
+  assert.doesNotMatch(html, /No landing figures/);
+});
+
+test('All time shows first-day landings and explains the summary without promising a range trend', () => {
+  const now = at('2026-11-23T04:15:00Z');
+  const selected = stats.periodOf(new URLSearchParams('period=all'), now);
+  const data = period.statsAllReply([], []);
+  const html = renderToStaticMarkup(
+    createElement(StatsView, { data, period: selected, now, liveLanded: 3, usePart: assert.fail }),
+  );
+  assert.match(html, /<b>3 landings today\.<\/b>/);
+  assert.match(html, /first hourly summary/);
+  assert.doesNotMatch(html, /same number of days|Try a longer period/);
+});
 
 test('closed up to 10:00 UTC plus 6 later landings: Stats, the top bar, Needs me, History and the sentence all say 57', () => {
   const now = at('2026-11-23T10:52:00Z');
