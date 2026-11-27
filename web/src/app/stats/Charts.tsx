@@ -201,20 +201,6 @@ function attributionHint(row: AgentRow, minimum: number) {
     .join(' · ');
 }
 
-function agentMeasure(value: string | null, recorded: number, total: number) {
-  if (value === null) return 'Not recorded';
-  return (
-    <>
-      {value}
-      {recorded < total ? (
-        <small className="stats-cell-note">
-          {int(recorded)} of {int(total)} recorded
-        </small>
-      ) : null}
-    </>
-  );
-}
-
 export function ByWho({ r }: { r: StatsAgents }) {
   // The public identity rule can omit the handle. Use the sorted position as the key in that case.
   const rows = r.agentRows.map((row, index) => ({ ...row, key: `${attributionLabel(row)}/${index}` }));
@@ -242,36 +228,23 @@ export function ByWho({ r }: { r: StatsAgents }) {
             key: 'first',
             title: 'First try',
             numeric: true,
-            cell: row =>
-              agentMeasure(
-                row.firstTryRate === null ? null : percent(row.firstTryRate),
-                row.counted,
-                row.landings,
-              ),
+            cell: row => (row.firstTryRate === null ? 'Not recorded' : percent(row.firstTryRate)),
           },
           {
             key: 'time',
             title: 'Median time to main',
             numeric: true,
             cell: row =>
-              agentMeasure(
-                row.toMainSeconds === null
-                  ? null
-                  : `${row.approximate ? '≈' : ''}${duration(row.toMainSeconds)}`,
-                row.timed,
-                row.landings,
-              ),
+              row.toMainSeconds === null
+                ? 'Not recorded'
+                : `${row.approximate ? '≈' : ''}${duration(row.toMainSeconds)}`,
           },
           {
             key: 'ci',
             title: 'CI minutes per landing',
             numeric: true,
             cell: row =>
-              agentMeasure(
-                row.ciMinutesPerLanding === null ? null : minutes(row.ciMinutesPerLanding),
-                row.priced,
-                row.landings,
-              ),
+              row.ciMinutesPerLanding === null ? 'Not recorded' : minutes(row.ciMinutesPerLanding),
           },
         ]}
         rows={rows}

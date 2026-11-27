@@ -391,6 +391,12 @@ test('stats: short headline, one freshness line, today so far, comparison, table
   assert.equal(await named.count(), 5);
   assert.match(await named.allTextContents().then(rows => rows.join(' ')), /Codex · gpt-6.2-sol/);
   assert.match(await byAgent.textContent(), /Antigravity · model not recorded/);
+  assert.doesNotMatch(await byAgent.textContent(), /\d+ of \d+ recorded/);
+  const ciValues = await named.locator('td:last-child').allTextContents();
+  assert.ok(
+    ciValues.every(value => /^\d+(?:\.\d+)?$/.test(value)),
+    'partially recorded CI shows a value',
+  );
   for (const width of [1440, 390]) {
     const counted = await open(width, 'notCounted');
     await counted.getByRole('button', { name: 'By agent' }).click();
