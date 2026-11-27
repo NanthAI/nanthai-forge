@@ -1353,7 +1353,8 @@ function ItemPage({
   toast?: ReactNode;
 }) {
   const [full, setFull] = useState<FullItem>();
-  const moved = full ? itemBody(full.body).lines.filter(line => line.state === 'moved').length : 0;
+  const lines = useMemo(() => (full ? itemBody(full.body).lines : undefined), [full]);
+  const moved = full?.id === row?.id ? (lines?.filter(line => line.state === 'moved').length ?? 0) : 0;
   const hierarchy =
     row && view
       ? {
@@ -1406,16 +1407,6 @@ function ItemPage({
     isPlanningUuid(row.id)
       ? row
       : null;
-  const handoffPrompt = itemToHandOff
-    ? [
-        `Work on this Forge Item: ${new URL(at({ rest: itemToHandOff.id }), location.origin).href}`,
-        'From the local Forge clone of this project, read the Item and its comments for the current requirements:',
-        `nforge agent . planning '${JSON.stringify({ planningItemId: itemToHandOff.id })}'`,
-        'If it is still Planned and nobody has started it, open a Lane for the Item:',
-        `nforge agent . start '${JSON.stringify({ planningItemId: itemToHandOff.id })}'`,
-        'Use the returned Lane folder. If the Item has no Done-when lines, propose them before editing.',
-      ].join('\n')
-    : null;
   const projectUrl = new URL(
     hrefFor({
       frame: 'project',
@@ -1596,11 +1587,13 @@ function ItemPage({
           {localError || error}
         </div>
       ) : null}
-      {handoffPrompt ? (
+      {handOff && itemToHandOff ? (
         <HandoffSheet
-          open={handOff}
+          open
           onOpenChange={setHandOff}
-          prompt={handoffPrompt}
+          item={itemToHandOff}
+          itemUrl={new URL(at({ rest: itemToHandOff.id }), location.origin).href}
+          lines={full?.id === itemToHandOff.id && full.version === itemToHandOff.version ? lines : undefined}
           projectUrl={projectUrl}
           readConnectedApps={readConnectedApps}
         />
@@ -1615,6 +1608,7 @@ function ItemPage({
             }
           }}
           rows={[closingRow]}
+          lines={full?.id === closingRow.id && full.version === closingRow.version ? lines : undefined}
           go={closeGo}
           busy={closingBusy}
           error={closeError}
@@ -1631,6 +1625,13 @@ function ItemPage({
             row={row}
             read={readItemText}
             onItem={setFull}
+            needsChecklist={
+              row.doneWhen !== null &&
+              row.doneWhen?.[1] !== 0 &&
+              ((handOff && Boolean(itemToHandOff)) ||
+                (closingRow !== null &&
+                  (!closingRow.doneWhen || closingRow.doneWhen[0] < closingRow.doneWhen[1])))
+            }
             projectId={projectId}
             project={route}
             href={id => at({ rest: id })}

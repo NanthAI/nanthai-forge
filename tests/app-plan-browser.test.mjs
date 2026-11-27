@@ -254,6 +254,17 @@ const reads = {
     { intentId: uuid(11), laneId: uuid(206), actor: 'peer-builder', at: 3 },
   ] }),
 };
+const readActionItem = async (id, full) => {
+  if (boardFlags.has('defer-checklist') && !full) return null;
+  const row = rows.find(row => row.id === id);
+  return row ? { ...row, body: [
+    'Done when:',
+    '- [x] Record the current behavior',
+    '- [ ] Confirm the parser outcome',
+    '- [~] Move the obsolete test',
+    '- [ ] Report the result',
+  ].join(String.fromCharCode(10)) } : null;
+};
 // What the shell already holds (mock check d3357f40): the project's counts from this fixture's own rows, the line
 // feed (the newest Lane on Item 17 is checking) and the Needs me read (Item 11's Lane waits on the reader's approval).
 const issues = JSON.parse(read.rows).filter(row => row.kind === 'issue');
@@ -306,7 +317,7 @@ function Fixture() {
       readItemText={deferred ? async (id, full) => {
         if (!full || id !== duplicateSource.id) return null;
         return window.calls.length ? { ...duplicateSource, version: 9, relations: [...duplicateSource.relations, extraLink] } : duplicateSource;
-      } : undefined}
+      } : boardFlags.has('item-actions') ? readActionItem : undefined}
       readInitiativeWork={window.readItemWork ? initiativeId => window.readItemWork({initiativeId}) : undefined}
       readConnectedApps={boardFlags.has('no-apps') ? async () => [] : boardFlags.has('codex-connected') ? async () => ['codex'] : undefined}
       linkedItem={boardFlags.has('hierarchy-worst') ? settledRows.find(row => row.id === rest) ?? null : null}
@@ -1719,7 +1730,7 @@ test('plan views and bulk bar: real components keep the view in the address and 
           true,
         );
         await sheet.getByText('Show prompt', { exact: true }).click();
-        const shown = await sheet.locator('.cmd').textContent();
+        const shown = await sheet.locator('details > pre').textContent();
         assert.ok(shown.includes(`https://forge.test/example-builder/synthetic/plan/${id}`));
         assert.ok(shown.includes(`nforge agent . start '{"planningItemId":"${id}"}'`));
         await check(page, `hand-off ${width} ${theme}`);
@@ -1754,10 +1765,10 @@ test('plan views and bulk bar: real components keep the view in the address and 
     }
   });
 
-  // Item 96085563 (02.1b, 02.3): a writer plans a Proposed Item and opens the handoff sheet with connection help in one press.
+  // Item 96085563 (J02): a writer plans a Proposed Item and sees its checklist before expanding the prepared prompt.
   for (const [width, theme, query] of [
     [1440, 'dark', '?writer&no-apps&item-actions'],
-    [390, 'light', '?writer&no-apps&item-actions'],
+    [390, 'light', '?writer&no-apps&item-actions&defer-checklist'],
   ])
     await t.test(`Proposed Item plan-and-handoff with app connection help at ${width} ${theme}`, async () => {
       const id = '00000000-0000-4000-8000-000000000013';
@@ -1773,6 +1784,14 @@ test('plan views and bulk bar: real components keep the view in the address and 
       assert.deepEqual(await page.evaluate(() => window.calls.at(-1)), [
         { action: 'put-planning-item', itemId: id, expectedVersion: 2, status: 'open', statusPin: null },
       ]);
+      const preview = sheet.getByRole('list', { name: 'Done-when lines' });
+      await preview.getByText('Confirm the parser outcome', { exact: true }).waitFor();
+      await sheet.getByText('Name every error the parser can return', { exact: true }).waitFor();
+      const disclosure = sheet.locator('details').first();
+      assert.equal(await disclosure.getAttribute('open'), null);
+      assert.equal(await disclosure.getByText(/Confirm the parser outcome/).isVisible(), false);
+      await sheet.getByText('Show prompt', { exact: true }).click();
+      assert.match(await disclosure.locator('pre').innerText(), /- \[ \] Confirm the parser outcome/);
       await sheet.getByText(/No agent app connected yet/).waitFor();
       await sheet.getByRole('button', { name: 'Codex', exact: true }).click();
       await sheet.getByText('nforge connect codex').waitFor();
@@ -1783,14 +1802,18 @@ test('plan views and bulk bar: real components keep the view in the address and 
       await context.close();
     });
 
-  // Item 96085563 (10.2a): open Item exposes Status override and Close with existing checklist semantics.
+  // Item 96085563 (J10): Close on an open Item names the lines still outstanding before a reason is chosen.
   for (const [width, theme] of [
     [1440, 'light'],
     [390, 'dark'],
   ])
     await t.test(`open Item page Status action and Close checklist flow at ${width} ${theme}`, async () => {
       const id = '00000000-0000-4000-8000-000000000010';
-      const { page, errors, context } = await open(width, theme, `/${id}?item-actions`);
+      const { page, errors, context } = await open(
+        width,
+        theme,
+        `/${id}?item-actions${width === 390 ? '&defer-checklist' : ''}`,
+      );
       const statusBtn = page.getByRole('button', { name: 'Status', exact: true });
       await statusBtn.waitFor();
       await statusBtn.click();
@@ -1806,6 +1829,12 @@ test('plan views and bulk bar: real components keep the view in the address and 
       await page.getByRole('button', { name: 'Close', exact: true }).click();
       const sheet = page.getByRole('dialog', { name: 'Close Item', exact: true });
       await sheet.waitFor();
+      const outstanding = sheet.getByRole('list', { name: 'Outstanding Done-when lines' });
+      await outstanding.waitFor();
+      assert.deepEqual(await outstanding.getByRole('listitem').allTextContents(), [
+        'Confirm the parser outcome',
+        'Report the result',
+      ]);
       assert.match(await sheet.textContent(), /has Done-when lines open/);
       assert.equal(await sheet.getByRole('button', { name: 'Close anyway', exact: true }).count(), 1);
       await sheet.getByRole('button', { name: 'Not needed', exact: true }).click();

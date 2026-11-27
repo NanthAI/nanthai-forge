@@ -16,18 +16,23 @@ import {
   type AgentApp,
 } from '../start/agent-apps';
 import { CommandBlock, CopyKey } from '../start/parts';
+import type { ItemLine } from './item-body';
 import '../start/start.css';
 
 export function HandoffSheet({
   open,
   onOpenChange,
-  prompt,
+  item,
+  itemUrl,
+  lines,
   projectUrl,
   readConnectedApps,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  prompt: string;
+  item: { id: string; title: string; doneWhen?: readonly [number, number] | null };
+  itemUrl: string;
+  lines?: readonly ItemLine[] | undefined;
   projectUrl: string;
   readConnectedApps?: (() => Promise<readonly AgentApp[]>) | undefined;
 }) {
@@ -55,6 +60,24 @@ export function HandoffSheet({
   const step = app ? appStep(app) : null;
   const isConnected = Boolean(app && connected?.includes(app));
   const shared = setupOpen ? sharedSteps(location.origin, projectUrl) : null;
+  const itemArg = JSON.stringify({ planningItemId: item.id });
+  const startCommand = `nforge agent . start '${itemArg}'`;
+  const checklist = lines?.filter(line => line.state !== 'moved');
+  const checklistHint = item.doneWhen?.[1]
+    ? 'Read the Item for its current Done-when lines.'
+    : 'If the Item has no Done-when lines, propose them before editing.';
+  const prompt = [
+    `Work on this Forge Item: ${item.title}`,
+    itemUrl,
+    ...(checklist?.length
+      ? ['Done when:', ...checklist.map(line => `- [${line.state === 'done' ? 'x' : ' '}] ${line.text}`)]
+      : [checklistHint]),
+    'From the local Forge clone of this project, read the Item and its comments for the current requirements:',
+    `nforge agent . planning '${itemArg}'`,
+    'If it is still Planned and nobody has started it, open a Lane for the Item:',
+    startCommand,
+    'Use the returned Lane folder.',
+  ].join('\n');
 
   return (
     <Sheet
@@ -67,7 +90,33 @@ export function HandoffSheet({
       footer={<CopyKey text={prompt} label="Copy prompt" kind="primary" />}
     >
       <div className="ip-handoff">
-        <p>Paste the prompt into your agent to start work on this Item.</p>
+        <div className="ip-prompt-preview">
+          <p dir="auto">
+            <b>{item.title}</b>
+          </p>
+          <p className="meta">
+            Item <span className="mono">{item.id}</span>
+          </p>
+          <pre className="cmd mono" translate="no">
+            {startCommand}
+          </pre>
+          {checklist?.length ? (
+            <div>
+              <p className="meta">Done when</p>
+              <ul className="ip-checklist-lines" aria-label="Done-when lines">
+                {checklist.map(line => (
+                  <li key={line.row} dir="auto">
+                    {line.text}
+                    {line.state === 'done' ? <span className="meta"> · Ticked</span> : null}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <p className="meta">{checklistHint}</p>
+          )}
+          <p className="meta">Read the Item and its comments for the current requirements.</p>
+        </div>
         <details>
           <summary className="btn ghost">
             Show prompt <span className="tw" aria-hidden="true" />

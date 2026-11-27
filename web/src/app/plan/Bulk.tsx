@@ -20,6 +20,7 @@ import {
 import { defaultItemTypes, type PlanRow, type StoredStatus } from '../../../../src/planning-model';
 import { hostedError, hostedErrorCode } from '../../snapshot';
 import type { BatchOptions, BatchOutcome, FullItem, InitiativeDetails, ItemComment, RunBatch } from './batch';
+import type { ItemLine } from './item-body';
 import type { ReadWorkers } from './workers';
 
 export type Reads = {
@@ -325,6 +326,7 @@ export function CloseSheet({
   open,
   onOpenChange,
   rows,
+  lines,
   go,
   busy,
   error,
@@ -332,6 +334,7 @@ export function CloseSheet({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   rows: readonly PlanRow[];
+  lines?: readonly ItemLine[] | undefined;
   go: Go;
   busy: boolean;
   error: string;
@@ -342,6 +345,7 @@ export function CloseSheet({
   const attempt = useRef<{ payload: string; operationId: string } | null>(null);
   const { writes, openLines } = useMemo(() => closeMany(rows, note), [rows, note]);
   const withOpen = rows.filter(row => openLines.some(entry => entry.id === row.id));
+  const outstanding = lines?.filter(line => line.state === 'open');
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (busy) return;
@@ -418,6 +422,18 @@ export function CloseSheet({
       ) : (
         <form id={formId} className="plan-capture" onSubmit={event => void submit(event)}>
           {error ? <p role="alert">{error}</p> : null}
+          {outstanding?.length ? (
+            <div>
+              <p className="meta">Outstanding Done-when lines</p>
+              <ul className="ip-checklist-lines" aria-label="Outstanding Done-when lines">
+                {outstanding.map(line => (
+                  <li key={line.row} dir="auto">
+                    {line.text}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
           {withOpen.length ? (
             <div className="ip-quick">
               <span className="meta">Quick reasons:</span>

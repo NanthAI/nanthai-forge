@@ -18,6 +18,7 @@ type Props = {
   read?: ReadItem | undefined;
   aside: ReactNode;
   onItem: (item: FullItem) => void;
+  needsChecklist?: boolean | undefined;
   projectId?: Id<'hostedProjects'> | undefined;
   project: WhoProject;
   href: (itemId: string) => string;
@@ -47,6 +48,7 @@ function Detail({
   read,
   aside,
   onItem,
+  needsChecklist,
   comments,
   discussion,
   edit,
@@ -70,6 +72,7 @@ function Detail({
       request.current = pending;
       try {
         const value = await pending;
+        if (full && !value) throw new Error('Item text is unavailable.');
         if (request.current === pending) {
           setDeferred(value === null);
           setItem(value ?? undefined);
@@ -80,7 +83,10 @@ function Detail({
         if (request.current === pending) setFailed(true);
         throw error;
       } finally {
-        if (request.current === pending) setLoading(false);
+        if (request.current === pending) {
+          request.current = undefined;
+          setLoading(false);
+        }
       }
     },
     [read, row.id, onItem],
@@ -92,6 +98,11 @@ function Detail({
     observed.current = { id: row.id, version: row.version, read };
     retry();
   }, [read, load, row.id, row.version]);
+  useEffect(() => {
+    // Only a sheet that needs the checklist upgrades the already-deferred Item read.
+    if (needsChecklist && deferred && !failed && !loading && !request.current)
+      void load(true).catch(() => undefined);
+  }, [needsChecklist, deferred, failed, loading, load]);
   const edits = useItemEdits(edit, async () => {
     const value = await load(true);
     if (!value) throw new Error('Item text is unavailable.');
