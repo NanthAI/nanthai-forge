@@ -43,6 +43,7 @@ import {
   transientFailureCause,
 } from './hosted-action-error.js';
 import { shellQuote } from './shell-quote.js';
+import { emptyLandingRecovery } from './hosted-agent-finish-result.js';
 import { hostedAgentDirectory, readAgentJson } from './hosted-agent-journal.js';
 import {
   FINISH_REFUSALS,
@@ -584,13 +585,18 @@ export async function executeHostedFinish(session: HostedAgentSession, input: un
       }
       await recordFinishStop(session, error);
       // Ended before anything was submitted: a re-run on new source is new work, not a replay (ac13de6b).
-      const code = (error as { code?: unknown }).code;
-      if (typeof code === 'string' && FINISH_REFUSALS.has(code))
+      const refusal = hostedActionError(error, 'finish');
+      const code = refusal.code;
+      if (FINISH_REFUSALS.has(code))
         await session.journal.retain(finishRefusedKey, () => refusedCode(error, code));
       // Lane pins moved before any compose request was built: this operation can only replay the
       // stale pins, so the next shorthand land is new work on the folder's pins (593fc2d7).
       else if (staleBeforeCompose(session, error))
         await session.journal.retain(finishRefusedKey, () => 'WORK_STALE');
+      if (code === 'NOTHING_TO_LAND') {
+        const laneId = (input as { laneId?: string }).laneId ?? session.marker()?.selection.laneId;
+        throw new ForgeError(code, refusal.message, undefined, emptyLandingRecovery(session.root, laneId));
+      }
       if (
         error instanceof ForgeError &&
         (code === 'PREFLIGHT_REQUIRED' || code === 'PREFLIGHT_BUDGET_EXCEEDED')

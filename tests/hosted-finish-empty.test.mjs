@@ -12,11 +12,13 @@ import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
 import { recordLane } from '../dist/lane-registry.js';
 import { clientCacheRoot } from '../dist/root-paths.js';
 import { landSummary } from '../dist/hosted-land-summary.js';
-import { finishResubmitContinuation } from '../dist/hosted-agent-finish-result.js';
+import { finishResubmitContinuation, normalizeObservedFinish } from '../dist/hosted-agent-finish-result.js';
 import { hostedAgentCli } from '../dist/hosted-agent-cli.js';
 import { submitHostedLand } from '../dist/hosted-land-cli.js';
 import { synthetic } from './hosted-revert-fixture.mjs';
 import { ConvexError } from 'convex/values';
+import { getFunctionName } from 'convex/server';
+import { digest } from '../dist/hash.js';
 
 const priorEnv = Object.fromEntries(
   [...Object.keys(synthetic), 'XDG_STATE_HOME'].map(key => [key, process.env[key]]),
@@ -161,6 +163,78 @@ test('a Lane with changes lands and the reply states the changed path count at z
     operationId: landed.operationId,
   });
   assert.equal(replay.result.changedPaths, 1);
+});
+
+test('f081111a CLI replay: after the server refuses a composed no-op, a newly saved edit lands', async t => {
+  const s = agentFixture(t);
+  await s.transport().dispatch('open', { laneId: s.lane.laneId });
+  const mutate = s.exchange.client.mutation;
+  const submitted = [];
+  s.exchange.client.mutation = (ref, args) => {
+    if (getFunctionName(ref) === 'projectHostedLanding:enqueue') {
+      const request = JSON.parse(args.request);
+      submitted.push(request);
+      if (request.expectedHead === s.main.head)
+        throw new ConvexError({
+          code: 'NOTHING_TO_LAND',
+          message: 'The composed head already equals current main.',
+        });
+    }
+    return mutate(ref, args);
+  };
+  const query = s.exchange.client.query;
+  s.exchange.client.query = (ref, args) => {
+    if (
+      getFunctionName(ref) === 'projectHostedFinishObserve:page' &&
+      args.operationId === submitted[0]?.operationId
+    )
+      throw new ConvexError({ code: 'NOT_FOUND', message: 'Select one hosted landing operation.' });
+    return query(ref, args);
+  };
+  const command = { message: 'Land the saved Lane' };
+  await assert.rejects(s.transport().dispatch('finish', command), error => {
+    assert.equal(error.code, 'NOTHING_TO_LAND');
+    assert.doesNotMatch(error.message, /Retry the original/);
+    assert.deepEqual(error.recovery.next, {
+      action: 'diff',
+      parameters: { laneId: s.lane.laneId, summary: true },
+    });
+    return true;
+  });
+  const markerPath = join(s.root, '.forge', 'hosted-lane.json');
+  const marker = JSON.parse(readFileSync(markerPath, 'utf8'));
+  const bytes = Buffer.from('New saved follow-up\n');
+  const blob = digest(bytes);
+  const state = { ...marker.state, files: [{ ...marker.state.files[0], blob }] };
+  const encoded = Buffer.from(JSON.stringify(state));
+  const head = digest(encoded);
+  s.objects.set(blob, bytes);
+  s.objects.set(head, encoded);
+  s.lane.head = s.candidate.result.head = marker.selection.head = head;
+  marker.state = state;
+  writeFileSync(join(s.root, state.files[0].path), bytes);
+  writeFileSync(markerPath, JSON.stringify(marker));
+  assert.equal((await s.transport().dispatch('finish', command)).result.phase, 'finish');
+  assert.equal(submitted.length, 2);
+  assert.notEqual(submitted[0].operationId, submitted[1].operationId);
+  assert.equal(submitted[1].expectedHead, head);
+});
+
+test('a queued no-op ends with a Lane diff command and no resubmission command', () => {
+  const laneId = '33333333-3333-4333-8333-333333333333';
+  const result = normalizeObservedFinish(
+    '/workspace/lane',
+    { laneId },
+    {
+      submission: {
+        phase: 'terminal-failed',
+        error: { code: 'NOTHING_TO_LAND', message: 'Already on main' },
+      },
+    },
+  );
+  assert.equal(result.terminal, true);
+  assert.equal(result.retryCommand, undefined);
+  assert.deepEqual(result.recovery.next, { action: 'diff', parameters: { laneId, summary: true } });
 });
 
 test('the LANDED line states the number of changed paths', () => {

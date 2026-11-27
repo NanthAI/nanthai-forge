@@ -144,6 +144,14 @@ export function finishRetryContinuation(root: string, selection: Reply) {
   return { ...continuation, retry };
 }
 
+export function emptyLandingRecovery(root: string, laneId?: string) {
+  const parameters = { ...(laneId ? { laneId } : {}), summary: true };
+  return {
+    command: `nforge agent ${shellQuote(root)} diff ${shellQuote(JSON.stringify(parameters))}`,
+    next: { action: 'diff', parameters },
+  };
+}
+
 export const stoppedLanding = (code: unknown) => code === 'LANDING_CANCELLED' || code === 'REVIEW_DECLINED';
 
 export const stoppedLandingResubmit =
@@ -323,6 +331,10 @@ export function normalizeObservedFinish(root: string, selection: Reply, result: 
     result.error ??
     (progress as { error?: unknown; outcome?: { error?: unknown } } | undefined)?.error ??
     (progress as { outcome?: { error?: unknown } } | undefined)?.outcome?.error;
+  if ((error as { code?: string } | undefined)?.code === 'NOTHING_TO_LAND') {
+    const laneId = typeof selection.laneId === 'string' ? selection.laneId : undefined;
+    return { ...clean, status: 'failed', terminal: true, recovery: emptyLandingRecovery(root, laneId) };
+  }
   if ((error as { code?: string } | undefined)?.code === 'SOURCE_STATE_TOO_LARGE')
     return { ...clean, status: 'failed', terminal: true };
   if (stoppedLanding((error as { code?: string } | undefined)?.code))

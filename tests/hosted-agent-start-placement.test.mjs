@@ -8,6 +8,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   rmSync,
   writeFileSync,
@@ -22,6 +23,7 @@ import { readHostedCliStatus } from '../dist/hosted-cli-status.js';
 import { submitHostedLand } from '../dist/hosted-land-cli.js';
 import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
 import { readHostedLaneCheckout } from '../dist/hosted-lane-checkout-marker.js';
+import { clientCacheRoot } from '../dist/root-paths.js';
 
 const downloads = calls => calls.filter(call => call.name.startsWith('projectObjectDownloads')).length;
 function stateHome(t) {
@@ -75,6 +77,50 @@ test('start reports the Lane before its checkout and opens it at the chosen path
     request = args.request ? JSON.parse(args.request) : args;
   assert.equal(request.intent.outcome, 'Placed Lane');
   assert(!('path' in request) && !('open' in request));
+});
+
+test('starting a follow-up in a completed Lane folder refuses before creating another Lane', async t => {
+  stateHome(t);
+  const s = agentFixture(t);
+  signedDownloads(t, s);
+  const path = join(s.root, '..', 'finished');
+  const first = { outcome: 'First change', path, operationId: randomUUID() };
+  s.lane.state = 'completed';
+  await s.transport().dispatch('start', first);
+  const completed = s.lane.laneId;
+  assert.equal((await s.transport().dispatch('start', first)).result.lane.laneId, completed);
+  const inside = new HostedAgentTransport(path, s.address, s.exchange);
+  const edits = join(path, 'follow-up.txt');
+  writeFileSync(edits, 'keep this edit');
+  s.lane.laneId = randomUUID();
+  s.lane.state = 'active';
+  const before = s.calls.length;
+  const journals = join(clientCacheRoot(path), 'agent');
+  const journalNames = () =>
+    existsSync(journals)
+      ? readdirSync(journals).filter(name => name.startsWith('auto-') || /^[0-9a-f-]{36}\.json$/.test(name))
+      : [];
+  const originals = journalNames();
+  let retry;
+  await assert.rejects(
+    inside.dispatch('start', { outcome: 'Follow-up change', path, carryEdits: true }),
+    error => {
+      assert.equal(error.code, 'WORK_CONFLICT');
+      assert(error.message.includes(completed));
+      assert.match(error.recovery.command, / start /);
+      retry = error.recovery.next.parameters;
+      assert.deepEqual(retry, { outcome: 'Follow-up change', carryEdits: true });
+      return true;
+    },
+  );
+  assert(!s.calls.slice(before).some(call => call.name === 'projectHostedStart:start'));
+  assert.deepEqual(journalNames(), originals, 'a refused start records no operation or auto index');
+  assert.equal(readHostedLaneCheckout(path).selection.laneId, completed);
+  assert.equal(readFileSync(edits, 'utf8'), 'keep this edit');
+  const followUp = await inside.dispatch('start', retry);
+  assert.equal(followUp.result.lane.laneId, s.lane.laneId);
+  assert.equal(followUp.result.previousLane, undefined);
+  assert.notEqual(followUp.result.path, realpathSync(path));
 });
 
 test('start sends a local hook opt-out only to a server that accepts it, on the existing mutation', async t => {

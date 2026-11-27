@@ -290,6 +290,7 @@ export const read = query({
       return canonicalPayload({
         role: true,
         intent: state,
+        ...(state && stateHead ? { intentPin: { intentId: stateHead.key, version: stateHead.version } } : {}),
         lanes: rows,
         ...(landings
           ? {

@@ -35,7 +35,7 @@ NOT_FOUND names what was looked up: run from the Lane root start printed, or pas
 - Review what will land: diff '{"summary":true}' lists changed paths, diff '{}' the hunks.
 - It waits by default; --no-wait returns after submission. Clients that wake on background exit (Claude Code; FORGE_AGENT_WAKE=background-exit|off) get result.wake.command: run it once in the background. --wait keeps the foreground wait; --check-only checks without landing.
 - land --withdraw {laneId?,reason?} ends the Lane's live landing; confirm.waitCommand returns LANDING_CANCELLED and names how to resubmit. cancel {submissionId} stops one named submission.
-- NOTHING_TO_LAND: the Lane equals its base; save first.
+- NOTHING_TO_LAND: no saved change, or already on main.
 - After a failed check: land --save with "retry":true,"reason":"flake"|"main-moved"|"infra"|"other" (next.retryReason).
 - LANDED is acceptance; CHECK PASSED is not. Fix in the same Lane and land again; never abandon and re-create it.
 - revert {target} prepares a Lane. Run land --save there for a checked compensating landing.

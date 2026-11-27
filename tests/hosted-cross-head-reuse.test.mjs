@@ -586,6 +586,27 @@ test('two disjoint main advances re-prove the original pass without inherited-ch
   );
 });
 
+test('f081111a reuse replay: an empty recomposition settles before starting proof IO', async t => {
+  const { f, state } = await readyRace(t, {
+    mainFiles: [['convex/projectConvexSourceOutput.ts', 'export const cost = 2;']],
+  });
+  const runs = f.tables.projectHostedCheckRuns.size;
+  for (
+    let n = 0;
+    !['terminal-failed', 'landed'].includes((await f.current(state.id)).submission.phase);
+    n++
+  ) {
+    assert(n < 40, 'settles without a proof wait or another check');
+    await f.execute();
+  }
+  assert.equal((await f.current(state.id)).submission.error?.code, 'NOTHING_TO_LAND');
+  assert.equal(f.tables.projectHostedCheckRuns.size, runs);
+  assert.deepEqual(f.reuseDecisions, []);
+  assert.equal(JSON.parse(f.row(state.id).value).pending, null);
+  await f.drain();
+  assert.equal(f.pending().length, 0);
+});
+
 test('a slow proof has one renewable owner; watchdogs do not duplicate it and expiry falls back once', async t => {
   const { f, state } = await readyRace(t),
     args = await pendingProof(f, state);

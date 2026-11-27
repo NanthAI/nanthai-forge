@@ -35,10 +35,10 @@ import {
   hostedFinishBackoff,
   type HostedFinish,
 } from '../src/hosted-finish';
-import { hostedRecordSchema } from '../src/hosted-records';
+import { hostedRecordSchema, type HostedRecord } from '../src/hosted-records';
 import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operation';
 import { storedLandingStateSchema, landingObservation, type HostedLandingState } from '../src/hosted-landing';
-import { invariant } from '../src/errors';
+import { ForgeError, invariant } from '../src/errors';
 import { requireLandingPaths } from './accessPolicy';
 import { validCrossHeadProof, type CrossHeadProof } from '../src/hosted-cross-head-proof';
 import { carriedCostCounts } from '../src/landing-speed-alerts';
@@ -355,6 +355,11 @@ export async function prepareFinishCompose(ctx: MutationCtx, input: LandingIdent
   // Do not reload the same compose, operation and project just to return them.
   return { row: (await ctx.db.get(id))!, state: stateValue, project, operation: prepared.operation };
 }
+/** Cheap inspection of completed compose data; installation still validates its exact pins. */
+export function emptyFinishComposition(result: unknown) {
+  const candidate = result as Partial<Extract<HostedRecord, { kind: 'candidate' }>> | null;
+  return candidate?.result?.status === 'clean' && candidate.result.head === candidate.base?.head;
+}
 export async function installFinishCompose(
   ctx: MutationCtx,
   row: Doc<'projectHostedFinishes'>,
@@ -395,10 +400,11 @@ export async function installFinishCompose(
     await failFinish(ctx, input, terminal.outcome.error.code, terminal.outcome.error.message);
     return;
   }
+  const empty = terminal.outcome.status === 'completed' && emptyFinishComposition(terminal.outcome.result);
   // A running check retired by an acceptance owns a fresh exact composition.
   // Back-to-back main moves must not spend its replacement CI on an obsolete
   // source generation, or expose an obsolete conflict as the final outcome.
-  if (!pending.precompose && state.batchNeedsSoloCompose) {
+  if (!pending.precompose && (state.batchNeedsSoloCompose || empty)) {
     const main = await hostedStartMain(ctx, row.projectId);
     if (main.head !== pending.main.head || main.receipt.id !== pending.main.receiptId) {
       await reserveFinishRetry(
@@ -449,6 +455,11 @@ export async function installFinishCompose(
   // A folder-grant landing's recomposed files are checked before this step writes anything (df06081d).
   if (landing.grant && candidate.governance)
     requireLandingPaths(landing.grant.paths, candidate.governance.paths);
+  const settleEmpty = async (message: string) => {
+    await writeFinish(ctx, row, { ...value, pending: null });
+    await failFinish(ctx, input, 'NOTHING_TO_LAND', message);
+    await wakeAfterPrecompose(ctx, row.projectId, state.id, false);
+  };
   if (pending.precompose) {
     const startMain =
       candidate.result.status === 'conflict' ? await hostedStartMain(ctx, row.projectId) : null;
@@ -557,6 +568,10 @@ export async function installFinishCompose(
         pending.precompose.runnable || landing.runnable,
       );
     }
+    return;
+  }
+  if (empty) {
+    await settleEmpty('The composed head already equals current main. There is nothing to check or land.');
     return;
   }
   const original = await loadLandingAttempt(ctx, {
@@ -709,7 +724,12 @@ export async function installFinishCompose(
     at: pending.at,
     operations: { check: pending.operations.check, accept: pending.operations.accept },
     retainedSelection: original.candidate,
+  }).catch(async error => {
+    if (!(error instanceof ForgeError) || error.code !== 'NOTHING_TO_LAND') throw error;
+    await settleEmpty(error.message);
+    return null;
   });
+  if (!attempt) return;
   if (proof && previous?.check) {
     attempt.check = previous.check;
     attempt.crossHeadProof = proof;

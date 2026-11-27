@@ -220,7 +220,16 @@ export async function batchFinishStep(
         at: batch.at,
       });
     }
-    if (!included.length) {
+    const empty = predecessor !== 'pending' && candidate.result.head === main.head;
+    if (!included.length || empty) {
+      if (empty)
+        for (const member of included)
+          await failFinish(
+            ctx,
+            { projectId: input.projectId, submissionId: member.submissionId },
+            'NOTHING_TO_LAND',
+            'The composed cohort already equals current main. There is nothing to check or land.',
+          );
       if (predecessor === 'pending' && dropped.length)
         await deferSpeculativeConflict(ctx, key, batch, dropped);
       await retainSurvivorTrain(ctx, key, [], batch);

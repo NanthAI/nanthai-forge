@@ -41,7 +41,7 @@ export function unsavedEditsError(laneId: string, found: { root: string; count: 
 export function nothingToLandError(laneId: string) {
   return new ForgeError(
     'NOTHING_TO_LAND',
-    `Lane ${laneId} changes nothing against its base, so there is nothing to land. If you edited files, save them first with \`save\` or \`land --save\` from the Lane folder. To land it anyway (for example to close its Issue with no change), pass "allowEmpty":true.`,
+    `Lane ${laneId} changes nothing against its base. If you edited files, save them from the Lane folder. To check unchanged source, use land --save --check-only with "allowEmpty":true.`,
   );
 }
 

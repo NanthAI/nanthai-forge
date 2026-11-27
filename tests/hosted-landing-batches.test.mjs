@@ -278,6 +278,28 @@ test('a main receipt race recomposes the whole cohort without transferring evide
   assertForkRacesNamed(f, 'cohort');
 });
 
+test('f081111a cohort replay: rebasing an already accepted cohort dispatches no second check', async t => {
+  const f = await batchesFixture(t, { count: 3, fileCount: 2 });
+  await f.drain();
+  const [first] = f.runs();
+  const initial = f.currentMain();
+  const accepted = {
+    ...initial,
+    head: first.request.expectedHead,
+    receipt: { ...initial.receipt, id: randomUUID() },
+  };
+  f.patch('projectHostedChannels', f.mainId, { selection: JSON.stringify(accepted) });
+  await f.passChecks();
+  await f.drain();
+  assert.equal(f.runs().length, 1, 'only the original check was dispatched');
+  assert.deepEqual(
+    states(f).map(state => state.error?.code),
+    Array(3).fill('NOTHING_TO_LAND'),
+  );
+  assert.deepEqual(f.currentMain(), accepted);
+  assert.equal(f.pending().length, 0);
+});
+
 test('a rebased cohort reports zero landed paths for a member already present on main', async t => {
   const f = await batchesFixture(t, { count: 3, fileCount: 2 });
   await f.drain();

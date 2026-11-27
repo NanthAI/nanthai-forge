@@ -111,6 +111,15 @@ export async function rebaseHostedCheckout(
   const transport = new ConvexLaneTransport(exchange),
     laneId = onto?.laneId ?? stale.selection.laneId,
     lane = selected?.laneId === laneId ? selected : await transport.select(laneId);
+  if (lane.state === 'completed') {
+    const command = `nforge agent ${shell(root)} start --reopen ${shell(JSON.stringify({ laneId: lane.laneId }))}`;
+    throw new ForgeError(
+      'LANE_NOT_ACTIVE',
+      `Lane ${lane.laneId} is completed. Your edits are still in this checkout. Reopen it to continue with them: ${command}`,
+      undefined,
+      { command, next: { action: 'reopen', laneId: lane.laneId } },
+    );
+  }
   const repair = keepPatchCommand(root, lane.laneId);
   invariant(
     lane.state === 'active',

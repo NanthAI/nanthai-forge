@@ -307,9 +307,11 @@ test('663e89b0: a stacked child that passed before its parent landed waits in re
   });
   const parent = await f.enqueue(f.request());
   await f.drain();
-  const child = await f.enqueue(
-    f.request({ finish: { composeOperationId: f.selection.request.operationId, after: parent.id } }),
-  );
+  const childRequest = await f.resubmission([['child.txt', 'Child change\n']]);
+  const child = await f.enqueue({
+    ...childRequest,
+    finish: { ...childRequest.finish, after: parent.id },
+  });
   await f.drain();
   const stored = () =>
     [...f.tables.projectHostedLandingRequests.values()].find(r => JSON.parse(r.value).id === child.id);

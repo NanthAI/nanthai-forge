@@ -15,7 +15,12 @@ import {
   type LandingIdentity,
 } from './projectHostedLandingStore';
 import { retryFinish, scheduleFinish, watchFinishCompose } from './projectHostedFinishWake';
-import { prepareFinishCompose, installFinishCompose, reserveFinishRetry } from './projectHostedFinishCompose';
+import {
+  emptyFinishComposition,
+  prepareFinishCompose,
+  installFinishCompose,
+  reserveFinishRetry,
+} from './projectHostedFinishCompose';
 import { hostedComposeInput } from './projectHostedComposeStore';
 import { submitHostedCompose } from './projectHostedComposeJobs';
 import { prepareAcceptance, stageAcceptance } from './projectHostedAcceptanceStore';
@@ -108,6 +113,15 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
     if (value.pending) {
       const source = await prepareFinishCompose(ctx, input, value);
       if (source.operation.terminal) {
+        const outcome = source.operation.terminal.outcome;
+        if (
+          !value.pending.precompose &&
+          outcome.status === 'completed' &&
+          emptyFinishComposition(outcome.result)
+        ) {
+          await installFinishCompose(ctx, row, value, undefined, source);
+          return null;
+        }
         if (row.reuseLease?.pendingId === value.pending.id) {
           if (row.reuseLease.until > Date.now()) {
             await retryFinish(ctx, row, input, row.reuseLease.until - Date.now(), true);

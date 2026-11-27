@@ -1,0 +1,195 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedLandingBatchFinish.ts": "1cd8b98e85257f02f7a50b1fac4d8f542caaac5edb3b47a49c192e6cf7e9d9c1"
+  },
+  "replay": {
+    "incident": "f081111a",
+    "test": "f081111a cohort replay: rebasing an already accepted cohort dispatches no second check",
+    "receipt": "1e08f7b8-065b-4f18-a03b-bf8525124ad7"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "thread:delegated-task:command%3Amcp%3A08ea8707-90ed-483f-99d2-cb2ca34545e4%3Adelegate-task%3A3152e286-2654-43f9-8dcd-dfe80cd0e85a",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "thread:delegated-task:command%3Amcp%3A4c9e1717-52b6-4aa5-91b6-25874a5a1e18%3Adelegate-task%3A6e4efced-d76f-4e1e-a6af-38a2f1134089",
+    "receipt": "bf1cfe31-cf9a-47a1-90af-9952be19e79b"
+  },
+  "exercised": {
+    "convex/projectHostedLandingBatchFinish.ts": {
+      "executed": [
+        "batchFinishStep",
+        "resumeBatchIO"
+      ],
+      "digest": "0c6d6ffc8f6078005b63829b5d306aaa4d4248fd1bba29941da0d391b88ef6a7",
+      "units": [
+        [
+          "advanceBatchFallback",
+          "388e59837911e172daa33997000194cc3335a0f96285192a5970ef166b98c903"
+        ],
+        [
+          "batchConflictPeers",
+          "ceac906cf1826b0fe1b479b3eb627b55e13a7e6bc53d197567e6eeebc261dcdc"
+        ],
+        [
+          "batchFinishStep",
+          "7c24fd8aad13fd1aefc86e8c91bcd0c075664a8f3273bcec1fd3fd0728125cc1"
+        ],
+        [
+          "cancelPendingTask",
+          "84ed3533530e281a188a8b8c0b152ef3c5f8d15ad1bce7dbcf4834f23072f2a3"
+        ],
+        [
+          "canonicalPayload",
+          "95124f3098690f0b83a3927221e9cee6fc53fe1b0c044ab43a9f934e9effe9bb"
+        ],
+        [
+          "checkCause",
+          "951898d2c83b24b33455ecfb98acea9ce436ed50e52d985a280b89061f7ab66d"
+        ],
+        [
+          "cohortRecheckBases",
+          "b9bd2a5556a6bd25ca21a123f09208dd0550421e2a5c0c2340c644dc010103a2"
+        ],
+        [
+          "deferCohortConflicts",
+          "ad7dad446df8b95bac46fd194b44442cfd3fc0e7ce5ebd0594d0ba74605e48a6"
+        ],
+        [
+          "deferSpeculativeConflict",
+          "c45c6b23fcd71b7f3d134b7d13d97877bb3833ff9d6087284de04e2de0a5953a"
+        ],
+        [
+          "enqueueBatchCheck",
+          "e73b77709f674ad67a5ca1d2eeb79a328e787cf8429a579193a287391c19c113"
+        ],
+        [
+          "exhaustFinishCompose",
+          "6b9e43c636e89bfbaa5c3a0b7f2a3e6ab0d1bc14588912235abe63ad1ec25524"
+        ],
+        [
+          "failFinish",
+          "c41a5ea50ac2bf3cdecac808a561e736ebb6f793c82054780b7882b4252905ea"
+        ],
+        [
+          "findObject",
+          "24c72de797e426b1cba65ee78a72f180ff603f3d0d03c64c6474e34622c2ba51"
+        ],
+        [
+          "hostedRecordSchema",
+          "508c659caa39090faf59eafb8c7320cc42ca43240ec90785756c1840e7c03f61"
+        ],
+        [
+          "hostedStartMain",
+          "b363e9608e562023c7b2963703c2aa02c302faf29032c2afe9c22405b82e1a0a"
+        ],
+        [
+          "hostedWriteProject",
+          "3a2dcfd149cab0cc00290a015bc2bf96315135dd3f5c0643e4bb3178451cd869"
+        ],
+        [
+          "installBatchAttempt",
+          "a925337da4b53568ae4a08ee7d6382ca9296ea11e078ae34aa5b8f7a91cec9b2"
+        ],
+        [
+          "invariant",
+          "a25036d770aae805d10bdb41ade261044ed7f7ba6fbbf3ccd57a32c56a3d4c20"
+        ],
+        [
+          "isStored",
+          "b9b9e00074d66f7069753f1558ce5f0991302e5007a6ba7c8b21537e93baf41a"
+        ],
+        [
+          "loadBatch",
+          "9f7edfb63f5a849340d559faeb2596462acb1adcb0e357a90313d329ae486647"
+        ],
+        [
+          "loadFinish",
+          "aef79203df0cea79db8071f8a5ced5d7c6e03632dff0e042fb11c308442932f1"
+        ],
+        [
+          "loadLanding",
+          "ebcbbc4824870ad74803810ad5144fbbc671303f4a51f289356b20578d07ace2"
+        ],
+        [
+          "ownRow",
+          "45d15c1fd5a51377adb8be462a4ff0da488b531235e26abe44e7a8320ce93784"
+        ],
+        [
+          "predecessorStatus",
+          "3f5e14b02ffc9c0a5103d645feddbbbf5b3614382a254a5e0c6c44e9d097e0d1"
+        ],
+        [
+          "prepareBatchCompose",
+          "6ae726488bff976cb871d777ed605808cbece96e09cb2f435a893b3005a6eda9"
+        ],
+        [
+          "r2Key",
+          "6139c7ecb1ef81acde791e2ca521e084af827cd6c6564dbe999d38f290e52426"
+        ],
+        [
+          "readHostedRecord",
+          "f8ebe857e46255798f036f3db0acb78682a740661afb1147e12c1163e7ad5ee2"
+        ],
+        [
+          "releaseUnstartedBatchForPriority",
+          "312f62e28b5c1df13432c1494817a0d1351d4aecf388a97dfc2e08596ec1e930"
+        ],
+        [
+          "resumeBatchIO",
+          "7054f89b6e659d83364049774912436ed6b977815e0f787944974613ce206f17"
+        ],
+        [
+          "retainSurvivorTrain",
+          "be06fce7e0eca780403b46af8052fce0067a9a43a6a083973afef66339459314"
+        ],
+        [
+          "retainedStallOwner",
+          "9a33866e63b0e2abbcd190d90042d661c184259558e2b08d4df3551d62e9f896"
+        ],
+        [
+          "retryFinish",
+          "e94f832207453ba7079e561b6ed553081c909b2a3800af8cec7c12b5cdf24ca5"
+        ],
+        [
+          "retryLandingBatch",
+          "53e5d70361be7423bbca6dcd08ed0d5a5e4052d4201f412a5e9ead063b6e50f3"
+        ],
+        [
+          "settleBatchConflicts",
+          "87ec6e8269ce805261bb6cea4d13aef636e43b38fe7af1d8bd3660fcfabad88a"
+        ],
+        [
+          "settleMemberBatchConflict",
+          "e524c4377e5aedd434e7b7c765ec940fc54217d1ba4c83522d116427b764f5e9"
+        ],
+        [
+          "splitLandingBatch",
+          "073649a58618dfff3f7cbc452902ade943821c75c8465cabce3344d27c612c50"
+        ],
+        [
+          "submitHostedCompose",
+          "70ecaa0aae4aebc96ce10f547885df3135d7686cc0d3cf220a5857159ddd13c1"
+        ],
+        [
+          "wakeBatch",
+          "a4a14e4bdff0e7ac24045986403ccd54091252b7d741b15c531dcbd5b0da845e"
+        ],
+        [
+          "wakeLandingQueue",
+          "925a304e72696ab3c42a44b00695b49c7bbf96a2352360c7ac1e5e7446090876"
+        ],
+        [
+          "watchFinishCompose",
+          "d8129dabb3448937eb0cabd03fb954df4935cbe46b2c260b05af6806e899f1c7"
+        ],
+        [
+          "writeBatch",
+          "6243c96915dac73d9f4479bbf75d8f781cae2776d3b77b128f47fbb7fcc29a07"
+        ]
+      ],
+      "shell": "0f5641f4b8d2ddf33be04824eacc78d7a911a7895b4d0b4400afd368b1d51563"
+    }
+  }
+}

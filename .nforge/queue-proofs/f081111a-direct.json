@@ -1,0 +1,166 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedLandingPins.ts": "4333d55e062b313e5a937701732c7ef4e4df5077424d7243478329b76dfbd558"
+  },
+  "replay": {
+    "incident": "f081111a",
+    "test": "f081111a: a reopened Lane already on main refuses a new landing before dispatching a check",
+    "receipt": "caef8484-9fd8-498f-bff1-f199d28e9810"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "thread:delegated-task:command%3Amcp%3A08ea8707-90ed-483f-99d2-cb2ca34545e4%3Adelegate-task%3A3152e286-2654-43f9-8dcd-dfe80cd0e85a",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "thread:delegated-task:command%3Amcp%3A4c9e1717-52b6-4aa5-91b6-25874a5a1e18%3Adelegate-task%3A6e4efced-d76f-4e1e-a6af-38a2f1134089",
+    "receipt": "bf1cfe31-cf9a-47a1-90af-9952be19e79b"
+  },
+  "exercised": {
+    "convex/projectHostedLandingPins.ts": {
+      "executed": [
+        "pinLandingAttempt"
+      ],
+      "digest": "50025f3b695bed6ad49ed825e6e51aed5fbea86896f666d6be2eb0d57064a099",
+      "units": [
+        [
+          "ForgeError",
+          "c8934d5ec6f70ce797a0d05c3ecfb78031a48937ad3336194885e4520006a12d"
+        ],
+        [
+          "acceptancePolicyDigest",
+          "b1420e1636112f49ce0e72ea244c699aee21995cd1f500becf4a129be969e55a"
+        ],
+        [
+          "batchEligible",
+          "1775d96c1a3b52873c488a10afee0a8b41bd1aa4e218f245de45854a7e450730"
+        ],
+        [
+          "candidateOwnerInputs",
+          "7e64861abde58bdaf07c327eef9d0fde40ac8372b76393250653932226dc1bf6"
+        ],
+        [
+          "canonicalPayload",
+          "95124f3098690f0b83a3927221e9cee6fc53fe1b0c044ab43a9f934e9effe9bb"
+        ],
+        [
+          "checkCause",
+          "951898d2c83b24b33455ecfb98acea9ce436ed50e52d985a280b89061f7ab66d"
+        ],
+        [
+          "ciDownMessage",
+          "e48b4c0564b73ff23026c589c1379f7ff71595994d36d0455101ffdbebedf758"
+        ],
+        [
+          "earlyPredecessor",
+          "4df9830c15023844fa1a6cefbfc0cb435e39b4178090ae402c2e6e14910bfe13"
+        ],
+        [
+          "effectivePolicy",
+          "3cdc0ff32407b7603d7a90387ef5e3b5e63f8a4336f55bfdf7f1dac19863e36e"
+        ],
+        [
+          "enqueueHostedCheck",
+          "b8fe4c1b88c9d378fa86661a5378ac77da8b72f952c96b74859bfa7ab2ce0c6b"
+        ],
+        [
+          "fixGate",
+          "1c9c2211d6f4449555967426f5e7837702df25bcaffa560226d1ded1c473e240"
+        ],
+        [
+          "governanceReason",
+          "d421ff74e3dcf5efc318c5994fe9311eb9da156f3b7d9ea136bda1e9d0f4ba65"
+        ],
+        [
+          "hasWriteRole",
+          "5b8d0c0f15dd72bb7b2511088443f66af002a4c0e145a635ea1889dc97f13320"
+        ],
+        [
+          "heldCommand",
+          "55961a6645004f549649a99b1811872a1005fea78c7bea69bd2febb466705913"
+        ],
+        [
+          "hostedAcceptGate",
+          "82277450b9cdf070defc2fbff04898439620ca7b85f4ee730e6b942a45730893"
+        ],
+        [
+          "hostedLandingAttemptSchema",
+          "cee3c0d8c5941e479f205ef9027a8ec750bcd64ccc3dd83b3b22b698ebd6203a"
+        ],
+        [
+          "hostedRecordSchema",
+          "508c659caa39090faf59eafb8c7320cc42ca43240ec90785756c1840e7c03f61"
+        ],
+        [
+          "hostedStartMain",
+          "b363e9608e562023c7b2963703c2aa02c302faf29032c2afe9c22405b82e1a0a"
+        ],
+        [
+          "hostedWriteProject",
+          "3a2dcfd149cab0cc00290a015bc2bf96315135dd3f5c0643e4bb3178451cd869"
+        ],
+        [
+          "invariant",
+          "a25036d770aae805d10bdb41ade261044ed7f7ba6fbbf3ccd57a32c56a3d4c20"
+        ],
+        [
+          "loadHostedCheck",
+          "7d7c2fad5d560d74b72df0c0dfd719fe39b88b74c22fbcad6581a2a765e1c1fd"
+        ],
+        [
+          "mergeSemanticMembers",
+          "c915ba6916b75f2e3410fd4c5cecb93dd1c75969a640dfc16ed7f71326c7030a"
+        ],
+        [
+          "pinLandingAttempt",
+          "14e342744cb425e6f580003038f0a92dbeac26ca7b95a3750dd288319f5669c3"
+        ],
+        [
+          "protectedPathMatches",
+          "3995a7740142a279f47eae480c5ed316384c99e0da4443ca50a0dee4221a56f4"
+        ],
+        [
+          "readHostedRecord",
+          "f8ebe857e46255798f036f3db0acb78682a740661afb1147e12c1163e7ad5ee2"
+        ],
+        [
+          "refreshCheckEntries",
+          "b6fe4c470b39d173dcd4bad3085002b311e65c910571cb42b94c281673be41f8"
+        ],
+        [
+          "requireHostedCheckEvidence",
+          "bdf82523d3f463b23b6dbd9aea51f06742fecfc4027c723545340e4d80737f66"
+        ],
+        [
+          "requireLandingCheck",
+          "52c6468a33969c46cd861d42fc052d3079e7e7622ed448c9e7d6543cf4e8fbd3"
+        ],
+        [
+          "requireLandingPaths",
+          "b38ca7d1930c3d41a7f6ef535ddef32dd50dbeaed8a92b36dda6fe8cf8527eaa"
+        ],
+        [
+          "requireMemberAuthority",
+          "7e1c42388f42099e9c975c90112b13daed60b9886154807bd12df5c7f5f2d388"
+        ],
+        [
+          "saveObject",
+          "17e863ada21108d974af54f19859da8e055f11d7ed994f47f4f9aa00b55d5ce5"
+        ],
+        [
+          "semanticMember",
+          "ed9d20c3f4ee2f274f9cb3060520fa0c64e2ae1b0a377a05a920b6b6d3be64b7"
+        ],
+        [
+          "submittedCheckCause",
+          "63ad04a21b56a47b3cf8cb6de3694bd145c07656530cd2a686f2ae83a1e4af2c"
+        ],
+        [
+          "validCrossHeadProof",
+          "99eae428e6e71fb41088ba8e35fd1b1382a363c7b9e0d759f7fb333cb88f87cc"
+        ]
+      ],
+      "shell": "8a7020272af208e53803d8b61705c06fa845c78f4a464e1a50b55250f78a60af"
+    }
+  }
+}

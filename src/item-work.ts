@@ -7,6 +7,7 @@ import type { HostedAgentTransport } from './hosted-agent-transport.js';
 export type ItemWork = {
   role: boolean;
   intent?: string | null;
+  intentPin?: { intentId: string; version: number };
   intents?: number;
   lanes?: Record<string, unknown>[];
   total?: number;
@@ -40,10 +41,11 @@ export async function readItemWork(
 }
 
 /** The `work` section of a single-Item read: the first page, its total, and how to read the rest. */
-export function workSection(itemId: string, work: ItemWork) {
+export function workSection(itemId: string, work: ItemWork, planningVersion: number) {
   return {
     lanes: work.lanes ?? [],
     total: work.total ?? 0,
+    ...(work.intentPin ? { intentPin: { kind: 'intent', ...work.intentPin, planningVersion } } : {}),
     ...(work.atLeast ? { atLeast: true } : {}),
     ...(work.nextCursor
       ? {

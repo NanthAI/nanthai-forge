@@ -457,10 +457,11 @@ for (const lost of [false, true])
 test('stacked dependency waits own no idle timer and resume on the parent receipt', async t => {
   const f = await finishFixture(t),
     parent = await begin(f);
-  const childRequest = f.request({
-    finish: { composeOperationId: f.selection.request.operationId, after: parent.state.id },
+  const childRequest = await f.resubmission([['child.txt', 'Child change\n']]);
+  const child = await f.enqueue({
+    ...childRequest,
+    finish: { ...childRequest.finish, after: parent.state.id },
   });
-  const child = await f.enqueue(childRequest);
   await f.drain();
   const waiting = (await f.current(child.id)).submission.observation;
   assert.equal(waiting.pendingReason, 'waiting-for-dependency');

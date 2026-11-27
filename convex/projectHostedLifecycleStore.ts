@@ -84,23 +84,37 @@ export async function lifecycleTarget(
         : hostedIntentSchema.parse(JSON.parse(row.value)),
   };
 }
+export function lifecycleItemHead(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  linkedId: string | undefined,
+  intentId: string,
+) {
+  const itemId = linkedId ?? intentId;
+  return itemId ? recordHead(ctx, projectId, 'issue', itemId) : null;
+}
 export async function lifecycleCurrent(ctx: MutationCtx, plan: LifecyclePlan) {
   const project = await hostedWriteProject(ctx, plan.projectId, plan.actor, plan.authorityEpoch);
   const guard = await lifecycleGuard(ctx, plan.projectId, plan.intentId);
-  const request = hostedLifecycleRequestSchema.parse(JSON.parse(plan.request));
+  const { target } = hostedLifecycleRequestSchema.parse(JSON.parse(plan.request));
   const current = await lifecycleTarget(
     ctx,
     plan.projectId,
     plan.actor,
-    request.target.kind,
-    request.target.kind === 'lane' ? request.target.laneId : request.target.intentId,
+    target.kind,
+    target.kind === 'lane' ? target.laneId : target.intentId,
   );
-  const valid =
-    request.target.kind === 'intent' &&
+  const pinned =
+    target.kind === 'intent' &&
     current.record.kind === 'intent' &&
-    request.target.version === current.record.version &&
+    target.version === current.record.version &&
     guard?.planId === plan._id &&
     guard.revision === plan.revision;
+  const valid =
+    pinned &&
+    (target.planningVersion === undefined ||
+      (await lifecycleItemHead(ctx, plan.projectId, current.row.planningItemId, plan.intentId))?.version ===
+        target.planningVersion);
   return { guard, current, valid, project };
 }
 export async function settleLifecycle(

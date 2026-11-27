@@ -14,10 +14,13 @@ import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
 import { readTurnLedger, recordTurnWork } from '../dist/agent-turn-work.js';
 const modules = Object.fromEntries(
   await Promise.all(
-    ['projectHostedAgent', 'projectHostedLandingWithdraw', 'projectHostedLanding'].map(async name => [
-      name,
-      await import(moduleUrl(`../convex/${name}.ts`)),
-    ]),
+    [
+      'projectHostedAgent',
+      'projectHostedLandingWithdraw',
+      'projectHostedLanding',
+      'projectHostedLifecycle',
+      'projectHostedLanes',
+    ].map(async name => [name, await import(moduleUrl(`../convex/${name}.ts`))]),
   ),
 );
 const prior = Object.fromEntries(Object.keys(synthetic).map(key => [key, process.env[key]]));
@@ -67,6 +70,29 @@ const landing = async f => {
   await f.drain();
   return state;
 };
+
+test('a late withdraw from a project root names and can reopen the target Lane', async t => {
+  const s = await setup(t);
+  const first = await landing(s.f);
+  await s.f.passChecks();
+  await s.f.drain();
+  assert.equal((await s.f.current(first.id)).submission.phase, 'landed');
+  const transport = s.transport();
+  const laneId = s.f.lane.laneId;
+  await assert.rejects(transport.dispatch('withdraw', { laneId }), error => {
+    assert.equal(error.code, 'LANDING_NOT_LIVE');
+    assert.match(error.message, /already landed/);
+    assert.doesNotMatch(error.message, /Retry the original|land --save/);
+    assert.equal(
+      error.recovery.command,
+      `nforge agent '${transport.root}' start --reopen '{"laneId":"${laneId}"}'`,
+    );
+    assert.deepEqual(error.recovery.next, { action: 'reopen', laneId });
+    return true;
+  });
+  const reply = await transport.dispatch('reopen', { laneId });
+  assert.equal(reply.result.lane.state, 'active');
+});
 
 test('withdraw replays a lost reply, keeps the Lane and a later identical withdraw ends the next landing', async t => {
   const s = await setup(t),

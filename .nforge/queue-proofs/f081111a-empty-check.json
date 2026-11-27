@@ -1,0 +1,80 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "src/hosted-finish-guard.ts": "b75dee4d19a919df3e70f1ab120f9ea6accab08f073a6c49da7af4a72a2dbb16"
+  },
+  "replay": {
+    "incident": "f081111a",
+    "test": "land of an empty Lane is refused as nothing to land, unless allowEmpty asks for it",
+    "receipt": "1e08f7b8-065b-4f18-a03b-bf8525124ad7"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "thread:delegated-task:command%3Amcp%3A08ea8707-90ed-483f-99d2-cb2ca34545e4%3Adelegate-task%3A3152e286-2654-43f9-8dcd-dfe80cd0e85a",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "thread:delegated-task:command%3Amcp%3A4c9e1717-52b6-4aa5-91b6-25874a5a1e18%3Adelegate-task%3A6e4efced-d76f-4e1e-a6af-38a2f1134089",
+    "receipt": "bf1cfe31-cf9a-47a1-90af-9952be19e79b"
+  },
+  "exercised": {
+    "src/hosted-finish-guard.ts": {
+      "executed": [
+        "changedPathsAgainstBase",
+        "inspectLaneCheckout",
+        "nothingToLandError"
+      ],
+      "digest": "8ba782a633d99ed72352f7363c940b7ae88247973eb5c5888052671107c1fed5",
+      "units": [
+        [
+          "ForgeError",
+          "80782ffe370115376243f742db60843dd45ba6c24c25340d4092b697f7ab8a84"
+        ],
+        [
+          "changedPathsAgainstBase",
+          "80d1390efc10a237636ced825e0ad3f059f575d6748b2d0e2dd31e08670ebbe1"
+        ],
+        [
+          "finishChangedPathsKey",
+          "3520fd5736136672e6bab820472167aa1a00f89b2b6282d90664b52572892b74"
+        ],
+        [
+          "inspectLaneCheckout",
+          "9a5cc9edf99c7582d966cbd72fd0c9615c5cb6d86d5ee68d504f7f8a83042406"
+        ],
+        [
+          "nothingToLandError",
+          "8540b756b8bdac1faf941415c2bc56aeef599aeff0e79c123850ea3fc6e65b1a"
+        ],
+        [
+          "pathsAgainstBase",
+          "9791422cf40d67330387961da21178bd682716403660219be99bbbed5c93b3f7"
+        ],
+        [
+          "plural",
+          "3410a5451c4f4504919f19a21791117be7bba582d422dd21d1940eb614324b84"
+        ],
+        [
+          "readHostedLaneCheckout",
+          "a9e34c0f2ca203e38017b50fcae0943416c213fd8f668dc8c0bf6346628b5de6"
+        ],
+        [
+          "readLaneEntry",
+          "234143c671f57b9d5faf00532c8b669b652ea50071fdcb75127385c9831f20a5"
+        ],
+        [
+          "scanCheckout",
+          "c5bd97583ebc362a3a26f8a8a124c444d70bee57f8ba8de7882e628eb4b92b3c"
+        ],
+        [
+          "shellQuote",
+          "5298851f4c8211780b29057b283a3ca3ed58fe90955dd95bd4912059c331950b"
+        ],
+        [
+          "unsavedEditsError",
+          "f2f905414d8493ba0a6dfc293d6c4a8fe1b06f0087c1b4658cbf0924ae9c83e6"
+        ]
+      ],
+      "shell": "9f5dc3f793a98de4b125448872d5a2c8dd0a6908ade61922b1ce00253de93675"
+    }
+  }
+}

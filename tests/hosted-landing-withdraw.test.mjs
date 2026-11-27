@@ -23,6 +23,7 @@ test.after(() => {
 });
 const withdrawApi = await import(moduleUrl('../convex/projectHostedLandingWithdraw.ts'));
 const laneFinish = await import(moduleUrl('../convex/projectHostedLaneFinish.ts'));
+const lifecycle = await import(moduleUrl('../convex/projectHostedLifecycle.ts'));
 
 async function begin(f, overrides = {}, metadata) {
   const request = f.request(overrides),
@@ -50,6 +51,12 @@ const live = (f, laneId) =>
     },
     {},
   );
+const pins = lane => ({
+  head: lane.head,
+  version: lane.version,
+  sourceVersion: lane.sourceVersion,
+  lifecycleVersion: lane.lifecycleVersion,
+});
 
 test('land --withdraw lowers to the hosted withdraw action', () => {
   const [form] = parseVerbForm('land', ['--withdraw', '{}']);
@@ -144,7 +151,68 @@ test('an already accepted landing is never undone by a late withdraw', async t =
   await f.drain();
   const main = f.currentMain();
   assert.equal((await f.current(state.id)).submission.phase, 'landed');
-  await assert.rejects(withdraw(f, { laneId: f.lane.laneId }), code('LANDING_NOT_LIVE'));
+  await assert.rejects(withdraw(f, { laneId: f.lane.laneId }), error => {
+    assert.equal(error.data?.code ?? error.code, 'LANDING_NOT_LIVE');
+    const message = error.data?.message ?? error.message;
+    assert.match(message, /already landed/);
+    assert.match(message, /start --reopen/);
+    assert.doesNotMatch(message, /land --save/);
+    return true;
+  });
+  assert.deepEqual(f.currentMain(), main);
+});
+
+test('f081111a: a reopened Lane already on main refuses a new landing before dispatching a check', async t => {
+  const f = await finishFixture(t, { admission: true });
+  const { state } = await begin(f);
+  await f.passChecks();
+  await f.drain();
+  assert.equal((await f.current(state.id)).submission.phase, 'landed');
+  const lane = await f.readLane(f.lane.laneId);
+  assert.equal(lane.state, 'completed');
+  const reopened = JSON.parse(
+    await f.tx('reopen', lifecycle.transition, {
+      projectId: f.projectId,
+      request: JSON.stringify({
+        operationId: randomUUID(),
+        authorityEpoch: 1,
+        action: 'reopen',
+        target: { kind: 'lane', laneId: lane.id, expected: pins(lane) },
+      }),
+    }),
+  );
+  const main = f.currentMain();
+  const expectedMain = { head: main.head, receiptId: main.receipt.id };
+  const selection = f.c.selection(
+    [
+      {
+        ...f.lane,
+        version: reopened.lane.version,
+        lifecycleVersion: reopened.lane.lifecycleVersion,
+      },
+    ],
+    [],
+    { expectedMain },
+  );
+  const candidate = await compose(f.c, selection);
+  assert.equal(candidate.result.head, main.head);
+  const runs = f.tables.projectHostedCheckRuns.size;
+  const landings = f.tables.projectHostedLandingRequests.size;
+  await assert.rejects(
+    f.enqueue(
+      f.request({
+        candidateId: candidate.id,
+        expectedHead: candidate.result.head,
+        expectedMain,
+        finish: { composeOperationId: selection.request.operationId, after: null },
+        message: 'A different message for the same source',
+      }),
+    ),
+    code('NOTHING_TO_LAND'),
+  );
+  assert.equal(f.tables.projectHostedCheckRuns.size, runs);
+  assert.equal(f.tables.projectHostedLandingRequests.size, landings);
+  assert.equal(f.pending().length, 0);
   assert.deepEqual(f.currentMain(), main);
 });
 
@@ -274,12 +342,6 @@ test('D1 replay: the Lane’s new head supersedes its queued sync-required entry
     if (parsed?.error) throw Object.assign(new Error(parsed.error.message), { code: parsed.error.code });
     return parsed;
   };
-  const pins = lane => ({
-    head: lane.head,
-    version: lane.version,
-    sourceVersion: lane.sourceVersion,
-    lifecycleVersion: lane.lifecycleVersion,
-  });
   const syncRequest = (f, lane, extra = {}) => {
     const main = f.currentMain();
     return {

@@ -340,7 +340,8 @@ test('Issue 1018d0f8: identical shared changes reuse the passed run instead of d
 
 test('an identical complete tree carries the full admission pass outside pipeline recovery', async t => {
   const f = await wave(t, {
-    memberPaths: ['src/same.ts', 'src/same.ts'],
+    // The rebased tree still equals the second checked tree, and includes one file main lacks.
+    memberPaths: ['src/same.ts', ['src/same.ts', 'src/second.ts']],
     memberContents: ['same', 'same'],
     fileCount: 2,
   });

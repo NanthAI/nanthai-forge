@@ -370,7 +370,7 @@ export const hostedAgentCommandSchemas = {
         .describe(
           'Optional: tokens your own work on this landing used, as your harness counts them (whole number, at most 1e9). Stats shows the measured total; never billed.',
         ),
-      /** Land a Lane whose saved head changes nothing against its base (otherwise refused). */
+      /** Allow a Lane with no saved changes against its base to reach composition or a check-only run. */
       allowEmpty: z.boolean().optional(),
       /** Submit only while the queue holds fewer than N checks; judged by the server with the submit,
        * and a land without room waits for it on a live query, never polling (ad80e037). */
@@ -467,6 +467,7 @@ export const hostedAgentCommandSchemas = {
           kind: z.literal('intent'),
           intentId: uuid,
           version: z.number().int().nonnegative(),
+          planningVersion: z.number().int().nonnegative().optional(),
           cascade: z.boolean().default(false),
         })
         .strict()
@@ -503,6 +504,7 @@ export const hostedAgentCommandSchemas = {
           kind: z.literal('intent'),
           intentId: uuid,
           version: z.number().int().nonnegative(),
+          planningVersion: z.number().int().nonnegative().optional(),
           cascade: z.literal(false).default(false),
         })
         .strict()

@@ -3,7 +3,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { finishFixture, desired, api as finishApi, landingApi, code } from './hosted-finish-fixture.mjs';
+import {
+  finishFixture,
+  desired,
+  api as finishApi,
+  landingApi,
+  code,
+  compose,
+} from './hosted-finish-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { policyPreset } from '../dist/autonomy-policy.js';
 const synthetic = {
@@ -55,9 +62,9 @@ const read = (f, operationId, actor = 'owner') =>
       actor,
     )
     .then(JSON.parse);
-function pauseSource(f) {
+function pauseSource(f, composeOperationId = f.selection.request.operationId) {
   const row = [...f.tables.projectHostedOperations.values()].find(
-    row => row.operationId === f.selection.request.operationId,
+    row => row.operationId === composeOperationId,
   );
   const saved = row.value;
   const operation = JSON.parse(saved);
@@ -549,6 +556,49 @@ test('one alarm transfers from desired preparation, resets on run progress, and 
   assert.equal(current.phase, 'landed');
   assert.equal(f.pending().length, 0, 'no delayed alarm or watchdog call while idle');
   assert([...f.tables.projectHostedLandingRequests.values()].every(row => !row.alarm));
+});
+
+test('f081111a stale no-op replay: moving main before desired admission never dispatches the old empty composition', async t => {
+  const f = await finishFixture(t);
+  const first = await f.enqueue(f.request());
+  await f.drain();
+  await f.passChecks();
+  await f.drain();
+  assert.equal((await f.current(first.id)).submission.phase, 'landed');
+  const lane = await f.readLane(f.lane.laneId);
+  const reopened = await f.changeLane(lane.id, {
+    state: 'active',
+    lifecycleVersion: lane.lifecycleVersion + 1,
+  });
+  const main = f.currentMain();
+  const selection = f.c.selection(
+    [{ ...f.lane, version: reopened.version, lifecycleVersion: reopened.lifecycleVersion }],
+    [],
+    { expectedMain: { head: main.head, receiptId: main.receipt.id } },
+  );
+  const candidate = await compose(f.c, selection);
+  assert.equal(candidate.result.head, main.head);
+  const command = {
+    ...request(f),
+    composeOperationId: selection.request.operationId,
+    message: 'Try the unchanged Lane again',
+  };
+  const resume = pauseSource(f, selection.request.operationId);
+  await submit(f, command);
+  const moved = f.moveMain({
+    files: [
+      ['selected.txt', 'selected\n'],
+      ['later.txt', 'another landed change\n'],
+    ],
+  });
+  const runs = f.tables.projectHostedCheckRuns.size;
+  resume();
+  await f.drain();
+  const { submission } = await read(f, command.operationId);
+  assert.equal(submission.error?.code, 'NOTHING_TO_LAND');
+  assert.equal(f.tables.projectHostedCheckRuns.size, runs);
+  assert.deepEqual(f.currentMain(), moved);
+  assert.equal(f.pending().length, 0);
 });
 
 test('a reserved desired landing survives main moving before admission and remains visible by Candidate', async t => {

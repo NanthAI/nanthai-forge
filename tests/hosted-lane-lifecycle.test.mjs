@@ -13,6 +13,13 @@ import {
   maxima,
 } from './hosted-lane-lifecycle-fixture.mjs';
 import { checksFixture } from './hosted-checks-fixture.mjs';
+import { moduleUrl } from './convex-module.mjs';
+import { hostedRecordValue } from '../dist/hosted-records.js';
+import { workStoreRecord } from '../dist/work-store-records.js';
+import { teach } from '../dist/error-teaching.js';
+const { storeVersion } = await import(moduleUrl('../convex/projectWorkStore.ts'));
+const { storeItem } = await import(moduleUrl('../convex/projectWorkStoreReads.ts'));
+const itemWork = await import(moduleUrl('../convex/projectItemWork.ts'));
 const pins = l => ({
   head: l.head,
   version: l.version,
@@ -89,6 +96,62 @@ test('known dirty client requires the retained exact save-first child, whose com
   assert(f.objects.has(result.head));
   assert(f.objects.has(f.baseline.sha256));
 });
+test('f081111a lifecycle replay: planning supplies both pins and an execution-only change makes the target stale', async () => {
+  const f = await lifecycleFixture();
+  const item = {
+    id: f.intentId,
+    kind: 'issue',
+    title: 'Captured follow-up',
+    operationId: randomUUID(),
+    request: 'a'.repeat(64),
+    version: 1,
+    previousVersion: 0,
+    at: f.initial.at,
+    provenance: 'user-declared-local',
+    status: 'in-progress',
+  };
+  await f.lifeRun(
+    'putIssue',
+    ctx =>
+      storeVersion(ctx, { _id: f.projectId }, hostedRecordValue(workStoreRecord('planningVersions', item))),
+    {},
+  );
+  const shown = await f.lifeRun('planningDetail', ctx => storeItem(ctx, f.projectId, item.id), {});
+  assert.equal(shown.version, 1);
+  const intentHead = [...f.tables.projectHostedRecordHeads.values()].find(head => head.kind === 'intent');
+  f.patch('projectHostedRecordHeads', intentHead._id, { planningItemId: item.id });
+  const readPin = async () =>
+    JSON.parse(await f.lifeCall('planningWork', itemWork.read, { projectId: f.projectId, itemId: item.id }))
+      .intentPin;
+  const target = { kind: 'intent', intentId: f.intentId, version: 0, planningVersion: 1, cascade: true };
+  assert.deepEqual(await readPin(), { intentId: f.intentId, version: 0 });
+  await f.lifeRun('editIntent', (ctx, input) => records.writeHostedRecord(ctx, input), {
+    ...f.auth,
+    expectedVersion: 0,
+    record: { ...f.intent, version: 1, constraints: 'New independent work' },
+  });
+  await assert.rejects(f.begin(f.request(target)), error => {
+    assert(code('WORK_STALE')(error));
+    const { next } = teach(
+      'WORK_STALE',
+      { root: '/fixture root', argv: ['agent', '/fixture root', 'abandon'] },
+      undefined,
+      error.data?.message ?? error.message,
+    );
+    assert.equal(next, `nforge agent '/fixture root' planning '{"planningItemId":"${item.id}"}'`);
+    return true;
+  });
+  await assert.rejects(f.begin(f.request({ ...target, version: 1, planningVersion: 0 })), code('WORK_STALE'));
+  const r = f.request({ ...target, ...(await readPin()), planningVersion: shown.version });
+  assert.equal((await f.begin(r)).status, 'pending');
+  for (let step = 0; !f.plan(r).materialized; step++) {
+    assert(step < 5, 'the cascade applies and materializes through its original pin');
+    await f.advance(r);
+  }
+  assert.equal((await f.read(f.laneId)).state, 'abandoned');
+  assert.equal((await f.begin(r)).status, 'applied');
+});
+
 test('cascade visibility is all-or-nothing before projection; exact historical versions and sibling pages agree', async () => {
   const f = await lifecycleFixture();
   const children = [f.initial];

@@ -109,6 +109,7 @@ async function fixture(t) {
       query: async (ref, args) => {
         const name = getFunctionName(ref);
         calls.push(name);
+        if (name === 'projectHostedLanes:select') return f.call('select', lanes.select, args);
         assert.equal(name, 'projectHostedSaves:progress');
         return f.call('progress', api.progress, args);
       },
@@ -164,6 +165,21 @@ async function fixture(t) {
   return { ...f, root, exchange, calls, waits, waitSource, session, syncPrepares, selects, complete, done };
 }
 const marker = s => readHostedLaneCheckout(s.root).selection;
+
+test('a save on a completed Lane keeps unsaved edits and offers reopening the checkout', async t => {
+  const s = await fixture(t);
+  await s.changeLane(s.laneId, { state: 'completed', lifecycleVersion: 1 });
+  writeFileSync(join(s.root, 'a.txt'), 'follow-up edit');
+  const command = { message: 'Follow-up' };
+  await assert.rejects(executeHostedAgent(s.session('save', command), 'save', command), error => {
+    assert.equal(error.code, 'LANE_NOT_ACTIVE');
+    assert.match(error.message, /start --reopen/);
+    assert.doesNotMatch(error.message, /abandon/);
+    return true;
+  });
+  assert.equal(readFileSync(join(s.root, 'a.txt'), 'utf8'), 'follow-up edit');
+  assert(!s.calls.includes('projectHostedSaveJobs:submit'));
+});
 
 test('incident replay fcd197f1: a save that returned submitted and needed 2-3 replays now finishes on the first call', async t => {
   const s = await fixture(t);

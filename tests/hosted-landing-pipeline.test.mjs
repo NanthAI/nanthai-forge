@@ -139,6 +139,7 @@ for (const identical of [true, false])
         identical && followerFirst !== 'failed' ? 'exact-tree-v1' : undefined,
       );
       assert.equal(f.pending().length, 0, 'owner hold costs zero while idle');
+      const beforeApprovalDrain = f.runs().length;
       const approved = JSON.parse(
         await f.tx('laterOwnerApproval', acceptance.approve, {
           projectId: f.projectId,
@@ -150,7 +151,19 @@ for (const identical of [true, false])
       await drainActive(f);
       await f.passChecks();
       await drainActive(f);
-      assert(states(f).every(state => state.phase === 'landed'));
+      const [seed, predecessor, successor] = states(f);
+      assert.equal(seed.phase, 'landed');
+      assert.equal(successor.phase, 'landed');
+      if (identical) {
+        assert.equal(predecessor.phase, 'terminal-failed');
+        assert.equal(predecessor.error.code, 'NOTHING_TO_LAND');
+        assert.equal(
+          f.runs().length,
+          beforeApprovalDrain,
+          'approval starts no check for already accepted source',
+        );
+        assert.equal(f.tables.projectHostedAcceptances.size, 2);
+      } else assert.equal(predecessor.phase, 'landed');
       assert.equal(f.pending().length, 0);
     });
 

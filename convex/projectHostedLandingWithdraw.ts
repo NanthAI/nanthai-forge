@@ -60,6 +60,18 @@ export async function withdrawHostedLanding(
     { projectId, laneId: lane.id, headWrittenAt: '' },
     { queuedConflicts: true },
   );
+  if (!live && lane.state === 'completed') {
+    const overlap = await ctx.db
+      .query('projectHostedOverlapLanes')
+      .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', lane.id))
+      .unique();
+    const state = overlap?.landed?.laneHead === lane.head ? 'already landed' : 'already completed';
+    invariant(
+      false,
+      'LANDING_NOT_LIVE',
+      `Lane ${lane.id} has ${state} and has no live landing to withdraw. For follow-up edits, start a new Lane or use start --reopen from the Lane's own checkout.`,
+    );
+  }
   invariant(
     live,
     'LANDING_NOT_LIVE',

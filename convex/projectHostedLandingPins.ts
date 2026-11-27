@@ -138,10 +138,21 @@ export async function pinLandingAttempt(
       'A finish retry must retain the original ordered selection.',
     );
   }
+  invariant(
+    !r.finish || candidate.result.status !== 'clean' || candidate.result.head !== main.head,
+    'NOTHING_TO_LAND',
+    'The composed head already equals current main. There is nothing to check or land.',
+  );
+  // A reserved composition that was empty on its own base cannot be checked there.
+  // If main moved, recompose through stale admission so changes that main lost can still land.
+  const staleEmpty = Boolean(
+    r.finish && candidate.result.status === 'clean' && candidate.result.head === candidate.base.head,
+  );
   const recoveryGate = fixGate({ needsFix: row.restoreBases ?? project.needsFix?.[candidate.intentId] });
   const policy = effectivePolicy(project);
   const paths = candidate.governance?.paths ?? null;
   const canReview =
+    !staleEmpty &&
     input.review &&
     r.finish &&
     r.check &&
@@ -162,6 +173,7 @@ export async function pinLandingAttempt(
   );
   if (earlyReview) input.review?.(earlyReview, verifiedReview);
   const deferredCheck =
+    staleEmpty ||
     verifiedReview ||
     (!recoveryGate &&
       !earlyReview &&

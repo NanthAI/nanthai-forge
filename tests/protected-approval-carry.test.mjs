@@ -102,6 +102,24 @@ const approvalsOf = f =>
     .filter(row => row.ownerGrant)
     .map(row => row.ownerGrant);
 
+test('f081111a review replay: approved work that is already on main settles before comparison IO', async t => {
+  const { f, state } = await licenceShape(t, [
+    [GUARD, 'guard v2\nkeep\nguard end\n'],
+    [SHARED, 'header agpl\nmiddle\nend\n'],
+  ]);
+  const held = await readback(f, state);
+  assert.equal(held.wait.reviewState, 'held');
+  const main = f.moveMain();
+  const runs = f.tables.projectHostedCheckRuns.size;
+  await f.tx('approveNowEmpty', acceptance.approve, held.selection);
+  await f.drain();
+  assert.equal((await f.current(state.id)).submission.error?.code, 'NOTHING_TO_LAND');
+  assert.equal(f.tables.projectHostedCheckRuns.size, runs);
+  assert.equal(JSON.parse(f.row(state.id).value).pending, null);
+  assert.deepEqual(f.currentMain(), main);
+  assert.equal(f.pending().length, 0);
+});
+
 test('fe2b0a86: the approval survives a main move that does not touch the approved paths, and lands without a new request', async t => {
   const { f, state } = await licenceShape(t, [UNCHANGED_GUARD, sharedEdit(1)]);
   const held = await readback(f, state);

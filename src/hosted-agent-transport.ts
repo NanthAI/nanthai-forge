@@ -132,6 +132,7 @@ import {
   finishCommandLaneIds,
   hostedAgentRoot,
   retainedFinishMessage,
+  retainedHostedValues,
 } from './hosted-agent-journal.js';
 import { shellQuote } from './shell-quote.js';
 import { landPhase } from './hosted-land-summary.js';
@@ -275,6 +276,8 @@ const quietActions = new Set([
 const gateCodes = new Set([
   'BAD_ARGUMENT',
   'NOT_FOUND', // a missing record: replaying the same request cannot change it (w30)
+  'NOTHING_TO_LAND',
+  'LANDING_NOT_LIVE',
   'PREFLIGHT_REQUIRED',
   'SAVE_PENDING',
   'SAVE_SETTLE_FAILED',
@@ -1141,6 +1144,43 @@ export class HostedAgentTransport {
           'BAD_ARGUMENT',
           'start needs one of: planningItemId (an Issue id), intentId (join an Intent), or outcome (a new one).',
         );
+        if (typeof placement.path === 'string' && placement.open !== false) {
+          const path = resolve(placement.path);
+          const occupied = markerIdentity(path);
+          if (occupied) {
+            const root = hostedAgentRoot(this.root);
+            const startedLane =
+              typeof operationId === 'string'
+                ? retainedHostedValues(root, operationId, 'start')?.['started-lane']
+                : undefined;
+            if (
+              startedLane !== occupied.laneId ||
+              occupied.projectId !== this.address.projectId ||
+              occupied.url !== this.address.url
+            ) {
+              // Earlier clients could reserve a Lane before finding the obstruction. Retry its
+              // operation with an explicit replacement for the occupied placement.
+              const retryPath =
+                typeof startedLane === 'string' ? laneSiblingPath(path, startedLane, 'follow-up') : undefined;
+              const retry = {
+                ...command.data,
+                ...(operationId === undefined ? {} : { operationId }),
+                ...(retryPath === undefined ? {} : { path: retryPath }),
+                ...(placement.installScripts === undefined
+                  ? {}
+                  : { installScripts: placement.installScripts }),
+                ...(placement.carryEdits === undefined ? {} : { carryEdits: placement.carryEdits }),
+              };
+              const commandLine = `nforge agent ${shellQuote(root)} start ${shellQuote(JSON.stringify(retry))}`;
+              throw new ForgeError(
+                'WORK_CONFLICT',
+                `${path} is already the checkout for Lane ${occupied.laneId}. ${retryPath ? 'Open the reserved Lane at a different path' : 'Omit path to use the default location'}: ${commandLine}`,
+                undefined,
+                { command: commandLine, next: { action: 'start', parameters: retry } },
+              );
+            }
+          }
+        }
       }
       // A wide metrics read is refused before capability discovery, so it costs no server call (Issue 686ecdde).
       if (action === 'metrics') {

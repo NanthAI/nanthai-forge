@@ -20,6 +20,7 @@ import { requireMemberAuthorityById } from './projectLaneAuthority';
 import { report } from './errors';
 import {
   lifecycleCaller,
+  lifecycleItemHead,
   lifecyclePlan,
   lifecycleTarget,
   lifecycleResult,
@@ -139,12 +140,18 @@ export async function transitionLifecycle(
         'The retained save-first child must bind this exact original Lane baseline.',
       );
     }
-  } else
+  } else if (target.version !== record.version || target.planningVersion !== undefined) {
+    // A target copied from planning protects both records. Older callers send the Intent version.
+    const item = await lifecycleItemHead(ctx, input.projectId, row.planningItemId, target.intentId);
     invariant(
-      record.version === target.version,
+      target.version === record.version &&
+        (target.planningVersion === undefined || item?.version === target.planningVersion),
       'WORK_STALE',
-      'Hosted Intent changed from its lifecycle pins.',
+      item
+        ? `Planning Item ${item.key} has the current lifecycle pin for its latest Intent. Read planning and use work.intentPin if it names Intent ${target.intentId}.`
+        : 'Hosted Intent changed from its lifecycle pins.',
     );
+  }
   const intentId = record.kind === 'lane' ? record.intentId : record.id;
   const purges = prepared.project.itemPurges?.filter(
     purge => !purge.commentId && purge.purgedAt === undefined,

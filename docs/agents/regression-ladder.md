@@ -157,6 +157,7 @@ removed, skipped or moved out of `tests/*.test.mjs`, or when this page stops nam
 | `368d2d2e` | An authenticated browser shard remains active beyond the stall window and a late pickup clears an earlier stall. |
 | `ab9766f3` | Admission adoption and deferred solo checks each keep one immutable attempt; a main-race carry adds only its recomposition. |
 | `b7f93deb` | A landing supersedes quiet same-Intent Lanes using the overlap row activity while active or pinned siblings remain visible. |
+| `f081111a` | A reopened Lane with a new landing message and a composed head already on main refuses before any hosted check or landing is created. |
 
 A new core-claim incident adds its replay to the registry and a row here in the Lane that fixes
 it.

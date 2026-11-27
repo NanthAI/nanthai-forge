@@ -921,7 +921,7 @@ async function readPlanning(
         ...settled,
         ...(states[item.id] ? { intent: states[item.id] } : {}),
       }),
-      ...(work?.role ? { work: workSection(item.id, work) } : {}),
+      ...(work?.role ? { work: workSection(item.id, work, settled.version) } : {}),
       comments: shown,
       ...(comments.isDone ? {} : commentsContinue(ws, id, comments.continueCursor)),
       ...(shown.some(comment => comment.system === true) ? { systemComments: systemCommentNotice } : {}),

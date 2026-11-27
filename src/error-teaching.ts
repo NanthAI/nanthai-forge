@@ -236,6 +236,20 @@ export function teach(code: string, context: TeachContext = {}, recovery?: unkno
   if (!entry) return {};
   let next = commandIn(recovery);
   if (!next && context.surface !== 'mcp') {
+    const staleItem =
+      code === 'WORK_STALE'
+        ? /^Planning Item (\S+) has the current lifecycle pin /.exec(message ?? '')?.[1]
+        : undefined;
+    if (staleItem && uuid.test(staleItem))
+      return {
+        next: commandLine([
+          'agent',
+          context.root || '.',
+          'planning',
+          JSON.stringify({ planningItemId: staleItem }),
+        ]),
+        learn: learnCommand('planning', context),
+      };
     const timedAgentLimit =
       code === 'RATE_LIMITED' &&
       Boolean(context.argv?.[0] === 'agent' || context.argv?.[0] === 'x') &&

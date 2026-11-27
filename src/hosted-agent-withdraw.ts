@@ -17,6 +17,9 @@ import { HostedAgentJournal } from './hosted-agent-journal.js';
 import type { HostedAgentAddress } from './hosted-agent-contract.js';
 import { sendAuthorityPinned } from './hosted-main-pin.js';
 import { landingCancelReason } from './hosted-contract-features.js';
+import { hostedActionError } from './hosted-action-error.js';
+import { readLaneEntry } from './lane-registry.js';
+import { markerIdentity } from './hosted-lane-directory.js';
 
 export const WITHDRAW_COST =
   'Withdraw ends only this submission: its queue place and its unfinished check (stopped once no other landing needs it). The Lane, its saves, Candidates and the recorded check results stay.';
@@ -56,7 +59,28 @@ export async function executeHostedWithdraw(session: HostedAgentSession, input: 
           request: canonicalPayload(request),
         }),
       ),
-  );
+  ).catch(error => {
+    const refusal = hostedActionError(error, 'withdraw');
+    if (refusal.code !== 'LANDING_NOT_LIVE' || !refusal.message.startsWith(`Lane ${laneId} has already `))
+      throw error;
+    const own = session.marker()?.selection.laneId;
+    const registered = readLaneEntry(laneId)?.root;
+    const marker = registered ? markerIdentity(registered) : null;
+    const checkout =
+      own === laneId
+        ? session.root
+        : marker?.laneId === laneId &&
+            marker.projectId === session.address.projectId &&
+            marker.url === session.address.url
+          ? registered
+          : undefined;
+    // An unopened Lane can be reopened from a project root. From another Lane, open the target first.
+    const action = checkout || !own ? 'reopen' : 'open';
+    throw new ForgeError(refusal.code, refusal.message, undefined, {
+      command: `nforge agent ${shellQuote(checkout ?? session.root)} start --${action} ${shellQuote(JSON.stringify({ laneId }))}`,
+      next: { action, laneId },
+    });
+  });
   // Received: an identical withdraw after this one is new work (a later landing), not a replay.
   await session.journal.retain('withdraw-received', () => landing.id);
   // Ended, or already accepted: either way this turn has no unfinished landing to wait for (SM-C M1).

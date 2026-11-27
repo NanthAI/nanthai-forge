@@ -24,6 +24,7 @@ export const hostedLifecycleRequestSchema = z
           kind: z.literal('intent'),
           intentId: z.uuid(),
           version: number,
+          planningVersion: number.optional(),
           cascade: z.boolean().default(false),
         })
         .strict(),
