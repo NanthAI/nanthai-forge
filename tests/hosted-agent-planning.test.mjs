@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
+import { workEventRows } from './work-event-fixture.mjs';
 import { meterReads } from './hosted-read-set.mjs';
 import { indexedRecord } from '../dist/work-hosted-index.js';
 import { installPlanningSearch } from './planning-search-fixture.mjs';
@@ -386,9 +387,9 @@ test('the worker closes an Item from its completed hosted Intent; planning reads
       true,
     );
     await publishPlanWork(s, itemId);
-    const eventCount = s.tables.projectWorkEvents.size;
+    const eventCount = workEventRows(s.tables).length;
     const after = await list(p, reading);
-    assert.equal(s.tables.projectWorkEvents.size, eventCount);
+    assert.equal(workEventRows(s.tables).length, eventCount);
     assert.equal(after.item.intent, 'completed');
     assert.equal(after.item.status, met ? 'closed' : 'in-progress');
     if (!met) {
@@ -1206,11 +1207,11 @@ test('on a server before planning-put-mutation a repeated operation replays, a l
     );
   const input = { kind: 'issue', title: 'Replay me' };
   const first = await put(p, input);
-  const events = s.tables.projectWorkEvents.size;
+  const events = workEventRows(s.tables).length;
   const again = await put(p, input);
   assert.equal(again.operationId, first.operationId);
   assert.deepEqual(again.result.itemId, first.result.itemId);
-  assert.equal(s.tables.projectWorkEvents.size, events);
+  assert.equal(workEventRows(s.tables).length, events);
   await assert.rejects(
     run(p, 'put-planning-item', { ...input, title: 'Changed' }, first.operationId),
     code('WORK_OPERATION_CHANGED'),
@@ -1230,9 +1231,9 @@ test('on a server before planning-put-mutation a repeated operation replays, a l
   };
   await assert.rejects(put(p, lost));
   p.exchange.client.action = action;
-  const before = s.tables.projectWorkEvents.size;
+  const before = workEventRows(s.tables).length;
   const recovered = await put(p, lost);
-  assert.equal(s.tables.projectWorkEvents.size, before);
+  assert.equal(workEventRows(s.tables).length, before);
   assert.equal(recovered.result.version, 1);
 
   // Someone else writes between the revision read and the command.
@@ -1389,10 +1390,10 @@ test('default and explicitly non-reconciling planning reads use worker statuses 
   assert.equal(persisted.filter(item => item.id === done).at(-1).status, 'closed');
   assert.equal(persisted.filter(item => item.id === done).at(-1).reason, 'Done: linked work finished');
 
-  const events = s.tables.projectWorkEvents.size;
+  const events = workEventRows(s.tables).length;
   const next = await list(p);
   assert.equal(next.reconciled, undefined);
-  assert.equal(s.tables.projectWorkEvents.size, events);
+  assert.equal(workEventRows(s.tables).length, events);
   assert.deepEqual(Object.fromEntries(next.items.map(item => [item.id, item.status])), {
     [done]: 'closed',
     [dropped]: 'open',
@@ -1420,7 +1421,7 @@ test('a start keeps an archived Item archived and a deleted Item deleted: no sta
       expectedVersion: before.version,
       status: shelf,
     });
-    const events = s.tables.projectWorkEvents.size;
+    const events = workEventRows(s.tables).length;
     const startOperation = randomUUID();
     // With a claim offered: the shelf check runs before the claim, so nobody becomes the owner of a shelved Item.
     const marked = await markPlanningStarted(p, id, startOperation, 'synthetic-owner/amber-fox');
@@ -1431,7 +1432,7 @@ test('a start keeps an archived Item archived and a deleted Item deleted: no sta
     });
     // A replay of the same start is the same no-op.
     assert.deepEqual(await markPlanningStarted(p, id, startOperation, 'synthetic-owner/amber-fox'), marked);
-    assert.equal(s.tables.projectWorkEvents.size, events, `${shelf}: nothing written`);
+    assert.equal(workEventRows(s.tables).length, events, `${shelf}: nothing written`);
     const item = (await list(p, { id, reconcile: false })).item;
     assert.deepEqual(
       [item.status, item.was, item.version, item.owner],
@@ -1493,12 +1494,12 @@ test('builders claim the Item they start (d3357f40): an unowned Item takes the s
   });
   assert.equal((await list(p, { id: issue })).item.owner, '@synthetic-owner/amber-fox');
   // A second builder on the same Item keeps the first one's claim, and writes nothing.
-  const events = s.tables.projectWorkEvents.size;
+  const events = workEventRows(s.tables).length;
   assert.deepEqual(await markPlanningStarted(p, issue, randomUUID(), 'synthetic-owner/ocean-moth'), {
     updated: false,
     status: 'in-progress',
   });
-  assert.equal(s.tables.projectWorkEvents.size, events);
+  assert.equal(workEventRows(s.tables).length, events);
   assert.equal((await list(p, { id: issue })).item.owner, '@synthetic-owner/amber-fox');
 
   // Already in progress with no owner (started before claims existed): one write sets the owner, once.
@@ -1572,17 +1573,17 @@ test('builders claim the Item they start (d3357f40): an unowned Item takes the s
   assert.equal(moved.status, 'in-progress');
   assert.equal(moved.owner ?? null, null, 'the server move claims nothing');
   // Once only: a retried move, or a later start's, writes nothing more.
-  const writes = s.tables.projectWorkEvents.size;
+  const writes = workEventRows(s.tables).length;
   await serverMove(open);
   await serverMove(open, randomUUID());
-  assert.equal(s.tables.projectWorkEvents.size, writes);
+  assert.equal(workEventRows(s.tables).length, writes);
   // A closed Item, or one that does not exist, is never moved.
   const closed = (await put(p, { kind: 'issue', title: 'Done already', status: 'closed' })).result.itemId;
-  const before = s.tables.projectWorkEvents.size;
+  const before = workEventRows(s.tables).length;
   await serverMove(closed, randomUUID());
   await serverMove(randomUUID(), randomUUID());
   assert.equal((await list(p, { id: closed, reconcile: false })).item.status, 'closed');
-  assert.equal(s.tables.projectWorkEvents.size, before);
+  assert.equal(workEventRows(s.tables).length, before);
   // A proposed Item stays proposed for a member: the start says it waits for the owner (lead 2026-11-19).
   const proposal = (
     await put(p, {
@@ -1687,7 +1688,7 @@ test('the server move after a member start: open Issues only, this project, the 
       ...input,
     });
   const status = async id => (await list(p, { id, reconcile: false })).item.status;
-  const events = () => s.tables.projectWorkEvents.size;
+  const events = () => workEventRows(s.tables).length;
   // Proposed waits for the owner; abandoned stays; Archived and Deleted stay on their shelf (4c9e961e); an Initiative
   // (any kind but issue) never moves.
   const proposed = (await put(p, { kind: 'issue', title: 'Proposed', status: 'proposed' })).result.itemId;
@@ -1822,12 +1823,12 @@ test('start from an Issue: planned Intent shares the Issue id, the Issue becomes
     status: 'in-progress',
     version: 2,
   });
-  const events = s.tables.projectWorkEvents.size;
+  const events = workEventRows(s.tables).length;
   assert.deepEqual(await markPlanningStarted(p, issue, startOperation), {
     updated: false,
     status: 'in-progress',
   });
-  assert.equal(s.tables.projectWorkEvents.size, events);
+  assert.equal(workEventRows(s.tables).length, events);
   const item = (await list(p, { id: issue })).item;
   assert.equal(item.status, 'in-progress');
   assert.equal(item.initiativeId, initiative);
@@ -4531,11 +4532,11 @@ test('an Item read never moves status; the last Done-when tick lets the worker c
     p = port(s, new Map(), workerFeatures);
   const itemId = await tickIssue(p);
   p.states.set(itemId, 'completed');
-  const events = s.tables.projectWorkEvents.size;
+  const events = workEventRows(s.tables).length;
   const read = await list(p, { id: itemId });
   assert.equal(read.reconciled, undefined);
   assert.equal(read.item.status, 'open');
-  assert.equal(s.tables.projectWorkEvents.size, events, 'an Item read writes nothing');
+  assert.equal(workEventRows(s.tables).length, events, 'an Item read writes nothing');
   for (const line of [1, 2]) {
     const ticked = await tick(p, {
       planningItemId: itemId,

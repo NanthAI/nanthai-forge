@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
+import { workEventRows } from './work-event-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -380,9 +381,7 @@ for (const first of ['backfill', 'status']) {
     }
     await call('status'); // Same operation ID: the refused write retained no outcome or body.
     if (first === 'status')
-      assert.ok(
-        [...store.tables.projectWorkEvents.values()].some(row => row.operationId === close.operationId),
-      );
+      assert.ok(workEventRows(store.tables).some(row => row.operationId === close.operationId));
     const head = store.tables.projectHostedRecordHeads.get(headId);
     assert.equal(head.version, 2);
     assert.equal(head.status, 'closed');

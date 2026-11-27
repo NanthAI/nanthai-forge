@@ -71,7 +71,7 @@ function hosted(bytes, preview) {
   return { ...s, projectId, backupId };
 }
 
-test('initializing a resumed empty hosted archive starts its record-store event window', async t => {
+test('initializing a resumed empty hosted archive leaves the retired Work event window absent', async t => {
   const root = fixture(t, { 'a.ts': 'export const a = 1;' });
   git(root, ['add', '.']);
   git(root, ['commit', '-qm', 'Original native source']);
@@ -83,8 +83,10 @@ test('initializing a resumed empty hosted archive starts its record-store event 
   const { ctx, projectId, backupId } = hosted(bytes, preview);
   const start = { projectId, backupId, operationId: randomUUID() };
   const ready = await actions.initialize._handler(ctx, start);
-  assert.equal(ready.workStoreCutoverRevision, 0);
-  assert.deepEqual(ready.workStoreEventWindows, [{ revision: 0, storeFirst: true }]);
+  assert.equal(ready.work.revision, 0);
+  assert.equal(ready.work.backupId, backupId);
+  assert.equal(ready.workStoreCutoverRevision, undefined);
+  assert.equal(ready.workStoreEventWindows, undefined);
   assert.deepEqual(await actions.initialize._handler(ctx, start), ready);
 });
 

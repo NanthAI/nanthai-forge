@@ -116,10 +116,16 @@ async function lookupEventActor(
   charge: Budget,
 ): Promise<string | undefined> {
   if (charge.exhausted) return undefined;
-  const event = await ctx.db
-    .query('projectWorkEvents')
-    .withIndex('by_project_and_operation', q => q.eq('projectId', projectId).eq('operationId', operationId))
-    .unique();
+  // @remove-after 2026-12-31
+  const event =
+    (await ctx.db
+      .query('projectWorkEvents')
+      .withIndex('by_project_and_operation', q => q.eq('projectId', projectId).eq('operationId', operationId))
+      .unique()) ??
+    (await ctx.db
+      .query('projectHostedRecordBodies')
+      .withIndex('by_project_and_operation', q => q.eq('projectId', projectId).eq('operationId', operationId))
+      .unique());
   if (event && charge.record(event) && event.actor) return event.actor;
   return undefined;
 }

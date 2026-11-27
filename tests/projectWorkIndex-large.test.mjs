@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
+import { workEventRows } from './work-event-fixture.mjs';
 import { workRecordRows } from './hosted-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -277,7 +278,7 @@ test('record rebuild replays purged rows as their redacted commands and keeps th
     kind: 'initiative',
     expectedVersion: 2,
     deletedAt: '2026-11-20T00:00:00.000Z',
-    rows: purgeList(itemRows(f.s.tables.projectWorkEvents.values(), [initiative.itemId])),
+    rows: purgeList(itemRows(workEventRows(f.s.tables), [initiative.itemId])),
   };
   await purgeFromServer._handler(f.s.ctx, {
     projectId: 'project',
@@ -286,7 +287,7 @@ test('record rebuild replays purged rows as their redacted commands and keeps th
     owner: 'owner',
   });
   // The rows Lane 2 will write: the Initiative's words gone, its structure and envelope kept.
-  markPurged(itemRows(f.s.tables.projectWorkEvents.values(), [initiative.itemId]), purge.operationId);
+  markPurged(itemRows(workEventRows(f.s.tables), [initiative.itemId]), purge.operationId);
   f.s.tables.projectWorkGenerations.get(first).format = 3;
   const second = await ensure();
   assert.notEqual(first, second);

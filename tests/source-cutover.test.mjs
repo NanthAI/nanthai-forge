@@ -11,10 +11,7 @@ const setup = async () => cutoverFixture(await acceptanceFixture());
 
 test('cutover refuses unimported nonempty Work before changing source authority', async () => {
   const f = await setup();
-  f.patch('hostedProjects', f.projectId, {
-    workStoreCutoverRevision: undefined,
-    workStoreEventWindows: undefined,
-  });
+  f.patch('hostedProjects', f.projectId, { work: undefined });
   await assert.rejects(f.dryRun(), code('SOURCE_AUTHORITY_DRAIN_REQUIRED'));
   await assert.rejects(f.applyCutover(), code('SOURCE_AUTHORITY_DRAIN_REQUIRED'));
   assert.equal(f.currentMain().authority.mode, 'native-owner');

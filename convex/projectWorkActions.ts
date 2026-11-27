@@ -37,7 +37,11 @@ export const initialize = action({
         'Use an original Work operation UUID.',
       );
       const owner = await caller(ctx);
-      await ctx.runQuery(internal.projectWork.owner, { projectId: input.projectId, owner });
+      const alreadyImported: boolean = await ctx.runQuery(internal.projectWork.initializeOwner, {
+        projectId: input.projectId,
+        owner,
+        backupId: input.backupId,
+      });
       const snapshot = await source(ctx, input.backupId, owner);
       invariant(
         snapshot.project._id === input.projectId,
@@ -49,11 +53,7 @@ export const initialize = action({
         snapshot.data.intents.length > 0 ||
         snapshot.data.planningItems.length > 0 ||
         snapshot.data.planningComments.length > 0;
-      if (
-        !snapshot.project.work &&
-        importRequired &&
-        snapshot.project.workStoreCutoverRevision !== snapshot.data.revision
-      ) {
+      if (!snapshot.project.work && importRequired && !alreadyImported) {
         await importStoredWork(
           ctx,
           { ...input, owner },

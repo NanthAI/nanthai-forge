@@ -102,8 +102,9 @@ test('a browser-created project starts in the record store and keeps its first I
   const s = setup(),
     projectId = await s.create(input()),
     project = s.tables.hostedProjects.get(projectId);
-  assert.equal(project.workStoreCutoverRevision, 0);
-  assert.deepEqual(project.workStoreEventWindows, [{ revision: 0, storeFirst: true }]);
+  assert.equal(project.work.revision, 0);
+  assert.equal(project.workStoreCutoverRevision, undefined);
+  assert.equal(project.workStoreEventWindows, undefined);
   const receipt = JSON.parse([...s.tables.projectSourceCutovers.values()][0].receipt);
   assert.ok(receipt.changes.includes('Work kept in the record store'), 'the birth receipt says what it set');
   const { command } = await import(moduleUrl('../convex/projectWorkCommand.ts'));
@@ -357,7 +358,7 @@ test('R2 bootstrap retries an incomplete reservation without any Convex byte sto
 // Item c0af6cfa F2 review 92eafa87 P1: in the record store an Intent's creation is a retained version, not a
 // `projectWorkEvents` row. A contributor's proposal on the first Intent of a browser-born project must still
 // register against the Intent's exact server-pinned base, with historical and retained events, and keep its denials.
-test('a contributor proposal on a browser-born Intent registers its exact base pins with no journal event', async () => {
+test('a contributor proposal registers exact base pins on either Work birth', async () => {
   for (const records of [true, false]) {
     const s = setup(),
       projectId = await s.create(input()),
@@ -388,7 +389,7 @@ test('a contributor proposal on a browser-born Intent registers its exact base p
         }),
       }),
     );
-    assert.equal(s.tables.projectWorkEvents?.size ?? 0, records ? 0 : 1);
+    assert.equal(s.tables.projectWorkEvents?.size ?? 0, 0);
     const backup = s.tables.projectBackups.get(project.currentBackup);
     const register = (patch = {}) =>
       s.transaction(() =>

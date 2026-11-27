@@ -464,11 +464,8 @@ export const run = internalAction({
           ids: preflight.ids,
           after: hot.through[table],
         });
-        hot.selected.rows.push(...page.rows);
-        hot.selected.decisions.push(...page.decisions);
-        if (page.created !== null)
-          hot.selected.created = Math.min(hot.selected.created ?? page.created, page.created);
-        hot.selected.creates ||= page.creates;
+        // A relocation between the two table scans may return the same operation twice.
+        hot.selected = mergeSelection(hot.selected, page);
         hot.through[table] = page.after;
         invariant(
           hot.selected.rows.length <= PURGE_ROW_LIMIT,

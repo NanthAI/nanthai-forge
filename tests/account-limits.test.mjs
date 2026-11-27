@@ -2,6 +2,7 @@
 // Copyright 2026 Ferdinando Valsecchi
 // Item b6588425 line 3: one suspend switch and one shared per-account daily limiter on every channel that can
 // carry a message (docs/security.d/sections/2150-account-limits-and-suspension.md).
+import { workEventRows } from './work-event-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -145,23 +146,8 @@ const asContributor = s => {
   s.caller('contributor');
 };
 
-/** A new Intent at the Work append mutation (the charge runs there, after the replay check). */
-const appendIntent = s =>
-  s.transaction(() =>
-    work.append._handler(s.ctx, {
-      projectId: s.projectId,
-      owner: 'owner',
-      operationId: randomUUID(),
-      request: '{}',
-      previousRevision: 0,
-      command: JSON.stringify({
-        action: 'intent',
-        outcome: 'Synthetic outcome',
-        constraints: '',
-        base: 'a'.repeat(64),
-      }),
-    }),
-  );
+const appendIntent = (s, outcome = 'Synthetic outcome') =>
+  s.send({ action: 'intent', outcome, constraints: '', base: s.preview.head });
 async function planningComment(s, itemId, operationId = randomUUID()) {
   return s.send({ action: 'comment-planning-item', operationId, itemId, text: 'Synthetic comment' });
 }
@@ -173,10 +159,10 @@ test('suspended account: planning comments and puts are refused and nothing is w
   const item = s.item();
   await s.send(item);
   suspend(s.tables, 'owner');
-  const events = s.tables.projectWorkEvents.size;
+  const events = workEventRows(s.tables).length;
   await assert.rejects(planningComment(s, item.itemId), suspended);
   await assert.rejects(s.send(s.item()), suspended);
-  assert.equal(s.tables.projectWorkEvents.size, events);
+  assert.equal(workEventRows(s.tables).length, events);
 });
 
 test('suspended account: friction capture and triage are refused', async () => {
@@ -213,9 +199,9 @@ test('suspended account: friction capture and triage are refused', async () => {
 test('suspended account: a new Intent through the Work command is refused', async t => {
   const s = await planningSetup(t);
   suspend(s.tables, 'owner');
-  const events = s.tables.projectWorkEvents.size;
+  const events = workEventRows(s.tables).length;
   await assert.rejects(appendIntent(s), suspended);
-  assert.equal(s.tables.projectWorkEvents.size, events);
+  assert.equal(workEventRows(s.tables).length, events);
 });
 
 test('suspended account: a friction import is refused for the owner and a contributor', async () => {
@@ -878,22 +864,7 @@ test('friction 8e03404e: refused projectWork append writes nothing on any accoun
   s.tables.deviceAttempts.clear();
   const writes = countWrites(s.ctx.db);
   await s.send(s.item());
-  const revisionAfterItem = (await s.read()).data.revision;
-  const seeded = await s.transaction(() =>
-    work.append._handler(s.ctx, {
-      projectId: s.projectId,
-      owner: 'owner',
-      operationId: randomUUID(),
-      request: '{}',
-      previousRevision: revisionAfterItem,
-      command: JSON.stringify({
-        action: 'intent',
-        outcome: 'Seed shard 0',
-        constraints: '',
-        base: 'a'.repeat(64),
-      }),
-    }),
-  );
+  const seeded = await appendIntent(s, 'Seed shard 0');
   const currentRevision = seeded.revision;
   const before = writes();
   // Shard 0 exists for both planning and start; higher shards do not. Refused appends must touch neither.

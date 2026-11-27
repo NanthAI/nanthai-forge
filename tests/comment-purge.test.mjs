@@ -5,6 +5,7 @@
 // the Item and its other comments, leaves a tombstone, is idempotent by operation id, is audited, and is what the
 // abuse review's purge action runs for a comment (convex/projectCommentPurge.ts).
 import test from 'node:test';
+import { workEventRows } from './work-event-fixture.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
@@ -359,9 +360,7 @@ test('a purge while a Work index builds is refused with nothing written; a base-
   await assert.rejects(purge(s, itemId, reported.operationId), code('WORK_STALE'));
   assert.equal(secretRows(s).length > 0, true, 'nothing was purged');
   s.tables.projectWorkGenerations.delete('building');
-  const row = [...s.tables.projectWorkEvents.values()].find(
-    item => item.operationId === reported.operationId,
-  );
+  const row = workEventRows(s.tables).find(item => item.operationId === reported.operationId);
   const before = row.revision;
   // The selected generation starts after the comment, as an import or a checkpoint leaves it.
   for (const item of s.tables.projectWorkGenerations.values()) item.initialRevision = before;

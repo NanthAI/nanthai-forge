@@ -4,6 +4,7 @@
 // page, count and public read, is listed only by its own shelf, and comes back by one ordinary put that adds a
 // version and keeps the history. Each move is owner-only, applies once under replay and has an Undo. Version compare
 // marks the words that changed inside a rewritten line.
+import { workEventRows } from './work-event-fixture.mjs';
 import test from 'node:test';
 import { storageClock } from './storage-clock.mjs';
 import assert from 'node:assert/strict';
@@ -142,7 +143,7 @@ test('hosted: delete applies once under replay, leaves the plan, lists in Delete
   await s.send(item);
   const call = (writes, operationId = randomUUID()) =>
     batch.apply._handler(s.ctx, { projectId: s.projectId, operationId, writes: JSON.stringify(writes) });
-  const versions = () => [...s.tables.projectWorkEvents.values()].length;
+  const versions = () => workEventRows(s.tables).length;
   const writes = shelve([{ id: item.itemId, version: 1 }], 'deleted');
   const operationId = randomUUID();
   const before = versions();

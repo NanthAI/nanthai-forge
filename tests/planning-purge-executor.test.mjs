@@ -3,6 +3,7 @@
 // Purge executor (Item 4c9e961e, purge Lanes 2 and 3): selection, the atomic first step, redaction of every store
 // (the work store's Intent versions, lifecycle versions and handoff summaries included), the completeness check before
 // purgedAt, resume after a crash and after an index rebuild, and the row limit.
+import { workEventRows } from './work-event-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -360,9 +361,9 @@ test('a purge refuses an Item with more than 1000 Work rows and writes nothing',
       command: JSON.stringify(command),
     });
   }
-  const before = s.tables.projectWorkEvents.size;
+  const before = workEventRows(s.tables).length;
   await assert.rejects(executor(s).run(itemId, randomUUID()), code('BAD_ARGUMENT'));
-  assert.equal(s.tables.projectWorkEvents.size, before, 'no purge row');
+  assert.equal(workEventRows(s.tables).length, before, 'no purge row');
   assert.equal(s.tables.hostedProjects.get(s.projectId).itemPurges, undefined, 'no progress entry');
 });
 
@@ -371,9 +372,9 @@ test('review 2026-11-20 finding 2: a project with more aliases than one purge ca
   const { PURGE_ALIAS_LIMIT } = modules.projectPlanningPurgeSelect;
   for (let n = 0; n < PURGE_ALIAS_LIMIT; n++) addAlias(s, randomUUID());
   addAlias(s, itemId);
-  const before = s.tables.projectWorkEvents.size;
+  const before = workEventRows(s.tables).length;
   await assert.rejects(executor(s).run(itemId, randomUUID()), code('BAD_ARGUMENT'));
-  assert.equal(s.tables.projectWorkEvents.size, before, 'no purge row');
+  assert.equal(workEventRows(s.tables).length, before, 'no purge row');
   assert.equal(s.tables.hostedProjects.get(s.projectId).itemPurges, undefined, 'no progress entry');
 });
 
@@ -403,9 +404,9 @@ test('review 2026-11-20 (third) finding 1, Item b6588425 line 2e: an Item in a b
     expectedVersion: current.version,
     status: 'deleted',
   });
-  const before = s.tables.projectWorkEvents.size;
+  const before = workEventRows(s.tables).length;
   await assert.rejects(executor(s).run(itemId, randomUUID()), /legacy archive/);
-  assert.equal(s.tables.projectWorkEvents.size, before, 'no purge row');
+  assert.equal(workEventRows(s.tables).length, before, 'no purge row');
   assert.equal(s.tables.hostedProjects.get(s.projectId).itemPurges, undefined, 'no progress entry');
 });
 
@@ -419,9 +420,9 @@ test('review 2026-11-20 (fourth): an Item a record-detail catalog holds (a secon
     root: { key: 'catalog', sha256: 'a'.repeat(64), size: 1 },
   });
   project.work = { ...project.work, recordDetails: catalog(project.revision ?? 1_000_000) };
-  const before = s.tables.projectWorkEvents.size;
+  const before = workEventRows(s.tables).length;
   await assert.rejects(executor(s).run(itemId, randomUUID()), /base checkpoint/);
-  assert.equal(s.tables.projectWorkEvents.size, before, 'no purge row');
+  assert.equal(workEventRows(s.tables).length, before, 'no purge row');
   // A purge already past its first step does not finish once a catalog covers the Item.
   delete project.work.recordDetails;
   const operationId = randomUUID();
@@ -438,12 +439,12 @@ test('review 2026-11-20 (fourth): an Item a record-detail catalog holds (a secon
 test('review 2026-11-20 (fifth): an Item whose Intent row is in the stored base (a legacy archive), with its first put after it, is refused', async t => {
   const { s, itemId } = await deletedItem(t);
   const project = s.tables.hostedProjects.get(s.projectId);
-  const intentRow = [...s.tables.projectWorkEvents.values()].find(row => row.operationId === itemId);
+  const intentRow = workEventRows(s.tables).find(row => row.operationId === itemId);
   // The base reaches the Intent row (and no further): the put came after it.
   s.tables.projectWorkGenerations.get(project.work.generationId).initialRevision = intentRow.revision;
-  const before = s.tables.projectWorkEvents.size;
+  const before = workEventRows(s.tables).length;
   await assert.rejects(executor(s).run(itemId, randomUUID()), /legacy archive/);
-  assert.equal(s.tables.projectWorkEvents.size, before, 'no purge row');
+  assert.equal(workEventRows(s.tables).length, before, 'no purge row');
 });
 
 test('the executor refuses an Item that is not Deleted', async t => {
@@ -634,7 +635,7 @@ test('a pre-upgrade terminal check checkpoint cannot finish over a live discussi
 
 test('records mode (work store primary): a purge of an Item with an alias-written comment leaves the words in no store', async t => {
   const { s, itemId, keep, alias } = await deletedItem(t, { records: true, intentBorn: false });
-  assert.ok(s.tables.hostedProjects.get(s.projectId).workStoreEventWindows.length > 0);
+  assert.ok(s.tables.projectHostedRecordBodies.size > 0);
   const stored = [...s.tables.projectHostedRecords.values()].filter(row => row.kind === 'comment');
   assert.ok(stored.length >= 3, 'the store holds the comments and the note');
   // Every Issue is also an Intent, and the store keeps that Intent's versions (the Item's Intent copy).
@@ -1045,9 +1046,9 @@ test('purge Lane 3: a project with hosted display snapshots (copies of record bo
       value: `{"outcome":"${SECRET}"}`,
     });
   const id = await display();
-  const before = s.tables.projectWorkEvents.size;
+  const before = workEventRows(s.tables).length;
   await assert.rejects(executor(s).run(itemId, randomUUID()), /display snapshots/);
-  assert.equal(s.tables.projectWorkEvents.size, before, 'no purge row');
+  assert.equal(workEventRows(s.tables).length, before, 'no purge row');
   s.tables.projectHostedDisplayRecords.delete(id);
   const operationId = randomUUID();
   await assert.rejects(executor(s, 1).run(itemId, operationId), /executor stopped/);
@@ -1214,8 +1215,16 @@ async function oldIntentSegment(s, r2, itemId, options) {
       JSON.stringify(s.tables.projectHostedRecordBodies.get(row.bodyId)).includes(SECRET),
   );
   assert(record);
-  const body = s.tables.projectHostedRecordBodies.get(record.bodyId);
-  assert.equal(body.operationId, undefined, 'only an exclusive plain body moves with a record');
+  let body = s.tables.projectHostedRecordBodies.get(record.bodyId);
+  if (body.operationId !== undefined) {
+    // A historical archive can only move an exclusive body. Model the separately stored value it captured.
+    const bodyId = await s.ctx.db.insert('projectHostedRecordBodies', {
+      projectId: s.projectId,
+      value: body.value,
+    });
+    await s.ctx.db.patch(record._id, { bodyId });
+    body = s.tables.projectHostedRecordBodies.get(bodyId);
+  }
   const unrelated = options?.fragmented
     ? [
         canonicalPayload({

@@ -93,7 +93,8 @@ async function sizedCommand(ctx: QueryCtx, projectId: Id<'hostedProjects'>, oper
         )
         .unique();
   const bytes = size(event) + size(body);
-  const text = event?.command ?? body?.command;
+  const text =
+    event?.command ?? body?.command ?? (body?.purged === undefined ? undefined : body.journalCommand);
   if (!text) return { command: null, bytes };
   try {
     return { command: JSON.parse(text) as PlanningCommand, bytes };

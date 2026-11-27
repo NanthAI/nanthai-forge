@@ -27,25 +27,17 @@ type Birth = {
   generationId: Id<'projectWorkGenerations'>;
   origin: 'new-project' | 'github-import' | 'make-editable';
 };
-/** Start the retained event window at the verified Work revision. F3 still replays old windows. */
-export const bornRecordStore = (revision: number) => ({
-  workStoreCutoverRevision: revision,
-  workStoreEventWindows: [{ revision, storeFirst: true }],
-});
-
 /** The one seam for a project born under server authority (guarded by
  * tests/born-record-store-guard.test.mjs). A nonempty seed imports its Work before calling this seam. */
-export function serverBirth(previous: SourceAuthority, workRevision: number) {
+export function serverBirth(previous: SourceAuthority) {
   const authority = nextSourceAuthority(previous, previous, 'server'),
     at = new Date().toISOString();
-  const retainedWork = bornRecordStore(workRevision);
   return {
     authority,
     at,
     fields: {
       sourceAuthority: authority,
       sourceCutover: { minimumCliVersion: CUTOVER_CLI_VERSION, at },
-      ...retainedWork,
     },
   };
 }
@@ -69,8 +61,7 @@ export async function selectBornMain(ctx: MutationCtx, project: Doc<'hostedProje
     'SOURCE_AUTHORITY_DRAIN_REQUIRED',
     'A native owner journal exists for this project. Switch it with nforge host ROOT --cutover-file.',
   );
-  // The born Work revision: no owner journal head exists (checked above), so it is the published one.
-  const { authority, at, fields } = serverBirth(previous, project.work?.revision ?? 0);
+  const { authority, at, fields } = serverBirth(previous);
   const main = hostedMainV2Schema.parse({
     schema: 2,
     projectId: project._id,

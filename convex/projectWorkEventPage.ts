@@ -1,23 +1,33 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
+import { getDocumentSize } from 'convex/values';
+import { mergedStream, stream } from 'convex-helpers/server/stream';
+import schema from './schema';
 import { journalIndexAfter, requireJournal, loadedJournalRows } from './projectJournalStore';
 import type { QueryCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
 import { eventDocument, type StoredWorkEvent } from './projectWorkEventStore';
 import { invariant } from '../src/errors';
 import { verifyPurgedEvents } from './projectWorkPurgedRows';
-/** Read the unbounded command side first. The other side contains bounded metadata commands.
- * Fill across migration epochs inside this one query, so a flag change adds no client page call. */
+/** Merge the revision indexes while events relocate. The smallest remaining revision is consumed from
+ * either side, with one row of lookahead per index. The page boundary stays a logical Work revision.
+ * @remove-after 2026-12-31
+ */
 export async function retainedEventPage(
   ctx: QueryCtx,
   project: Doc<'hostedProjects'>,
   input: {
     initialRevision: number;
     revision: number;
-    paginationOpts: { cursor: string | null; numItems: number; maximumBytesRead?: number };
+    paginationOpts: {
+      cursor: string | null;
+      numItems: number;
+      maximumBytesRead?: number;
+      maximumRowsRead?: number;
+    };
   },
 ) {
-  let after = input.paginationOpts.cursor
+  const after = input.paginationOpts.cursor
     ? Number(input.paginationOpts.cursor.replace(/^work-events:/, ''))
     : input.initialRevision;
   invariant(
@@ -25,84 +35,69 @@ export async function retainedEventPage(
     'WORK_STALE',
     'Read the selected Work event page again.',
   );
-  const page: StoredWorkEvent[] = [];
-  let bytes = 0;
-  const epochs = project.workStoreEventWindows ?? [];
-  while (
-    after < input.revision &&
-    page.length < input.paginationOpts.numItems &&
-    bytes < (input.paginationOpts.maximumBytesRead ?? 500000)
-  ) {
-    const remaining = input.paginationOpts.numItems - page.length;
-    const nextEpoch = epochs.find(epoch => epoch.revision > after);
-    const epoch = epochs.filter(epoch => epoch.revision <= after).at(-1);
-    let end = Math.min(after + remaining, input.revision, nextEpoch?.revision ?? Infinity);
-    const legacy = () =>
-      ctx.db
-        .query('projectWorkEvents')
-        .withIndex('by_project_and_revision', q =>
-          q.eq('projectId', project._id).gt('revision', after).lte('revision', end),
-        )
-        .order('asc');
-    const stored = () =>
-      ctx.db
-        .query('projectHostedRecordBodies')
-        .withIndex('by_project_and_revision', q =>
-          q.eq('projectId', project._id).gt('revision', after).lte('revision', end),
-        )
-        .order('asc');
-    const budget = input.paginationOpts.maximumBytesRead ?? 500000;
-    // A Convex query supports only one .paginate() call. Stream the unbounded side instead:
-    // each row is consumed once, with the same soft byte boundary as the old event page.
-    let firstBytes = 0;
-    const batch: StoredWorkEvent[] = [];
-    if (epoch?.storeFirst) {
-      for await (const body of stored()) {
-        if (!body.journalSegment) batch.push(eventDocument(body));
-        firstBytes += new TextEncoder().encode(JSON.stringify(body)).length;
-        if (firstBytes >= budget || batch.length === remaining) {
-          end = body.revision!;
-          break;
-        }
+  const { numItems, maximumRowsRead = numItems, maximumBytesRead = 500000 } = input.paginationOpts;
+  let end = Math.min(after + Math.min(numItems, maximumRowsRead), input.revision);
+  const selected = new Map<number, StoredWorkEvent>();
+  const archived = new Map<number, Doc<'projectHostedRecordBodies'>>();
+  if (end > after) {
+    const db = stream(ctx.db, schema);
+    const legacy = db
+      .query('projectWorkEvents')
+      .withIndex('by_project_and_revision', q =>
+        q.eq('projectId', project._id).gt('revision', after).lte('revision', end),
+      );
+    const stored = db
+      .query('projectHostedRecordBodies')
+      .withIndex('by_project_and_revision', q =>
+        q.eq('projectId', project._id).gt('revision', after).lte('revision', end),
+      );
+    const rows = mergedStream<Doc<'projectWorkEvents'> | Doc<'projectHostedRecordBodies'>>(
+      [legacy, stored],
+      ['revision'],
+    );
+    let documents = 0,
+      bytes = 0;
+    for await (const row of rows) {
+      const revision = row.revision!;
+      const old = 'previousRevision' in row;
+      if (old || !row.journalSegment) {
+        const storeFirst = project.workStoreEventWindows
+          ?.filter(epoch => epoch.revision < revision)
+          .at(-1)?.storeFirst;
+        if (!selected.has(revision) || old === Boolean(storeFirst))
+          selected.set(revision, old ? row : eventDocument(row));
       }
-      batch.push(...(await legacy().take(remaining)));
-    } else {
-      for await (const event of legacy()) {
-        batch.push(event);
-        firstBytes += new TextEncoder().encode(JSON.stringify(event)).length;
-        if (firstBytes >= budget || batch.length === remaining) {
-          end = event.revision;
-          break;
-        }
+      documents++;
+      bytes += getDocumentSize(row);
+      if (documents >= maximumRowsRead || bytes >= maximumBytesRead) {
+        end = revision;
+        break;
       }
-      batch.push(...(await stored().take(remaining)).filter(row => !row.journalSegment).map(eventDocument));
     }
     if (project.journalRevision) {
-      let selected = after;
-      while (selected < end) {
-        const index = await journalIndexAfter(ctx, project._id, 'events', selected, end);
+      let known = after;
+      while (known < end) {
+        const index = await journalIndexAfter(ctx, project._id, 'events', known, end);
         if (!index) break;
         requireJournal(ctx, index);
-        selected = index.through;
+        known = index.through;
       }
-      batch.push(
-        ...loadedJournalRows(ctx, 'projectHostedRecordBodies')
-          .filter(row => row.revision !== undefined && row.revision > after && row.revision <= end)
-          .map(eventDocument),
-      );
+      for (const row of loadedJournalRows(ctx, 'projectHostedRecordBodies'))
+        if (row.revision !== undefined && row.revision > after && row.revision <= end)
+          archived.set(row.revision, row);
     }
-    const unique = [...new Map(batch.map(row => [row.revision, row])).values()];
-    batch.splice(0, batch.length, ...unique);
-    batch.sort((a, b) => a.revision - b.revision);
-    invariant(
-      batch.length === end - after && batch.every((event, i) => event.revision === after + i + 1),
-      'INVALID_WORK_JOURNAL',
-      'Hosted Work operation coverage is incomplete.',
-    );
-    await verifyPurgedEvents(ctx, project._id, batch);
-    page.push(...batch);
-    bytes += batch.reduce((total, row) => total + new TextEncoder().encode(JSON.stringify(row)).length, 0);
-    after = end;
   }
-  return { page, isDone: after === input.revision, continueCursor: `work-events:${after}` };
+  const page: StoredWorkEvent[] = [];
+  let replyBytes = 0;
+  for (let revision = after + 1; revision <= end; revision++) {
+    const body = archived.get(revision);
+    const row = body ? eventDocument(body) : selected.get(revision);
+    invariant(row, 'INVALID_WORK_JOURNAL', 'Hosted Work operation coverage is incomplete.');
+    replyBytes += getDocumentSize(body ?? row);
+    page.push(row);
+    if (replyBytes >= maximumBytesRead) break;
+  }
+  await verifyPurgedEvents(ctx, project._id, page);
+  const through = after + page.length;
+  return { page, isDone: through === input.revision, continueCursor: `work-events:${through}` };
 }

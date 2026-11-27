@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
+import { workEventRows } from './work-event-fixture.mjs';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { randomUUID } from 'node:crypto';
@@ -345,7 +346,7 @@ test('purging an Item unlinks its Lane mark in the same transaction', async () =
       kind: 'issue',
       expectedVersion: 3,
       deletedAt: '2026-11-20T00:00:00.000Z',
-      rows: purgeList(itemRows(f.tables.projectWorkEvents.values(), [id])),
+      rows: purgeList(itemRows(workEventRows(f.tables), [id])),
     },
     work.purgeFromServer,
   );

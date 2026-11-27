@@ -5,6 +5,7 @@
 // index and planning writes (hosted-planning fixture), the planned start, the acceptance completion tick
 // and `projectHostedPlanning.intentStates` (hosted-acceptance fixture). Only the transport between the two
 // in-memory databases is stubbed.
+import { workEventRows } from './work-event-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -218,13 +219,13 @@ test('closes + every Done-when box ticked: the landing fold closes the Issue eve
     'completeOnAccept off keeps the Lane open',
   );
   w.p.calls.length = 0;
-  const events = w.s.tables.projectWorkEvents.size;
+  const events = workEventRows(w.s.tables).length;
   const first = await read(w.p, { id: w.issue, reconcile: true });
   assert.equal(first.item.intent, 'completed');
   assert.equal(first.item.status, 'closed');
   assert.equal(first.item.reason, 'Done: linked work finished');
   assert.equal(first.reconciled, undefined);
-  assert.equal(w.s.tables.projectWorkEvents.size, events);
+  assert.equal(workEventRows(w.s.tables).length, events);
   // The healthy path reads the workspace, item, comments and one Item work reply; it never writes.
   assert.equal(w.p.calls.filter(name => name === 'projectItemWork:read').length, 1);
   assert.equal(w.p.calls.filter(name => name === 'projectHostedPlanning:intentStates').length, 0);
@@ -239,7 +240,7 @@ test('closes + every Done-when box ticked: the landing fold closes the Issue eve
   const again = await read(w.p, { id: w.issue, reconcile: true });
   assert.equal(again.item.status, 'closed');
   assert.equal(again.reconciled, undefined);
-  assert.equal(w.s.tables.projectWorkEvents.size, events);
+  assert.equal(workEventRows(w.s.tables).length, events);
 });
 
 test('closes + open Done-when lines: reads explain the hold without writing, and the final tick closes the Issue', async t => {
@@ -255,9 +256,9 @@ test('closes + open Done-when lines: reads explain the hold without writing, and
   const after = await read(w.p, { id: w.issue, reconcile: false });
   assert.equal(after.item.version, first.item.version);
   assert.equal(after.comments.filter(c => /still open/.test(c.text)).length, 0);
-  const events = w.s.tables.projectWorkEvents.size;
+  const events = workEventRows(w.s.tables).length;
   assert.equal((await read(w.p, { id: w.issue, reconcile: true })).reconciled.held.length, 1);
-  assert.equal(w.s.tables.projectWorkEvents.size, events);
+  assert.equal(workEventRows(w.s.tables).length, events);
   await run(w.p, 'tick-planning-item', { planningItemId: w.issue, line: 2, evidence: 'Checked' });
   await w.drain();
   assert.equal((await read(w.p, { id: w.issue })).item.status, 'in-progress');

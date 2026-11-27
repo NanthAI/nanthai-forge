@@ -41,7 +41,6 @@ const expected = {
   },
   // Every server birth: selectBornMain and the verified hosted seed.
   serverBirth: { 'projectHostedBirth.ts': 1, 'projectHostedSeed.ts': 1 },
-  bornRecordStore: { 'projectHostedBirth.ts': 1, 'projectHostedSeed.ts': 1, 'projectWork.ts': 1 },
   // The seam itself, plus existing projects switching authority with verified Work.
   nextSourceAuthority: {
     'projectHostedBirth.ts': 1,

@@ -21,7 +21,7 @@ import {
 } from '../src/hosted-seed-protocol';
 import { invariant } from '../src/errors';
 import { report } from './errors';
-import { bornRecordStore, serverBirth } from './projectHostedBirth';
+import { serverBirth } from './projectHostedBirth';
 import { findObject, findObjects, findStoredObject, findStoredObjects } from './projectObjectFind';
 import { indexEntry } from './projectWorkIndexFields';
 import { HOSTED_WORK_INDEX_FORMAT } from '../src/work-hosted-summary';
@@ -370,7 +370,7 @@ export const commit = internalMutation({
     // A new host becomes agent-writable only when its complete, verified source
     // and matching schema-2 main are selected in this same transaction. Legacy
     // seed requests never change authority, including retries after an upgrade.
-    const birth = request.serverAuthority ? serverBirth(row.authority, request.revision) : null;
+    const birth = request.serverAuthority ? serverBirth(row.authority) : null;
     const authority = birth?.authority ?? row.authority;
     if (request.format === 'native') {
       const selected = hostedMainV2Schema.parse({
@@ -404,7 +404,7 @@ export const commit = internalMutation({
     await ctx.db.patch(project._id, {
       currentBackup: backupId,
       revision: project.revision + 1,
-      ...(birth?.fields ?? bornRecordStore(request.revision)),
+      ...birth?.fields,
     });
     await ctx.db.patch(row._id, { backupId, ...(input.mainDigest ? { mainDigest: input.mainDigest } : {}) });
     return progress({ ...row, backupId, ...(input.mainDigest ? { mainDigest: input.mainDigest } : {}) });

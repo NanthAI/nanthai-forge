@@ -2,6 +2,7 @@
 // Copyright 2026 Ferdinando Valsecchi
 import { workRecordRows } from './hosted-fixture.mjs';
 import test from 'node:test';
+import { workEventRows } from './work-event-fixture.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
@@ -36,7 +37,7 @@ test('whole-project hosted planning creates a planned Intent, preserves versions
     s.ctx.runMutation = append;
     const original = await s.send(issue, revision);
     assert.equal(original.operationId, issue.operationId);
-    assert.equal(s.tables.projectWorkEvents.size, 2);
+    assert.equal(workEventRows(s.tables).length, 2);
     await assert.rejects(
       s.send({ ...issue, title: 'Changed original request' }, revision),
       error => error.data.code === 'WORK_OPERATION_CHANGED',
@@ -114,7 +115,7 @@ test('planning rejects stale versions, invalid links/kind changes and concurrent
     first = s.item();
   await s.send(first);
   const current = await s.read(),
-    count = s.tables.projectWorkEvents.size;
+    count = workEventRows(s.tables).length;
   const invalid = [
     s.item({ intentIds: [randomUUID()] }),
     s.item({ initiativeId: randomUUID() }),
@@ -126,7 +127,7 @@ test('planning rejects stale versions, invalid links/kind changes and concurrent
     await assert.rejects(s.send(command), error =>
       ['NOT_FOUND', 'BAD_ARGUMENT', 'ITEM_CHANGED'].includes(error.data.code),
     );
-  assert.equal(s.tables.projectWorkEvents.size, count);
+  assert.equal(workEventRows(s.tables).length, count);
   const unrelated = {
     action: 'comment-planning-item',
     operationId: randomUUID(),
@@ -200,7 +201,7 @@ test('current owner alone writes/exports project planning; existing contributor 
     denied,
   );
   assert.equal(s.reads(), reads);
-  assert.equal(s.tables.projectWorkEvents.size, 0);
+  assert.equal(workEventRows(s.tables).length, 0);
   s.caller('owner');
   const append = s.ctx.runMutation;
   s.ctx.runMutation = async (ref, args) => {
@@ -218,7 +219,7 @@ test('current owner alone writes/exports project planning; existing contributor 
   await assert.rejects(s.send(command), denied);
   s.ctx.runMutation = append;
   assert.equal(
-    s.tables.projectWorkEvents.size,
+    workEventRows(s.tables).length,
     0,
     'Atomic append rechecks current owner even when old owner retains ordinary contributor access.',
   );
@@ -416,6 +417,7 @@ test('frozen Work writers retain replay, export, rebuild and note projections wi
   await send({ action: 'note', intentId, text: 'Before freeze', kind: 'comment' });
   beginRetainedWork(s);
   const journalSize = s.tables.projectWorkEvents.size;
+  const beforeWindow = new Set(workEventRows(s.tables).map(row => row._id));
   const note = { action: 'note', intentId, text: 'After freeze', kind: 'decision' };
   const noteId = randomUUID();
   const receipt = await send(note, noteId);
@@ -435,7 +437,7 @@ test('frozen Work writers retain replay, export, rebuild and note projections wi
     authorLabel: 'Owner',
   });
   assert.equal(s.tables.projectWorkEvents.size, journalSize);
-  const events = [...s.tables.projectHostedRecordBodies.values()].filter(row => row.operationId);
+  const events = workEventRows(s.tables).filter(row => !beforeWindow.has(row._id));
   assert.equal(events.length, 5);
   assert.ok(
     events.every(row => !row.bodyId),

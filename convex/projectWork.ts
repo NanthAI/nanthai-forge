@@ -5,9 +5,8 @@ import { wakeJournal, journalGraceMs } from './projectJournalWake';
 import { JournalNeeded } from './projectJournalStore';
 import type { QueryCtx } from './_generated/server';
 import { canonicalPayload } from '../src/hosted-source-operation';
-import { findWorkEvent, type StoredWorkEvent } from './projectWorkEventStore';
+import { findWorkEvent, retainWorkEvent, type StoredWorkEvent } from './projectWorkEventStore';
 import { retainedEventPage } from './projectWorkEventPage';
-import { verifyPurgedEvents } from './projectWorkPurgedRows';
 import { requireSourceAuthority } from '../src/hosted-source-authority';
 import { indexActivity } from '../src/work-hosted-index';
 import { HOSTED_WORK_INDEX_FORMAT } from '../src/work-hosted-summary';
@@ -48,7 +47,7 @@ import { chargeAccountChannel } from './accountLimits';
 import { emitChange, workChange } from './coordinationWrite';
 import { movePlanLaneMark } from './projectPlanLaneMarks';
 import { storeProjection } from './projectWorkStore';
-import { bornRecordStore } from './projectHostedBirth';
+import { selectedSeedWork } from './projectSeedWorkProof';
 import { projectForViewer } from './projectViewerFields';
 
 /** The project record every open tab subscribes to (name, owner, selected source). A non-owner gets only the
@@ -163,6 +162,16 @@ export const events = internalQuery({
   ),
   handler: journalWorkEvents,
 });
+// Authorize before reading the archive and reuse that call to check the selected seed receipt.
+export const initializeOwner = internalQuery({
+  args: { projectId: v.id('hostedProjects'), owner: v.string(), backupId: v.id('projectBackups') },
+  returns: v.boolean(),
+  handler: async (ctx, { projectId, owner, backupId }) => {
+    const project = await activeOwnedProject(ctx, projectId, owner);
+    return !project.work && (await selectedSeedWork(ctx, project, backupId));
+  },
+});
+
 export const initialize = internalMutation({
   args: {
     projectId: v.id('hostedProjects'),
@@ -197,7 +206,7 @@ export const initialize = internalMutation({
       invariant(
         (!importRequired && revision === 0) ||
           (project.currentBackup === backupId &&
-            (project.workStoreCutoverRevision === revision || completedImport)),
+            (completedImport || (await selectedSeedWork(ctx, project, backupId)))),
         'INVALID_WORK_BACKUP',
         'Initialize nonempty Work only after its selected backup imported the record store.',
       );
@@ -216,13 +225,7 @@ export const initialize = internalMutation({
               )
               .unique();
       const generationId = initialGeneration?.status === 'ready' ? initialGeneration._id : undefined;
-      const emptyResume =
-        !importRequired &&
-        revision === 0 &&
-        project.workStoreCutoverRevision === undefined &&
-        project.workStoreEventWindows === undefined;
       await ctx.db.patch(projectId, {
-        ...(completedImport || emptyResume ? bornRecordStore(revision) : {}),
         work: {
           backupId,
           operationId,
@@ -277,6 +280,7 @@ export async function appendWork(
     authorityEpoch?: number;
     planning?: PlanningWriteContext | undefined;
     planningRestore?: string | undefined;
+    recoveryIntentWritten?: true;
     /** In-process proof from executeCommand after checking the exact Item and the member-write allowlist. */
     memberPlanning?: 'item' | 'tick';
     /** A server job writing as the owner (speed-budget Issues, a member's start): not charged. */
@@ -308,8 +312,8 @@ export async function appendWork(
       );
     const action = parsed.success ? parsed.data.action : purge?.success ? purge.data.action : undefined;
     const frozen =
-      // F3 still reads old event windows and keeps anchored notes and comment purges in the journal.
-      project.workStoreEventWindows?.at(-1)?.storeFirst === true &&
+      // Only projected operations that own a primary record version retain their event on that version.
+      !input.recoveryIntentWritten &&
       (action === 'note' ||
         action === 'intent' ||
         action === 'intent-status' ||
@@ -560,7 +564,9 @@ export async function appendWork(
         { projectId: input.projectId, operationId: `work:${input.operationId}` },
         Date.now() + journalGraceMs,
       );
-    const saved = retained ?? (await ctx.db.get(await ctx.db.insert('projectWorkEvents', event)))!;
+    const { previousRevision: _previousRevision, ...provenance } = event;
+    void _previousRevision;
+    const saved = retained ?? (await retainWorkEvent(ctx, provenance));
     await emitChange(ctx, {
       projectId: input.projectId,
       actor: input.owner,
@@ -601,17 +607,7 @@ export async function journalWorkEvents(
 ) {
   try {
     const project = await accessibleProject(ctx, projectId, owner);
-    if (project.workStoreCutoverRevision !== undefined && revision > project.workStoreCutoverRevision)
-      return await retainedEventPage(ctx, project, { initialRevision, revision, paginationOpts });
-    const page = await ctx.db
-      .query('projectWorkEvents')
-      .withIndex('by_project_and_revision', q =>
-        q.eq('projectId', projectId).gt('revision', initialRevision).lte('revision', revision),
-      )
-      .order('asc')
-      .paginate(paginationOpts);
-    await verifyPurgedEvents(ctx, projectId, page.page);
-    return page;
+    return await retainedEventPage(ctx, project, { initialRevision, revision, paginationOpts });
   } catch (error) {
     if (error instanceof JournalNeeded)
       return { journalHistory: true as const, index: canonicalPayload(error.index) };

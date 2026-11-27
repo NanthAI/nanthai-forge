@@ -239,13 +239,14 @@ export async function executeCommand(
   }
   // Recovery notices belong to canonical hosted Intents, while this endpoint also updates Work.
   // Keep both writes in this mutation, after the original-operation replay guard above.
-  if (
+  const sourceAuthority = project.sourceAuthority;
+  const recoveryIntentWritten =
     command.action === 'intent-status' &&
     command.status === 'abandoned' &&
     project.needsFix?.[command.intentId] &&
-    project.sourceAuthority &&
-    project.sourceAuthority.mode !== 'native-owner'
-  ) {
+    sourceAuthority &&
+    sourceAuthority.mode !== 'native-owner';
+  if (recoveryIntentWritten) {
     const row = await readHostedRecord(ctx, {
       projectId: input.projectId,
       actor: user.subject,
@@ -257,7 +258,7 @@ export async function executeCommand(
     await writeHostedRecord(ctx, {
       projectId: input.projectId,
       actor: user.subject,
-      authorityEpoch: project.sourceAuthority.epoch,
+      authorityEpoch: sourceAuthority.epoch,
       expectedVersion: intent.version,
       record: { ...intent, version: intent.version + 1, status: command.status },
     });
@@ -544,6 +545,7 @@ export async function executeCommand(
     projection,
     planning,
     planningRestore: options.planningRestore,
+    ...(recoveryIntentWritten ? { recoveryIntentWritten: true as const } : {}),
     ...(member && (command.action === 'put-planning-item' || command.action === 'comment-planning-item')
       ? { memberPlanning: options.planningTick ? ('tick' as const) : ('item' as const) }
       : {}),

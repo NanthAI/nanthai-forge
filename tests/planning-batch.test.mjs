@@ -2,6 +2,7 @@
 // Copyright 2026 Ferdinando Valsecchi
 // Backlog batches (Item 65b0e706, docs/planning.md "Batches"): one action on many Items is one retry-safe call with
 // per-Item results and one Undo; split and merge are batches too.
+import { workEventRows } from './work-event-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -433,10 +434,10 @@ async function transactionCost(s, run, failAfterVersions = Infinity) {
   const meter = meterWorkIO(s.ctx, s.tables);
   const { query, get } = s.ctx.db;
   let indexRanges = 0;
-  const events = s.tables.projectWorkEvents.size;
+  const events = workEventRows(s.tables).length;
   const readRange = () => {
     indexRanges++;
-    if (s.tables.projectWorkEvents.size - events >= failAfterVersions)
+    if (workEventRows(s.tables).length - events >= failAfterVersions)
       throw new Error(
         'Documents read from or written to the fixture exceeded the simulated transaction budget.',
       );
@@ -568,18 +569,18 @@ async function runClosePages(s, from, costs, states, retryFailedPage) {
       assert.equal(closeTasks(s).length, count + 1, 'retry re-arms exactly one failed cursor');
       task = closeTasks(s)[cursor++];
     }
-    const priorEvents = s.tables.projectWorkEvents.size;
+    const priorEvents = workEventRows(s.tables).length;
     const cost = await transactionCost(s, run);
     costs.push(cost);
     states.push(await observedPlan(s));
-    const events = s.tables.projectWorkEvents.size;
+    const events = workEventRows(s.tables).length;
     // Undo reads the selected immutable version before publishing the new one.
     // Keep both its per-version bound and the provider's transaction ceiling.
     assert(cost.indexRanges <= 21 * (events - priorEvents) + 80, JSON.stringify(cost));
     assert(cost.indexRanges <= transactionRangeCeiling, JSON.stringify(cost));
     const count = closeTasks(s).length;
     await run();
-    assert.equal(s.tables.projectWorkEvents.size, events, 'replayed cursor writes nothing');
+    assert.equal(workEventRows(s.tables).length, events, 'replayed cursor writes nothing');
     assert.equal(closeTasks(s).length, count, 'replayed cursor starts no chain');
   }
   assert(cursor > from, 'the operation needed at least one continuation');
@@ -682,7 +683,7 @@ for (const compact of [true, false])
           assert.equal(item.status, row.status);
         }
       }
-      assert.equal(s.tables.projectWorkEvents.size, changed.size * 2);
+      assert.equal(workEventRows(s.tables).length, changed.size * 2);
       assert.equal(s.tables.projectHostedOperations.size, 2);
       assert.deepEqual(await undoRequest(), undo);
       assert.deepEqual(items(), restored);
@@ -982,7 +983,7 @@ test('one batch call applies each write once, refuses a concurrently changed Ite
   }));
   writes.push({ action: 'comment-planning-item', itemId: items[0].itemId, text: 'Moved with the release' });
   const operationId = id();
-  const events = () => s.tables.projectWorkEvents.size;
+  const events = () => workEventRows(s.tables).length;
   const before = events();
   const meter = meterReads(s.ctx);
   const cost = await meter.cost(() =>

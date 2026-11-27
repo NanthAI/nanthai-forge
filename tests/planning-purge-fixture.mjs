@@ -16,6 +16,7 @@ const parsed = row => purgeableCommandSchema.safeParse(JSON.parse(row.command));
 export function itemRows(rows, ids) {
   const named = new Set(ids);
   return [...rows].filter(row => {
+    if (row.command === undefined) return false;
     const command = parsed(row);
     if (!command.success) return false;
     const { data } = command;
@@ -31,7 +32,12 @@ export const purgeList = rows =>
 /** What the purge executor writes per row: the redacted facts, marked with the purge. */
 export function markPurged(rows, purgeOperationId) {
   for (const row of rows) {
-    row.command = purgedFactsText(parsed(row).data);
+    const facts = purgedFactsText(parsed(row).data);
+    if ('previousRevision' in row) row.command = facts;
+    else {
+      delete row.command;
+      row.journalCommand = facts;
+    }
     row.purged = purgeOperationId;
   }
 }

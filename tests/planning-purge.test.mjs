@@ -7,6 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { setup, actions, work } from './hosted-planning-fixture.mjs';
+import { workEventRows } from './work-event-fixture.mjs';
 import { workRecordRows } from './hosted-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { metadataRequest, applyHostedEvent } from '../dist/work-metadata.js';
@@ -32,7 +33,7 @@ async function purgeItem(s, itemId, kind, expectedVersion, ids = [itemId]) {
     kind,
     expectedVersion,
     deletedAt: '2026-11-20T00:00:00.000Z',
-    rows: purgeList(itemRows(s.tables.projectWorkEvents.values(), ids)),
+    rows: purgeList(itemRows(workEventRows(s.tables), ids)),
   };
   await purgeFromServer._handler(s.ctx, {
     projectId: s.projectId,
@@ -48,7 +49,7 @@ async function purgeItem(s, itemId, kind, expectedVersion, ids = [itemId]) {
 function purgeRows(s, _itemId, purge) {
   const listed = new Set(purge.rows.map(([row]) => row));
   markPurged(
-    [...s.tables.projectWorkEvents.values()].filter(row => listed.has(row.operationId)),
+    workEventRows(s.tables).filter(row => listed.has(row.operationId)),
     purge.operationId,
   );
 }
@@ -78,7 +79,7 @@ async function purgedItem(t) {
   const keep = s.item({ title: 'Kept Item' });
   await s.send(keep);
   const purge = await purgeItem(s, create.itemId, 'issue', 2);
-  const rows = new Map([...s.tables.projectWorkEvents.values()].map(row => [row.operationId, row]));
+  const rows = new Map(workEventRows(s.tables).map(row => [row.operationId, row]));
   const live = indexRows(s);
   purgeRows(s, create.itemId, purge);
   const pages = async () => {
@@ -214,7 +215,7 @@ test('event pages verify purged rows: each must hold its own redacted command an
   const page = await p.pages();
   assert.equal(page.filter(row => row.purged === p.purge.operationId).length, 3);
   const row = p.rows.get(p.create.operationId);
-  const facts = JSON.parse(row.command);
+  const facts = JSON.parse(row.journalCommand);
   const tamper = async (patch, why) => {
     const before = { ...row };
     Object.assign(row, patch);
@@ -222,15 +223,19 @@ test('event pages verify purged rows: each must hold its own redacted command an
     Object.assign(row, before);
   };
   await tamper({ purged: randomUUID() }, 'a purge that does not exist');
-  await tamper({ command: JSON.stringify({ ...facts, itemId: p.keep.itemId }) }, 'another Item');
-  await tamper({ command: JSON.stringify({ ...facts, itemId: undefined }) }, 'facts without the Item');
-  await tamper({ command: JSON.stringify(p.create) }, 'facts that still hold words');
-  await tamper({ command: JSON.stringify({ ...facts, operationId: randomUUID() }) }, 'another operation');
+  await tamper({ journalCommand: JSON.stringify({ ...facts, itemId: p.keep.itemId }) }, 'another Item');
+  await tamper({ journalCommand: JSON.stringify({ ...facts, itemId: undefined }) }, 'facts without the Item');
+  await tamper({ journalCommand: JSON.stringify(p.create) }, 'facts that still hold words');
+  await tamper(
+    { journalCommand: JSON.stringify({ ...facts, operationId: randomUUID() }) },
+    'another operation',
+  );
   // A row cannot be purged by a purge that came before it.
   const keepRow = p.rows.get(p.keep.operationId);
   const original = { ...keepRow };
+  delete keepRow.command;
   Object.assign(keepRow, {
-    command: JSON.stringify({ ...redacted(p.keep), itemId: p.create.itemId }),
+    journalCommand: JSON.stringify({ ...redacted(p.keep), itemId: p.create.itemId }),
     purged: p.purge.operationId,
   });
   const purgeRow = p.rows.get(p.purge.operationId);
@@ -242,6 +247,8 @@ test('event pages verify purged rows: each must hold its own redacted command an
     'a purge must come after the rows it removed',
   );
   purgeRow.revision = purgeRevision;
+  delete keepRow.journalCommand;
+  delete keepRow.purged;
   Object.assign(keepRow, original);
   // The purged form without its marker is never a stored command: the rebuild and the full load both refuse it.
   const unmarked = { ...row };
@@ -259,6 +266,7 @@ test('event pages verify purged rows: each must hold its own redacted command an
     'the full load refuses an unmarked purged form',
   );
   await assert.rejects(p.rebuild(), code('INVALID_WORK_JOURNAL'), 'the rebuild refuses it too');
+  delete row.command;
   Object.assign(row, unmarked);
   // A whole purge row that no longer hashes to its request cannot vouch for anything.
   const command = JSON.parse(purgeRow.command);

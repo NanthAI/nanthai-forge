@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import type { MutationCtx, QueryCtx } from './_generated/server';
+import { selectedSeedWork } from './projectSeedWorkProof';
 import type { Doc } from './_generated/dataModel';
 import { selectedGeneration, recordPartition } from './projectWorkIndexStore';
 import { invariant } from '../src/errors';
@@ -47,8 +48,8 @@ export async function requireHostedOwnerDrained(
     );
     invariant(
       (backup.preview.revision === 0 && !project.work?.revision) ||
-        (project.workStoreCutoverRevision !== undefined &&
-          project.workStoreEventWindows?.at(-1)?.storeFirst === true),
+        project.work?.backupId === backup._id ||
+        (await selectedSeedWork(ctx, project, backup._id)),
       'SOURCE_AUTHORITY_DRAIN_REQUIRED',
       'The selected Work must finish record-store conversion before switching to server authority.',
     );

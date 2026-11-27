@@ -2,6 +2,7 @@
 // Copyright 2026 Ferdinando Valsecchi
 // Issue 85801d6f: the hosted Work command runs in the 64 MiB V8 runtime and hands only the commands
 // that need Node (acceptance, anchored notes, oversized rows) to the Node action.
+import { workEventRows } from './work-event-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -117,7 +118,7 @@ test('anchored notes hand over to the Node action with the resolved owner, befor
     calls.push([getFunctionName(ref), args]);
     return sentinel;
   };
-  const writes = s.tables.projectWorkEvents.size;
+  const writes = workEventRows(s.tables).length;
   const operationId = randomUUID();
   const result = await v8.command._handler(s.ctx, {
     projectId: s.projectId,
@@ -132,7 +133,7 @@ test('anchored notes hand over to the Node action with the resolved owner, befor
   assert.equal(calls[0][1].owner, 'owner');
   assert.equal(calls[0][1].operationId, operationId);
   assert.equal(JSON.parse(calls[0][1].command).action, 'note');
-  assert.equal(s.tables.projectWorkEvents.size, writes, 'V8 wrote nothing before the hand-over');
+  assert.equal(workEventRows(s.tables).length, writes, 'V8 wrote nothing before the hand-over');
   // The same note without an anchor needs no Node reader and stays in V8.
   delete command.anchor;
   calls.length = 0;

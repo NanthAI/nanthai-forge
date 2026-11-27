@@ -2,6 +2,7 @@
 // Copyright 2026 Ferdinando Valsecchi
 import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
+import { automaticAction } from './autonomyFields';
 /** A bounded local report, never a capability or access grant. */
 export const agentHooks = v.union(v.literal('configured'), v.literal('off'), v.literal('unavailable'));
 export const hostedKind = v.union(
@@ -74,6 +75,7 @@ export const hostedRecordTables = {
     projectId: v.id('hostedProjects'),
     value: v.string(),
     operationId: v.optional(v.string()),
+    automatic: v.optional(automaticAction),
     request: v.optional(v.string()),
     revision: v.optional(v.number()),
     actor: v.optional(v.string()),

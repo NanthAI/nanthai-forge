@@ -26,8 +26,7 @@ export async function cutoverFixture(f) {
     sourceAuthority: native,
     currentBackup: backupId,
     revision: 1,
-    workStoreCutoverRevision: 7,
-    workStoreEventWindows: [{ revision: 7, storeFirst: true }],
+    work: { backupId, operationId: randomUUID(), initialRevision: 7, revision: 7 },
   });
   const call = (name, fn, args, actor = 'owner') =>
     transaction(name, fn, { projectId: f.projectId, ...args }, actor);

@@ -3,6 +3,7 @@
 // Purge Lane 2 readers (Item 4c9e961e, lead decision 2bce94e5, follow-ups a-f of reviews e0720f64 and 327b1600):
 // planning-purge-v2. A purge lists every row of its Item with the digest of its redacted facts; purged rows include an
 // Intent-born Item's intent and note rows and writes through another id; a redacted command keeps only listed fields.
+import { workEventRows } from './work-event-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -36,7 +37,7 @@ async function purge(s, itemId, kind, expectedVersion, ids = [itemId]) {
     kind,
     expectedVersion,
     deletedAt: '2026-11-20T00:00:00.000Z',
-    rows: purgeList(itemRows(s.tables.projectWorkEvents.values(), ids)),
+    rows: purgeList(itemRows(workEventRows(s.tables), ids)),
   };
   await purgeFromServer._handler(s.ctx, {
     projectId: s.projectId,
@@ -50,7 +51,7 @@ const purgeAndRedact = async (s, itemId, kind, expectedVersion, ids = [itemId]) 
   const command = await purge(s, itemId, kind, expectedVersion, ids);
   const listed = new Set(command.rows.map(([row]) => row));
   markPurged(
-    [...s.tables.projectWorkEvents.values()].filter(row => listed.has(row.operationId)),
+    workEventRows(s.tables).filter(row => listed.has(row.operationId)),
     command.operationId,
   );
   return command;
@@ -187,23 +188,22 @@ test('a purged row must be listed on its purge with the digest of the facts it h
   await s.send(deletedPut(target.itemId, 1));
   const command = await purgeAndRedact(s, target.itemId, 'issue', 2);
   await eventPages(s);
-  const row = [...s.tables.projectWorkEvents.values()].find(item => item.operationId === target.operationId);
-  const facts = JSON.parse(row.command);
+  const row = workEventRows(s.tables).find(item => item.operationId === target.operationId);
+  const facts = JSON.parse(row.journalCommand);
   const original = { ...row };
   // Self-declared structure no longer vouches for itself: links the purge did not record are refused.
-  row.command = JSON.stringify({ ...facts, intentIds: [other.itemId] });
+  row.journalCommand = JSON.stringify({ ...facts, intentIds: [other.itemId] });
   await assert.rejects(eventPages(s), code('INVALID_WORK_JOURNAL'), 'facts that differ from the list');
   await assert.rejects(s.read(), code('INVALID_WORK_JOURNAL'), 'the full load refuses them too');
   Object.assign(row, original);
   // A whole row of another Item cannot be turned into a purged row of this purge.
-  const otherRow = [...s.tables.projectWorkEvents.values()].find(
-    item => item.operationId === other.operationId,
-  );
+  const otherRow = workEventRows(s.tables).find(item => item.operationId === other.operationId);
   const otherOriginal = { ...otherRow };
   markPurged([otherRow], command.operationId);
   await assert.rejects(eventPages(s), code('INVALID_WORK_JOURNAL'), 'a row the purge does not list');
   Object.assign(otherRow, otherOriginal);
   delete otherRow.purged;
+  delete otherRow.journalCommand;
   await eventPages(s);
 });
 
@@ -337,9 +337,7 @@ test('a purged decision comment rebuilds with its derived body version under a r
   const derived = data.planningItems.find(
     version => version.operationId === decisionOperationId(comment.operationId),
   );
-  const commentRow = [...s.tables.projectWorkEvents.values()].find(
-    row => row.operationId === comment.operationId,
-  );
+  const commentRow = workEventRows(s.tables).find(row => row.operationId === comment.operationId);
   assert.equal(derived.request, purgedDecisionRequest(commentRow.request));
   await assert.rejects(
     s.send(comment),
