@@ -30,7 +30,6 @@ import { projectPrefix } from './r2Operations';
 /** Every store an Item purge redacts, and how. The end-to-end test (tests/planning-purge-executor.test.mjs) searches
  * every table for the purged words, so a new store that keeps them fails the build. */
 export const planningPurgeStores = {
-  projectWorkEvents: 'journal row: redacted facts in `command`, `purged` marker',
   projectJournalSegments:
     'replace the verified object for each affected segment and delete the original and its fragments',
   projectHostedRecordBodies:
@@ -102,39 +101,21 @@ export type PurgeStep = (typeof purgeSteps)[number];
 
 /** The purge's command: its row list in journal order. */
 export async function purgeRows(ctx: Ctx, projectId: Id<'hostedProjects'>, operationId: string) {
-  const row =
-    (await byOperation(ctx, 'projectWorkEvents', projectId, operationId)) ??
-    (await byOperation(ctx, 'projectHostedRecordBodies', projectId, operationId));
+  const row = await byOperation(ctx, projectId, operationId);
   invariant(row?.command, 'NOT_FOUND', 'The purge has not been recorded yet.');
   return (JSON.parse(row.command) as { rows: [string, string][] }).rows;
 }
 /** The journal revision of the purge's own row: rows of the Item after it were written after the first step. */
 export async function purgeRevision(ctx: Ctx, projectId: Id<'hostedProjects'>, operationId: string) {
-  const row =
-    (await byOperation(ctx, 'projectWorkEvents', projectId, operationId)) ??
-    (await byOperation(ctx, 'projectHostedRecordBodies', projectId, operationId));
+  const row = await byOperation(ctx, projectId, operationId);
   invariant(row?.revision !== undefined, 'NOT_FOUND', 'The purge has not been recorded yet.');
   return row.revision;
 }
-async function byOperation(
-  ctx: Ctx,
-  table: 'projectWorkEvents' | 'projectHostedRecordBodies',
-  projectId: Id<'hostedProjects'>,
-  operationId: string,
-): Promise<Doc<'projectWorkEvents'> | Doc<'projectHostedRecordBodies'> | null> {
-  return table === 'projectWorkEvents'
-    ? ctx.db
-        .query('projectWorkEvents')
-        .withIndex('by_project_and_operation', q =>
-          q.eq('projectId', projectId).eq('operationId', operationId),
-        )
-        .unique()
-    : ctx.db
-        .query('projectHostedRecordBodies')
-        .withIndex('by_project_and_operation', q =>
-          q.eq('projectId', projectId).eq('operationId', operationId),
-        )
-        .unique();
+async function byOperation(ctx: Ctx, projectId: Id<'hostedProjects'>, operationId: string) {
+  return ctx.db
+    .query('projectHostedRecordBodies')
+    .withIndex('by_project_and_operation', q => q.eq('projectId', projectId).eq('operationId', operationId))
+    .unique();
 }
 
 /** One page of one step. Returns the changes made (or, with `apply` false, still needed) and the next cursor
@@ -339,14 +320,12 @@ export async function journalRow(
   /** A base Item's purge also lists rows only the stored base holds (no Work row); the base scrub replaces those. */
   options: { base?: boolean } = {},
 ) {
-  const event = await byOperation(ctx, 'projectWorkEvents', projectId, operationId);
-  const body = event ? null : await byOperation(ctx, 'projectHostedRecordBodies', projectId, operationId);
-  const row = event ?? body;
+  const row = await byOperation(ctx, projectId, operationId);
   if (!row && options.base) return 0;
   invariant(row, 'INVALID_WORK_JOURNAL', 'A row the purge lists is missing from the Work journal.');
   if (row.purged !== undefined) return 0;
   // The segment action publishes the redacted event and the live retry envelope together.
-  if ('journalSegment' in row && row.journalSegment) return 1;
+  if (row.journalSegment) return 1;
   invariant(row.command !== undefined, 'INVALID_WORK_JOURNAL', 'A listed Work row has no command.');
   const facts = redactPlanningWrite(purgeableCommandSchema.parse(JSON.parse(row.command)));
   invariant(
@@ -355,15 +334,13 @@ export async function journalRow(
     'A listed row changed after the purge.',
   );
   if (!write) return 1;
-  if (event) await write.patch(event._id, { command: purgedFactsText(facts), purged: purgeOperationId });
-  else
-    await write.patch(body!._id, {
-      command: undefined,
-      journalCommand: purgedFactsText(facts),
-      purged: purgeOperationId,
-      // An Intent row's body can hold its Intent record version: the storeIntents step purges that version.
-      value: '',
-    });
+  await write.patch(row._id, {
+    command: undefined,
+    journalCommand: purgedFactsText(facts),
+    purged: purgeOperationId,
+    // An Intent row's body can hold its Intent record version: the storeIntents step purges that version.
+    value: '',
+  });
   return 1;
 }
 

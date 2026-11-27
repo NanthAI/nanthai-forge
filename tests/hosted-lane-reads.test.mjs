@@ -135,11 +135,11 @@ test('full/sparse checkout uses bounded indexed membership/signing with no Work 
       const max = name === 'projectHostedLanes:select' ? 10 : 505;
       assert(meter.documents <= max && meter.ranges <= max, `${name}: per-function read counts`);
       assert(meter.readBytes < 256 * 1024, `${name}: bounded metadata bytes`);
+      assert.equal(meter.workEventReads, 0, `${name}: no Work events`);
       assert(
         !meter.touched.some(table =>
           [
             'projectWorkRecords',
-            'projectWorkEvents',
             'projectWorkGenerations',
             'projectBackups',
             'projectHostedChannels',

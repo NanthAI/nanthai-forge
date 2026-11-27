@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { getDocumentSize } from 'convex/values';
 import { spendEvent } from '../scripts/convex-spend-model.mjs';
 import { moduleUrl } from './convex-module.mjs';
-import { setup, beginRetainedWork, seedHistoricalIssueVersion } from './hosted-planning-fixture.mjs';
+import { setup, seedHistoricalIssueVersion } from './hosted-planning-fixture.mjs';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';
 import { setWorkRecord } from './hosted-fixture.mjs';
 import { meterReads } from './hosted-read-set.mjs';
@@ -333,7 +333,7 @@ for (const first of ['backfill', 'status']) {
     await s.ctx.db.patch(s.projectId, {
       sourceAuthority: { mode: 'server', epoch: 1 },
     });
-    if (first === 'backfill') beginRetainedWork(s);
+
     const open = s.item();
     const projectId = s.projectId;
     const args = input => ({ projectId, operationId: input.operationId, command: JSON.stringify(input) });

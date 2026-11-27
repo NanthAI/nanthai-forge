@@ -19,9 +19,6 @@ import { indexValue } from './projectPlanningPurgeRedact';
 
 /** Journal rows per selection page: a planning row is at most ~110 KB, so a page stays far under the read limit. */
 export const PURGE_SELECT_PAGE = 64;
-export const purgeJournalTables = ['projectWorkEvents', 'projectHostedRecordBodies'] as const;
-type JournalTable = (typeof purgeJournalTables)[number];
-
 /** The text a journal row's command is in: whole, purged (facts) or archived (facts, segment elsewhere). */
 export function journalText(row: { command?: string; journalCommand?: string }) {
   return row.command ?? row.journalCommand;
@@ -241,21 +238,13 @@ export const basePage = internalQuery({
   },
 });
 
-/** Whether the Work journal (either table) holds a row with this operation id. */
 async function journalHolds(ctx: QueryCtx, projectId: Id<'hostedProjects'>, operationId: string) {
-  for (const table of purgeJournalTables)
-    if (
-      (
-        await ctx.db
-          .query(table)
-          .withIndex('by_project_and_operation', q =>
-            q.eq('projectId', projectId).eq('operationId', operationId),
-          )
-          .take(1)
-      ).length
-    )
-      return true;
-  return false;
+  return Boolean(
+    await ctx.db
+      .query('projectHostedRecordBodies')
+      .withIndex('by_project_and_operation', q => q.eq('projectId', projectId).eq('operationId', operationId))
+      .unique(),
+  );
 }
 
 /** One selection page of one journal table: the Item's rows after `after` (revision), with their purged digests,
@@ -263,7 +252,6 @@ async function journalHolds(ctx: QueryCtx, projectId: Id<'hostedProjects'>, oper
 export const selectPage = internalQuery({
   args: {
     projectId: v.id('hostedProjects'),
-    table: v.union(v.literal('projectWorkEvents'), v.literal('projectHostedRecordBodies')),
     ids: v.array(v.string()),
     after: v.number(),
   },
@@ -282,10 +270,10 @@ export const selectPage = internalQuery({
 
 export async function selectRows(
   ctx: QueryCtx,
-  input: { projectId: Id<'hostedProjects'>; table: JournalTable; ids: string[]; after: number },
+  input: { projectId: Id<'hostedProjects'>; ids: string[]; after: number },
 ) {
   const page = await ctx.db
-    .query(input.table)
+    .query('projectHostedRecordBodies')
     .withIndex('by_project_and_revision', q => q.eq('projectId', input.projectId).gt('revision', input.after))
     .take(PURGE_SELECT_PAGE);
   return {

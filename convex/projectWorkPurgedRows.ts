@@ -51,19 +51,10 @@ async function purgeCommand(
   projectId: Id<'hostedProjects'>,
   operationId: string,
 ): Promise<Purge> {
-  const event = await ctx.db
-    .query('projectWorkEvents')
+  const row = await ctx.db
+    .query('projectHostedRecordBodies')
     .withIndex('by_project_and_operation', q => q.eq('projectId', projectId).eq('operationId', operationId))
     .unique();
-  const body = event
-    ? null
-    : await ctx.db
-        .query('projectHostedRecordBodies')
-        .withIndex('by_project_and_operation', q =>
-          q.eq('projectId', projectId).eq('operationId', operationId),
-        )
-        .unique();
-  const row = event ?? body;
   if (!row || row.purged !== undefined || row.revision === undefined || row.request === undefined)
     return null;
   // A purge never enters a journal segment (convex/projectJournalSelect.ts wordsRow), so it is always whole.

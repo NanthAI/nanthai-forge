@@ -190,22 +190,16 @@ export const IMPORTED_PURGE = '';
 export const purgedHere = (event: { purgedBy?: string | undefined } | undefined, operationId: string) =>
   event?.purgedBy === operationId || event?.purgedBy === IMPORTED_PURGE;
 
-/** The comment's live journal row, in either journal table. */
+/** The comment's live journal row. */
 export async function commentRow(
   ctx: QueryCtx | MutationCtx,
   projectId: Id<'hostedProjects'>,
   commentId: string,
 ) {
-  return (
-    (await ctx.db
-      .query('projectWorkEvents')
-      .withIndex('by_project_and_operation', q => q.eq('projectId', projectId).eq('operationId', commentId))
-      .unique()) ??
-    (await ctx.db
-      .query('projectHostedRecordBodies')
-      .withIndex('by_project_and_operation', q => q.eq('projectId', projectId).eq('operationId', commentId))
-      .unique())
-  );
+  return await ctx.db
+    .query('projectHostedRecordBodies')
+    .withIndex('by_project_and_operation', q => q.eq('projectId', projectId).eq('operationId', commentId))
+    .unique();
 }
 
 /** Purge one planning comment. Returns 1 when this purge removed it (also on a retry with the same operationId), 0

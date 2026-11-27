@@ -340,7 +340,7 @@ test('self-leave covers Zone, team and native project relationships without eras
     'pc-other',
     row('pc-other', { projectId: 'foreign-project', contributor: 'someone' }),
   );
-  f.tables.projectWorkEvents.set(
+  f.tables.projectHostedRecordBodies.set(
     'work',
     row('work', { projectId: 'foreign-project', actor: 'owner', command: 'create-intent' }),
   );
@@ -349,7 +349,7 @@ test('self-leave covers Zone, team and native project relationships without eras
     row('proposal', { projectId: 'foreign-project', actor: 'owner', digest: 'original', status: 'complete' }),
   );
   const preserved = JSON.stringify([
-    ...f.tables.projectWorkEvents.values(),
+    ...f.tables.projectHostedRecordBodies.values(),
     ...f.tables.projectProposals.values(),
   ]);
   const r = await begin(f, [], ['zones', 'teams', 'projects']);
@@ -364,7 +364,7 @@ test('self-leave covers Zone, team and native project relationships without eras
   assert.ok(f.tables.projectContributors.has('pc-other'));
   assert.equal(f.tables.hostedProjects.get('foreign-project').revision, 2);
   assert.equal(
-    JSON.stringify([...f.tables.projectWorkEvents.values(), ...f.tables.projectProposals.values()]),
+    JSON.stringify([...f.tables.projectHostedRecordBodies.values(), ...f.tables.projectProposals.values()]),
     preserved,
   );
 });

@@ -102,15 +102,10 @@ test('compound start atomically creates one Intent/Lane with no filesystem or fu
   assert.deepEqual(await s.begin(input), first);
   for (const count of s.counts) {
     assert(
-      !count.touched.some(t =>
-        [
-          'projectWorkEvents',
-          'projectWorkHeads',
-          'projectWorkRecords',
-          'projectWorkGenerations',
-          'projectBackups',
-        ].includes(t),
-      ),
+      count.workEventReads === 0 &&
+        !count.touched.some(t =>
+          ['projectWorkHeads', 'projectWorkRecords', 'projectWorkGenerations', 'projectBackups'].includes(t),
+        ),
     );
     assert(
       !count.written.some(t =>

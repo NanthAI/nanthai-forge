@@ -36,8 +36,6 @@ async function fixture(t) {
   const s = await setup(t);
   Object.assign(s.tables.hostedProjects.get(s.projectId), {
     sourceAuthority: { mode: 'server', epoch: 1 },
-    workStoreCutoverRevision: 0,
-    workStoreEventWindows: [{ revision: 0, storeFirst: true }],
   });
   const calls = [];
   const invoke = async (name, input) => {

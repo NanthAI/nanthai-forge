@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
+import { workEventRows } from './work-event-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -116,7 +117,7 @@ test('archive seed and status mutations preserve imported attributes before data
   // valid source extension into an empty attribute set.
   const missing = initialRows.filter(row => row.collection === 'intents:payload');
   for (const row of missing) s.tables.projectWorkDataRecords.delete(row._id);
-  const events = s.tables.projectWorkEvents.size;
+  const events = workEventRows(s.tables).length;
   await assert.rejects(
     commands.command._handler(s.ctx, {
       projectId: s.projectId,
@@ -125,7 +126,7 @@ test('archive seed and status mutations preserve imported attributes before data
     }),
     error => (error.code ?? error.data?.code) === 'WORK_STALE',
   );
-  assert.equal(s.tables.projectWorkEvents.size, events);
+  assert.equal(workEventRows(s.tables).length, events);
   for (const row of missing) s.tables.projectWorkDataRecords.set(row._id, row);
   await check();
   await s.send({ action: 'intent-status', intentId: id, status: 'completed' });

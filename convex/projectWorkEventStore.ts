@@ -2,6 +2,8 @@
 // Copyright 2026 Ferdinando Valsecchi
 // Provenance belongs to the retained primary version's body, never to another audit row.
 import { journalIndexAt, requireJournal } from './projectJournalStore';
+import type { Infer } from 'convex/values';
+import type { hostedWorkEventDocument } from './schema';
 import type { Doc, Id } from './_generated/dataModel';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import { journalCommandSchema } from '../src/work-intent-types';
@@ -10,9 +12,7 @@ import { metadataRequest } from '../src/work-metadata';
 import { invariant } from '../src/errors';
 import { commentPurged, planningPurged } from '../src/work-planning-put';
 import { purgedFacts, verifyPurgedRow } from './projectWorkPurgedRows';
-export type StoredWorkEvent = Omit<Doc<'projectWorkEvents'>, '_id'> & {
-  _id: Id<'projectWorkEvents'> | Id<'projectHostedRecordBodies'>;
-};
+export type StoredWorkEvent = Infer<typeof hostedWorkEventDocument>;
 export type WorkProvenance = Omit<StoredWorkEvent, '_id' | '_creationTime' | 'previousRevision'>;
 export function eventDocument(row: Doc<'projectHostedRecordBodies'>): StoredWorkEvent {
   const identity = {
@@ -107,12 +107,6 @@ export async function findWorkEvent(
   operationId: string,
   replay?: { command: string } | { authority: true },
 ): Promise<StoredWorkEvent | null> {
-  const old = await ctx.db
-    .query('projectWorkEvents')
-    .withIndex('by_project_and_operation', q => q.eq('projectId', projectId).eq('operationId', operationId))
-    .unique();
-  if (old?.purged !== undefined) return purgedReplay(ctx, projectId, old, replay);
-  if (old) return old;
   const body = await ctx.db
     .query('projectHostedRecordBodies')
     .withIndex('by_project_and_operation', q => q.eq('projectId', projectId).eq('operationId', operationId))

@@ -25,7 +25,7 @@ import { planningSearchEntry } from '../dist/planning-search.js';
 import { indexedRecord, intentHeader } from '../dist/work-hosted-index.js';
 import { workStoreRecord } from '../dist/work-store-records.js';
 import { hostedRecordValue } from '../dist/hosted-records.js';
-import { setup, beginRetainedWork, seedHistoricalIssueVersion } from './hosted-planning-fixture.mjs';
+import { setup, seedHistoricalIssueVersion } from './hosted-planning-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { meterReads, meterWorkIO } from './hosted-read-set.mjs';
 import { planFixture } from './plan-read-fixture.mjs';
@@ -509,7 +509,7 @@ test('100 long-lived Items can replace 20 Related pairs each and evict expired a
       value: '{}',
     });
   }
-  beginRetainedWork(s);
+
   const writes = sources.map(itemId => ({
     action: 'put-planning-item',
     itemId,

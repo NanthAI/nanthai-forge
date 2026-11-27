@@ -2,7 +2,7 @@
 // Copyright 2026 Ferdinando Valsecchi
 // A person's planning work and newest actions (Item 6a251b23; docs/people.md), read from records that already exist:
 // every planning command (put-planning-item, comment-planning-item) writes one Work `change` row in
-// projectCoordinationEvents (actor, time, action), and its command is kept in projectWorkEvents or its retained body.
+// projectCoordinationEvents (actor, time, action), and its command is kept on its retained event body.
 // Nothing here writes on the save, comment or landing path.
 // - The project's day close counts Items closed and comments per person (and per agent run) from the change rows
 //   (kind 'change': the Work commands and holder handoffs) since the previous closed day, the same window as its Lanes
@@ -80,21 +80,12 @@ export async function planningCommand(
 
 /** A planning command and the bytes its reads returned (whole documents, as Convex counts them). */
 async function sizedCommand(ctx: QueryCtx, projectId: Id<'hostedProjects'>, operationId: string) {
-  const event = await ctx.db
-    .query('projectWorkEvents')
+  const body = await ctx.db
+    .query('projectHostedRecordBodies')
     .withIndex('by_project_and_operation', q => q.eq('projectId', projectId).eq('operationId', operationId))
     .unique();
-  const body = event
-    ? null
-    : await ctx.db
-        .query('projectHostedRecordBodies')
-        .withIndex('by_project_and_operation', q =>
-          q.eq('projectId', projectId).eq('operationId', operationId),
-        )
-        .unique();
-  const bytes = size(event) + size(body);
-  const text =
-    event?.command ?? body?.command ?? (body?.purged === undefined ? undefined : body.journalCommand);
+  const bytes = size(body);
+  const text = body?.command ?? (body?.purged === undefined ? undefined : body.journalCommand);
   if (!text) return { command: null, bytes };
   try {
     return { command: JSON.parse(text) as PlanningCommand, bytes };

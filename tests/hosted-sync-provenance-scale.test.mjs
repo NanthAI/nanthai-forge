@@ -59,13 +59,13 @@ test('575 selected inputs recover with constant metadata calls and publication r
   for (const call of [...preparation, ...publication]) {
     assert(call.documents <= 100);
     assert(call.readBytes < 128 * 1024);
+    assert.equal(call.workEventReads, 0, 'sync reuses provenance without reading Work events');
     assert(
       !call.touched.some(table =>
         [
           'projectHostedComposePages',
           'projectHostedComposeSelections',
           'projectWorkRecords',
-          'projectWorkEvents',
           'projectWorkGenerations',
           'projectBackups',
         ].includes(table),

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 // Bounded, paged audit timeline for one planning Item (Item 1d51c91f).
-// Reuses existing projectHostedRecords / projectHostedRecordHeads / projectWorkEvents /
+// Reuses existing projectHostedRecords / projectHostedRecordHeads /
 // projectIntentLandingNotes indexes with zero new tables or indexes.
 import { z } from 'zod';
 import type { Doc, Id } from './_generated/dataModel';
@@ -116,16 +116,10 @@ async function lookupEventActor(
   charge: Budget,
 ): Promise<string | undefined> {
   if (charge.exhausted) return undefined;
-  // @remove-after 2026-12-31
-  const event =
-    (await ctx.db
-      .query('projectWorkEvents')
-      .withIndex('by_project_and_operation', q => q.eq('projectId', projectId).eq('operationId', operationId))
-      .unique()) ??
-    (await ctx.db
-      .query('projectHostedRecordBodies')
-      .withIndex('by_project_and_operation', q => q.eq('projectId', projectId).eq('operationId', operationId))
-      .unique());
+  const event = await ctx.db
+    .query('projectHostedRecordBodies')
+    .withIndex('by_project_and_operation', q => q.eq('projectId', projectId).eq('operationId', operationId))
+    .unique();
   if (event && charge.record(event) && event.actor) return event.actor;
   return undefined;
 }

@@ -57,11 +57,10 @@ export async function composeFixture({ baselineFiles = [] } = {}) {
         assert(c.ranges <= bound && c.documents <= bound, `${name}: bounded reads`);
         assert(controllerMetadataFits(c, 2 * 1024 * 1024, 512 * 1024), `${name}: metadata bytes`);
         assert(
-          !c.touched.some(t =>
-            ['projectBackups', 'projectWorkRecords', 'projectWorkEvents', 'projectWorkGenerations'].includes(
-              t,
+          c.workEventReads === 0 &&
+            !c.touched.some(t =>
+              ['projectBackups', 'projectWorkRecords', 'projectWorkGenerations'].includes(t),
             ),
-          ),
           `${name}: no history hydration`,
         );
         if (name === 'composePublish')

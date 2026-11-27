@@ -436,3 +436,7 @@ test('the command line help runs without a deployment', () => {
   assert.equal(result.status, 0);
   assert.match(result.stdout, /dry run unless --execute/);
 });
+
+test('the empty Work event table has no remaining runtime definition blockers', async () => {
+  assert.deepEqual(await definitionBlockers(root, ['projectWorkEvents']), { projectWorkEvents: [] });
+});

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
+import { workEventRows } from './work-event-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -21,8 +22,8 @@ test('current hosted Work, subsequent journal writes and recovery preserve origi
   const s = await fixture(t),
     issue = s.item({ title: 'One unified outcome' });
   await s.send(issue);
-  const original = JSON.stringify([...s.tables.projectWorkEvents.values()]);
-  assert.equal(JSON.stringify([...s.tables.projectWorkEvents.values()]), original);
+  const original = JSON.stringify(workEventRows(s.tables));
+  assert.equal(JSON.stringify(workEventRows(s.tables)), original);
   const migrated = await s.read();
   assert.equal(migrated.data.schema, 24);
   assert.equal(migrated.data.intents.find(i => i.id === issue.itemId).title, issue.title);

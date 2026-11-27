@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
+import { metadataRequest } from '../dist/work-metadata.js';
 import { setWorkRecord, workRecordRows } from './hosted-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -90,12 +91,18 @@ test('assignment removal and contributor revocation take effect on the next read
 test('a retained creation event remains authoritative before indexed identity enrichment', async () => {
   const s = setup();
   s.tables.projectWorkRecords.clear();
-  s.tables.projectWorkEvents.set('event', {
+  const command = { action: 'intent', outcome: 'Recorded Work', base: s.intent.base };
+  s.tables.projectHostedRecordBodies.set('event', {
     _id: 'event',
     projectId: 'project',
     operationId: s.intentId,
     actor: 'creator',
-    command: JSON.stringify({ action: 'intent', base: s.intent.base }),
+    command: JSON.stringify(command),
+    value: '',
+    revision: 1,
+    request: metadataRequest(command),
+    at: '2026-11-26T12:00:00Z',
+    _creationTime: 1,
   });
   await s.check('creator');
   await assert.rejects(s.check('other'), denied);

@@ -111,16 +111,16 @@ export async function landingFixture(source = null) {
       );
       assert(controllerMetadataFits(c, 512 * 1024, 512 * 1024), `${name}: bounded metadata`);
       assert(
-        !c.touched.some(t =>
-          [
-            'projectWorkRecords',
-            'projectBackups',
-            'projectWorkGenerations',
-            'projectWorkEvents',
-            'projectHostedComposePages',
-            'projectHostedCheckShards',
-          ].includes(t),
-        ),
+        c.workEventReads === 0 &&
+          !c.touched.some(t =>
+            [
+              'projectWorkRecords',
+              'projectBackups',
+              'projectWorkGenerations',
+              'projectHostedComposePages',
+              'projectHostedCheckShards',
+            ].includes(t),
+          ),
         `${name}: no source pages, shards or history hydration`,
       );
       const pinRanges = c.readRangesByTable?.projectHostedComposeSelections ?? 0;

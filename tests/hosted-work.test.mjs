@@ -32,7 +32,6 @@ function hosted(bytes, preview) {
   establishedAccount(s.tables, 'owner', ['planning', 'start']);
   s.tables.hostedProjects = new Map();
   s.tables.projectBackups = new Map();
-  s.tables.projectWorkEvents = new Map();
   s.ctx.runQuery = s.ctx.runMutation = (ref, args) => {
     const [module, name] = getFunctionName(ref).split(':');
     return (
@@ -71,7 +70,7 @@ function hosted(bytes, preview) {
   return { ...s, projectId, backupId };
 }
 
-test('initializing a resumed empty hosted archive leaves the retired Work event window absent', async t => {
+test('initializing a resumed empty hosted archive keeps the same verified Work selection', async t => {
   const root = fixture(t, { 'a.ts': 'export const a = 1;' });
   git(root, ['add', '.']);
   git(root, ['commit', '-qm', 'Original native source']);
@@ -85,8 +84,6 @@ test('initializing a resumed empty hosted archive leaves the retired Work event 
   const ready = await actions.initialize._handler(ctx, start);
   assert.equal(ready.work.revision, 0);
   assert.equal(ready.work.backupId, backupId);
-  assert.equal(ready.workStoreCutoverRevision, undefined);
-  assert.equal(ready.workStoreEventWindows, undefined);
   assert.deepEqual(await actions.initialize._handler(ctx, start), ready);
 });
 
@@ -198,7 +195,6 @@ test('hosted Intent authority reconciles original operations, retains concurrent
     const retainedEvents = () =>
       [...s.tables.projectHostedRecordBodies.values()].filter(row => row.operationId);
     assert.equal(retainedEvents().length, 1);
-    assert.equal(s.tables.projectWorkEvents.size, 0);
     assert.equal(s.tables.projectWorkHeads.size, 1, 'journal revision lives outside the project row');
     // `state` is the head-free project record every tab holds; the live revision is the hydrated `get`.
     assert.equal(
@@ -269,7 +265,7 @@ test('hosted Intent authority reconciles original operations, retains concurrent
     };
     await actions.command._handler(s.ctx, note);
     s.ctx.runMutation = native;
-    assert.equal(retainedEvents().length + s.tables.projectWorkEvents.size, 3);
+    assert.equal(retainedEvents().length, 3);
     assert.equal(
       (await actions.command._handler(s.ctx, create)).revision,
       initialRevision + 1,

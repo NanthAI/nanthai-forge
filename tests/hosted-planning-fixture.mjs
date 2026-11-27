@@ -57,17 +57,6 @@ export async function seedHistoricalIssueVersion(s, item, pin) {
   return 'copied';
 }
 
-/** Start the fixture's retained-event epoch at its current Work revision. */
-export function beginRetainedWork(s, storeFirst = true) {
-  const project = s.tables.hostedProjects.get(s.projectId);
-  const head = [...s.tables.projectWorkHeads.values()].find(
-    row => row.projectId === s.projectId && row.backupId === project.work?.backupId,
-  );
-  const revision = head?.revision ?? project.work?.revision ?? 0;
-  project.workStoreCutoverRevision ??= revision;
-  project.workStoreEventWindows = [...(project.workStoreEventWindows ?? []), { revision, storeFirst }];
-}
-
 /** Add a Lane-owned pin to live Work, as a hosted start does after the Item or Intent exists. */
 export async function pinIntent(ctx, input) {
   const head = await records.recordHead(ctx, input.projectId, 'intent', input.record.id);
@@ -151,13 +140,6 @@ export async function setup(t, native = true, prepare, prepareIndex = true) {
     if (!put.ok && put.status !== 412) throw new Error(`base archive upload failed: ${put.status}`);
   }
   await actions.initialize._handler(s.ctx, { projectId, backupId, operationId: randomUUID() });
-  // Empty fixtures represent projects initialized before the F2 cutover. Keep their original
-  // document shape and journal layout until a test opens a retained event window.
-  if (preview.revision === 0)
-    await s.ctx.db.patch(projectId, {
-      workStoreCutoverRevision: undefined,
-      workStoreEventWindows: undefined,
-    });
   if (prepareIndex) {
     const { ensure } = await import(moduleUrl('../convex/projectWorkIndexActions.ts'));
     await ensure._handler(s.ctx, { projectId, rebuild: true });

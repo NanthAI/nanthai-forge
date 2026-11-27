@@ -112,7 +112,7 @@ async function setup(t, { retained = false, r2Ready = false } = {}) {
   for (const name of [
     'hostedProjects',
     'projectBackups',
-    'projectWorkEvents',
+    'projectHostedRecordBodies',
     'projectContributors',
     'projectProposals',
   ])

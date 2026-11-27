@@ -218,7 +218,6 @@ export function state(jobs = [job()], { keysetPaging = false, legacyWorkRecords 
     projectContributors: new Map(),
     projectReaders: new Map(),
     projectReaderOperations: new Map(),
-    projectWorkEvents: new Map(),
     projectUploadCleanup: new Map(),
     imports: new Map(jobs.map(row => [row._id, { ...row }])),
     importArtifacts: new Map(),

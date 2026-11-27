@@ -109,7 +109,8 @@ test('one read names the pinned head and every changed path with its exact blobs
   const bucketDocuments = new Set(changes.map(change => overlapBuckets.overlapBucket(change.path))).size;
   assert(meter.documents <= 10 + bucketDocuments, `reads ${meter.documents} documents`);
   assert(meter.readBytes < 64 * 1024, `reads ${meter.readBytes} bytes`);
-  for (const table of ['projectBackups', 'projectWorkRecords', 'projectWorkEvents', 'projectHostedSaveJobs'])
+  assert.equal(meter.workEventReads, 0, 'does not read Work event history');
+  for (const table of ['projectBackups', 'projectWorkRecords', 'projectHostedSaveJobs'])
     assert(!meter.touched.includes(table), `does not read ${table}`);
 });
 

@@ -6,12 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { acceptanceFixture, control } from './hosted-acceptance-fixture.mjs';
 import { batchesFixture, batchPublish, states, synthetic } from './hosted-landing-batches-fixture.mjs';
-import {
-  setup as planningSetup,
-  actions as workActions,
-  pinIntent,
-  beginRetainedWork,
-} from './hosted-planning-fixture.mjs';
+import { setup as planningSetup, actions as workActions, pinIntent } from './hosted-planning-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { policyPreset } from '../dist/autonomy-policy.js';
 import { mergeItems } from '../dist/planning-batch.js';
@@ -317,7 +312,7 @@ for (const retained of [false, true])
   test(`a merged Item shows the landing notes of its merged duplicates (${retained ? 'retained' : 'historical'} events)`, async t => {
     const s = await planningSetup(t);
     s.tables.hostedProjects.get(s.projectId).sourceAuthority = { mode: 'server', epoch: 1 };
-    if (retained) beginRetainedWork(s);
+
     const survivor = s.item({ title: 'Survivor' }),
       duplicate = s.item({ title: 'Duplicate' });
     await s.send(survivor);
@@ -548,7 +543,7 @@ test('the planning export carries every landing note, across export pages', asyn
 test('merged Item discussion and owner export retain hot, legacy and verified capsule notes', async t => {
   const s = await planningSetup(t);
   s.tables.hostedProjects.get(s.projectId).sourceAuthority = { mode: 'server', epoch: 1 };
-  beginRetainedWork(s);
+
   const id = n => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
   const duplicate = s.item({ itemId: id(1), title: 'Duplicate' });
   const survivor = s.item({ itemId: id(2), title: 'Survivor', intentIds: [duplicate.itemId] });

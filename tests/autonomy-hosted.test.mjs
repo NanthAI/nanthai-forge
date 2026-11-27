@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
+import { workEventRows } from './work-event-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -184,7 +185,7 @@ test('internal Channel mutation cannot substitute an owner argument for the auth
     }),
     errorCode('PROJECT_UNAVAILABLE'),
   );
-  assert.equal(s.tables.projectWorkEvents.size, 0);
+  assert.equal(workEventRows(s.tables).length, 0);
 });
 
 test('hosted object import starts Trusted and keeps the policy on an existing project', async () => {

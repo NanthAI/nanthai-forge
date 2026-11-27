@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
+import { workEventRows } from './work-event-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -137,7 +138,7 @@ test('legacy final append transaction fences an authority switch', async () => {
     }),
     stale(server),
   );
-  assert.equal(s.tables.projectWorkEvents.size, 0);
+  assert.equal(workEventRows(s.tables).length, 0);
 });
 
 test('existing seed rejects a stale epoch using its authorized project row', async () => {

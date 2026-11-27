@@ -112,8 +112,8 @@ async function* sources(directory) {
 }
 
 /** Source files outside the schema that still name a retired table: blockers for removing its definition. */
-export async function definitionBlockers(root) {
-  const found = Object.fromEntries(Object.keys(RETIRED_TABLES).map(table => [table, []]));
+export async function definitionBlockers(root, tables = Object.keys(RETIRED_TABLES)) {
+  const found = Object.fromEntries(tables.map(table => [table, []]));
   for (const directory of ['convex', 'src'])
     for await (const path of sources(join(root, directory))) {
       const text = await readFile(path, 'utf8');

@@ -85,7 +85,6 @@ test('native upload and an unpublished GitHub import keep native authority; a br
   const archive = s.tables.hostedProjects.get(archiveId);
   assert.deepEqual(archive.sourceAuthority, defaultAuthority);
   assert.equal(archive.currentBackup, null);
-  assert.equal(archive.workStoreCutoverRevision, undefined);
   assert.ok(archive.hostingRequest, 'the next verified native seed may publish server authority');
 });
 

@@ -52,7 +52,7 @@ only: the run's Lanes, how many of them it saved and landed, its planning commen
 
 Nothing here adds a write on the save, comment or landing path. Every planning edit and comment already writes one
 Work change row (`projectCoordinationEvents`, `kind: 'change'`: actor, time, action; kept 14 days, then journaled)
-and keeps its command (status, Item, text, the agent run that sent it) in `projectWorkEvents` or its retained body.
+and keeps its command (status, Item, text, the agent run that sent it) in `projectHostedRecordBodies` or its retained body.
 Save records already name their Lane. `convex/personWork.ts` reads these.
 
 - **Items closed and comments per run** are counted by the project's day close, from that day's change rows. An Item

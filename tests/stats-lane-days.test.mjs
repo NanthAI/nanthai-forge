@@ -326,7 +326,7 @@ test('the backfill keeps the planning counts a close wrote on gap days, whenever
       change('put-1', '2026-11-08T11:00:00.000Z'),
       change('comment-1', '2026-11-08T12:00:00.000Z'),
     ],
-    projectWorkEvents: [
+    projectHostedRecordBodies: [
       work('put-1', { action: 'put-planning-item', itemId: 'item-1', status: 'closed', expectedVersion: 2 }),
       work('comment-1', {
         action: 'comment-planning-item',

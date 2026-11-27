@@ -359,8 +359,6 @@ test('archived Work events fill contiguous revision pages and retain exact repla
   const id = await h.ctx.db.insert('projectHostedRecordBodies', event);
   await h.ctx.db.patch(h.auth.projectId, {
     journalRevision: 1,
-    workStoreCutoverRevision: 0,
-    workStoreEventWindows: [{ revision: 0, storeFirst: true }],
   });
   const input = {
     projectId: h.auth.projectId,

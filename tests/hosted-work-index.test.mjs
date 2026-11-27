@@ -415,7 +415,7 @@ test('an explicit operator request rebuilds a prior projection format without ch
     first = await indexActions.ensure._handler(s.ctx, { rebuild: true, projectId: s.projectId });
   s.tables.projectWorkGenerations.get(first).format = 3;
   const before = structuredClone(s.tables.hostedProjects.get(s.projectId)),
-    events = [...s.tables.projectWorkEvents];
+    events = [...s.tables.projectHostedRecordBodies];
   assert.equal(await index.workspace._handler(s.ctx, { projectId: s.projectId }), null);
   const reads = s.reads();
   await assert.rejects(
@@ -431,7 +431,7 @@ test('an explicit operator request rebuilds a prior projection format without ch
   assert.equal(after.work.revision, before.work.revision);
   assert.equal(after.work.backupId, before.work.backupId);
   assert.equal(after.revision, before.revision);
-  assert.deepEqual([...s.tables.projectWorkEvents], events);
+  assert.deepEqual([...s.tables.projectHostedRecordBodies], events);
   await store.retire._handler(s.ctx, { generationId: first });
   assert.ok(!s.tables.projectWorkGenerations.has(first));
   await store.retire._handler(s.ctx, { generationId: second });
@@ -655,7 +655,9 @@ test('generation retirement drains return pages and interrupted alias rows while
       value: '{}',
     });
   }
-  const kept = ['projectBackups', 'projectWorkEvents', 'projectObjects'].map(name => [...s.tables[name]]);
+  const kept = ['projectBackups', 'projectHostedRecordBodies', 'projectObjects'].map(name => [
+    ...s.tables[name],
+  ]);
   const currentRows = [...s.tables.projectWorkRecords.values()].filter(row => row.generationId === current);
   for (let i = 0; i < 10 && s.tables.projectWorkGenerations.has(retired); i++)
     await store.retire._handler(s.ctx, { generationId: retired });
@@ -670,7 +672,7 @@ test('generation retirement drains return pages and interrupted alias rows while
   assert(s.tables.projectWorkGenerations.has(current));
   assert(s.tables.projectWorkGenerations.has(migration));
   assert.deepEqual(
-    ['projectBackups', 'projectWorkEvents', 'projectObjects'].map(name => [...s.tables[name]]),
+    ['projectBackups', 'projectHostedRecordBodies', 'projectObjects'].map(name => [...s.tables[name]]),
     kept,
   );
   await store.retire._handler(s.ctx, { generationId: retired });

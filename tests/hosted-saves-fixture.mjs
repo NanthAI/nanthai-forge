@@ -73,11 +73,10 @@ export async function saveFixture(originalText = 'original', originalPath = 'a.t
         );
         assert(controllerMetadataFits(c, 512 * 1024, 512 * 1024), `${name}: metadata only`);
         assert(
-          !c.touched.some(table =>
-            ['projectBackups', 'projectWorkRecords', 'projectWorkEvents', 'projectWorkGenerations'].includes(
-              table,
+          c.workEventReads === 0 &&
+            !c.touched.some(table =>
+              ['projectBackups', 'projectWorkRecords', 'projectWorkGenerations'].includes(table),
             ),
-          ),
           `${name}: no Work/history hydration`,
         );
         assert(

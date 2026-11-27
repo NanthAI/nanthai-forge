@@ -4,6 +4,7 @@
 // lists the Item's base rows from the Work index, the base scrub (src/work-base-scrub.ts itemScrub) rewrites every
 // base record of the Item and refuses one the list missed, and the replaced objects are tombstoned, except an
 // object another backup's whole Work still names (the reference check).
+import { workEventRows } from './work-event-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -287,11 +288,11 @@ test('review finding 5: an Item with more comments than one purge removes is ref
     const id = `imported-${n}`;
     table.set(id, { ...sample, _id: id, key: randomUUID(), position: sample.position + n + 1 });
   }
-  const before = s.tables.projectWorkEvents.size;
+  const before = workEventRows(s.tables).length;
   await assert.rejects(
     purge(s, itemId, randomUUID()),
     error => code(error) === 'BAD_ARGUMENT' && /more than 2000 comments/.test(error.message),
   );
-  assert.equal(s.tables.projectWorkEvents.size, before, 'no purge row');
+  assert.equal(workEventRows(s.tables).length, before, 'no purge row');
   assert.equal(project.itemPurges?.length ?? 0, 0, 'no progress entry');
 });

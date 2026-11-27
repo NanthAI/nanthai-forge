@@ -65,15 +65,15 @@ export async function checksFixture(
         );
         assert(controllerMetadataFits(c, 256 * 1024, 128 * 1024), `${name}: bounded metadata`);
         assert(
-          !c.touched.some(table =>
-            [
-              'projectWorkRecords',
-              'projectBackups',
-              'projectWorkGenerations',
-              'projectWorkEvents',
-              'projectHostedChannels',
-            ].includes(table),
-          ),
+          c.workEventReads === 0 &&
+            !c.touched.some(table =>
+              [
+                'projectWorkRecords',
+                'projectBackups',
+                'projectWorkGenerations',
+                'projectHostedChannels',
+              ].includes(table),
+            ),
           `${name}: no Work/history reads`,
         );
         if (name === 'checkStatus' || name === 'checkEvidence' || name === 'checkComplete')

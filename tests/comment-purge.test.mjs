@@ -9,7 +9,7 @@ import { workEventRows } from './work-event-fixture.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
-import { setup, actions, beginRetainedWork } from './hosted-planning-fixture.mjs';
+import { setup, actions } from './hosted-planning-fixture.mjs';
 import { meterWorkIO } from './hosted-read-set.mjs';
 import { digest } from '../dist/hash.js';
 import { dispatchHostedWork } from '../dist/hosted-work-client.js';
@@ -52,7 +52,7 @@ async function commented(t, { records = false, primary = false, decision = false
   if (records || primary)
     s.tables.hostedProjects.get(s.projectId).sourceAuthority = { mode: 'server', epoch: 1 };
   // Planning as a primary store writer: its commands' rows live in the store's record bodies, not the event table.
-  if (primary) beginRetainedWork(s);
+
   const item = s.item({ title: 'Kept title', body: 'Kept body' });
   await s.send(item);
   const comment = (text, extra = {}) => ({
@@ -207,14 +207,14 @@ test('a comment purge is idempotent by operation id, changes nothing on retry, a
     s.scheduled.some(task => getFunctionName(task.fn) === 'artifactStorage:deleteBytes'),
     'its R2 bytes are queued for cleanup',
   );
-  const snapshot = JSON.stringify([...s.tables.projectWorkEvents.values()]);
+  const snapshot = JSON.stringify(workEventRows(s.tables));
   const revision = s.tables.hostedProjects.get(s.projectId).planningPurgeRevision;
   assert.equal(
     await purge(s, itemId, reported.operationId, operationId),
     1,
     'a retry reports the same result',
   );
-  assert.equal(JSON.stringify([...s.tables.projectWorkEvents.values()]), snapshot, 'and appends nothing');
+  assert.equal(JSON.stringify(workEventRows(s.tables)), snapshot, 'and appends nothing');
   assert.equal(s.tables.hostedProjects.get(s.projectId).planningPurgeRevision, revision);
   assert.equal(
     await purge(s, itemId, reported.operationId),
@@ -287,10 +287,10 @@ for (const mode of ['journal', 'records', 'primary-writer'])
       );
     };
     await check('full load');
-    const events = s.tables.projectWorkEvents.size,
+    const events = workEventRows(s.tables).length,
       bodies = s.tables.projectHostedRecordBodies?.size;
     assert.equal(await purge(s, itemId, reported.operationId, operationId), 1, 'a retry answers the same');
-    assert.equal(s.tables.projectWorkEvents.size, events, 'and appends no Work row');
+    assert.equal(workEventRows(s.tables).length, events, 'and appends no Work row');
     assert.equal(s.tables.projectHostedRecordBodies?.size, bodies, 'and stores no record body');
     const project = s.tables.hostedProjects.get(s.projectId);
     s.tables.projectWorkGenerations.get(project.work.generationId).format = 3;
@@ -441,10 +441,10 @@ test('the abuse review purges a reported comment: one audit row, the report purg
     deleted: 1,
     done: true,
   });
-  const events = s.tables.projectWorkEvents.size;
+  const events = workEventRows(s.tables).length;
   assert.deepEqual(await reports.review._handler(s.ctx, review), { reportId, status: 'purged', removed: 1 });
   assert.equal(s.tables.boardAudit.size, 1, 'a retried review writes no second audit row');
-  assert.equal(s.tables.projectWorkEvents.size, events, 'and appends no Work row');
+  assert.equal(workEventRows(s.tables).length, events, 'and appends no Work row');
   // A later review of the same report does not lose the first one's receipt.
   const dismiss = { reportId, action: 'dismiss', reason: 'Handled', operationId: randomUUID() };
   assert.equal((await reports.review._handler(s.ctx, dismiss)).status, 'dismissed');

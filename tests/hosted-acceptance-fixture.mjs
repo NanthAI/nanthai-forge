@@ -43,14 +43,10 @@ export async function acceptanceFixture(source = null) {
           `${name}: bounded metadata ${JSON.stringify({ readBytes: c.readBytes, writeBytes: c.writeBytes, documents: c.documents, writes: c.writes })}`,
         );
         assert(
-          !c.touched.some(t =>
-            [
-              'projectWorkRecords',
-              'projectBackups',
-              'projectWorkEvents',
-              'projectHostedCheckShards',
-            ].includes(t),
-          ),
+          c.workEventReads === 0 &&
+            !c.touched.some(t =>
+              ['projectWorkRecords', 'projectBackups', 'projectHostedCheckShards'].includes(t),
+            ),
         );
         if (name !== 'acceptanceComplete')
           assert(

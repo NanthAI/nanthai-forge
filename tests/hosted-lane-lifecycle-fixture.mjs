@@ -33,17 +33,17 @@ export async function lifecycleFixture(originalPath = 'a.txt') {
         assert(c.ranges <= 500 && c.documents <= 500, `${name}: bounded reads`);
         assert(controllerMetadataFits(c, 1024 * 1024, 512 * 1024), `${name}: bounded metadata`);
         assert(
-          !c.touched.some(t =>
-            [
-              'projectBackups',
-              'projectWorkRecords',
-              'projectWorkEvents',
-              'projectWorkGenerations',
-              'projectHostedChannels',
-              'projectHostedCheckRuns',
-              'projectObjects',
-            ].includes(t),
-          ),
+          c.workEventReads === 0 &&
+            !c.touched.some(t =>
+              [
+                'projectBackups',
+                'projectWorkRecords',
+                'projectWorkGenerations',
+                'projectHostedChannels',
+                'projectHostedCheckRuns',
+                'projectObjects',
+              ].includes(t),
+            ),
           `${name}: no source/check/main/history hydration`,
         );
         const max = (maxima[name] ??= { ranges: 0, documents: 0, readBytes: 0, writes: 0, writeBytes: 0 });

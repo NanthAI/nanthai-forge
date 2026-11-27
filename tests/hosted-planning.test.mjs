@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { digest } from '../dist/hash.js';
-import { setup, actions, work, beginRetainedWork } from './hosted-planning-fixture.mjs';
+import { setup, actions, work } from './hosted-planning-fixture.mjs';
 import { readHosted } from './hosted-read.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { meterReads } from './hosted-read-set.mjs';
@@ -398,7 +398,6 @@ test('frozen Work writers retain replay, export, rebuild and note projections wi
   const commands = await import(moduleUrl('../convex/projectWorkCommand.ts'));
   const index = await import(moduleUrl('../convex/projectWorkIndex.ts'));
   const { hostedBriefRecords } = await import(moduleUrl('../convex/projectBriefingContext.ts'));
-  const retained = await import(moduleUrl('../convex/projectWorkEventStore.ts'));
   const { ensure } = await import(moduleUrl('../convex/projectWorkIndexActions.ts'));
   const s = await setup(t);
   const project = s.tables.hostedProjects.get(s.projectId);
@@ -415,8 +414,7 @@ test('frozen Work writers retain replay, export, rebuild and note projections wi
   await send(put);
   await send({ action: 'intent', outcome: 'Retained replay', constraints: '', base }, intentId);
   await send({ action: 'note', intentId, text: 'Before freeze', kind: 'comment' });
-  beginRetainedWork(s);
-  const journalSize = s.tables.projectWorkEvents.size;
+
   const beforeWindow = new Set(workEventRows(s.tables).map(row => row._id));
   const note = { action: 'note', intentId, text: 'After freeze', kind: 'decision' };
   const noteId = randomUUID();
@@ -436,7 +434,6 @@ test('frozen Work writers retain replay, export, rebuild and note projections wi
     text: 'Retained comment',
     authorLabel: 'Owner',
   });
-  assert.equal(s.tables.projectWorkEvents.size, journalSize);
   const events = workEventRows(s.tables).filter(row => !beforeWindow.has(row._id));
   assert.equal(events.length, 5);
   assert.ok(
@@ -471,47 +468,15 @@ test('frozen Work writers retain replay, export, rebuild and note projections wi
   const beforeBrief = await brief();
   assert.equal(beforeBrief.records.intents[0].notes.length, 2);
   const beforeExport = await actions.exportPlanning._handler(s.ctx, { projectId: s.projectId });
-  // Compare identical retained commands through both physical layouts, with the same project flags.
-  const meter = meterReads(s.ctx);
-  const canonicalCost = await meter.cost(pages);
-  const canonicalBriefCost = await meter.cost(brief);
-  const canonicalDetailCost = await meter.cost(detail);
-  for (const event of events) {
-    const { _id, _creationTime, ...value } = retained.eventDocument(event);
-    s.tables.projectWorkEvents.set(_id, { ...value, _id, _creationTime });
-    s.tables.projectHostedRecordBodies.delete(_id);
-  }
-  const journalCost = await meter.cost(pages);
-  const journalBriefCost = await meter.cost(brief);
-  const journalDetailCost = await meter.cost(detail);
-  assert.deepEqual(canonicalBriefCost, journalBriefCost);
-  assert.deepEqual(canonicalDetailCost, journalDetailCost);
-  assert.deepEqual(await brief(), beforeBrief);
-  meter.restore();
-  assert.ok(
-    canonicalCost.documents <= journalCost.documents && canonicalCost.bytes <= journalCost.bytes,
-    JSON.stringify({ canonicalCost, journalCost }),
-  );
-  assert.deepEqual(await pages(), mixed);
-  assert.deepEqual((await s.read()).data, expected.data);
-  assert.deepEqual(await detail(), beforeDetail);
-  assert.equal(await actions.exportPlanning._handler(s.ctx, { projectId: s.projectId }), beforeExport);
-  for (const event of events) {
-    s.tables.projectWorkEvents.delete(event._id);
-    s.tables.projectHostedRecordBodies.set(event._id, event);
-  }
   await ensure._handler(s.ctx, { projectId: s.projectId, rebuild: true });
   assert.deepEqual((await s.read()).data, expected.data, 'index rebuild replays retained canonical events');
+  assert.equal(await actions.exportPlanning._handler(s.ctx, { projectId: s.projectId }), beforeExport);
+  assert.deepEqual(await brief(), beforeBrief);
   const rebuilt = await detail();
   assert.equal(JSON.parse(rebuilt.value).noteCount, 2);
   assert.equal(rebuilt.editable, beforeDetail.editable);
   assert.equal(rebuilt.intentPin, beforeDetail.intentPin);
   await send({ action: 'intent-status', intentId, status: 'completed' });
-  assert.equal(
-    s.tables.projectWorkEvents.size,
-    journalSize,
-    'a no-op status retains its primary Intent version too',
-  );
   assert.equal((await s.read()).data.intents.find(i => i.id === intentId).status, 'completed');
   // A damaged retained row never silently replays different source.
   const damaged = events[0],
@@ -519,18 +484,6 @@ test('frozen Work writers retain replay, export, rebuild and note projections wi
   damaged.command = JSON.stringify({ ...note, text: 'Damaged retained command' });
   await assert.rejects(pages(), e => e.data?.code === 'SOURCE_UNAVAILABLE');
   damaged.command = original;
-  console.log(
-    JSON.stringify({
-      frozenWorkReplay: {
-        canonicalCost,
-        journalCost,
-        canonicalBriefCost,
-        journalBriefCost,
-        canonicalDetailCost,
-        journalDetailCost,
-      },
-    }),
-  );
 });
 
 test('mixed retained history pages large planning commands once across historical writer epochs', async t => {
@@ -550,8 +503,7 @@ test('mixed retained history pages large planning commands once across historica
     { action: 'intent', outcome: 'Large history replay', constraints: '', base: initial.sourceHead },
     intentId,
   );
-  // Recreate historical writer intervals saved by releases before the F2 cutover.
-  beginRetainedWork(s, false);
+
   const big = s.item({ body: 'Original large body\n'.repeat(18000) });
   await send(big);
   await send({ action: 'note', intentId, text: 'Mixed legacy planning', kind: 'comment' });
@@ -563,7 +515,7 @@ test('mixed retained history pages large planning commands once across historica
     text: 'Large legacy comment\n'.repeat(2800),
     authorLabel: 'Owner',
   });
-  beginRetainedWork(s);
+
   await send({ ...big, operationId: randomUUID(), expectedVersion: 1, title: 'Large retained update' });
   await send({ action: 'intent-status', intentId, status: 'completed' });
   await send({
@@ -573,7 +525,7 @@ test('mixed retained history pages large planning commands once across historica
     text: 'Large retained comment\n'.repeat(2800),
     authorLabel: 'Owner',
   });
-  beginRetainedWork(s, false);
+
   await send({ ...big, operationId: randomUUID(), expectedVersion: 2, title: 'Legacy after rollback' });
   await send({ action: 'note', intentId, text: 'Retained after rollback', kind: 'comment' });
   const expected = await s.read();
@@ -582,7 +534,7 @@ test('mixed retained history pages large planning commands once across historica
   const query = s.ctx.db.query;
   s.ctx.db.query = table => {
     const result = query(table);
-    if (['projectWorkEvents', 'projectHostedRecordBodies'].includes(table))
+    if (table === 'projectHostedRecordBodies')
       result.paginate = () => assert.fail('mixed retained history cannot use Convex paginate across epochs');
     return result;
   };

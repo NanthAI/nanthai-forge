@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { setup, actions, work, beginRetainedWork } from './hosted-planning-fixture.mjs';
+import { setup, actions, work } from './hosted-planning-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { trackReadSets } from './hosted-read-set.mjs';
 import { speedBudgets } from '../dist/speed-budgets.js';
@@ -201,8 +201,7 @@ test('flip 5 re-run meter: Work queries one tab re-runs per planning write', asy
   // S4: with the store reader on, the Issue list and detail read record heads; the dual write adds no
   // re-run (an Issue head, a comment head and an Intent version sit in separate kinds).
   assert.deepEqual(await meter({ expectedVersion: 2, status: 'open' }), expected);
-  beginRetainedWork(s);
-  s.tables.hostedProjects.get(s.projectId).workStoreCutoverRevision = (await s.read()).data.revision;
+
   assert.deepEqual(
     await meter({ expectedVersion: 3, status: 'closed' }),
     expected,

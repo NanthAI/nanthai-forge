@@ -103,8 +103,6 @@ test('a browser-created project starts in the record store and keeps its first I
     projectId = await s.create(input()),
     project = s.tables.hostedProjects.get(projectId);
   assert.equal(project.work.revision, 0);
-  assert.equal(project.workStoreCutoverRevision, undefined);
-  assert.equal(project.workStoreEventWindows, undefined);
   const receipt = JSON.parse([...s.tables.projectSourceCutovers.values()][0].receipt);
   assert.ok(receipt.changes.includes('Work kept in the record store'), 'the birth receipt says what it set');
   const { command } = await import(moduleUrl('../convex/projectWorkCommand.ts'));
@@ -128,7 +126,6 @@ test('a browser-created project starts in the record store and keeps its first I
       }),
     }),
   );
-  assert.equal(s.tables.projectWorkEvents?.size ?? 0, 0, 'no journal event row');
   const retained = [...s.tables.projectHostedRecordBodies.values()].filter(row => row.operationId);
   assert.equal(retained.length, 1, 'the command retains its one primary version');
   const page = await records._handler(s.ctx, {
@@ -355,66 +352,60 @@ test('R2 bootstrap retries an incomplete reservation without any Convex byte sto
   assert.equal(r2.objects.size, 3);
 });
 
-// Item c0af6cfa F2 review 92eafa87 P1: in the record store an Intent's creation is a retained version, not a
-// `projectWorkEvents` row. A contributor's proposal on the first Intent of a browser-born project must still
-// register against the Intent's exact server-pinned base, with historical and retained events, and keep its denials.
-test('a contributor proposal registers exact base pins on either Work birth', async () => {
-  for (const records of [true, false]) {
-    const s = setup(),
-      projectId = await s.create(input()),
-      project = s.tables.hostedProjects.get(projectId);
-    if (!records)
-      for (const field of ['workStoreCutoverRevision', 'workStoreEventWindows']) delete project[field];
-    establishedAccount(s.tables, 'contributor', ['planning', 'start']);
-    s.tables.projectContributors.set('grant', {
-      _id: 'grant',
-      _creationTime: 1,
+// Item c0af6cfa F2 review 92eafa87 P1: a browser-born Intent keeps its exact server-pinned base
+// when a contributor registers a proposal against retained Work provenance.
+test('a contributor proposal registers the exact base pin on a browser-born project', async () => {
+  const s = setup(),
+    projectId = await s.create(input()),
+    project = s.tables.hostedProjects.get(projectId);
+  establishedAccount(s.tables, 'contributor', ['planning', 'start']);
+  s.tables.projectContributors.set('grant', {
+    _id: 'grant',
+    _creationTime: 1,
+    projectId,
+    contributor: 'contributor',
+  });
+  const main = await modules.projectHostedChannels.hostedStartMain(s.ctx, projectId);
+  const { command } = await import(moduleUrl('../convex/projectWorkCommand.ts'));
+  const proposals = await import(moduleUrl('../convex/projectProposals.ts'));
+  const intentId = randomUUID();
+  s.caller('contributor');
+  await s.transaction(() =>
+    command._handler(s.ctx, {
       projectId,
-      contributor: 'contributor',
-    });
-    const main = await modules.projectHostedChannels.hostedStartMain(s.ctx, projectId);
-    const { command } = await import(moduleUrl('../convex/projectWorkCommand.ts'));
-    const proposals = await import(moduleUrl('../convex/projectProposals.ts'));
-    const intentId = randomUUID();
-    s.caller('contributor');
-    await s.transaction(() =>
-      command._handler(s.ctx, {
+      operationId: intentId,
+      command: JSON.stringify({
+        action: 'intent',
+        outcome: 'First Intent',
+        constraints: '',
+        base: main.head,
+      }),
+    }),
+  );
+  const backup = s.tables.projectBackups.get(project.currentBackup);
+  const register = (patch = {}) =>
+    s.transaction(() =>
+      proposals.register._handler(s.ctx, {
         projectId,
-        operationId: intentId,
-        command: JSON.stringify({
-          action: 'intent',
-          outcome: 'First Intent',
-          constraints: '',
-          base: main.head,
-        }),
+        operationId: randomUUID(),
+        intentId,
+        baseBackupId: backup._id,
+        baseArchiveSha256: backup.digest,
+        baseState: main.head,
+        head: 'c'.repeat(64),
+        viewId: 'view',
+        digest: 'd'.repeat(64),
+        size: 1,
+        preview: backup.preview,
+        transport: 'objects',
+        actor: 'contributor',
+        request: 'e'.repeat(64),
+        nonce: randomUUID(),
+        ...patch,
       }),
     );
-    assert.equal(s.tables.projectWorkEvents?.size ?? 0, 0);
-    const backup = s.tables.projectBackups.get(project.currentBackup);
-    const register = (patch = {}) =>
-      s.transaction(() =>
-        proposals.register._handler(s.ctx, {
-          projectId,
-          operationId: randomUUID(),
-          intentId,
-          baseBackupId: backup._id,
-          baseArchiveSha256: backup.digest,
-          baseState: main.head,
-          head: 'c'.repeat(64),
-          viewId: 'view',
-          digest: 'd'.repeat(64),
-          size: 1,
-          preview: backup.preview,
-          transport: 'objects',
-          actor: 'contributor',
-          request: 'e'.repeat(64),
-          nonce: randomUUID(),
-          ...patch,
-        }),
-      );
-    assert.ok(await register(), `registered with ${records ? 'record store' : 'journal'} provenance`);
-    await assert.rejects(register({ baseState: 'f'.repeat(64) }), code('SOURCE_UNAVAILABLE'));
-    s.tables.projectContributors.delete('grant');
-    await assert.rejects(register(), code('PROJECT_UNAVAILABLE'));
-  }
+  assert.ok(await register());
+  await assert.rejects(register({ baseState: 'f'.repeat(64) }), code('SOURCE_UNAVAILABLE'));
+  s.tables.projectContributors.delete('grant');
+  await assert.rejects(register(), code('PROJECT_UNAVAILABLE'));
 });

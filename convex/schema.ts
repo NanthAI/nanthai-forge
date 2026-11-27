@@ -191,7 +191,7 @@ export const hostedWorkFields = v.object({
   initialRevision: v.number(),
   revision: v.number(),
 });
-export const hostedWorkEventFields = {
+const hostedWorkEventFields = {
   automatic: v.optional(automaticAction),
   projectId: v.id('hostedProjects'),
   operationId: v.string(),
@@ -208,7 +208,7 @@ export const hostedWorkEventFields = {
   purged: v.optional(v.string()),
 };
 export const hostedWorkEventDocument = v.object({
-  _id: v.union(v.id('projectWorkEvents'), v.id('projectHostedRecordBodies')),
+  _id: v.id('projectHostedRecordBodies'),
   _creationTime: v.number(),
   ...hostedWorkEventFields,
 });
@@ -279,8 +279,6 @@ const projectFields = {
   ),
   planningArchiveEventRevision: v.optional(v.number()),
   journalRecordReceipts: v.optional(v.literal(true)),
-  workStoreCutoverRevision: v.optional(v.number()),
-  workStoreEventWindows: v.optional(v.array(v.object({ revision: v.number(), storeFirst: v.boolean() }))),
   /** Durable one-time Item Intent and Lane membership repair frontier; true is complete. */
   /** Roll-up's independent coverage proof for existing open-Lane tally rows. */
   planLaneMarkCoverage: v.optional(
@@ -823,9 +821,6 @@ export default defineSchema({
     revision: v.number(),
     metadata: v.optional(v.string()),
   }).index('by_project', ['projectId']),
-  projectWorkEvents: defineTable(hostedWorkEventFields)
-    .index('by_project_and_revision', ['projectId', 'revision'])
-    .index('by_project_and_operation', ['projectId', 'operationId']),
   projectRecoveryConnections: defineTable({
     projectId: v.id('hostedProjects'),
     operationId: v.string(),

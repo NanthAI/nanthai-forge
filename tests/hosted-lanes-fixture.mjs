@@ -104,6 +104,7 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
         readDocumentsByTable: {},
         readRangesByTable: {},
         readBytesByTable: {},
+        workEventReads: 0,
         duplicateReadDocumentsByTable: {},
         duplicateReadBytesByTable: {},
         writes: 0,
@@ -155,10 +156,17 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
           meter.liveLine[`${kind}WriteBytes`] += size;
         }
       };
-      const read = (table, select, hint) => {
+      const read = (table, select, hint, index) => {
         meter.touched.push(table);
         const current = view(table),
           rows = select(current);
+        if (
+          table === 'projectHostedRecordBodies' &&
+          (index === 'by_project_and_operation' ||
+            index === 'by_project_and_revision' ||
+            rows.some(row => row?.revision !== undefined))
+        )
+          meter.workEventReads++;
         for (const kind of ['mark', 'meta']) {
           const selected = rows.filter(row => row && lineKind(table, row) === kind);
           if (selected.length || (!rows.filter(Boolean).length && lineKind(table, null, hint) === kind)) {
@@ -364,10 +372,12 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
             let match,
               indexFields,
               kindHint,
+              indexName,
               descending = false;
-            const queryRead = select => read(table, select, kindHint);
+            const queryRead = select => read(table, select, kindHint, indexName);
             const q = {
               withIndex: (name, build) => {
+                indexName = name;
                 const index =
                   name === 'by_creation_time'
                     ? { fields: [] }

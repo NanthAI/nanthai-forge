@@ -95,7 +95,7 @@ function world() {
     ['o3', 'copper-moth', 'From copper-moth', 3],
   ]) {
     table(s, 'projectCoordinationEvents').set(op, change(op, hour));
-    table(s, 'projectWorkEvents').set(op, event(op, agent, text));
+    table(s, 'projectHostedRecordBodies').set(op, event(op, agent, text));
   }
   return s;
 }

@@ -338,7 +338,6 @@ test('doubled dogfood history retains its index through main moves and increment
   }
   assert.equal(s.tables.projectWorkGenerations.size, 1);
   assert.equal(s.tables.hostedProjects.get(s.projectId).work.generationId, generationId);
-  assert.equal(s.tables.projectWorkEvents.size, 0);
   assert.equal(workEventRows(s.tables).length, 201);
   assert.equal(metrics.historyBytes, 0);
   assert(maxResponseBytes < 64 * 1024);

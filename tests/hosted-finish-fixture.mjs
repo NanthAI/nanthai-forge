@@ -286,15 +286,15 @@ export async function finishFixture(
           `${name}: metadata bytes ${JSON.stringify({ documents: count.documents, writes: count.writes, readBytes: count.readBytes, writeBytes: count.writeBytes })}`,
         );
         assert(
-          !count.touched.some(k =>
-            [
-              'projectWorkRecords',
-              'projectWorkGenerations',
-              'projectWorkEvents',
-              'projectBackups',
-              'projectHostedCheckShards',
-            ].includes(k),
-          ),
+          count.workEventReads === 0 &&
+            !count.touched.some(k =>
+              [
+                'projectWorkRecords',
+                'projectWorkGenerations',
+                'projectBackups',
+                'projectHostedCheckShards',
+              ].includes(k),
+            ),
           `${name}: no Work/history/shard hydration`,
         );
         if (name === 'finishStep')

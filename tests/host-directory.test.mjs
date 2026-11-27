@@ -363,8 +363,6 @@ test('legacy native-owner and existing server projects retain their original aut
       epoch: server ? 1 : 0,
     });
     // The Work store is selected even when the source remains native-owner.
-    assert.equal(project.workStoreCutoverRevision, undefined);
-    assert.equal(project.workStoreEventWindows, undefined);
     if (server) assert.equal((await exchange.current()).head, JSON.parse(selection).head);
     else
       await assert.rejects(

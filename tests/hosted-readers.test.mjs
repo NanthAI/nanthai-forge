@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
+import { metadataRequest } from '../dist/work-metadata.js';
 import { setWorkRecord } from './hosted-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -75,12 +76,18 @@ function setup(t) {
     value: JSON.stringify({ id: 'intent', outcome: 'Visible Work' }),
   });
   // A former contributor's own Intent must not become editable through a reader grant.
-  s.tables.projectWorkEvents.set('intent-event', {
+  const command = { action: 'intent', outcome: 'Recorded Work', base: 'a'.repeat(64) };
+  s.tables.projectHostedRecordBodies.set('intent-event', {
     _id: 'intent-event',
     projectId: 'project',
     operationId: 'intent',
     actor: 'reader',
-    command: JSON.stringify({ action: 'intent', base: 'a'.repeat(64) }),
+    command: JSON.stringify(command),
+    value: '',
+    revision: 1,
+    request: metadataRequest(command),
+    at: '2026-11-26T12:00:00Z',
+    _creationTime: 1,
   });
   t.after(providers());
   const set = input =>

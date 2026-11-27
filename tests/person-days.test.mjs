@@ -230,7 +230,7 @@ function world() {
       comment('shared', 'Team comment', 10),
       comment('mine', 'Secret comment', 11),
     ],
-    projectWorkEvents: [
+    projectHostedRecordBodies: [
       command('pub', 'Public comment'),
       command('shared', 'Team comment'),
       command('mine', 'Secret comment'),
@@ -503,7 +503,7 @@ test('the close counts Items closed once each and comments per agent run, from t
       change('o11', 'comment-planning-item', 18),
       change('o12', 'put-planning-item', 19, { projectId: 'p2' }),
     ],
-    projectWorkEvents: [
+    projectHostedRecordBodies: [
       put('o1', { status: 'closed', expectedVersion: 3 }),
       // Reopened and closed again the same day: one Item closed.
       put('o2', { status: 'closed', expectedVersion: 5 }),
@@ -514,8 +514,6 @@ test('the close counts Items closed once each and comments per agent run, from t
       event('o7', { action: 'comment-planning-item', itemId: 'item-1', text: 'By hand' }),
       event('o8', { action: 'comment-planning-item', itemId: 'item-1', text: 'System' }),
       event('o10', { action: 'comment-planning-item', itemId: 'item-1', text: 'Yesterday' }),
-    ],
-    projectHostedRecordBodies: [
       // A retained body still holds its command; one the journal took holds none and is skipped.
       event('o6', {
         action: 'comment-planning-item',
@@ -576,7 +574,7 @@ test('a close past either cap marks the days it could not fully count, never und
   );
   const commands = fakeDb({
     projectCoordinationEvents: busy,
-    projectWorkEvents: busy.map((_, n) => event(n)),
+    projectHostedRecordBodies: busy.map((_, n) => event(n)),
   });
   const capped = await planningContributions({ db: commands.db }, 'p1', from, from + 86_400_000);
   assert.equal(capped.cut, from + PERSON_WORK_COMMANDS * 1000, 'the first change not counted');
@@ -690,7 +688,7 @@ test('LATER-2: an edit that re-sends the closed status of a closed Item is no cl
   });
   const { db } = fakeDb({
     projectCoordinationEvents: day.rows,
-    projectWorkEvents: day.events,
+    projectHostedRecordBodies: day.events,
     projectHostedRecords: [version('item-closed', 4, 'closed'), version('item-open', 2, 'open')],
   });
   const { contributions } = await planningContributions({ db }, 'p1', day.from, day.to);
@@ -730,7 +728,7 @@ test('LATER-2: on a project whose planning is only in the journal index, the ver
       },
     ],
     projectCoordinationEvents: day.rows,
-    projectWorkEvents: day.events,
+    projectHostedRecordBodies: day.events,
     projectWorkDataRecords: [
       journal('x-v3', 'item-x', 5, { version: 3, status: 'closed' }),
       journal('y-v1', 'item-y', 6, { version: 1, status: 'open' }),
@@ -753,7 +751,7 @@ test('LATER-4: the close stops reading commands at its byte cap and marks the re
   const day = planningDay(
     Array.from({ length: 6 }, () => ({ action: 'comment-planning-item', itemId: 'item-1', text })),
   );
-  const { db } = fakeDb({ projectCoordinationEvents: day.rows, projectWorkEvents: day.events });
+  const { db } = fakeDb({ projectCoordinationEvents: day.rows, projectHostedRecordBodies: day.events });
   const { contributions, cut } = await planningContributions({ db }, 'p1', day.from, day.to);
   assert.deepEqual(
     contributions.map(c => c.kind),

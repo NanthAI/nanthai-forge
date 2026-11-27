@@ -21,7 +21,6 @@ import {
   baseRevision,
   DISPLAY_BLOCK,
   displaySnapshots,
-  purgeJournalTables,
   purgeTarget,
   selectRows,
 } from './projectPlanningPurgeSelect';
@@ -53,7 +52,8 @@ const LATE_ROW_BLOCK =
   'A note reached this Item’s Intent after its purge began; its words are not on the purge’s list, so the purge stays open (not done). Nothing more was purged.';
 /** Finished purges kept on the project (newest first); unfinished ones always stay. */
 const KEPT_FINISHED = 20;
-const throughRevisions = v.object({ projectWorkEvents: v.number(), projectHostedRecordBodies: v.number() });
+// Keep the persisted continuation envelope. Only the canonical body's frontier is used.
+const throughRevisions = v.record(v.string(), v.number());
 const selection = v.object({
   ids: v.array(v.string()),
   created: v.union(v.number(), v.null()),
@@ -164,18 +164,15 @@ export const begin = internalMutation({
       'WORK_STALE',
       'The Item changed while its rows were selected. Select again.',
     );
-    for (const table of purgeJournalTables) {
-      let after = input.selection.through[table];
-      for (;;) {
-        const tail = await selectRows(ctx, { projectId: input.projectId, table, ids: target.ids, after });
-        invariant(
-          !tail.rows.length,
-          'WORK_STALE',
-          'The Item changed while its rows were selected. Select again.',
-        );
-        if (tail.done) break;
-        after = tail.after;
-      }
+    for (let after = input.selection.through.projectHostedRecordBodies ?? -1; ;) {
+      const tail = await selectRows(ctx, { projectId: input.projectId, ids: target.ids, after });
+      invariant(
+        !tail.rows.length,
+        'WORK_STALE',
+        'The Item changed while its rows were selected. Select again.',
+      );
+      if (tail.done) break;
+      after = tail.after;
     }
     invariant(
       !(await pendingIntentArchives(ctx, input.projectId, target.historyId)).length,
@@ -327,13 +324,12 @@ export const finish = internalMutation({
     // A note on the Item's Intent is still accepted after the first step (refusing it would cost every note write a
     // read). Its row is not on the purge's list, so no reader would accept it purged: the purge never finishes over it.
     const since = await purgeRevision(ctx, input.projectId, input.operationId);
-    for (const table of purgeJournalTables)
-      for (let after = since; ;) {
-        const tail = await selectRows(ctx, { projectId: input.projectId, table, ids: purge.ids, after });
-        invariant(!tail.rows.length, 'WORK_STALE', LATE_ROW_BLOCK);
-        if (tail.done) break;
-        after = tail.after;
-      }
+    for (let after = since; ;) {
+      const tail = await selectRows(ctx, { projectId: input.projectId, ids: purge.ids, after });
+      invariant(!tail.rows.length, 'WORK_STALE', LATE_ROW_BLOCK);
+      if (tail.done) break;
+      after = tail.after;
+    }
     const { page: landingNotes } = await itemNotePage(
       ctx,
       input.projectId,
@@ -448,31 +444,29 @@ export const run = internalAction({
           ? input.hot
           : {
               ids: preflight.ids,
-              table: 0,
-              through: { projectWorkEvents: -1, projectHostedRecordBodies: -1 },
+              table: 1,
+              through: { projectHostedRecordBodies: -1 },
               selected: { rows: [], decisions: [], created: null, creates: false } as ArchiveSelection,
             };
-      while (hot.table < purgeJournalTables.length) {
+      while (hot.table < 2) {
         if (Date.now() >= deadline) {
           await resume(expectedVersion, { hot });
           return null;
         }
-        const table = purgeJournalTables[hot.table]!;
         const page = await ctx.runQuery(internal.projectPlanningPurgeSelect.selectPage, {
           projectId: input.projectId,
-          table,
           ids: preflight.ids,
-          after: hot.through[table],
+          after: hot.through.projectHostedRecordBodies ?? -1,
         });
         // A relocation between the two table scans may return the same operation twice.
         hot.selected = mergeSelection(hot.selected, page);
-        hot.through[table] = page.after;
+        hot.through.projectHostedRecordBodies = page.after;
         invariant(
           hot.selected.rows.length <= PURGE_ROW_LIMIT,
           'BAD_ARGUMENT',
           `This Item has more than ${PURGE_ROW_LIMIT} Work rows; a purge removes at most ${PURGE_ROW_LIMIT}.`,
         );
-        if (page.done) hot.table++;
+        if (page.done) hot.table = 2;
       }
       // A base Item's rows that only the stored base holds (line 2e), selected once begin says it is in the base.
       let base: ArchiveSelection['rows'] | undefined;

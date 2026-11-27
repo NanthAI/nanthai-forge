@@ -145,7 +145,7 @@ export async function based(
   const project = s.tables.hostedProjects.get(s.projectId);
   project.work.initialRevision = data.revision;
   if (!rows)
-    for (const table of ['projectWorkEvents', 'projectHostedRecordBodies'])
+    for (const table of ['projectHostedRecordBodies'])
       for (const [id, row] of s.tables[table] ?? [])
         if (row.projectId === s.projectId && row.revision <= data.revision) s.tables[table].delete(id);
   await modules.projectWorkIndexActions.ensure._handler(s.ctx, { projectId: s.projectId, rebuild: true });

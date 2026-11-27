@@ -162,7 +162,7 @@ test('native hosted summaries track actual ancestry when main moves without read
   s.ctx.storage.getUrl = s.ctx.storage.get = async () => assert.fail('summary reads never fetch source');
   const query = s.ctx.db.query;
   s.ctx.db.query = table => {
-    assert.notEqual(table, 'projectWorkEvents');
+    assert.notEqual(table, 'projectHostedRecordBodies');
     return query(table);
   };
   summaries = (await readPage(s, 'views')).page.map(row => JSON.parse(row.value));

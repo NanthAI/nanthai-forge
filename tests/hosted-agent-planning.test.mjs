@@ -3595,10 +3595,7 @@ test('planning detail, list and search distinguish the latest close from later e
   const first = Date.parse('2026-11-09T12:00:00Z');
   t.mock.timers.enable({ apis: ['Date'], now: first });
   const s = await setup(t);
-  await s.ctx.db.patch(s.projectId, {
-    workStoreCutoverRevision: 0,
-    workStoreEventWindows: [{ revision: 0, storeFirst: true }],
-  });
+  await s.ctx.db.patch(s.projectId, {});
   const p = port(s, new Map(), [
     ...hostedContractFeatures,
     planningInitiativeCountsFeature,

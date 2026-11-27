@@ -551,7 +551,6 @@ test('make-editable converts an existing native-owner import once, owner only, u
   const legacy = s.tables.hostedProjects.get(projectId);
   delete legacy.sourceAuthority;
   delete legacy.sourceCutover;
-  for (const field of ['workStoreCutoverRevision', 'workStoreEventWindows']) delete legacy[field];
   const caps = JSON.parse(await agent.capabilities._handler(s.ctx, { projectId }));
   assert.deepEqual(caps.actions, ['capabilities']);
   const operationId = randomUUID();
@@ -567,7 +566,6 @@ test('make-editable converts an existing native-owner import once, owner only, u
   );
   assert.deepEqual(s.tables.hostedProjects.get(projectId).sourceAuthority, { mode: 'server', epoch: 1 });
   // Item c0af6cfa F2: the unchanged import has no Work commands, so it is born in the record store too.
-  assert.equal(s.tables.hostedProjects.get(projectId).workStoreEventWindows, undefined);
   await assert.rejects(
     birth.makeEditable._handler(s.ctx, { projectId, operationId: randomUUID() }),
     /already/,

@@ -538,7 +538,7 @@ test('operational expiry keeps active checks and all verdict/source/receipt evid
   const immutableTables = [
     'projectHostedAcceptances',
     'projectHostedRecords',
-    'projectWorkEvents',
+    'projectHostedRecordBodies',
     'projectObjects',
   ];
   const immutable = immutableTables.map(name => [...s.tables[name]]);
@@ -727,7 +727,7 @@ test('legacy catch-up resumes exact steps, pauses for landings, and stops after 
   const immutableNames = [
     'projectHostedRecords',
     'projectHostedAcceptances',
-    'projectWorkEvents',
+    'projectHostedRecordBodies',
     'projectObjects',
   ];
   const immutable = immutableNames.map(n => [...s.tables[n]]);

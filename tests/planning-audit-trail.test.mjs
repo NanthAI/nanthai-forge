@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
-import { setup, beginRetainedWork } from './hosted-planning-fixture.mjs';
+import { setup } from './hosted-planning-fixture.mjs';
 import { installPlanningSearch } from './planning-search-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { executeHostedPlanning, markPlanningStarted } from '../dist/hosted-agent-planning.js';
@@ -235,7 +235,7 @@ test('Item audit timeline records who, when and what changed across versions, co
   const baseTime = Date.parse('2026-11-18T10:00:00.000Z');
   t.mock.timers.enable({ apis: ['Date'], now: baseTime });
   const s = await setup(t);
-  beginRetainedWork(s);
+
   addDeviceAndAccounts(s);
 
   const as = identity => {
@@ -485,7 +485,7 @@ test('Item audit timeline records who, when and what changed across versions, co
 test('backlog window view lists closed, reopened and changed Items per Initiative with shelf-restore exclusion and paging', async t => {
   t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-11-10T10:00:00.000Z') });
   const s = await setup(t);
-  beginRetainedWork(s);
+
   addDeviceAndAccounts(s);
   s.ctx.auth.getUserIdentity = async () => ({ subject: 'owner', forgeCredential: 'cred-1' });
   const p = makePort(s, {
@@ -610,7 +610,7 @@ test('backlog window view lists closed, reopened and changed Items per Initiativ
 test('window read lists each Item once across scan pages, keeps its older close and ignores versions after `to`', async t => {
   t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-11-10T10:00:00.000Z') });
   const s = await setup(t);
-  beginRetainedWork(s);
+
   addDeviceAndAccounts(s);
   s.ctx.auth.getUserIdentity = async () => ({ subject: 'owner' });
   const p = makePort(s);
@@ -662,7 +662,7 @@ test('window read lists each Item once across scan pages, keeps its older close 
 test('an Item that moves out of an Initiative and back is listed once on an initiative-filtered window read (friction 0f1264b0)', async t => {
   t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-11-10T10:00:00.000Z') });
   const s = await setup(t);
-  beginRetainedWork(s);
+
   addDeviceAndAccounts(s);
   s.ctx.auth.getUserIdentity = async () => ({ subject: 'owner' });
   const p = makePort(s);
@@ -704,7 +704,7 @@ test('an Item that moves out of an Initiative and back is listed once on an init
 test('window rows list the Decisions lines dated in the window across Items, without extra reads', async t => {
   t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-11-10T10:00:00.000Z') });
   const s = await setup(t);
-  beginRetainedWork(s);
+
   addDeviceAndAccounts(s);
   s.ctx.auth.getUserIdentity = async () => ({ subject: 'owner' });
   const p = makePort(s);
@@ -810,7 +810,7 @@ test('decisionsInWindow keeps UTC-day lines, the newest max and ignores other se
 test('window read names where imported records begin and flags Items recorded after they changed', async t => {
   t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-11-01T10:00:00.000Z') });
   const s = await setup(t);
-  beginRetainedWork(s);
+
   addDeviceAndAccounts(s);
   s.ctx.auth.getUserIdentity = async () => ({ subject: 'owner' });
   const p = makePort(s);
@@ -855,7 +855,7 @@ test('window read names where imported records begin and flags Items recorded af
 test('Item timeline pages every version past lifecycle-plan rows that share its key and version', async t => {
   t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-11-18T10:00:00.000Z') });
   const s = await setup(t);
-  beginRetainedWork(s);
+
   addDeviceAndAccounts(s);
   s.ctx.auth.getUserIdentity = async () => ({ subject: 'owner' });
   const p = makePort(s);
@@ -882,7 +882,7 @@ test('Item timeline pages every version past lifecycle-plan rows that share its 
 
 test('serverPutWriter enforces credential-based agent attribution, pre-deploy retry safety and bounded byte delta', async t => {
   const s = await setup(t);
-  beginRetainedWork(s);
+
   addDeviceAndAccounts(s);
   const as = identity => {
     s.ctx.auth.getUserIdentity = async () => identity;
@@ -1037,7 +1037,7 @@ test('audit reads enforce membership and public-identity rules across signed-out
   const s = await setup(t);
   const project = s.tables.hostedProjects.get(s.projectId);
   project.visibility = 'public';
-  beginRetainedWork(s);
+
   addDeviceAndAccounts(s);
   const as = identity => {
     s.ctx.auth.getUserIdentity = async () => identity;
@@ -1136,7 +1136,7 @@ test('Item audit reads without a mode marker and returns durable purge tombstone
   );
 
   // Purged Item on records project: returns tombstone without throwing PLANNING_ITEM_PURGED.
-  beginRetainedWork(s);
+
   const purgedId = (await runPut(p, { kind: 'issue', title: 'Will purge' })).itemId;
   await runPut(p, { planningItemId: purgedId, expectedVersion: 1, status: 'deleted' });
   const purgeOp = randomUUID();
@@ -1191,7 +1191,7 @@ test('Lead 2026-11-22: every agent-made Item change (tick, put, comment, decisio
   };
 
   const s = await setup(t);
-  beginRetainedWork(s);
+
   addDeviceAndAccounts(s);
   s.ctx.auth.getUserIdentity = async () => ({ subject: 'owner', forgeCredential: 'cred-1' });
   installPlanningSearch(s);
@@ -1491,7 +1491,7 @@ test('Lead 2026-11-22: every agent-made Item change (tick, put, comment, decisio
 test('the Item audit pages landing notes by landing time: landings written late for old receipts stay in order across pages', async t => {
   t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-11-18T10:00:00.000Z') });
   const s = await setup(t);
-  beginRetainedWork(s);
+
   addDeviceAndAccounts(s);
   s.ctx.auth.getUserIdentity = async () => ({ subject: 'owner' });
   const port = makePort(s);

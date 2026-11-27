@@ -15,7 +15,7 @@ import { encodeArchiveBytes } from '../dist/landing-capsule-bytes.js';
 import { journalFragmentTexts } from '../dist/journal-fragments.js';
 import { journalSegmentText, journalTablePins } from '../dist/journal-segment.js';
 import { getFunctionName } from 'convex/server';
-import { setup, actions, beginRetainedWork } from './hosted-planning-fixture.mjs';
+import { setup, actions } from './hosted-planning-fixture.mjs';
 import { workRecordRows } from './hosted-fixture.mjs';
 import { meterWorkIO } from './hosted-read-set.mjs';
 import { moduleUrl } from './convex-module.mjs';
@@ -96,9 +96,8 @@ const secretRows = s =>
       ),
   );
 
-function historicalPurgeWork(s, recordWindow) {
+function useServerWork(s) {
   s.tables.hostedProjects.get(s.projectId).sourceAuthority = { mode: 'server', epoch: 1 };
-  if (recordWindow) beginRetainedWork(s, false);
 }
 
 /** An alias of the Intent in the selected index, as a folded Issue leaves one (src/work-intent-converter.ts). */
@@ -119,7 +118,7 @@ async function deletedItem(
   { records = false, intentBorn = true, large = false, useAlias = true, converted = true } = {},
 ) {
   const s = await setup(t);
-  if (records) historicalPurgeWork(s, false);
+  if (records) useServerWork(s);
   const initial = await s.read(),
     itemId = randomUUID();
   if (intentBorn)
@@ -196,7 +195,7 @@ async function deletedItem(
     await s.send(keep);
   } else {
     if (useAlias) alias = addAlias(s, itemId);
-    historicalPurgeWork(s, true);
+    useServerWork(s);
     await s.send(keep);
     // The alias lives in the index only (a real one comes from the base checkpoint, which a full read replays from),
     // so the last two writes pass their revision instead of reading the whole journal.
@@ -269,10 +268,9 @@ test('retained Issue versions refuse purged text only with a valid recorded purg
         error.recovery.itemId === itemId &&
         error.recovery.purgeOperationId === done.operationId,
     );
-  const recorded = [
-    ...s.tables.projectWorkEvents.values(),
-    ...s.tables.projectHostedRecordBodies.values(),
-  ].find(row => row.operationId === done.operationId && row.command);
+  const recorded = [...s.tables.projectHostedRecordBodies.values()].find(
+    row => row.operationId === done.operationId && row.command,
+  );
   assert.ok(recorded, 'the purge has a canonical command');
   const request = recorded.request;
   recorded.request = '0'.repeat(64);
@@ -350,11 +348,11 @@ test('a purge refuses an Item with more than 1000 Work rows and writes nothing',
       authorLabel: '',
       text: 'x',
     };
-    await s.ctx.db.insert('projectWorkEvents', {
+    await s.ctx.db.insert('projectHostedRecordBodies', {
+      value: '',
       projectId: s.projectId,
       operationId: command.operationId,
       request: metadataRequest(command),
-      previousRevision: revision,
       revision: ++revision,
       actor: 'owner',
       at: '2026-11-20T00:00:00.000Z',
@@ -455,7 +453,7 @@ test('the executor refuses an Item that is not Deleted', async t => {
   assert.ok(secretRows(s).length > 0);
 });
 
-test('purge cost budget: one redaction call per step page, one check query per step page, two selection pages', async t => {
+test('purge cost budget: one redaction call per step page, one check query per step page, one selection page', async t => {
   const { s, itemId } = await deletedItem(t);
   const run = executor(s);
   await run.run(itemId, randomUUID());
@@ -464,8 +462,8 @@ test('purge cost budget: one redaction call per step page, one check query per s
   // heads. Plus begin and finish.
   const pages = purgeSteps.length + 4;
   assert.equal(run.calls.mutation, pages + 2, 'redaction pages, begin and finish');
-  // status (twice), preflight, one selection page per journal table, one check page per step page, final status.
-  assert.equal(run.calls.query, 2 + 1 + 2 + pages + 1, 'selection, check and status reads');
+  // status (twice), preflight, one journal selection page, one check page per step page, final status.
+  assert.equal(run.calls.query, 2 + 1 + 1 + pages + 1, 'selection, check and status reads');
   assert.ok(workRecordRows(s.tables).length > 0);
 });
 
@@ -560,7 +558,7 @@ test('purge charges one check and redaction per additional attachment page', asy
       meter.restore();
       const pages = purgeSteps.length + 4 + Math.max(0, Math.ceil(count / 8) - 1);
       assert.equal(worker.calls.mutation, pages + 2);
-      assert.equal(worker.calls.query, pages + 6);
+      assert.equal(worker.calls.query, pages + 5);
       const scheduled = s.scheduled.filter(
         task => getFunctionName(task.fn) === 'artifactStorage:deleteBytes',
       );
@@ -635,7 +633,6 @@ test('a pre-upgrade terminal check checkpoint cannot finish over a live discussi
 
 test('records mode (work store primary): a purge of an Item with an alias-written comment leaves the words in no store', async t => {
   const { s, itemId, keep, alias } = await deletedItem(t, { records: true, intentBorn: false });
-  assert.ok(s.tables.projectHostedRecordBodies.size > 0);
   const stored = [...s.tables.projectHostedRecords.values()].filter(row => row.kind === 'comment');
   assert.ok(stored.length >= 3, 'the store holds the comments and the note');
   // Every Issue is also an Intent, and the store keeps that Intent's versions (the Item's Intent copy).
@@ -685,11 +682,7 @@ test('records mode (work store primary): a purge of an Item with an alias-writte
 });
 
 const journalRevision = s =>
-  Math.max(
-    ...[...s.tables.projectWorkEvents.values(), ...s.tables.projectHostedRecordBodies.values()].map(
-      row => row.revision ?? 0,
-    ),
-  );
+  Math.max(...[...s.tables.projectHostedRecordBodies.values()].map(row => row.revision ?? 0));
 /** The work store's versions of one Intent, oldest first. */
 const storeIntents = (s, key) =>
   [...s.tables.projectHostedRecords.values()]
@@ -1264,7 +1257,7 @@ async function backfillArchive(s, ctx, beforePage = () => {}) {
 async function purgeArchiveFixture(t, { history, indexed }) {
   const { s, itemId } = await deletedItem(t, { records: true, useAlias: false });
   const r2 = storage(t);
-  beginRetainedWork(s);
+
   const revision = journalRevision(s);
   for (let offset = 0; offset < 3; offset++)
     await s.send(
@@ -1989,7 +1982,6 @@ test('a lost fragment PUT and codec change leave no hidden bytes from a later-pu
 });
 
 async function archiveOneNote(s, r2, itemId) {
-  beginRetainedWork(s);
   await s.send(
     { action: 'note', kind: 'comment', intentId: itemId, text: `Archived ${SECRET}` },
     journalRevision(s),
@@ -2022,7 +2014,7 @@ test('a pending legacy publication adds its index entry and invalidates an index
   const pages = await backfillArchive(s, executor(s).ctx);
   assert.ok(pages.length >= 3, 'archive coverage crosses a bounded event page and its next phase');
   assert.ok(pages.every(page => page.segments <= 16));
-  beginRetainedWork(s);
+
   await s.send(
     { action: 'note', kind: 'comment', intentId: itemId, text: `Archived ${SECRET}` },
     journalRevision(s),
@@ -2169,7 +2161,7 @@ test('the tombstone retries an appended archive tail and lists a relocated comma
   const [first] = await fillArchivePage(s, r2, keep, 1);
   const operationId = randomUUID();
   let appended;
-  beginRetainedWork(s);
+
   await s.send(
     { action: 'note', kind: 'comment', intentId: itemId, text: `Archived ${SECRET}` },
     journalRevision(s),
