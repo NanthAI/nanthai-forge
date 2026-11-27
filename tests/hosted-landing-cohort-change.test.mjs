@@ -8,8 +8,7 @@ import { moduleUrl } from './convex-module.mjs';
 
 const landingStore = await import(moduleUrl('../convex/projectHostedLandingStore.ts'));
 const { withdraw } = await import(moduleUrl('../convex/projectHostedLandingWithdraw.ts'));
-// The O3 cohort switch is deleted (lead decision on 026ce0cf): a
-// changed cohort regroups or falls back to serial checks, as these pin.
+// Cohorts group eligible queued work and fall back to serial checks when membership changes.
 const prior = Object.fromEntries(Object.keys(synthetic).map(key => [key, process.env[key]]));
 test.before(() => Object.assign(process.env, synthetic));
 test.after(() => {
@@ -24,12 +23,13 @@ const row = (f, i) =>
 const active = f => f.runs().filter(run => ['queued', 'running'].includes(run.status));
 const files = f => JSON.parse(f.c.objects.get(f.currentMain().head)).files.map(file => file.path);
 
-test('an arriving member can regroup a live individual run', async t => {
+test('an arriving member stacks behind a live solo and preserves its original check', async t => {
   const f = await batchesFixture(t, { count: 1 });
   await f.drain();
   const id = f.entries[0].state.id;
-  await f.rawChecks.activate(f.runs()[0].id);
-  await f.add(1);
+  const original = row(f, 0);
+  const run = await f.rawChecks.activate(original.runId);
+  const newcomer = await f.add(1);
   const formed = await f.transaction(
     'select-new-cohort',
     {
@@ -42,7 +42,29 @@ test('an arriving member can regroup a live individual run', async t => {
     },
     {},
   );
-  assert.equal(formed, true);
+  assert.equal(formed, false);
+  assert.equal(row(f, 0).phase, 'checking');
+  assert.equal(row(f, 0).attemptId, original.attemptId);
+  assert.equal(row(f, 0).runId, run.id);
+  assert.equal(f.tables.projectHostedLandingBatches.size, 0);
+
+  await f.drain();
+  const [record] = f.tables.projectHostedLandingBatches.values();
+  const batch = JSON.parse(record.value);
+  assert.deepEqual(
+    batch.members.map(member => member.submissionId),
+    [newcomer.id],
+  );
+  assert.equal(batch.predecessor?.submissionId, id);
+  await f.rawChecks.pass(run);
+  await f.passChecks();
+  await f.drain();
+  assert(states(f).every(state => state.phase === 'landed'));
+  const receipt = [...f.tables.projectHostedAcceptances.values()]
+    .map(row => JSON.parse(row.value))
+    .find(receipt => receipt.submissionId === id);
+  assert.equal(receipt.check.runId, run.id);
+  assert.equal(f.runs().length, 2);
 });
 
 test('withdrawing a member uses serial fallback', async t => {

@@ -251,10 +251,16 @@ overrides the width (1–16); this is runner scheduling, never an admission limi
 Once a group's exact head and final acceptance receipt are reserved, its successor
 composes and checks on that predicted main. Publication remains ordered and fenced
 by the exact head and receipt. A passing successor keeps its evidence when the
-predecessor lands unchanged, even if the successor check completed first. An
+predecessor lands unchanged, even if the successor check completed first. Cohort
+formation takes queued entries without a bound check. Progress wakes leave a
+checking solo entry and its successors in their current generations. An
 individual fallback with an immutable Candidate, reserved acceptance receipt and
 exact live check is also a valid predecessor; its solo flag prevents re-batching
-that member.
+that member. When a cohort falls back, its shared generation leaves the train.
+Waiting siblings take their solo compose turns through the fallback controller,
+so a parked member cannot block the older work it is waiting for. A split
+singleton's withdrawal leaves its sibling cohorts and their check generations
+in the train.
 A failed, cancelled or re-pinned predecessor invalidates its dependent generations
 in that transition, including a solo tail whose head or acceptance receipt changes;
 the original member selections return to the queue and check again on surviving

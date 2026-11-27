@@ -76,16 +76,12 @@ export async function writeBatch(
       await wakeLandingCapsule(ctx, { projectId: input.projectId, ...wait });
     await ctx.db.patch(row._id, { capsuleWaits: undefined });
   }
-  if (['fallback', 'superseded', 'split', 'failed'].includes(batch.phase))
-    await invalidatePipeline(ctx, input, batch);
+  // Waiting fallback siblings do not own train slots. Retire the cohort in
+  // the same pass that drops its dependent generations, before releasing solo work.
+  const retireMembers = batch.phase === 'fallback' || batch.phase === 'superseded';
+  if (retireMembers || batch.phase === 'split' || batch.phase === 'failed')
+    await invalidatePipeline(ctx, input, batch, retireMembers);
   if (batch.phase === 'fallback' || batch.phase === 'landed') await releaseBatchMembers(ctx, input, batch);
-  if (batch.phase === 'superseded') {
-    const queue = await landingQueue(ctx, { projectId: input.projectId, channel: 'main' });
-    if (queue?.train?.some(id => batch.members.some(member => member.submissionId === id)))
-      await ctx.db.patch(queue._id, {
-        train: queue.train.filter(id => !batch.members.some(member => member.submissionId === id)),
-      });
-  }
 }
 export async function wakeBatch(ctx: MutationCtx, input: BatchIdentity, recovery = false) {
   const { batch } = await loadBatch(ctx, input);
@@ -121,10 +117,17 @@ export async function formLandingBatch(
   },
   selected: Awaited<ReturnType<typeof loadLanding>>,
 ) {
-  if (!selected.row.batchSelection || selected.state.batchId || selected.state.batchSolo) return false;
+  if (
+    selected.row.phase !== 'queued' ||
+    selected.row.runId ||
+    !selected.row.batchSelection ||
+    selected.state.batchId ||
+    selected.state.batchSolo
+  )
+    return false;
   const own = hostedLandingAttemptSchema.parse(JSON.parse(selected.row.batchSelection));
   // Grouping policy is pinned; members share its digest.
-  if (!hostedBatching(own.policy)) return false;
+  if (own.check || !hostedBatching(own.policy)) return false;
   // Passed-change grouping (owner 2026-11-22, 10b0a94b): with pre-queue Lane checks only changes
   // whose own check passed form a cohort; a fresh arrival (unadmitted after platform restarts)
   // checks alone. Grouping a fresh arrival was measured at 69% red groups of 4 and not adopted.
@@ -191,6 +194,9 @@ export async function formLandingBatch(
   const ordered = orderHostedLandingRows([...new Map(windows.map(row => [row.submissionId, row])).values()]);
   const members = ordered
     .flatMap(row => {
+      // A progress wake can make a checking solo runnable. Old stored
+      // batchability flags cannot let that wake replace its live generation.
+      if (row.phase !== 'queued' || row.runId) return [];
       const state = storedLandingStateSchema.parse(JSON.parse(row.value));
       if (
         row.earlyReview ||
@@ -202,7 +208,8 @@ export async function formLandingBatch(
       )
         return [];
       const attempt = hostedLandingAttemptSchema.parse(JSON.parse(row.batchSelection));
-      return attempt.id === row.attemptId &&
+      return !attempt.check &&
+        attempt.id === row.attemptId &&
         attempt.actor.id === own.actor.id &&
         attempt.authorityEpoch === own.authorityEpoch &&
         attempt.policyDigest === own.policyDigest &&

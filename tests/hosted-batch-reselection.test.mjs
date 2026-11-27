@@ -37,7 +37,6 @@ const toFallback = f =>
     await batchStore.wakeBatch(ctx, key);
   });
 const fallback = await import(moduleUrl('../convex/projectHostedLandingBatchFallback.ts'));
-const landingStore = await import(moduleUrl('../convex/projectHostedLandingStore.ts'));
 
 for (const passed of [false, true])
   for (const legacy of [false, true])
@@ -49,17 +48,44 @@ for (const passed of [false, true])
       const original = (await f.status(f.entries[0].state.id)).attempt;
       const running = await f.rawChecks.activate(original.check.runId);
       if (passed) await f.rawChecks.pass(running);
-      f.patch('projectHostedLandingRequests', rows[1]._id, { batchable: true, runnable: true });
       const id = f.entries[0].state.id;
-      assert(
-        await transaction(f, 'form-around-individual', async ctx =>
-          batchStore.formLandingBatch(
-            ctx,
-            { projectId: f.projectId, submissionId: id },
-            await landingStore.loadLanding(ctx, { projectId: f.projectId, submissionId: id }),
-          ),
-        ),
-      );
+      // Restore the retained shape from when a checking solo could enter a cohort.
+      const batchId = randomUUID();
+      const at = new Date(f.now()).toISOString();
+      const cohort = {
+        id: batchId,
+        leaderId: id,
+        at,
+        composeOperationId: randomUUID(),
+        checkOperationId: randomUUID(),
+        phase: 'composing',
+        drive: { step: 'retry', at },
+        members: [original, (await f.status(f.entries[1].state.id)).attempt],
+        uploadIndex: 0,
+      };
+      f.insert('projectHostedLandingBatches', {
+        projectId: f.projectId,
+        batchId,
+        composeOperationId: cohort.composeOperationId,
+        value: JSON.stringify(cohort),
+      });
+      for (const { _id } of rows) {
+        const current = f.tables.projectHostedLandingRequests.get(_id);
+        const state = JSON.parse(current.value);
+        f.patch('projectHostedLandingRequests', _id, {
+          phase: 'queued',
+          batchable: false,
+          runnable: false,
+          value: JSON.stringify({
+            ...state,
+            batchId,
+            phase: 'queued',
+            observation: { state: 'pending', pendingReason: 'queued', cause: null },
+          }),
+        });
+      }
+      const [queue] = f.tables.projectHostedLandingQueues.values();
+      f.patch('projectHostedLandingQueues', queue._id, { train: rows.map(row => row.submissionId) });
       const { row, batch } = retained(f),
         main = f.currentMain();
       if (legacy) {

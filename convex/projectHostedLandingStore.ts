@@ -562,7 +562,8 @@ export async function writeLanding(
           // Pre-queue: an admitted change tries its own Lane run once before any cohort.
           !(row.admission?.full && row.admission.status === 'passed' && !row.admission.reuse) &&
           (attempt.deferredCheck || row.batchSelection) &&
-          (state.phase === 'queued' || state.phase === 'checking'),
+          state.phase === 'queued' &&
+          !runId,
         ),
     phase: state.phase as LandingRow['phase'],
     runnable,

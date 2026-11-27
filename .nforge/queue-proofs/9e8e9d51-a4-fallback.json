@@ -1,0 +1,214 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedLandingBatchStore.ts": "90285af236f23dae424b521bf3eb98621624683410c3164f23f7dfaff499cbbb"
+  },
+  "replay": {
+    "incident": "2e00dee4",
+    "test": "a4 overlap: a parked fallback and its queued siblings cannot strand older work",
+    "receipt": "ab016012-0aed-4e8d-8eda-2eb9f5b8eebb"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "thread:delegated-task:command%3Amcp%3A9e99cd6c-8c9a-4bf7-ae49-27c7ac345145%3Adelegate-task%3A216101ca-c800-4775-b1d6-85c7f722c1c7",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "thread:delegated-task:command%3Amcp%3Ad64224aa-88aa-4294-b206-9ffed6d8a73b%3Adelegate-task%3A645a3790-1136-4f90-8d11-1113c71c5e9d",
+    "receipt": "556106e1-991b-4f09-96f4-b804205acb46"
+  },
+  "exercised": {
+    "convex/projectHostedLandingBatchStore.ts": {
+      "executed": [
+        "enqueueBatchCheck",
+        "formLandingBatch",
+        "installBatchAttempt",
+        "wakeBatch",
+        "writeBatch"
+      ],
+      "digest": "f1084d20b18defbc3510648a78a84d09da8c09ef75530b6e67436973624dd05c",
+      "units": [
+        [
+          "HOSTED_TRAIN_HOLD_MS",
+          "8317c4661d1d8c3e31dfca1b44b6fc791d813d4de67319fe92630c76eedd8a94"
+        ],
+        [
+          "armLandingAlarm",
+          "b961926a4e9f7e790ec7b31b241d7b3bb2b4ba0a72558e6c8f34921f531a533a"
+        ],
+        [
+          "batchSchema",
+          "8e06922f54c632f1258b464f5b1af4be53a47f79e5a2e57617fb6a17a03279b6"
+        ],
+        [
+          "cancelPendingTask",
+          "84ed3533530e281a188a8b8c0b152ef3c5f8d15ad1bce7dbcf4834f23072f2a3"
+        ],
+        [
+          "canonicalPayload",
+          "95124f3098690f0b83a3927221e9cee6fc53fe1b0c044ab43a9f934e9effe9bb"
+        ],
+        [
+          "checkCause",
+          "951898d2c83b24b33455ecfb98acea9ce436ed50e52d985a280b89061f7ab66d"
+        ],
+        [
+          "cohortSize",
+          "b523672ed5c08b7724eb0fd163c60f08a07186282c52466f9a4781d7e51de452"
+        ],
+        [
+          "earlyPredecessor",
+          "4df9830c15023844fa1a6cefbfc0cb435e39b4178090ae402c2e6e14910bfe13"
+        ],
+        [
+          "enqueueBatchCheck",
+          "d819df711a4a10c650324f165794cf94f59ae9086fc3b60439af7c7275f8d637"
+        ],
+        [
+          "enqueueHostedCheck",
+          "b8fe4c1b88c9d378fa86661a5378ac77da8b72f952c96b74859bfa7ab2ce0c6b"
+        ],
+        [
+          "finishRow",
+          "42f05b1aac53a7d0d1b32027b90939cd2afcd2e8f6f2648e459e44a2ca8c92b5"
+        ],
+        [
+          "forkLandingAttempt",
+          "d36ff5ed92e3983e8262cc9f8cf6ef7f39267b830a00aa37285281e373697a42"
+        ],
+        [
+          "forkRaceReason",
+          "0c8132306961a3b99eb6268fe248e4fcb0937153dc1f34cca5d18abafed54dfc"
+        ],
+        [
+          "formLandingBatch",
+          "7558b3578c74de27f864ac0f3bd088cae1c9b0b74e849adb30c217b51d03a45b"
+        ],
+        [
+          "hostedAdmission",
+          "811098a2c20c8387002aa1da4bd6a6070bd5d21752ca742ce5504c85e61a654b"
+        ],
+        [
+          "hostedBatching",
+          "d2a2481d352356a9e0c7b0eccfcc5abf82d5678d75e12763562272f050d93f97"
+        ],
+        [
+          "hostedLandingAttemptSchema",
+          "cee3c0d8c5941e479f205ef9027a8ec750bcd64ccc3dd83b3b22b698ebd6203a"
+        ],
+        [
+          "hostedLandingProgressAt",
+          "934f487989ee4215885647fb5284123fb12fd3c9469dffa80e0484b2244e414e"
+        ],
+        [
+          "insertLandingAttempt",
+          "e89f5ed577ce7edc9ff353d7289c40f8f39db6c79a521514c81bc3f19d76d5a3"
+        ],
+        [
+          "installBatchAttempt",
+          "526b721cafa06a27c555122412951094cfbf6e048ad4b43a3195f3c037acf87b"
+        ],
+        [
+          "invalidatePipeline",
+          "ebcbd043e2a1d4a56dd457cee0c67d4edf1adff8dbfe7ea57d5254669a501c8b"
+        ],
+        [
+          "invariant",
+          "a25036d770aae805d10bdb41ade261044ed7f7ba6fbbf3ccd57a32c56a3d4c20"
+        ],
+        [
+          "landingObservation",
+          "09012ed641a96f08b1189eb8956b8639de4d4f07ad39d94d952cd1c01d4cade8"
+        ],
+        [
+          "landingQueue",
+          "133b8765bccbb695ac3fb29795469a9976b57700cf9bc517906aafaf600427f8"
+        ],
+        [
+          "landingRow",
+          "9b2f0188e0b4cde94aab9a444ecb94a974871df87818b7d98abd5a37b26204aa"
+        ],
+        [
+          "loadBatch",
+          "a4dbf321198ba21dfcc7d169b8c8c45b2166c6dd1fa7fce27231f4887a27fbfa"
+        ],
+        [
+          "loadHostedCheck",
+          "7d7c2fad5d560d74b72df0c0dfd719fe39b88b74c22fbcad6581a2a765e1c1fd"
+        ],
+        [
+          "loadLanding",
+          "ebcbbc4824870ad74803810ad5144fbbc671303f4a51f289356b20578d07ace2"
+        ],
+        [
+          "loadLandingAttempt",
+          "0e7a8090a6e014f352bec9ef0e1fccd9dbcbb8bbb583cf5e0aa3c3058790a9f7"
+        ],
+        [
+          "orderHostedLandingRows",
+          "4726c78468757970f5746d94d89dcdbd2ac969a233a8533d95160d70392330b5"
+        ],
+        [
+          "passRepinnedFollowers",
+          "c1a8751123c29d85dfc2e62ea6256f094238dce9843bf6f1cf45dc26a19d350d"
+        ],
+        [
+          "pipelinePredecessor",
+          "04a6455174f6632eb43dda98b6f3150a128a55be3a440bd8a6416ec46540aa14"
+        ],
+        [
+          "preQueueCheck",
+          "341d4efe9c2a5d79f90aa66a7b2a2b1ade0b504ba0bc5605f126450b86081c51"
+        ],
+        [
+          "releaseBatchMembers",
+          "9b1f1df5df0fe47df034ce653629d8273e525f1c540ae692f25f48bcff8a5af6"
+        ],
+        [
+          "retainLandingTrain",
+          "bb4f28b057962afbb56c7a3361e5006068a8b8a050f1971f0305fa21207238cc"
+        ],
+        [
+          "retiredCheckUsage",
+          "c769c7a7ffb0c42d8b822281833e1ce3ab06ad7b538f1c3bf9e5c2abd8ad1648"
+        ],
+        [
+          "retryLandingBatch",
+          "23cdcc989d730731ec62be084a142dffa99df045fd5cb2d73e6e7a46a826882d"
+        ],
+        [
+          "scheduleFinish",
+          "bc3cadba879b5c49ac45c5ecc1015ab368ca31081a5275a7d1879d701431ce65"
+        ],
+        [
+          "scopedRecheckPairs",
+          "f3f42d48a2a8fb78bf60b58bc08a99cab6081c3aefd0085e76a1d2d0a9e4dcff"
+        ],
+        [
+          "storedLandingStateSchema",
+          "84f2e6ac995c11ec270f1529329561cce7a49b20ebc8bf42dd09977cfa51b6a4"
+        ],
+        [
+          "wakeBatch",
+          "e6d60809b43026c5190f9fedeaf5662ac520ad5d009e82dcb2549c452f23de09"
+        ],
+        [
+          "wakeLandingCapsule",
+          "b8b76c2132b94f012d6bc875b8c551a795448a20296f2e82c12ffbc8a839b1d6"
+        ],
+        [
+          "writeBatch",
+          "4d2f96b28db25494ca9fca78c5f7e4e143e31e464dbc382b1274e68785a8bfcb"
+        ],
+        [
+          "writeHostedCheck",
+          "b68f5a5ebd6031ce4667c138ef16de13e142da74636f49d36b33c90769693592"
+        ],
+        [
+          "writeLanding",
+          "66d679cf148e8bffa47ba33cf08bb2006907e465b1d2a27dae0b275f4082152c"
+        ]
+      ],
+      "shell": "898ccc25c467db75b5f26b41ae900a9689f8c5d8e065336768be83f290f767ae"
+    }
+  }
+}

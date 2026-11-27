@@ -223,7 +223,8 @@ export async function cancelHostedLanding(
       const key = { projectId, batchId };
       const { batch } = await loadBatch(ctx, key);
       const rejected = batch.included && !batch.included.includes(state.id) && batch.phase !== 'fallback';
-      if (!rejected) {
+      // A split singleton's origin is provenance. Its child cohorts own their own train slots.
+      if (!rejected && batch.phase !== 'split') {
         const transition = {
           code: result.error?.code ?? 'LANDING_CANCELLED',
           message: result.error?.message ?? 'A batch member was cancelled.',

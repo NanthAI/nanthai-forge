@@ -1,0 +1,142 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedLandingCancel.ts": "42371f7b65494201586452cbbd8ffe3f8e9f308931f680dd44f337bb14ffa8b3"
+  },
+  "replay": {
+    "incident": "2e00dee4",
+    "test": "a4 split: withdrawing a solo preserves the sibling cohort as a speculative predecessor",
+    "receipt": "1c03db19-b3c7-4558-ba6a-aba23db14dda"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "thread:delegated-task:command%3Amcp%3A9e99cd6c-8c9a-4bf7-ae49-27c7ac345145%3Adelegate-task%3A216101ca-c800-4775-b1d6-85c7f722c1c7",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "thread:delegated-task:command%3Amcp%3Ad64224aa-88aa-4294-b206-9ffed6d8a73b%3Adelegate-task%3A645a3790-1136-4f90-8d11-1113c71c5e9d",
+    "receipt": "556106e1-991b-4f09-96f4-b804205acb46"
+  },
+  "exercised": {
+    "convex/projectHostedLandingCancel.ts": {
+      "executed": [
+        "cancelHostedLanding"
+      ],
+      "digest": "30d932ca8ab91e99601530c69b8527ca216a00de75a514484b44d17be71837b1",
+      "units": [
+        [
+          "acceptanceRow",
+          "98deb415e96c9a4a60049727beb64c3e9a1835ebf28219984c26218fb31b4986"
+        ],
+        [
+          "advanceBatchFallback",
+          "388e59837911e172daa33997000194cc3335a0f96285192a5970ef166b98c903"
+        ],
+        [
+          "beginHostedOperation",
+          "d1957e3c5db8585d728949c5534a9a4f4d14f7603d823f5b890fa99f2e56e40f"
+        ],
+        [
+          "cancelHostedLanding",
+          "329b81456968e5928f6c6a927fcbfe434291f1f18ea12eeb66501a46706fa7d5"
+        ],
+        [
+          "cancelPendingTask",
+          "84ed3533530e281a188a8b8c0b152ef3c5f8d15ad1bce7dbcf4834f23072f2a3"
+        ],
+        [
+          "canonicalPayload",
+          "95124f3098690f0b83a3927221e9cee6fc53fe1b0c044ab43a9f934e9effe9bb"
+        ],
+        [
+          "desiredLanding",
+          "a16cab9e2518219f1ae223b2363df2dbeaca3f54d7d23c324cf4335792d90483"
+        ],
+        [
+          "finishHostedOperation",
+          "241d16baeaede23d314192e7e47c686b8dc870c2eba959b1bd25a7c24a3b9048"
+        ],
+        [
+          "finishRow",
+          "42f05b1aac53a7d0d1b32027b90939cd2afcd2e8f6f2648e459e44a2ca8c92b5"
+        ],
+        [
+          "hostedAcceptanceSchema",
+          "39327ee6e33a3edc9e10d59d90a736f1e9fdf38624551ffdd071f753e5be3d69"
+        ],
+        [
+          "hostedLandingCancelSchema",
+          "2c28ee00ad54814b81db0eae2e539f551f475f830644d213814138b8b5e859a6"
+        ],
+        [
+          "hostedPayloadHash",
+          "dd878479813234bbf14db3ad1ea1b9d68605840ca3eec856231f180ae5455fa5"
+        ],
+        [
+          "invariant",
+          "a25036d770aae805d10bdb41ade261044ed7f7ba6fbbf3ccd57a32c56a3d4c20"
+        ],
+        [
+          "landingObservation",
+          "09012ed641a96f08b1189eb8956b8639de4d4f07ad39d94d952cd1c01d4cade8"
+        ],
+        [
+          "landingQueue",
+          "133b8765bccbb695ac3fb29795469a9976b57700cf9bc517906aafaf600427f8"
+        ],
+        [
+          "landingRow",
+          "9b2f0188e0b4cde94aab9a444ecb94a974871df87818b7d98abd5a37b26204aa"
+        ],
+        [
+          "landingStateFromRow",
+          "e9544abb32ec380806ee05d0c5356ffef65c48ef8e5f2b615f74e09b65bd7af6"
+        ],
+        [
+          "loadBatch",
+          "9f7edfb63f5a849340d559faeb2596462acb1adcb0e357a90313d329ae486647"
+        ],
+        [
+          "loadLanding",
+          "ebcbbc4824870ad74803810ad5144fbbc671303f4a51f289356b20578d07ace2"
+        ],
+        [
+          "loadLandingAttempt",
+          "0e7a8090a6e014f352bec9ef0e1fccd9dbcbb8bbb583cf5e0aa3c3058790a9f7"
+        ],
+        [
+          "notifyStackedLandingEnded",
+          "720c6e0ab10360f81bb0de004bd82dda60a06dae9cea3328946eaeaba92c75b0"
+        ],
+        [
+          "recordLandingFeed",
+          "7fec6bd9064c3850bdd9ebf1867b63f42e3d185992187f8b44b5e311c88804b4"
+        ],
+        [
+          "releaseLandingQueue",
+          "f1468f75263fc83bc19a62f42dcba21c51ce4af14563404ff398bd7d995ceab6"
+        ],
+        [
+          "requireMemberAuthorityById",
+          "10250b98ff6fdc67c07a34026f612da35b8cd7785dec9c347a1e6a473d9ca7f4"
+        ],
+        [
+          "settleLandingOperation",
+          "0337a93ddf0c38fb6bdef6bad3834ab5392022e0c97e8a92f837c42e1aaeeb4e"
+        ],
+        [
+          "storedLandingStateSchema",
+          "84f2e6ac995c11ec270f1529329561cce7a49b20ebc8bf42dd09977cfa51b6a4"
+        ],
+        [
+          "writeBatch",
+          "6243c96915dac73d9f4479bbf75d8f781cae2776d3b77b128f47fbb7fcc29a07"
+        ],
+        [
+          "writeLanding",
+          "66d679cf148e8bffa47ba33cf08bb2006907e465b1d2a27dae0b275f4082152c"
+        ]
+      ],
+      "shell": "ea1372ce8073f7cd541704f6c8befa9b279dbff94e1d2614aa80e3ed1ff88ea1"
+    }
+  }
+}

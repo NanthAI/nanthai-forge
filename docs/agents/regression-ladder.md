@@ -87,6 +87,7 @@ removed, skipped or moved out of `tests/*.test.mjs`, or when this page stops nam
 | `t27456` | B1.5d conflict recovery: re-land with markers, resolve from a subdirectory, overtaken during its check |
 | `a930de4c` | Core claim: an empty Lane reported LANDED |
 | `c329d191` | Core claim: a lost finish wake stalled the queue about 30 min, and a holder that lost every driver stranded the Ready waiters behind it |
+| `2e00dee4` | The a4 overlap claim race pulled a checking solo into a cohort and invalidated its speculative successors. A separate replay covers the parked fallback and queued siblings that stopped older work. |
 | `c7ad22b0` | Exact check reuse proof for an earlier landing attempt was unavailable after capsule relocation |
 | `a7de3a93` | Core claim: a lost check dispatch left the queue head checking for up to 12 h (2026-11-05) |
 | `9a04d916` | Core claim: a conflict known at once after a cancelled pre-queue check sat 921 s, because the one action that consumed its recompose was lost and only the 15-minute stall alarm owned it |
