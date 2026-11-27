@@ -46,10 +46,3 @@ export async function planningRecordTable(
 ): Promise<'projectPlanningRecords'> {
   return 'projectPlanningRecords';
 }
-/** Only for `convex/projectHostedCheckImport.ts`, a core queue path whose edit needs a queue proof: the F14
- * slice (core queue, Item c0af6cfa) replaces its two calls with `splitRecordTable` and deletes this. */
-export const workRecordTable = async (
-  _ctx: Context,
-  _generationId: Id<'projectWorkGenerations'>,
-  collection: string,
-) => splitRecordTable(collection);

@@ -62,9 +62,7 @@ export async function supersedeQuietSiblings(
   let marked = 0;
   for (const sibling of candidates) {
     const row = await overlapRow(ctx, input.projectId, sibling.key);
-    // Unknown activity counts as live: missing evidence never hides a Lane.
-    const activity = row?.lastActivityAt ?? row?.presenceRow?.at ?? Infinity;
-    if (row && activity <= landed._creationTime && (await supersede(ctx, row, input))) marked++;
+    if (row && row.lastActivityAt <= landed._creationTime && (await supersede(ctx, row, input))) marked++;
   }
   return marked;
 }

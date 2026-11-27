@@ -145,8 +145,12 @@ test('a complete valid hosted run document stays within 256 KiB for 1,000 failur
   }
   const meter = s.counts.at(-1);
   const source = observerProjectionBudget(meter);
-  assert.equal(source.documents, 0);
+  const canonicalReadBytes = meter.readBytesByTable.projectHostedCheckRuns ?? 0;
+  assert.equal(meter.readDocumentsByTable.projectHostedCheckRuns, 1);
+  assert(canonicalReadBytes > 0 && canonicalReadBytes <= 256 * 1024);
+  assert.equal(source.documents, 1, 'the cold patch reads only the existing run');
   assert.equal(source.writes, 1);
+  assert.equal(source.projectionWrites, 0, 'report-only changes do not rewrite unchanged metric pins');
   t.diagnostic(
     JSON.stringify({
       failedFiles: 1000,
@@ -155,6 +159,7 @@ test('a complete valid hosted run document stays within 256 KiB for 1,000 failur
       calls: 1,
       documentsRead: meter.documents,
       documentsWritten: meter.writes,
+      uncachedRunReadBytes: canonicalReadBytes,
     }),
   );
 });

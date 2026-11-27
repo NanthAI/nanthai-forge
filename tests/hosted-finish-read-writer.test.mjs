@@ -12,6 +12,7 @@ const {
   finishAheadQueueProjection,
 } = await import(moduleUrl('../convex/projectFinishReadProjection.ts'));
 const { finishReadWriter } = await import(moduleUrl('../convex/projectFinishReadWriter.ts'));
+const { finishReadReader } = await import(moduleUrl('../convex/projectFinishReadReader.ts'));
 const expected = (kind, row) => [
   finishReadProjection(kind, row),
   ...(kind === 'projectHostedFinishes' ? [finishOwnerProjection(row)] : []),
@@ -92,6 +93,91 @@ test('projection patches are idempotent and match recomputing the complete sourc
   }
 });
 
+test('a pinned Plan repair switches a stale pointer and installs its ready generation in one transaction', async () => {
+  const f = await landingFixture();
+  const { HOSTED_WORK_INDEX_FORMAT } = await import('../dist/work-hosted-summary.js');
+  const { plan } = await import(moduleUrl('../convex/projectFinishReadRepair.ts'));
+  const project = f.tables.hostedProjects.get(f.projectId);
+  const backupId = 'projectBackups-plan-finish-repair';
+  const generation = {
+    projectId: f.projectId,
+    backupId,
+    format: HOSTED_WORK_INDEX_FORMAT,
+    status: 'ready',
+    revision: 0,
+    initialRevision: 0,
+    nextBatch: 1,
+    metadata: JSON.stringify({ schema: 24 }),
+  };
+  const ids = await f.call(
+    'preparePlanRepairFixture',
+    {
+      _handler: async ctx => {
+        const previous = await ctx.db.insert('projectWorkGenerations', generation);
+        const next = await ctx.db.insert('projectWorkGenerations', generation);
+        await ctx.db.patch(f.projectId, {
+          work: {
+            backupId,
+            generationId: previous,
+            operationId: 'plan-source',
+            initialRevision: 0,
+            revision: 0,
+          },
+        });
+        return { previous, next };
+      },
+    },
+    {},
+  );
+  // A pre-projection source publication can leave both the old Plan pin and a missing compact header.
+  const original = f.tables.hostedProjects.get(project._id);
+  original.work.generationId = ids.next;
+  const compact = kind =>
+    [...f.tables.projectFinishReadRows.values()].find(row => row.sourceId === ids.next && row.kind === kind);
+  f.tables.projectFinishReadRows.delete(compact('projectWorkGenerations')._id);
+  const readPlan = () =>
+    f.call(
+      'readPlanHeader',
+      {
+        _handler: async ctx => {
+          const { db } = finishReadReader(ctx, 'plan');
+          const selected = (await db.get(f.projectId)).work.generationId;
+          const header = await db.get(selected);
+          return { selected, status: header.status };
+        },
+      },
+      {},
+    );
+  assert.deepEqual(await readPlan(), { selected: ids.previous, status: 'ready' });
+  const input = { projectId: f.projectId, generationId: ids.next, apply: false };
+  assert.deepEqual(await f.transaction('inspectMissingPlanHeader', plan, input, 'owner'), {
+    eligible: 2,
+    oversized: 0,
+    different: 2,
+    changed: 0,
+  });
+  await assert.rejects(
+    () =>
+      f.transaction(
+        'refuseStalePlanRepair',
+        plan,
+        { ...input, generationId: ids.previous, apply: true },
+        'owner',
+      ),
+    error => error.code === 'WORK_STALE',
+  );
+  assert.equal(
+    (await f.transaction('repairPlanHeaders', plan, { ...input, apply: true }, 'owner')).changed,
+    2,
+  );
+  assert.deepEqual(await readPlan(), { selected: ids.next, status: 'ready' });
+  assert.equal(
+    (await f.transaction('replayPlanRepair', plan, { ...input, apply: true }, 'owner')).changed,
+    0,
+  );
+  assert.equal(f.tables.hostedProjects.get(project._id).work.generationId, ids.next);
+});
+
 test('parallel same-row patches, field removal, replacement, rollback and deletion preserve the read model', async () => {
   const f = await landingFixture();
   const state = await f.enqueue();
@@ -149,7 +235,7 @@ test('parallel same-row patches, field removal, replacement, rollback and deleti
   assert(![...f.tables.projectFinishReadRows.values()].some(r => r.sourceId === original._id));
 });
 
-test('metrics run projection is transactional, fresh and separate from the status-only finish observer', async () => {
+test('metrics run projection is transactional, fresh and separate from the status-only finish observer', async t => {
   const f = await landingFixture();
   const run = {
     id: 'metrics-run',
@@ -177,11 +263,7 @@ test('metrics run projection is transactional, fresh and separate from the statu
   const projection = kind =>
     [...f.tables.projectFinishReadRows.values()].find(row => row.kind === kind && row.sourceId === id);
   const metric = () => projection('projectMetricCheckRuns');
-  assert.equal(
-    metric(),
-    undefined,
-    'insertion defers until an ordinary write knows the exact canonical creation time',
-  );
+  assert.equal(metric(), undefined, 'the existing first update owns the metric projection');
   await f.call(
     'firstMetricsRunWrite',
     {
@@ -193,6 +275,7 @@ test('metrics run projection is transactional, fresh and separate from the statu
     {},
   );
   assert.equal(f.tables.projectHostedCheckRuns.get(id).metricsProjected, true);
+  assert.equal(metric().sourceCreatedAt, f.tables.projectHostedCheckRuns.get(id)._creationTime);
   assert.equal(JSON.parse(metric().value).runnerMinutes, 0.5);
   const observer = structuredClone(projection('projectHostedCheckRuns'));
   run.cost.seconds = 60;
@@ -271,13 +354,22 @@ test('metrics run projection is transactional, fresh and separate from the statu
   );
   assert.equal(
     f.counts.at(-1).readDocumentsByTable.projectHostedCheckRuns ?? 0,
-    0,
-    'a write that needs no source read must not gain one',
+    1,
+    'a value write without a cached row reads the exact creation and projection pins once',
   );
-  assert.equal(
-    f.tables.projectHostedCheckRuns.get(id).metricsProjected,
-    undefined,
-    'canonical fallback protects every measurement after an uncached write',
+  assert.equal(f.tables.projectHostedCheckRuns.get(id).metricsProjected, true);
+  assert.equal(JSON.parse(metric().value).runnerMinutes, 2);
+  const uncached = f.counts.at(-1);
+  t.diagnostic(
+    JSON.stringify({
+      uncachedMetricsPatch: {
+        canonicalReadBytes: uncached.readBytesByTable.projectHostedCheckRuns,
+        totalReadBytes: uncached.readBytes,
+        canonicalWriteBytes: uncached.writeBytesByTable.projectHostedCheckRuns,
+        finishReadWriteBytes: uncached.writeBytesByTable.projectFinishReadRows,
+        totalWriteBytes: uncached.writeBytes,
+      },
+    }),
   );
   const created = metric().sourceCreatedAt;
   run.status = 'passed';
@@ -291,10 +383,7 @@ test('metrics run projection is transactional, fresh and separate from the statu
   await f.call(
     'replaceMetricsRun',
     {
-      _handler: async ctx => {
-        await ctx.db.get(id);
-        await ctx.db.replace(id, replacement);
-      },
+      _handler: ctx => ctx.db.replace(id, replacement),
     },
     {},
   );

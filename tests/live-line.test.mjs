@@ -11,6 +11,7 @@ const line = await import(moduleUrl('../convex/projectLiveLine.ts'));
 const submission = await import(moduleUrl('../convex/projectLiveLineSubmission.ts'));
 const store = await import(moduleUrl('../convex/projectLiveLineStore.ts'));
 const landing = await import(moduleUrl('../convex/projectHostedLandingStore.ts'));
+const { weekOf } = await import(moduleUrl('../convex/publicRead.ts'));
 const previousEnvironment = Object.fromEntries(Object.keys(synthetic).map(key => [key, process.env[key]]));
 test.before(() => Object.assign(process.env, synthetic));
 test.after(() => {
@@ -306,7 +307,7 @@ test('live line checks current access, rejects anonymous/revoked readers and nev
   await assert.rejects(read(f, null), e => (e.data?.code ?? e.code) === 'PROJECT_UNAVAILABLE');
 });
 
-test('native Work publication preserves the old strip facts without a live Work-generation dependency', async () => {
+function nativeLineFixture() {
   const f = lanesFixture();
   f.projectId = f.insert('hostedProjects', {
     owner: 'owner',
@@ -387,6 +388,34 @@ test('native Work publication preserves the old strip facts without a live Work-
     { channel: 'other', head: 'e'.repeat(64), status: 'accepted' },
     { status: 'accepted' },
   );
+  return { f, backupId, generationId, head };
+}
+
+test('renaming a historical native project preserves its accepted passing main in public activity', async () => {
+  const { f, backupId, generationId, head } = nativeLineFixture();
+  const project = f.tables.hostedProjects.get(f.projectId);
+  project.work = { backupId, generationId, operationId: randomUUID(), initialRevision: 1, revision: 1 };
+  const activity = () =>
+    f.tx(
+      'readPublicNativeActivity',
+      { _handler: ctx => weekOf(ctx, project, Date.parse('2026-01-02T00:00:00.000Z')) },
+      {},
+    );
+  assert.equal((await activity()).activity.main, 'unchecked');
+  await f.call(
+    'renameHistoricalNativeProject',
+    { _handler: ctx => ctx.db.patch(f.projectId, { name: 'Renamed' }) },
+    {},
+  );
+  assert.equal((await activity()).activity.main, 'passing');
+  const { main } = await read(f);
+  assert.equal(main.head, head);
+  assert.equal(main.check, 'passed');
+  assert(!f.counts.at(-1).touched.includes('projectWorkRecords'));
+});
+
+test('native Work publication preserves the old strip facts without a live Work-generation dependency', async () => {
+  const { f, backupId, generationId, head } = nativeLineFixture();
   await f.call(
     'nativePublication',
     {
@@ -403,6 +432,17 @@ test('native Work publication preserves the old strip facts without a live Work-
   assert.equal(result.main.check, 'passed');
   assert.equal(result.main.automatic, true);
   assert(!f.counts.at(-1).touched.includes('projectWorkRecords'));
+  const beforeRename = f.counts.length;
+  await f.call(
+    'unrelatedNativeProjectEdit',
+    { _handler: ctx => ctx.db.patch(f.projectId, { name: 'Renamed' }) },
+    {},
+  );
+  assert(
+    f.counts.slice(beforeRename).every(count => !count.touched.includes('projectWorkRecords')),
+    'unrelated project edits read no native Work to publish the same main',
+  );
+  assert.deepEqual((await read(f)).main, result.main);
   const unchanged = f.readSet();
   await f.call(
     'unrelatedNativeWork',

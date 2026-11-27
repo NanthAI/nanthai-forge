@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-import { workRecordTable } from './projectWorkRecordTables';
+import { splitRecordTable } from './projectWorkRecordTables';
 import { z } from 'zod';
 import { v } from 'convex/values';
 import { mutation, type MutationCtx } from './cliServer';
@@ -109,7 +109,7 @@ async function workCheck(ctx: MutationCtx, project: Doc<'hostedProjects'>, selec
     rows = row ? [row] : [];
   } else {
     rows = await ctx.db
-      .query(await workRecordTable(ctx, partition, 'checks'))
+      .query(splitRecordTable('checks'))
       .withIndex('by_generation_and_collection_and_position', q =>
         q.eq('generationId', partition).eq('collection', 'checks'),
       )
@@ -132,7 +132,7 @@ async function workCheck(ctx: MutationCtx, project: Doc<'hostedProjects'>, selec
       if (header.payloadKey)
         for (let offset = 0; offset < header.payloadParts!; offset += 100) {
           const page = await ctx.db
-            .query(await workRecordTable(ctx, partition, 'checks:payload'))
+            .query(splitRecordTable('checks:payload'))
             .withIndex('by_generation_and_collection_and_parent_and_position', q =>
               q
                 .eq('generationId', partition)

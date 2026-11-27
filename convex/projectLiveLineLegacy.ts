@@ -3,7 +3,7 @@
 import type { QueryCtx, MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { workRecordLookup } from './projectWorkRecordTables';
-import { writeLineMain } from './projectLiveLineStore';
+import { lineSummary, writeLineMain } from './projectLiveLineStore';
 
 type Db = QueryCtx['db'];
 /** Compatibility with the native Work index. Publication freezes only the exact
@@ -69,7 +69,12 @@ export async function publishLegacyLineMain(
   db: MutationCtx['db'],
   projectId: Id<'hostedProjects'>,
   generationId: Id<'projectWorkGenerations'>,
+  onlyMissingMain = false,
 ) {
+  if (onlyMissingMain) {
+    const summary = await lineSummary(db, projectId);
+    if (summary && JSON.parse(summary.value).main) return;
+  }
   const main = await legacyLineMain(db, projectId, generationId);
   if (main) await writeLineMain({ db }, projectId, main);
 }

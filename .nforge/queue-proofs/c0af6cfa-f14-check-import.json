@@ -1,0 +1,128 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedCheckImport.ts": "55b58c623ac34f5bcebd92b03349163c511d81377ed9cac9b80417b3c151b440"
+  },
+  "replay": {
+    "incident": "c0af6cfa",
+    "test": "fromWork imports the newest verify from hosted Work with bounded reads and replays its receipt",
+    "receipt": "332a6461-5599-475a-840a-fc1d3924e2e5"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "thread:delegated-task:command%3Amcp%3Ae185e300-634a-4a77-837f-4079add3e0a5%3Adelegate-task%3Aa724aace-6e2b-4325-b7a6-bab67e078c86",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "thread:delegated-task:command%3Amcp%3A47e87b3c-dc3f-4057-bc20-9de5a6c4685c%3Adelegate-task%3A6fc31a8d-0117-4e56-90b3-3b6657557f98",
+    "receipt": "77b73464-5da7-4e05-885c-e4cb8ce4adc0"
+  },
+  "exercised": {
+    "convex/projectHostedCheckImport.ts": {
+      "executed": [
+        "fromWork",
+        "importCheckFromWork",
+        "workCheck"
+      ],
+      "digest": "c6b6f113729bc81db9317d094b41bdffeaee728d6a2b8071409a7b2978df8327",
+      "units": [
+        [
+          "WORK_CHECK_SCAN",
+          "a6991c9d3c9031a38d2131b3862fb847ac4414eb8fd356e948fdee758c027196"
+        ],
+        [
+          "assembleIndexValue",
+          "68f1c1adcc9fbc3f45a0e52a9850a41e51f8e4b486053a65b781abb87bad15bb"
+        ],
+        [
+          "checkHash",
+          "3fcba4271f64de9e021ce30317cb4c4af7efb50db0c932fada422dfd838f4727"
+        ],
+        [
+          "checkNumber",
+          "e1d5520d47c11316b5dbbdd82c8a8094c05e8fead92a0e00896f38fb529e7fbf"
+        ],
+        [
+          "checkSchema",
+          "fa9d7f312c598575fc93dd37782882a158f4902f6965d7e4fba8110b0e6e0124"
+        ],
+        [
+          "digest",
+          "5f605f8606bb3242a28c6a44a95e70e8b39f3555b7f0838c11f4e606795a3e50"
+        ],
+        [
+          "fromWork",
+          "aa17d8220612d0d8698df787fa8f5f15a40bf3f1c4bc9581a008b7c3c0465bff"
+        ],
+        [
+          "heldSchema",
+          "7b78e10abc2bcc7cb101fc575856859b5b44c98e336bb1d027fe46994a65ed4d"
+        ],
+        [
+          "importCheckFromWork",
+          "05ee416edd4aa21a2fe609a438fe82e1e83e163adb8259bd96f36d1aa066eb71"
+        ],
+        [
+          "importedHostedCheck",
+          "20c022dc8b5271ff486870c6ae33d601999ffa2469bf77ee6ead12db5dc7b201"
+        ],
+        [
+          "invariant",
+          "a25036d770aae805d10bdb41ade261044ed7f7ba6fbbf3ccd57a32c56a3d4c20"
+        ],
+        [
+          "mutation",
+          "4f17c7855059ce010489b8b943f417aba3333721a20f7872a46abe0eee887bc9"
+        ],
+        [
+          "record",
+          "c3177233bc651e72b067f8dcdcacd0141962697ca78aac32c7840dbc36c342f3"
+        ],
+        [
+          "recordPartition",
+          "fb4f084d9c9ce2f2c24911ee0157f8106fdf44b28b8dbb966cfbeff68648a564"
+        ],
+        [
+          "report",
+          "11f51c908ed7b15c3270a2410f7282cdb9c431b81d35e62cdff8695c9d306e0b"
+        ],
+        [
+          "requestFields",
+          "199faab9f4913d0bd9b24226496feda33d71b67394b78686985de0769d8af27b"
+        ],
+        [
+          "requestSchema",
+          "960cbe6de2e5687245e1eccae7d88ea74aba8241db9bc56e2a45791f159e9530"
+        ],
+        [
+          "saveCheckSetting",
+          "6fe9afaafe4b03bc336cc2ebeccaa906b48d855beb0f88363554bf7927b44442"
+        ],
+        [
+          "selectedGeneration",
+          "d62db45299833b99e54475d7224b39afc1612a6f8d01371a487a31063ac1fb9b"
+        ],
+        [
+          "settingKey",
+          "b90937fbd83bb12e40d06820d10254abfcc4ac81220f315e7b82be237922d528"
+        ],
+        [
+          "splitRecordTable",
+          "66ed01917b7f1eda2c13d52e2d8cd00e5869fbd98c35b6e6abb84f70d22352b0"
+        ],
+        [
+          "v",
+          "c9b23930c9b094848cdb5f563a16f0a2f497fc28d7ea9a82afca6bc52741e95f"
+        ],
+        [
+          "workCheck",
+          "8410e5ada0dd401f01cb9cd3f9352cad345e2b93830894886424217283626ca7"
+        ],
+        [
+          "z",
+          "0be8b14a719fbad954f3dc9bb19b1716bed3a588afba2e97f0a99e168ee0a700"
+        ]
+      ],
+      "shell": "d429934bc97c63f7700501df8a054813f8a63ff80d011eb0318cb0b9d3115db0"
+    }
+  }
+}

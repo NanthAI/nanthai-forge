@@ -8,6 +8,7 @@ import { hostedRecordValue, hostedRecordIndex } from '../dist/hosted-records.js'
 import { hostedAcceptanceSchema } from '../dist/hosted-acceptance.js';
 import { stateSchema } from '../dist/state/format.js';
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
+import { metricAliasProjectionCounts } from './observer-projection-budget.mjs';
 
 test('600 Intents, 575 receipts and 3k files: a 30-landing day runs three bounded audits; idle zero', async t => {
   const f = await auditFixture({ manual: true });
@@ -163,7 +164,17 @@ test('600 Intents, 575 receipts and 3k files: a 30-landing day runs three bounde
   });
   const terminal = f.counts.slice(terminalBefore);
   assert.equal(terminal.length, 1, 'scope guard stays inside the existing completion call');
-  assert(terminal[0].documents <= 10 && terminal[0].writes <= 10);
+  const [completion] = terminal;
+  assert(completion.documents <= 10);
+  assert.equal(completion.readDocumentsByTable.projectHostedCheckRuns, 1, 'cold patch reads its run once');
+  const storedRun = [...f.tables.projectHostedCheckRuns.values()].find(run => run.runId === selected.id);
+  const metric = f.tables.projectFinishReadRows.get(storedRun.metricProjection?.rowId);
+  assert.equal(metric?.sourceId, storedRun._id, 'cold completion preserves metrics coverage');
+  assert.equal(completion.written.filter(table => table === 'projectFinishReadRows').length, 2);
+  const aliases = metricAliasProjectionCounts(completion);
+  assert(aliases.writes > 0 && aliases.writes <= 3, 'bounded run-activity, full-audit and reuse keys');
+  assert(completion.writes - 1 - aliases.writes <= 10, 'unchanged non-metric write ceiling');
+  assert(completion.writes <= 12, 'physical completion writes include the metric projection and aliases');
   assert.equal(f.row().unaudited.count, 10);
   assert.equal(f.row().lastGreen.sequence, 605);
   assert.equal(f.pending().length, 0);
@@ -184,6 +195,10 @@ test('600 Intents, 575 receipts and 3k files: a 30-landing day runs three bounde
       notFullCompletionCalls: terminal.length,
       notFullDocumentsRead: terminal[0].documents,
       notFullDocumentsWritten: terminal[0].writes,
+      uncachedRunReadBytes: completion.readBytesByTable.projectHostedCheckRuns,
+      compactProjectionWriteBytes: completion.writeBytesByTable.projectFinishReadRows,
+      metricAliasWrites: aliases.writes,
+      metricAliasWriteBytes: aliases.writeBytes,
       idleScheduledFunctions: 0,
       notFullWallMs: performance.now() - terminalBegan,
       maxRssBytes: process.resourceUsage().maxRSS * 1024,

@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedSuperseded.ts": "6443f827a0f08b023e15d8427611d6f931508388b637856b97c1391d160c9591"
+  },
+  "replay": {
+    "incident": "b7f93deb",
+    "test": "a landing supersedes the quiet open siblings of its Intent on their overlap rows (friction b7f93deb)",
+    "receipt": "332a6461-5599-475a-840a-fc1d3924e2e5"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "thread:delegated-task:command%3Amcp%3Ae185e300-634a-4a77-837f-4079add3e0a5%3Adelegate-task%3Aa724aace-6e2b-4325-b7a6-bab67e078c86",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "thread:delegated-task:command%3Amcp%3A47e87b3c-dc3f-4057-bc20-9de5a6c4685c%3Adelegate-task%3A6fc31a8d-0117-4e56-90b3-3b6657557f98",
+    "receipt": "77b73464-5da7-4e05-885c-e4cb8ce4adc0"
+  },
+  "exercised": {
+    "convex/projectHostedSuperseded.ts": {
+      "executed": [
+        "overlapRow",
+        "supersede",
+        "supersedeQuietSiblings"
+      ],
+      "digest": "a8337236322e43166aa4d7473143b8652fb543bef607a28866c65403bc40bd98",
+      "units": [
+        [
+          "closeConflictNotices",
+          "6b766ef3d269b5b1a4b0674eb89437f48e4296fc9667899689f417c28f062d82"
+        ],
+        [
+          "dropLanePark",
+          "5a29580fb75e5554d315423bc87bb9085662438891b06db5eb53fcfd8448524e"
+        ],
+        [
+          "overlapRow",
+          "72ed749472286be4d5ef87f368997370dfe4dba7f26973a023f7ac2692bb0a7d"
+        ],
+        [
+          "releaseLaneSession",
+          "b5c778fb8ab9106aadcfc3302e8817d8d0a012c143f34a9b73251fc5481c7afa"
+        ],
+        [
+          "supersede",
+          "23f2a30dc9eecb4a167243b1586127f85dd086416a512291cede770cb011268a"
+        ],
+        [
+          "supersedeLane",
+          "6e7bbc355a2b77d322b845b7cb2af4cb6461d4a66ea73d4465b851632fb2849d"
+        ],
+        [
+          "supersedeQuietSiblings",
+          "56b7ed09a3a22dbab6fc0451ef5a78d3505ee557b26124d49075a894fbee188a"
+        ]
+      ],
+      "shell": "3ad5da6861b9699095a5aa364e6397850eeb493d5fec25d02db634f39af797c2"
+    }
+  }
+}

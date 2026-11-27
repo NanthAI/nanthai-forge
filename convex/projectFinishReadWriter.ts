@@ -175,6 +175,7 @@ export function finishReadWriter(ctx: MutationCtx): MutationCtx {
                 | undefined;
               if (
                 kind === 'hostedProjects' &&
+                selection === 'projectPlanProjects' &&
                 work?.generationId &&
                 (source.sourceAuthority as { mode?: string } | undefined)?.mode !== 'server'
               )
@@ -182,6 +183,7 @@ export function finishReadWriter(ctx: MutationCtx): MutationCtx {
                   db,
                   id as import('./_generated/dataModel').Id<'hostedProjects'>,
                   work.generationId,
+                  key === 'patch' && !('work' in value!) && !('sourceAuthority' in value!),
                 );
               if (kind === 'projectHostedLandingRequests' && selection === kind && old) {
                 const before = JSON.parse(old.value);

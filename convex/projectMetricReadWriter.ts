@@ -8,6 +8,17 @@ import { digest } from '../src/state/hash';
 import { metricAliasRows, withMetricAliases } from './projectMetricAliasWriter';
 import type { metricRunRow } from '../src/self-metrics-run';
 
+const projectionFields = [
+  'value',
+  'projectId',
+  'runId',
+  'sourceCreatedAt',
+  'reportFlakes',
+  'cause',
+  'auditDonor',
+  'auditCoverage',
+];
+
 /** Reuse canonical rows the mutation already read. The compact row's identity/digest ride on
  * the canonical write, so upkeep needs neither another lookup nor a status-observer change. */
 export function metricReadWriter(db: MutationCtx['db']) {
@@ -54,10 +65,14 @@ export function metricReadWriter(db: MutationCtx['db']) {
       return value;
     }) as MutationCtx['db']['get'],
     async write(id: string, kind: 'patch' | 'replace' | 'delete', value?: Record<string, unknown>) {
-      const old = rows.get(id);
+      let old = rows.get(id);
+      if (
+        !old &&
+        (kind === 'replace' || (kind === 'patch' && projectionFields.some(field => field in value!)))
+      )
+        old = (await db.get(id as Doc<'projectHostedCheckRuns'>['_id'])) ?? undefined;
       written.add(id);
-      // A full-value write without a prior source read must remain zero-read. Invalidate
-      // compact coverage; the canonical reader retains every measure until a normal update.
+      // A deletion without a source read can dispose of its compact copy by id.
       if (!old) {
         if (kind === 'delete' || kind === 'replace' || 'projectId' in value! || 'runId' in value!) {
           const stale = await db
@@ -69,7 +84,7 @@ export function metricReadWriter(db: MutationCtx['db']) {
             ? value
             : { ...value, metricsProjected: undefined, metricProjection: undefined };
         }
-        return 'value' in value! ? { ...value, metricsProjected: undefined } : value;
+        return value;
       }
       const retained = old?.metricProjection;
       if (kind === 'delete') {
