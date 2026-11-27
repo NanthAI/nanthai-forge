@@ -31,6 +31,7 @@ export async function postSystemLaneNote(
     author: string;
     agent?: string;
     text: string;
+    approvalReason?: string;
     reason?: FeedAttentionReason;
     recipientActor?: string;
     now?: number;
@@ -60,7 +61,8 @@ export async function postSystemLaneNote(
     fromLaneId: input.fromLaneId,
     targetKey,
     body: input.text,
-    bytes: new TextEncoder().encode(input.text).length,
+    ...(input.approvalReason ? { approvalReason: input.approvalReason } : {}),
+    bytes: new TextEncoder().encode(input.text + (input.approvalReason ?? '')).length,
     bodyHash: digest(JSON.stringify([targetKey, input.text, []])),
     at,
     expiresAt: now + BOARD_RETENTION_MS,

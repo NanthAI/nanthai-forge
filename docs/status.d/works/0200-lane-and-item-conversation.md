@@ -7,5 +7,7 @@
   Hand a Lane to an agent with its resume prompt, take it yourself, or set it aside and keep its saves.
   A hand-back between people offers Take it and Decline to the recipient.
   Writers can post messages directly on the Lane's Thread.
+  The Thread also shows retained Candidate review notes for that Lane, with
+  their exact file, side and line. Agent delivery of these notes is unrecorded.
   Questions asked ahead appear without adding to the Needs you count.
   While an answer waits for acknowledgement, the thread offers its saved resume prompt.

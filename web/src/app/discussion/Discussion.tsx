@@ -62,6 +62,8 @@ export type DiscussionProps = {
   now?: Date;
   project?: WhoProject | undefined;
   title?: 'Comments' | 'Thread';
+  /** Only Candidate review comments anchored to this Lane join its conversation. */
+  reviewLaneId?: string;
   /** Offers Report on each comment and message (Item b6588425) to a signed-in viewer who did not write it. */
   reportProjectId?: Id<'hostedProjects'> | undefined;
   conversation?: {
@@ -100,12 +102,20 @@ function DiscussionContent({
   now = new Date(),
   project,
   title = 'Comments',
+  reviewLaneId,
   conversation,
   reportProjectId,
   filters,
 }: DiscussionProps & { filters?: ReturnType<typeof useCommentFilters> }) {
   const report = reportProjectId ? { reportProjectId } : {};
-  const matched = filters?.active ? comments.filter(filters.matches) : comments;
+  const matched = reviewLaneId
+    ? comments.filter(comment => {
+        const review = readReview(comment.text);
+        return review?.laneId === reviewLaneId && Boolean(review.candidateId);
+      })
+    : filters?.active
+      ? comments.filter(filters.matches)
+      : comments;
   const all = threads([
     ...matched,
     ...((filters?.active ? undefined : conversation)?.entries.map((row): DiscussionComment => ({
@@ -128,7 +138,7 @@ function DiscussionContent({
   // it has a reply past that point.
   const oldest = (times: string[]) => (times.length ? times.reduce((a, b) => (a < b ? a : b)) : '');
   const frontier = [
-    loadEarlier ? oldest(comments.map(comment => comment.at)) : '',
+    loadEarlier && !reviewLaneId ? oldest(comments.map(comment => comment.at)) : '',
     conversation?.loadEarlier ? oldest(conversation.entries.map(row => new Date(row.at).toISOString())) : '',
   ].reduce((a, b) => (a > b ? a : b), '');
   const recent = all.filter(
@@ -149,7 +159,7 @@ function DiscussionContent({
   // The cursor already bounds Item comments. Another client-side limit would hide loaded filter matches.
   const visible = itemPage ? [...all.filter(thread => !pending.includes(thread))].reverse() : folded.visible;
   const earlier = itemPage ? 0 : folded.earlier;
-  const total = comments.length + (conversation?.entries.length ?? 0);
+  const total = (reviewLaneId ? matched.length : comments.length) + (conversation?.entries.length ?? 0);
   const reading = loading || conversation?.loading;
   const earlierMessages = conversation?.loadEarlier;
   const more = itemPage
@@ -162,6 +172,7 @@ function DiscussionContent({
       : undefined;
   const loadingMore = conversation?.loadingMore || loadingEarlier;
   const conversationActions = conversation ? { answer: conversation.answer } : {};
+  const reviewStatus = reviewLaneId ? { showReviewDelivery: true } : {};
   return (
     <section
       className={itemPage ? 'region discussion' : 'sec discussion'}
@@ -209,6 +220,7 @@ function DiscussionContent({
             now={now}
             project={project}
             {...conversationActions}
+            {...reviewStatus}
             {...report}
           />
           {replies.map(reply => (
@@ -221,6 +233,7 @@ function DiscussionContent({
               now={now}
               project={project}
               {...conversationActions}
+              {...reviewStatus}
               {...report}
             />
           ))}
@@ -248,9 +261,6 @@ function DiscussionContent({
               : `Show ${more ? pageSize : Math.min(pageSize, earlier)} earlier`}
           </Key>
           {conversation?.failed ? <p role="alert">Could not read earlier messages. Try again.</p> : null}
-          {commentsFailed ? (
-            <p role="alert">Could not read earlier comments. Reload the page to try again.</p>
-          ) : null}
         </div>
       ) : null}
       {conversation?.readFailed ? (
@@ -258,7 +268,12 @@ function DiscussionContent({
           Could not load the conversation.
         </p>
       ) : null}
-      {!total && !reading && !conversation?.readFailed ? (
+      {!itemPage && commentsFailed ? (
+        <p className="quietline" role="alert">
+          Could not read {reviewLaneId ? 'review notes' : 'comments'}. Reload the page to try again.
+        </p>
+      ) : null}
+      {!total && !reading && !conversation?.readFailed && !commentsFailed ? (
         <p className="quietline">{title === 'Thread' ? 'No messages yet.' : 'No comments yet.'}</p>
       ) : null}
       {visible.map(thread => (
@@ -270,6 +285,7 @@ function DiscussionContent({
             now={now}
             project={project}
             {...conversationActions}
+            {...reviewStatus}
             {...report}
             {...(readAttachment ? { readAttachment } : {})}
             {...(onReact ? { onReact } : {})}
@@ -287,6 +303,7 @@ function DiscussionContent({
               now={now}
               project={project}
               {...conversationActions}
+              {...reviewStatus}
               {...report}
               {...(readAttachment ? { readAttachment } : {})}
               {...(onReact ? { onReact } : {})}
@@ -346,6 +363,7 @@ function Comment({
   answer,
   reportProjectId,
   readAttachment,
+  showReviewDelivery,
 }: {
   comment: DiscussionComment;
   reply?: boolean;
@@ -358,6 +376,7 @@ function Comment({
   answer?: Answer;
   reportProjectId?: Id<'hostedProjects'> | undefined;
   readAttachment?: ReadAttachment;
+  showReviewDelivery?: boolean;
 }) {
   const by = writer(comment);
   const row = comment.conversation;
@@ -412,7 +431,11 @@ function Comment({
           shown.
         </p>
       ) : review ? (
-        <ReviewFindings review={review} original={comment.text} />
+        <ReviewFindings
+          review={review}
+          original={comment.text}
+          {...(showReviewDelivery ? { showDelivery: true } : {})}
+        />
       ) : uncheckedMark && uncheckedAt >= 0 ? (
         <p>
           {comment.text.slice(0, uncheckedAt + uncheckedMark.length - 'unchecked'.length)}
@@ -422,6 +445,13 @@ function Comment({
       ) : (
         <SafeMarkdown text={comment.text} idPrefix={comment.id} />
       )}
+      {row?.approvalReason && row.withdrawnAt === undefined ? (
+        <p className="md approval-reason" dir="auto">
+          <strong>Approval reason</strong>
+          {' · '}
+          {row.approvalReason}
+        </p>
+      ) : null}
       {!row && comment.attachments?.length ? (
         <Attachments commentId={comment.id} files={comment.attachments} read={readAttachment} />
       ) : null}

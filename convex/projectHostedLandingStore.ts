@@ -224,6 +224,8 @@ export async function writeLanding(
     /** Fix D (Item 687d1eda): only parkLanding passes 'main-red'. Never inferred from the row. */
     hold?: 'main-red' | 'ci-down';
     feedLanes?: readonly { laneId: string; actor?: string }[];
+    /** The reason from the exact owner grant publication used, for the Lane notice only. */
+    approvalReason?: string;
     landedPathCount?: number | null;
     settlement?: { passedAt: string; startedAt: number };
     publishedMainReceiptId?: string;
@@ -651,6 +653,7 @@ export async function writeLanding(
           projectId: row.projectId,
           receiptId: state.acceptance.receiptId,
           by: JSON.stringify(state.acceptance.acceptedBy),
+          ...(options?.approvalReason ? { approvalReason: options.approvalReason } : {}),
         },
       );
   }

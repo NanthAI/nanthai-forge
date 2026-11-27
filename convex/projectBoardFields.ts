@@ -20,6 +20,8 @@ export const boardTables = {
     targetKey: v.string(),
     replyTo: v.optional(v.string()),
     body: v.string(),
+    /** Retained from a person's exact landing approval. Read by the team Lane Thread. */
+    approvalReason: v.optional(v.string()),
     paths: v.optional(v.array(v.string())),
     bytes: v.number(),
     /** Digest of target and body: the same note to the same target within 24 h is a duplicate. */

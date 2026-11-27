@@ -66,7 +66,7 @@ export type Reply = {
       at: string;
       unchecked?: true;
       revertedBy?: { receiptId: string; at: string };
-      /** Seconds from "land" to on main and at each stop; null when not recorded (convex/projectLaneTiming.ts). */
+      /** Seconds between the landing request and main, and at each stop. Null when unrecorded. */
       timing?: {
         toMain: number | null;
         queue: number | null;
@@ -87,6 +87,7 @@ export type Reply = {
   noteItemId?: string;
   candidateUnavailable?: true;
   candidate?: {
+    submissionId?: string;
     candidateId: string;
     base: string;
     head: string;
@@ -94,6 +95,9 @@ export type Reply = {
     summary: string | null;
     notVerified: string[] | null;
     check: string | null;
+    heldForReview?: true;
+    /** Recorded scope for this exact Candidate. Null when its coverage is unavailable. */
+    protection?: { paths: string[]; total: number } | null;
   };
   supervised: boolean;
   protectedRules: number;
@@ -103,6 +107,7 @@ export type Reply = {
     total: number;
     offset: number;
     nextOffset: number | null;
+    orderPin?: string;
     items: ReviewFile[];
   };
   conflicts: Conflict[];
@@ -115,7 +120,7 @@ export const handleOf = (who: { actor: string | null; agent: string | null }, fa
 
 export const span = ([from, to]: [number, number]) => (from === to ? `${from}` : `${from}-${to}`);
 
-export type Entry = ReviewEntry & { file: ReviewFile };
+export type Entry = ReviewEntry & { file: ReviewFile; protectionUnreported?: true };
 
 /** Every listed file with its group and reason. Crossing lines come from the open conflict notices only. */
 export function entriesOf(reply: Reply, files: readonly ReviewFile[]): Entry[] {
@@ -132,17 +137,28 @@ export function entriesOf(reply: Reply, files: readonly ReviewFile[]): Entry[] {
     }
   // Files are read in pages at offsets, so a save made between two reads can send one path twice; it lists once
   // (f9309eec). The caller's next offset still counts every row it read.
+  const scope = reply.candidate?.protection;
+  const guarded = new Set(scope?.paths);
+  const useSavedProtection =
+    scope === undefined || (!reply.candidate?.heldForReview && (!scope || scope.paths.length < scope.total));
   return uniqueBy(files, file => file.path).map(file => {
+    const protectedPath = guarded.has(file.path) || (useSavedProtection && file.protected === true);
     const facts: ReviewFacts = {
       path: file.path,
       doc: documentationPath(file.path),
       status: file.status,
       before: file.before?.mode ?? null,
       after: file.after?.mode ?? null,
-      ...(file.protected ? { protected: true } : {}),
+      protected: protectedPath,
       ...(crossing.has(file.path) ? { crossing: crossing.get(file.path)! } : {}),
     };
-    return { ...reviewEntry(facts), file };
+    return {
+      ...reviewEntry(facts),
+      file,
+      ...(!protectedPath && scope && scope.paths.length < scope.total
+        ? { protectionUnreported: true as const }
+        : {}),
+    };
   });
 }
 

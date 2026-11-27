@@ -29,6 +29,7 @@ export function LaneDecision({
   request,
   head,
   read,
+  protectedScope,
 }: {
   projectId: Id<'hostedProjects'>;
   laneId: string;
@@ -40,6 +41,10 @@ export function LaneDecision({
   /** The Lane's current save: a Lane request's decision names it. */
   head: string;
   read: ReturnType<typeof useHeldView>;
+  protectedScope?: {
+    submissionId: string;
+    protection: { paths: string[]; total: number } | null;
+  };
 }) {
   const decide = useProjectDecide(projectId);
   // A plain status line, not the behaviour layer: it stays after the hold ends, saying what happened.
@@ -56,7 +61,12 @@ export function LaneDecision({
   const target = row ? decideTarget(row) : null;
   const attempt = row?.landing?.attemptId;
   const reason = approvalNote && approvalNote.attempt === attempt ? approvalNote.text : '';
-  const protectedReason = row ? protectedApprovalCopy(row) : null;
+  const protectedReason = protectedApprovalCopy(
+    row,
+    protectedScope && row?.submissionId === protectedScope.submissionId
+      ? protectedScope.protection
+      : undefined,
+  );
   const said = message ? (
     <p className="quietline" role="status">
       {message}

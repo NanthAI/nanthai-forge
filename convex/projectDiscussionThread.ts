@@ -36,6 +36,7 @@ const entry = v.object({
   agent: v.optional(v.string()),
   type: v.union(v.literal('note'), v.literal('question'), v.literal('handoff'), v.literal('hand-back')),
   text: v.string(),
+  approvalReason: v.optional(v.string()),
   replyTo: v.optional(v.string()),
   withdrawnAt: v.optional(v.number()),
   choices: v.optional(v.array(v.string())),
@@ -212,6 +213,7 @@ export const read = query({
               ...(row.agent ? { agent: row.agent } : {}),
               type: 'note' as const,
               text: row.body,
+              ...(scope === 'lane' && row.approvalReason ? { approvalReason: row.approvalReason } : {}),
               ...(row.replyTo ? { replyTo: row.replyTo } : {}),
               ...(row.resolvedAt ? { withdrawnAt: row.resolvedAt } : {}),
             };

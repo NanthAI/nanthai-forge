@@ -79,7 +79,15 @@ export function readReview(text: string): Review | null {
   }
   return value as Review;
 }
-export function ReviewFindings({ review, original }: { review: Review; original: string }) {
+export function ReviewFindings({
+  review,
+  original,
+  showDelivery,
+}: {
+  review: Review;
+  original: string;
+  showDelivery?: boolean;
+}) {
   return (
     <div className="md">
       <p>
@@ -88,6 +96,7 @@ export function ReviewFindings({ review, original }: { review: Review; original:
         </strong>
         {' · '}reported by reviewer
       </p>
+      {showDelivery ? <p className="t2">Agent delivery not recorded</p> : null}
       {review.findings.map(finding => (
         <div key={finding.id}>
           <p>

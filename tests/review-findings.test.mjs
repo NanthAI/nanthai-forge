@@ -96,6 +96,51 @@ test('a Candidate line note retains the selected side, immutable blob and unchan
   ]);
 });
 
+test('J04: the Lane Thread shows only its own persisted Candidate notes, with their exact anchor and delivery state', async () => {
+  const { lineReviewText } = await import(moduleUrl('../src/candidate-line-note.ts'));
+  const pin = {
+    ...review,
+    candidateId: randomUUID(),
+    path: '.env.example',
+    side: 'head',
+    blob: 'f'.repeat(64),
+    line: 1,
+    changed: true,
+  };
+  const itemId = randomUUID();
+  const comments = [
+    lineReviewText(pin, 'Use the new variable here.'),
+    lineReviewText({ ...pin, laneId: randomUUID() }, 'A sibling Lane should see this.'),
+    'An Item-only comment.',
+  ].map((text, i) => ({ id: randomUUID(), at: new Date(i).toISOString(), itemId, text }));
+  const html = renderToStaticMarkup(
+    h(Discussion, {
+      canWrite: false,
+      title: 'Thread',
+      reviewLaneId: review.laneId,
+      comments,
+    }),
+  );
+  assert.match(html, /\.env\.example:1 · head/);
+  assert.match(html, /Use the new variable here\./);
+  assert.match(html, /Agent delivery not recorded/);
+  assert.doesNotMatch(html, /sibling Lane|Item-only/);
+});
+
+test('the Lane Thread surfaces a failed first review-note page without claiming the Thread is empty', () => {
+  const html = renderToStaticMarkup(
+    h(Discussion, {
+      canWrite: false,
+      title: 'Thread',
+      reviewLaneId: review.laneId,
+      comments: [],
+      commentsFailed: true,
+    }),
+  );
+  assert.match(html, /role="alert">Could not read review notes/);
+  assert.doesNotMatch(html, /No messages yet/);
+});
+
 test('findings draw the complete count, evidence side and origin, outcome and reason as inert text', () => {
   const hostile = structuredClone(review);
   hostile.findings[0].claim = '<img src=x onerror=alert(1)> [run](javascript:alert(2))';

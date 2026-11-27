@@ -32,6 +32,7 @@ const { set: setPolicy } = await import(moduleUrl('../convex/projectAutonomy.ts'
 const needsMe = await import(moduleUrl('../convex/projectNeedsMe.ts'));
 const { needsView } = await import(moduleUrl('../web/src/app/needs/model.ts'));
 const { decideTarget } = await import(moduleUrl('../web/src/app/needs/decide.ts'));
+const thread = await import(moduleUrl('../convex/projectDiscussionThread.ts'));
 
 function syntheticR2(t, web = 'https://forge.example.invalid') {
   const synthetic = {
@@ -495,8 +496,57 @@ test('approval reason is optional, bounded, replay-safe and adds no approval tra
     );
     assert.equal(replay.receipt.id, approval.receipt.id);
     assert.equal(readGrant().reason, reason === undefined ? undefined : 'X'.repeat(500));
+    await f.drain();
+    const notice = f.counts.findLast(count => count.name === 'acceptedByNote');
+    t.diagnostic(
+      JSON.stringify({
+        withReason: reason !== undefined,
+        approval: { documents, ranges, writes },
+        notice: {
+          documents: notice.documents,
+          ranges: notice.ranges,
+          writes: notice.writes,
+          readBytes: notice.readBytes,
+          writeBytes: notice.writeBytes,
+        },
+      }),
+    );
   }
   assert.deepEqual(costs[1], costs[0]);
+});
+
+test('J05: the accepted Lane notice gives the team the persisted exact-attempt approval reason', async t => {
+  const { f, select } = await heldLanding(t);
+  const reason = 'Verified <change> in the release check.\n' + '界'.repeat(450);
+  const pin = await select();
+  const approved = JSON.parse(await f.tx('approve', acceptance.approve, { ...pin, reason }));
+  assert.equal(approved.status, 'landed');
+  assert.equal(
+    JSON.parse(await f.tx('approveReplay', acceptance.approve, { ...pin, reason: 'Replacement' })).receipt.id,
+    approved.receipt.id,
+  );
+  await f.drain();
+  const read = actor =>
+    f.tx(
+      'acceptedLaneThread',
+      thread.read,
+      {
+        projectId: f.projectId,
+        scope: 'lane',
+        id: f.lane.laneId,
+      },
+      actor,
+    );
+  const { entries } = await read('contributor');
+  const notices = entries.filter(entry => /accepted this landing/.test(entry.text));
+  assert.equal(notices.length, 1);
+  assert.match(notices[0].text, /protected paths selected\.txt/);
+  assert.equal(notices[0].approvalReason, reason);
+  const stats = f.counts.at(-1);
+  t.diagnostic(
+    `Lane Thread with reason: ${stats.documents} documents, ${stats.ranges} ranges, ${stats.readBytes} read bytes`,
+  );
+  assert.deepEqual(await read('stranger'), { canRead: false, entries: [], before: null });
 });
 
 test('48049998 replay: a protected-path policy hold has no Lane request, yet Needs me offers Approve and Decline on its exact attempt', async t => {

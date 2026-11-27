@@ -29,14 +29,14 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
     title: 'Lane review fixture',
   });
   const browser = await chromium.launch(launchOptions);
-  async function open(t, viewport, query, path = '/lane-review.html') {
+  async function open(t, viewport, query, path = '/lane-review.html', extraPaths = []) {
     const context = await browser.newContext({ viewport, locale: 'en-US' });
     const page = await context.newPage();
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     page.on('console', message => message.type() === 'error' && errors.push(message.text()));
     page.on('requestfailed', request => errors.push(`failed ${request.url().slice(0, 80)}`));
-    await routeBrowserFixture(page, out, html, { paths: [path] });
+    await routeBrowserFixture(page, out, html, { paths: [path, ...extraPaths] });
     await page.goto(`https://forge.test${path}?${query}`);
     if (path === '/lane-review.html')
       await page
@@ -298,6 +298,24 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
         await page.getByRole('region', { name: 'The change' }).waitFor();
       }
     });
+
+    await t.test(
+      'the Lane Thread requests review notes only for a real Item and reports a read failure',
+      async t => {
+        const thread = '/sample-owner/tide-pool/lanes/7a2b4c6d-8e9f-4a1b-8c3d-5e6f7a8b9c0d/thread';
+        const unplanned = await open(t, PHONE, 'routes&s=thread-unplanned', thread);
+        const region = unplanned.getByRole('region', { name: 'Thread', exact: true });
+        await region.getByText('Legacy board note').waitFor();
+        assert.equal(
+          await unplanned.evaluate(() => window.__watches.includes('projectWorkIndex:records')),
+          false,
+        );
+        const failed = await open(t, PHONE, 'routes&s=thread-review-error', thread);
+        const failedThread = failed.getByRole('region', { name: 'Thread', exact: true });
+        await failedThread.getByRole('alert').filter({ hasText: 'Could not read review notes' }).waitFor();
+        await failedThread.getByText('Legacy board note').waitFor();
+      },
+    );
 
     await t.test(
       'the Lane Thread composer is for writers, and a failed send retains the draft for one retry',
@@ -1074,7 +1092,8 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
     });
     await t.test('Candidate notes keep their exact line and retry identity in both layouts', async t => {
       for (const viewport of [DESK, PHONE]) {
-        const page = await open(t, viewport, 's=candidate&frame');
+        const lane = '/sample-owner/tide-pool/lanes/7a2b4c6d-8e9f-4a1b-8c3d-5e6f7a8b9c0d';
+        const page = await open(t, viewport, 'routes&s=candidate', lane, [`${lane}/thread`]);
         const change = page.getByRole('region', { name: 'The change', exact: true });
         await change.getByRole('heading', { name: 'Candidate review' }).waitFor();
         for (const fact of [
@@ -1114,7 +1133,8 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
         await page.getByRole('button', { name: 'Add note: Before line 1', exact: true }).click();
         await draft.fill(claim);
         await send.click();
-        await page.getByRole('link', { name: 'Note sent to the Item discussion' }).waitFor();
+        const sent = page.getByRole('link', { name: 'Open the note in the Lane Thread' });
+        await sent.waitFor();
         const [first, retry] = await page.evaluate(() =>
           JSON.parse(sessionStorage.getItem('fixture.noteWrites')),
         );
@@ -1137,8 +1157,61 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
           origin: 'changed',
           outcome: 'open',
         });
+        await sent.click();
+        await page.waitForURL(url => url.pathname === `${lane}/thread`);
+        await page.goto(`https://forge.test${lane}/thread?routes&s=candidate`);
+        const thread = page.getByRole('region', { name: 'Thread', exact: true });
+        const note = thread.locator('article').filter({ hasText: claim });
+        await note.waitFor();
+        assert.equal(await note.count(), 1);
+        assert.match(await note.textContent(), /src\/exact-result\.ts:1 · base/);
+        assert.match(await note.textContent(), /Agent delivery not recorded/);
+        assert.equal(
+          await page.evaluate(
+            () => window.__subscriptions.filter(read => read.name === 'projectWorkIndex:records').length,
+          ),
+          1,
+        );
       }
     });
+
+    await t.test(
+      'J04 and J05: the exact protected file draws first, Facts agree, and acceptance retains its reason',
+      async t => {
+        const lane = '/sample-owner/tide-pool/lanes/7a2b4c6d-8e9f-4a1b-8c3d-5e6f7a8b9c0d';
+        const query = 'routes&s=candidate-held&submission=a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d';
+        for (const viewport of [DESK, PHONE]) {
+          const page = await open(t, viewport, query, lane, [`${lane}/thread`]);
+          const change = page.getByRole('region', { name: 'The change', exact: true });
+          const file = change.locator('details.file summary').filter({ hasText: '.env.example' });
+          await file.waitFor();
+          assert.match(await file.textContent(), /a protected path/);
+          assert.deepEqual((await bands(page))[0], ['Needs your eyes', 1]);
+          const facts = page.locator('.lr-facts');
+          assert.match(await facts.textContent(), /Protected paths1 file matches a protected-path rule/);
+          assert.match(await facts.textContent(), /ApprovalChanges a protected path: \.env\.example\./);
+          const decision = page.getByRole('region', { name: 'Your decision' });
+          const reason = 'Verified <sample> in the release check.';
+          await decision.getByRole('textbox', { name: 'Approval reason (optional)' }).fill(reason);
+          await decision.getByRole('button', { name: 'Approve and land' }).click();
+          await page.getByRole('status').filter({ hasText: 'Approved. Landing on main.' }).waitFor();
+          await page.getByRole('link', { name: 'Thread', exact: true }).click();
+          await page.waitForURL(url => url.pathname === `${lane}/thread`);
+          await page.goto(`https://forge.test${lane}/thread?${query}`);
+          const notice = page
+            .getByRole('region', { name: 'Thread', exact: true })
+            .locator('article')
+            .filter({ hasText: /accepted this landing/ });
+          await notice.waitFor();
+          assert.match(
+            await notice.textContent(),
+            /Approval reason · Verified <sample> in the release check\./,
+          );
+          assert.equal(await notice.locator('sample').count(), 0);
+          assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+        }
+      },
+    );
 
     async function fitsBothThemes(page, viewport) {
       for (const theme of ['dark', 'light']) {

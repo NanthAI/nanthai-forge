@@ -9,11 +9,13 @@ import { randomUUID } from 'node:crypto';
 import { moduleUrl } from './convex-module.mjs';
 import { api as saves, saveFixture } from './hosted-saves-fixture.mjs';
 import { digest } from '../dist/hash.js';
+import { policyPreset } from '../dist/autonomy-policy.js';
 
 const review = await import(moduleUrl('../convex/projectLaneReview.ts'));
 const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 const lanes = await import(moduleUrl('../convex/projectHostedLiveLanes.ts'));
 const overlapBuckets = await import(moduleUrl('../convex/projectHostedOverlapChanges.ts'));
+const { entriesOf } = await import(moduleUrl('../web/src/app/lane/review-model.ts'));
 
 async function lane(changes, extra = {}, savedBy) {
   const s = await saveFixture('original', 'a.txt');
@@ -71,6 +73,40 @@ async function lane(changes, extra = {}, savedBy) {
 
 const side = (seed, mode = 'file') => ({ blob: digest(seed), mode });
 
+test('J04: the saved file page uses both acceptance protection lists and the configured check entries', async () => {
+  const paths = ['.env.example', 'ci/check.sh', 'src/plain.ts'];
+  const { s, read } = await lane(paths.map(path => ({ path, before: null, after: side(path) })));
+  const policy = policyPreset('trusted');
+  policy.acceptance.protectedPaths = [];
+  policy.acceptance.ownerApprovalPaths = ['.env.example'];
+  s.patch('hostedProjects', s.projectId, { autonomyPolicy: policy, checkEntries: ['ci/check.sh'] });
+  const reply = await read();
+  assert.deepEqual(
+    reply.files.items.filter(file => file.protected).map(file => file.path),
+    paths.slice(0, 2),
+  );
+});
+
+test('a bounded Candidate scope keeps positive saved protection evidence beyond its named paths', () => {
+  const file = { path: 'z.ts', status: 'added', before: null, after: side('z'), protected: true };
+  const candidate = { protection: { paths: ['a.ts'], total: 400 } };
+  const reply = { candidate, conflicts: [], peers: [] };
+  const [entry] = entriesOf(reply, [file]);
+  assert.equal(entry.group, 'eyes');
+  assert.equal(entry.reason, 'a protected path');
+});
+
+test('a held Candidate with a clipped scope reports unknown protection for an unlisted file', () => {
+  const file = { path: 'z.ts', status: 'added', before: null, after: side('z') };
+  const reply = {
+    candidate: { heldForReview: true, protection: { paths: ['a.ts'], total: 400 } },
+    conflicts: [],
+    peers: [],
+  };
+  const [entry] = entriesOf(reply, [file]);
+  assert.equal(entry.protectionUnreported, true);
+});
+
 test('one read names the pinned head and every changed path with its exact blobs, in a handful of documents', async t => {
   const changes = [
     { path: 'src/parser.ts', before: side('p0'), after: side('p1') },
@@ -81,6 +117,7 @@ test('one read names the pinned head and every changed path with its exact blobs
   const reply = await read();
   assert.equal(reply.lane.head, saved.head);
   assert.equal(reply.lane.goal, null, 'the saved overlap placeholder is not a title');
+  assert.equal(reply.lane.itemId, undefined, 'an unplanned Lane has no Item to read for its Thread');
   assert.equal(reply.lane.saveFailure, undefined);
   assert.equal(reply.files.current, true);
   assert.equal(reply.files.total, 3);
@@ -290,12 +327,18 @@ test('a row written for another head is not shown as this save; pages are bounde
     after: side(`a${i}`),
   }));
   const { s, saved, read } = await lane(many);
+  const policy = policyPreset('trusted');
+  policy.acceptance.ownerApprovalPaths = [many.at(-1).path];
+  s.patch('hostedProjects', s.projectId, { autonomyPolicy: policy });
   const first = await read();
   assert.equal(first.files.items.length, review.REVIEW_PAGE);
   assert.equal(first.files.nextOffset, review.REVIEW_PAGE);
+  assert.equal(first.files.items[0].path, many.at(-1).path, 'the protected path is visible on open');
   const second = await read({ offset: first.files.nextOffset });
   assert.equal(second.files.items.length, 450 - review.REVIEW_PAGE);
   assert.equal(second.files.nextOffset, null);
+  assert.equal(second.files.orderPin, first.files.orderPin);
+  assert.equal(new Set([...first.files.items, ...second.files.items].map(file => file.path)).size, 450);
   // The overlap row moves on to another head: the page says the save is not recorded rather than show other files.
   const row = [...s.tables.projectHostedOverlapLanes.values()].find(entry => entry.laneId === saved.id);
   row.head = digest('another save');
@@ -304,9 +347,15 @@ test('a row written for another head is not shown as this save; pages are bounde
   assert.deepEqual(stale.files.items, []);
 });
 
-test('an approval link shows its pinned Candidate summary and never substitutes another Lane’s Candidate', async t => {
+test('J05: an approval link shows the held Candidate’s protected scope and never substitutes another Lane’s Candidate', async t => {
   const { s, saved, read, write } = await lane([]);
   const { projectId } = s;
+  const protectedPath = 'config/rollout, prod; next.json';
+  const splitNames = ['config/rollout', 'prod; next.json'];
+  const policy = policyPreset('trusted');
+  policy.acceptance.ownerApprovalPaths = [protectedPath];
+  const editedPolicy = { ...policy, acceptance: { ...policy.acceptance, ownerApprovalPaths: splitNames } };
+  s.patch('hostedProjects', projectId, { autonomyPolicy: editedPolicy });
   const candidateId = randomUUID();
   const submission = randomUUID();
   const attemptId = randomUUID();
@@ -343,6 +392,7 @@ test('an approval link shows its pinned Candidate summary and never substitutes 
     dependencies: { sha256: digest('dependencies'), size: 10 },
     algorithm: 'native@fixture',
     result: { status: 'clean', head },
+    governance: { version: 1, paths: [protectedPath, ...splitNames, 'src/plain.ts'], ownerInputs: true },
   });
   const state = {
     schema: 1,
@@ -357,7 +407,7 @@ test('an approval link shows its pinned Candidate summary and never substitutes 
     version: 1,
     phase: 'ready',
     observation: { state: 'pending', pendingReason: 'waiting-for-review', cause: null },
-    error: null,
+    error: { code: 'REVIEW_REQUIRED', message: `needs owner approval: protected paths ${protectedPath}` },
     request: {
       operationId,
       authorityEpoch: 1,
@@ -386,6 +436,37 @@ test('an approval link shows its pinned Candidate summary and never substitutes 
     runId: null,
     value: JSON.stringify(state),
   });
+  s.insert('projectHostedLandingAttempts', {
+    projectId,
+    submissionId: submission,
+    attemptId,
+    number: 0,
+    value: JSON.stringify({
+      schema: 1,
+      projectId,
+      submissionId: submission,
+      operationId,
+      id: attemptId,
+      parentAttemptId: null,
+      number: 0,
+      at: saved.at,
+      authorityEpoch: 1,
+      actor: { id: 'owner', kind: 'agent' },
+      main: base,
+      candidate: {
+        id: candidateId,
+        head,
+        digest: digest('candidate'),
+        inputs: { sha256: digest('inputs'), size: 10 },
+        dependencies: { sha256: digest('dependencies'), size: 10 },
+        algorithm: 'native@fixture',
+      },
+      check: null,
+      policy,
+      policyDigest: digest('pinned policy'),
+      operations: { check: randomUUID(), accept: randomUUID() },
+    }),
+  });
   const wrong = await read({ submission });
   assert.equal(wrong.candidate, undefined);
   assert.equal(wrong.candidateUnavailable, true);
@@ -398,8 +479,11 @@ test('an approval link shows its pinned Candidate summary and never substitutes 
     head: saved.head,
   });
   const exact = await read({ submission });
+  assert.equal(exact.candidate.heldForReview, true);
+  assert.deepEqual(exact.candidate.protection, { paths: [protectedPath], total: 1 });
   assert.equal(exact.lane.head, saved.head);
   assert.deepEqual(exact.candidate, {
+    submissionId: submission,
     candidateId,
     base: base.head,
     head,
@@ -407,6 +491,8 @@ test('an approval link shows its pinned Candidate summary and never substitutes 
     summary: 'Split input safely',
     notVerified: ['Device runner'],
     check: 'not-run',
+    heldForReview: true,
+    protection: { paths: [protectedPath], total: 1 },
   });
   const meter = s.counts.at(-1);
   t.diagnostic(`Candidate review: ${meter.documents} documents, ${meter.readBytes} bytes`);

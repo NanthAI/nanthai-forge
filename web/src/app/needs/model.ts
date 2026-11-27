@@ -45,18 +45,27 @@ export type NowRow = HeldLane & {
 };
 export type AskRow = Ask & { who: string | null };
 
-export function protectedApprovalCopy(row: HeldLane) {
-  if (row.why !== 'review' || !row.note) return null;
-  const paths = landingHold({
-    observation: { state: 'pending', pendingReason: 'waiting-for-review' },
-    error: { code: 'REVIEW_REQUIRED', message: row.note },
-  })?.paths;
-  if (!paths?.length) return null;
+export function protectedApprovalCopy(
+  row: HeldLane | undefined,
+  scope?: { paths: string[]; total: number } | null,
+) {
+  const paths =
+    scope !== undefined
+      ? scope?.paths
+      : row?.why === 'review' && row.note
+        ? landingHold({
+            observation: { state: 'pending', pendingReason: 'waiting-for-review' },
+            error: { code: 'REVIEW_REQUIRED', message: row.note },
+          })?.paths
+        : null;
+  const total = scope?.total ?? paths?.length ?? 0;
+  if (!total) return null;
+  const first = paths?.[0];
   const reason =
-    paths.length === 1
-      ? `Changes a protected path: ${paths[0]}.`
-      : `Changes ${paths.length} protected paths: ${paths[0]} and ${paths.length - 1} more.`;
-  return row.reviewCheck === 'not-configured' ? `${reason} No check is set up.` : reason;
+    total === 1 && first
+      ? `Changes a protected path: ${first}.`
+      : `Changes ${total.toLocaleString()} protected ${total === 1 ? 'path' : 'paths'}${first ? `: ${first} and ${total - 1} more` : ''}.`;
+  return row?.reviewCheck === 'not-configured' ? `${reason} No check is set up.` : reason;
 }
 /** Work reverted from main, work that needs a fix, or a stopped mirror (Item 12fde646): a shared-state decision. */
 export type NoticeRow = AttentionNotice & { word: StateWord; tag: string; head: string };

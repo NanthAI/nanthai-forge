@@ -133,7 +133,7 @@ export function ReviewDiff({
                     {sent ? (
                       <div className="msg" role="status">
                         <p dir="auto">{sent}</p>
-                        <A href={note.href}>Note sent to the Item discussion</A>
+                        <A href={note.href}>Open the note in the Lane Thread</A>
                       </div>
                     ) : null}
                     {selectedKey === keyOf(line) ? (

@@ -13,7 +13,10 @@ import { readHostedIntentLabel, readHostedRecord } from './projectHostedRecords'
 import { laneConflicts } from './projectHostedConflicts';
 import { isAgentSlug } from '../src/agent-slug';
 import { hostedLaneSchema } from '../src/hosted-lane';
-import { effectivePolicy, protectedMatches } from '../src/autonomy-policy';
+import { effectivePolicy } from '../src/autonomy-policy';
+import { protectedPathMatches } from '../src/public-governance';
+import { effectiveOwnerApprovalPaths } from '../src/owner-approval-paths';
+import { digest } from '../src/state/hash';
 import { lineCounts, type OverlapChange } from '../src/hosted-overlap';
 import { invariant } from '../src/errors';
 import { report } from './errors';
@@ -91,14 +94,24 @@ export const read = query({
       // The row describes this exact pinned pair only when it was written for the Lane's current head and base.
       const current = !!row && row.head === lane.head && row.baseHead === lane.base.head;
       const changes: OverlapChange[] = current ? JSON.parse(await overlapLaneChanges(ctx, row)) : [];
-      const page = changes.slice(offset, offset + REVIEW_PAGE);
       const policy = effectivePolicy(project);
+      const prioritize = lane.state === 'active' && !row?.landed && changes.length > REVIEW_PAGE;
       const guarded = new Set(
-        protectedMatches(
+        protectedPathMatches(
           policy,
-          page.map(change => change.path),
+          (prioritize ? changes : changes.slice(offset, offset + REVIEW_PAGE)).map(change => change.path),
+          project.checkEntries,
         ),
       );
+      // The saved list is already loaded. Take a window only after moving guarded files forward.
+      const ordered =
+        prioritize && guarded.size
+          ? [
+              ...changes.filter(change => guarded.has(change.path)),
+              ...changes.filter(change => !guarded.has(change.path)),
+            ]
+          : changes;
+      const page = ordered.slice(offset, offset + REVIEW_PAGE);
       const conflicts = row?.conflicted ? await laneConflicts(ctx, projectId, laneId, lane.head) : [];
       // The Lane ahead of an early resolution is the stack parent; earlyResolution.laneId names this Lane itself.
       const ahead = lane.earlyResolution && lane.stack ? lane.stack.laneId : null;
@@ -155,12 +168,15 @@ export const read = query({
               laneId,
               intentId: lane.intentId,
               submission,
+              policy,
+              checkEntries: project.checkEntries,
             })
           : null,
         askedRead,
       ]);
       const request = ownerRequest(approval, laneId);
       const role = candidate && intent?.itemId ? await readProjectRole(ctx, project, user.subject) : null;
+      const itemId = intent?.itemId ?? row?.planningItemId;
       const run = isAgentSlug(lane.agentRun) ? lane.agentRun : null;
       const savedBy = current ? row.savedBy : undefined;
       // Before the save's author was projected, a holder change or a legacy owner override
@@ -178,7 +194,7 @@ export const read = query({
           laneId,
           intentId: lane.intentId,
           goal: intent?.title ?? null,
-          itemId: intent?.itemId ?? row?.planningItemId ?? lane.intentId,
+          ...(itemId ? { itemId } : {}),
           actor: author,
           agent: lane.authorship ? (run ?? null) : (row?.agent ?? null),
           ...(lane.agentClient ? { agentClient: lane.agentClient } : {}),
@@ -213,11 +229,15 @@ export const read = query({
         // The owner may purge a leaked file's saved bytes from its row (Item 9d3c407d).
         ...(project.owner === user.subject ? { owner: true } : {}),
         supervised: policy.acceptance.mode === 'review',
-        protectedRules: policy.acceptance.protectedPaths.length,
+        protectedRules:
+          policy.acceptance.protectedPaths.length +
+          effectiveOwnerApprovalPaths(policy.acceptance.ownerApprovalPaths).length +
+          (project.checkEntries?.length ?? 0),
         files: {
           current,
           complete: current ? row!.complete : lane.head === lane.base.head,
           total: changes.length,
+          ...(prioritize ? { orderPin: digest(JSON.stringify([...guarded])) } : {}),
           offset,
           nextOffset: offset + page.length < changes.length ? offset + page.length : null,
           items: page.map(change => {

@@ -413,6 +413,10 @@ export async function publishAcceptance(
   const message = await acceptedLandingMessage(ctx, state);
   // Who accepted it, from facts already loaded (fe5bea80): `actor` names the submitter only.
   const grant = granted ? row.ownerGrant : undefined;
+  const noticeGrant =
+    ownerApproval && row.ownerGrant?.actor === ownerApproval.id && row.ownerGrant.attemptId === attempt.id
+      ? row.ownerGrant
+      : grant;
   const acceptedBy = landingAcceptedBy({
     actor,
     at: new Date(now).toISOString(),
@@ -571,6 +575,7 @@ export async function publishAcceptance(
   const completionAlarm = plan.inputPages ? row.alarm?.taskId : undefined;
   await writeLanding(ctx, row, next, false, row.runId !== run?.id, completionAlarm, {
     feedLanes: plan.feedLanes,
+    ...(noticeGrant?.reason ? { approvalReason: noticeGrant.reason } : {}),
     landedPathCount: changedPaths?.length ?? null,
     replay: {
       ...(run ? checkReplay(run) : {}),

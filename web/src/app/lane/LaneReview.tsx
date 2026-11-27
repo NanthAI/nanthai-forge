@@ -140,8 +140,8 @@ function Review({ route, projectId, projectName, feed }: Props) {
     ...(submission ? { submission } : {}),
   });
   const reply = useMemo(() => (text ? (JSON.parse(text) as Reply) : undefined), [text]);
-  const [extra, setExtra] = useState<{ head: string; items: ReviewFile[] }>();
-  const [nextPage, setNextPage] = useState<{ head: string; offset: number }>();
+  const [extra, setExtra] = useState<{ pin: string; items: ReviewFile[] }>();
+  const [nextPage, setNextPage] = useState<{ pin: string; offset: number }>();
   const trail = crumbsFor(route, projectName);
   if (!reply) {
     return (
@@ -155,9 +155,9 @@ function Review({ route, projectId, projectName, feed }: Props) {
       </>
     );
   }
-  const head = reply.lane.head;
-  // Returning to a save changes the head; never mix pages from the former head into its review.
-  const files = [...reply.files.items, ...(extra?.head === head ? extra.items : [])];
+  const pin = filePagePin(reply);
+  // A different save, base, or protection rule may reorder the windows.
+  const files = [...reply.files.items, ...(extra?.pin === pin ? extra.items : [])];
   const lastLoaded = reply.files.offset + files.length;
   const nextOffset = lastLoaded < reply.files.total ? lastLoaded : null;
   const who = handleOf(reply.lane, `Lane ${short(laneId)}`);
@@ -172,18 +172,18 @@ function Review({ route, projectId, projectName, feed }: Props) {
       trail={trail}
       who={who}
       nextOffset={nextOffset}
-      onMore={() => nextOffset !== null && setNextPage({ head, offset: nextOffset })}
+      onMore={() => nextOffset !== null && setNextPage({ pin, offset: nextOffset })}
       loader={
-        nextPage?.head === head && nextPage.offset === nextOffset ? (
+        nextPage?.pin === pin && nextPage.offset === nextOffset ? (
           <MorePage
             projectId={projectId}
             laneId={laneId}
             offset={nextPage.offset}
-            head={head}
+            pin={pin}
             onItems={items => {
               setExtra(current => ({
-                head,
-                items: [...(current?.head === head ? current.items : []), ...items],
+                pin,
+                items: [...(current?.pin === pin ? current.items : []), ...items],
               }));
               setNextPage(undefined);
             }}
@@ -194,21 +194,23 @@ function Review({ route, projectId, projectName, feed }: Props) {
   );
 }
 
-/** The next page of changed paths, read once on the reader's press and only while it is pinned to the same head. */
+const filePagePin = ({ lane, files }: Reply) => `${lane.head}:${lane.base.head}:${files.orderPin ?? ''}`;
+
+/** The next page of changed paths, read once on the reader's press and only for the same saved listing. */
 function MorePage(props: {
   projectId: Id<'hostedProjects'>;
   laneId: string;
   offset: number;
-  head: string;
+  pin: string;
   onItems: (items: ReviewFile[]) => void;
 }) {
-  const { projectId, laneId, offset, head, onItems } = props;
+  const { projectId, laneId, offset, pin, onItems } = props;
   const text = useQuery(api.projectLaneReview.read, { projectId, laneId, offset });
   useEffect(() => {
     if (!text) return;
     const page = JSON.parse(text) as Reply;
-    onItems(page.lane.head === head ? page.files.items : []);
-  }, [text, head, onItems]);
+    onItems(filePagePin(page) === pin ? page.files.items : []);
+  }, [text, pin, onItems]);
   return <p className="quietline">Loading the next files…</p>;
 }
 
@@ -240,20 +242,28 @@ export function ReviewPage({
   const history = route.rest.endsWith('/history');
   const laneHref = hrefFor({ ...route, rest: lane.laneId });
   const candidate = reply.candidate;
+  const scope = new Set(candidate?.protection?.paths);
   const needsListing =
     candidate &&
     (!reply.files.current ||
       !reply.files.complete ||
       candidate.head !== lane.head ||
-      candidate.base !== lane.base.head);
+      candidate.base !== lane.base.head ||
+      (nextOffset !== null && scope.size > 0 && !reply.files.items.some(file => scope.has(file.path))));
   const exact = useCandidateFiles(projectId, needsListing ? candidate : null);
+  const [order, setOrder] = useState<'eyes' | 'path'>('eyes');
   const [more, setMore] = useState<{ id: string; limit: number }>();
   const limit = candidate && more?.id === candidate.candidateId ? more.limit : 400;
   const entries = useMemo(() => {
     if (reply.candidateUnavailable) return [];
-    if (needsListing) return entriesOf({ ...reply, conflicts: [] }, exact.files?.slice(0, limit) ?? []);
+    if (needsListing) {
+      const listed = entriesOf({ ...reply, conflicts: [] }, exact.files ?? []);
+      // Bring the known protected paths into the first window of an available exact listing.
+      if (order === 'eyes') listed.sort((a, b) => Number(b.group === 'eyes') - Number(a.group === 'eyes'));
+      return listed.slice(0, limit);
+    }
     return entriesOf(reply, files);
-  }, [reply, files, needsListing, exact.files, limit]);
+  }, [reply, files, needsListing, exact.files, limit, order]);
   const total = needsListing ? exact.total : reply.files.total;
   const orderedPage = needsListing
     ? entries.length < (exact.files?.length ?? 0)
@@ -261,7 +271,6 @@ export function ReviewPage({
       : null
     : nextOffset;
   const ticks = useReadTicks(lane.laneId);
-  const [order, setOrder] = useState<'eyes' | 'path'>('eyes');
   const [mode, setMode] = useDiffMode();
   const [cli, setCli] = useState(false);
   const stop = laneStop(reply, feed);
@@ -278,6 +287,15 @@ export function ReviewPage({
       (linked === null || row.submissionId === linked) &&
       (row.laneId === lane.laneId || row.laneIds?.includes(lane.laneId)),
   );
+  const exactApproval =
+    candidate?.protection !== undefined
+      ? candidate.heldForReview
+        ? (protectedApprovalCopy(
+            heldRow?.submissionId === candidate.submissionId ? heldRow : undefined,
+            candidate.protection,
+          ) ?? 'Waits for project owner approval.')
+        : null
+      : undefined;
   const checkAttempt =
     params.get(CHECK_ATTEMPT) ?? (heldRow?.why === 'check-failed' ? heldRow.attemptId : undefined);
   const client = useConvex();
@@ -300,7 +318,7 @@ export function ReviewPage({
           head: candidate.head,
           laneId: lane.laneId,
           itemId: reply.noteItemId,
-          href: hrefFor({ ...route, place: 'plan', section: '', rest: reply.noteItemId }) + '#discussion',
+          href: `${laneHref}/thread#discussion`,
         }
       : null;
   const situation =
@@ -400,6 +418,9 @@ export function ReviewPage({
         {...(reply.request && !lane.landed ? { request: reply.request } : {})}
         head={lane.head}
         read={heldView}
+        {...(candidate?.submissionId && candidate.heldForReview && candidate.protection !== undefined
+          ? { protectedScope: { submissionId: candidate.submissionId, protection: candidate.protection } }
+          : {})}
       />
       {lane.park && !lane.landed ? (
         <p className="quietline" dir="auto">
@@ -456,7 +477,7 @@ export function ReviewPage({
             key={lane.laneId}
             projectId={projectId}
             laneId={lane.laneId}
-            intentId={itemId}
+            itemId={lane.itemId ?? null}
             route={route}
           />
         </Suspense>
@@ -542,12 +563,19 @@ export function ReviewPage({
             itemId={itemId}
             itemLabel={itemLabel}
             approvalHold={
-              heldRow?.why === 'review'
-                ? (protectedApprovalCopy(heldRow) ?? 'Waits for project owner approval.')
-                : linked || (isHeld && !heldView)
-                  ? 'Not reported.'
-                  : null
+              exactApproval === undefined
+                ? heldRow?.why === 'review'
+                  ? (protectedApprovalCopy(heldRow) ?? 'Waits for project owner approval.')
+                  : linked || (isHeld && !heldView)
+                    ? 'Not reported.'
+                    : null
+                : exactApproval
             }
+            scopeUnavailable={Boolean(
+              reply.candidateUnavailable ||
+              (candidate && (candidate.protection === null || (needsListing && !candidate.protection))) ||
+              (!candidate && !reply.files.current && lane.head !== lane.base.head),
+            )}
           />
         </div>
       )}
@@ -682,6 +710,9 @@ function Files({
   }
   const changed = entries.filter(entry => state(entry) === 'changed');
   const rest = entries.filter(entry => state(entry) !== 'changed');
+  const scope = reply.candidate?.protection;
+  const uncertainScope =
+    reply.candidateUnavailable || (reply.candidate && (!scope || scope.paths.length < scope.total));
   const sorted = (group: ReviewGroup) =>
     rest
       .filter(entry => entry.group === group)
@@ -693,7 +724,9 @@ function Files({
         band(
           group,
           reviewGroupLabels[group].title,
-          reviewGroupLabels[group].hint,
+          group === 'code' && uncertainScope
+            ? 'protected scope not fully reported'
+            : reviewGroupLabels[group].hint,
           sorted(group),
           group === 'eyes',
         ),
@@ -765,7 +798,13 @@ function FileRow({
             {'‎'}
             {file.path}
           </span>
-          {why ? <span className="why">{why}</span> : null}
+          {why || entry.protectionUnreported ? (
+            <span className="why">
+              {why}
+              {why && entry.protectionUnreported ? ' · ' : null}
+              {entry.protectionUnreported ? 'Protection not reported' : null}
+            </span>
+          ) : null}
           {stat}
         </summary>
         {open ? (
@@ -1121,6 +1160,7 @@ function Side({
   itemId,
   itemLabel,
   approvalHold,
+  scopeUnavailable,
 }: {
   reply: Reply;
   entries: Entry[];
@@ -1129,9 +1169,10 @@ function Side({
   itemId: string;
   itemLabel: string;
   approvalHold: string | null;
+  scopeUnavailable: boolean;
 }) {
   const { lane } = reply;
-  const guarded = entries.filter(entry => entry.file.protected).length;
+  const guarded = reply.candidate?.protection?.total ?? entries.filter(entry => entry.file.protected).length;
   const peers = new Map(reply.peers.map(peer => [peer.laneId, peer]));
   const laneHref = (laneId: string) => hrefFor({ ...route, place: 'lanes', section: '', rest: laneId });
   return (
@@ -1217,11 +1258,13 @@ function Side({
         </dd>
         <dt>Protected paths</dt>
         <dd>
-          {!reply.protectedRules
-            ? 'None set for this project'
+          {scopeUnavailable
+            ? 'Not reported'
             : guarded
               ? `${plural(guarded, 'file')} ${guarded === 1 ? 'matches' : 'match'} a protected-path rule`
-              : 'None of these files'}
+              : reply.protectedRules
+                ? 'None of these files'
+                : 'None set for this project'}
         </dd>
         <dt>Approval</dt>
         <dd>

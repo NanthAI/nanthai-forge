@@ -159,6 +159,11 @@ const client = {
     ) {
       (window as unknown as { __decide: unknown[] }).__decide ??= [];
       (window as unknown as { __decide: unknown[] }).__decide.push(args);
+      if (scenario === 'candidate-held' && name === 'projectHostedAcceptance:approve') {
+        const { reason } = args as unknown as { reason?: string };
+        sessionStorage.setItem('fixture.approvalReason', reason ?? '');
+        return JSON.stringify({ status: 'landed' });
+      }
       return JSON.stringify({ approval: { status: 'granted' } });
     }
     if (name === 'projectHostedSaves:dismissFailure') {
@@ -202,6 +207,51 @@ const client = {
         return () => callbacks.delete(update);
       },
       localQueryResult: () => {
+        if (name === 'projectWorkIndex:records') {
+          if (scenario === 'thread-review-error') throw new Error('Synthetic comment read failure');
+          const writes = JSON.parse(sessionStorage.getItem('fixture.noteWrites') ?? '[]') as {
+            operationId: string;
+            command: string;
+          }[];
+          const persisted = [...new Map(writes.map(write => [write.operationId, write])).values()];
+          return {
+            isDone: true,
+            continueCursor: '',
+            page: persisted.map(({ operationId, command }, i) => {
+              const { text, itemId } = JSON.parse(command);
+              return {
+                id: operationId,
+                position: i,
+                value: JSON.stringify({
+                  id: operationId,
+                  itemId,
+                  text,
+                  at: new Date(i + 10).toISOString(),
+                  author: 'sample-owner',
+                }),
+              };
+            }),
+          };
+        }
+        if (name === 'projectDiscussionThread:read' && scenario === 'candidate-held') {
+          const approvalReason = sessionStorage.getItem('fixture.approvalReason');
+          return {
+            canRead: true,
+            before: null,
+            entries: approvalReason
+              ? [
+                  {
+                    id: 'acceptance',
+                    at: 20,
+                    actor: 'sample-owner',
+                    type: 'note',
+                    text: '@sample-owner accepted this landing, protected paths .env.example.',
+                    approvalReason,
+                  },
+                ]
+              : [],
+          };
+        }
         if (name === 'projectFailureCause:forLane' && scenario === 'failed-check') {
           const selected = (args as { attemptId?: string }).attemptId === FAILED_ATTEMPT;
           return JSON.stringify({
@@ -309,7 +359,7 @@ async function reply(): Promise<Reply> {
   const exactFiles: Reply['files']['items'] = scenario.startsWith('candidate')
     ? [
         {
-          path: 'src/exact-result.ts',
+          path: scenario === 'candidate-held' ? '.env.example' : 'src/exact-result.ts',
           status: 'modified',
           before: await blob('export const amount = 1;\n'),
           after: await blob('export const amount = 2;\n'),
@@ -346,6 +396,13 @@ async function reply(): Promise<Reply> {
             summary: 'Keep partial input until the next read.',
             notVerified: ['Split input on the device runner'],
             check: 'passed',
+            ...(scenario === 'candidate-held'
+              ? {
+                  submissionId: LINKED_SUBMISSION,
+                  heldForReview: true as const,
+                  protection: { paths: ['.env.example'], total: 1 },
+                }
+              : {}),
           },
           ...(scenario !== 'candidate-reader' ? { noteItemId: ITEM } : {}),
         }
@@ -353,7 +410,7 @@ async function reply(): Promise<Reply> {
     lane: {
       laneId: LANE,
       intentId: scenario === 'legacy-id' ? ITEM : INTENT,
-      ...(scenario === 'legacy-id' ? {} : { itemId: ITEM }),
+      ...(scenario === 'legacy-id' || scenario === 'thread-unplanned' ? {} : { itemId: ITEM }),
       goal: scenario === 'unavailable' ? null : scenario === 'legacy-id' ? ITEM : TITLE,
       // A long *valid* public byline, so the identity filter doesn't render “not reported”.
       actor: wideByline ? 'w'.repeat(39) : 'sample-owner',
@@ -537,7 +594,7 @@ function Routed() {
 
 void reply().then(data => {
   history.start(data.lane);
-  if (scenario === 'linked')
+  if (scenario === 'linked' || scenario === 'candidate-held')
     reads.set('projectNeedsMe:read', {
       held: ['older', 'newer'].map((which, index) => ({
         laneId: LANE,
@@ -545,7 +602,10 @@ void reply().then(data => {
         actor: 'sample-two',
         agent: 'salt-wren',
         why: 'review',
-        note: which === 'older' ? 'needs owner approval: protected paths package.json' : null,
+        note:
+          which === 'older'
+            ? `needs owner approval: protected paths ${scenario === 'candidate-held' ? '.env.example' : 'package.json'}`
+            : null,
         submissionId: which === 'older' ? LINKED_SUBMISSION : '9b8a7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d',
         attemptId:
           which === 'older' ? 'b1c2d3e4-f5a6-4b7c-8d9e-0f1a2b3c4d5e' : 'c2d3e4f5-a6b7-4c8d-9e0f-1a2b3c4d5e6f',
@@ -664,7 +724,7 @@ void reply().then(data => {
       JSON.stringify({ total: 0, listed: 0, more: false, entries: [] }),
     );
     // Lanes' Needs you shares the frame's Needs me read (e317b6ea): nothing waits on this reader.
-    if (scenario !== 'linked')
+    if (scenario !== 'linked' && scenario !== 'candidate-held')
       reads.set('projectNeedsMe:read', {
         held:
           scenario === 'failed-check'
