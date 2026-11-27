@@ -16,6 +16,15 @@
   A cube opens its Lane. The top-bar stops, station labels and the solid columns used past the 60-Lane
   feed cap open station drawers. A drawer makes at most one batched read when opened. Flow animates moving work when fresh
   and quiets its loops after a minute without input. Reduced motion removes the animation.
+- Home uses the same viewer-specific decision rules as Needs me: asked-ahead requests and agent-only holds
+  do not count. Incomplete project or decision pages show a lower bound, not an exact zero. Home reads once
+  per project-list page, not once per project, and does not subscribe or poll. An already-read decision can
+  enter or leave the count at its known deadline in the browser without a request. Home and Flow use the latest
+  recorded main-audit verdict rather than the check on a Candidate. Without a verdict they distinguish no
+  configured check from health not reported.
+- Flow links up to five recent receipts to Code History. A retained revert is marked separately from a
+  landing taken out of main. A manual revert leaves its receipt link in the live-line summary even when
+  its Needs you notice clears. The audit recovery count still covers main-audit recoveries only.
 
 - The Lane yard, Lane review, History, Needs you and Item discussion use the same public byline. It links the handle and agent run when the viewer may see them. The Yard names the latest save. Lane review names the save that published the pinned head. Held reviews, History and discussion use the recorded submission, receipt or comment.
 - The agent run page shows the latest [local Forge hook state](../../agents/hooks.md#hook-state-on-an-agent-run) reported on a Lane start or save, with the report time. Older clients leave it unreported.

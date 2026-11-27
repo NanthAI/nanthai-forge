@@ -23,7 +23,9 @@ import { AccountStrip } from './AccountStrip';
 import type { AccountProps } from '../screen-route';
 import {
   grouped,
-  heldWords,
+  attentionAt,
+  attentionTotal,
+  attentionWords,
   itemWords,
   laneWords,
   metaWords,
@@ -116,10 +118,23 @@ export function ProjectsView({
   const [gone, setGone] = useState<ReadonlySet<string>>(new Set());
   const { toast, show, clear } = useToast();
   const loaded = read.state === 'ok' ? read.data : read.state === 'failed' ? read.last : undefined;
-  const data = useMemo(
-    () => (loaded ? { ...loaded, projects: loaded.projects.filter(row => !gone.has(row.id)) } : undefined),
-    [loaded, gone],
+  const [wokeAt, setWokeAt] = useState(0);
+  const drawnAt = Math.max(now, wokeAt);
+  const snapshot = useMemo(
+    () =>
+      loaded
+        ? attentionAt({ ...loaded, projects: loaded.projects.filter(row => !gone.has(row.id)) }, drawnAt)
+        : undefined,
+    [loaded, gone, drawnAt],
   );
+  const nextAt = snapshot?.nextAt ?? Infinity;
+  useEffect(() => {
+    if (!Number.isFinite(nextAt)) return;
+    const delay = Math.min(Math.max(0, nextAt - Date.now()), 2_147_483_647);
+    const timer = setTimeout(() => setWokeAt(Date.now()), delay);
+    return () => clearTimeout(timer);
+  }, [nextAt, drawnAt]);
+  const data = snapshot?.data;
   const groups = useMemo(() => (data ? grouped(data.projects) : null), [data]);
   const menu = moveToTrash ? setMoving : undefined;
   const tools = (
@@ -153,7 +168,7 @@ export function ProjectsView({
         )}
       </div>
     );
-  if (!data.projects.length) {
+  if (!data.projects.length && !data.more) {
     const prompt = onboardingPrompt(typeof location === 'undefined' ? '' : location.origin);
     return (
       <div className="account-projects">
@@ -184,6 +199,7 @@ export function ProjectsView({
     );
   }
   const shown = data.projects.length;
+  const total = attentionTotal(data);
   return (
     <div className="account-projects">
       <AccountStrip current="projects" />
@@ -200,7 +216,7 @@ export function ProjectsView({
       >
         {groups!.needs.length ? (
           <>
-            <Band title="Needs you" count={groups!.needs.length} needs hint="a Lane is held for a person" />
+            <Band title="Needs you" count={total.atLeast ? undefined : total.n} needs />
             {groups!.needs.map(row => (
               <ProjectLine key={row.id} row={row} now={now} needs onMove={menu} />
             ))}
@@ -262,6 +278,7 @@ function ProjectLine({
   needs?: boolean;
   onMove?: ((row: ProjectRow) => void) | undefined;
 }) {
+  const attention = attentionWords(row);
   const settings =
     row.handle && row.slug
       ? hrefFor({
@@ -306,7 +323,7 @@ function ProjectLine({
         </span>
       </span>
       <span className="proj-facts">
-        {row.held.n ? <State word="Needs you">{heldWords(row)}</State> : null}
+        {needs ? <State word="Needs you">{attention}</State> : attention ? <span>{attention}</span> : null}
         <span>{laneWords(row)}</span>
         <span>{itemWords(row)}</span>
       </span>

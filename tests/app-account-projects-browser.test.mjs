@@ -29,18 +29,18 @@ const c = (n, atLeast = false) => ({ n, atLeast });
 const h = 3600000;
 const sample = [
   { id: 'p1', name: 'stream-parser', handle: 'sample-owner', slug: 'stream-parser', role: 'owner', visibility: 'public', activityAt: now - 20 * 60000,
-    held: c(2), lanes: c(7), main: { at: now - 40 * 60000, passing: true }, items: { done: c(31), inProgress: c(4), left: c(267) } },
+    held: c(0), attention: c(2), lanes: c(7), verdict: { red: true, since: null, checkedAt: null }, main: { at: now - 40 * 60000, passing: true }, items: { done: c(31), inProgress: c(4), left: c(267) } },
   { id: 'p2', name: 'docs-site', handle: 'sample-owner', slug: 'docs-site', role: 'owner', visibility: 'private', activityAt: now - 3 * h,
-    held: c(0), lanes: c(1), main: { at: now - 3 * h, passing: false }, items: { done: c(12), inProgress: c(1), left: c(5) } },
+    held: c(2), attention: c(0), lanes: c(1), checksConfigured: false, main: { at: now - 3 * h, passing: false }, items: { done: c(12), inProgress: c(1), left: c(5) } },
   { id: 'p3', name: 'shared-tools', handle: 'sample-peer', slug: 'shared-tools', role: 'write', visibility: 'private', activityAt: now - 30 * h,
-    held: c(0), lanes: c(0), main: null, items: null },
+    held: c(0), attention: c(0, true), lanes: c(0), main: null, items: null },
   { id: 'p4', name: 'reading-room', handle: 'sample-peer', slug: 'reading-room', role: 'read', visibility: 'public', activityAt: now - 80 * h,
-    held: c(0), lanes: c(0), main: { at: now - 80 * h, passing: true }, items: { done: c(0), inProgress: c(0), left: c(0) } },
+    held: c(0), attention: c(0), lanes: c(0), verdict: { red: false, since: null, checkedAt: now - 80 * h }, main: { at: now - 80 * h, passing: true }, items: { done: c(0), inProgress: c(0), left: c(0) } },
 ];
 const long = 'bartholomew-fitzgerald-the-third-of-the-northern-reaches-x';
 const worst = [
-  { ...sample[0], id: 'w1', name: 'a-very-long-project-name-that-keeps-going-well-past-any-sensible-width-for-a-row', handle: long, slug: 'a-very-long-project-name-that-keeps-going-well-past-any-sensible-width-for-a-row', held: c(20, true), lanes: c(60, true), items: { done: c(1000), inProgress: c(500, true), left: c(2048, true) } },
-  { ...sample[1], id: 'w2', name: 'م', handle: 'x', slug: 'م', held: c(1) },
+  { ...sample[0], id: 'w1', name: 'a-very-long-project-name-that-keeps-going-well-past-any-sensible-width-for-a-row', handle: long, slug: 'a-very-long-project-name-that-keeps-going-well-past-any-sensible-width-for-a-row', attention: c(20, true), lanes: c(60, true), items: { done: c(1000), inProgress: c(500, true), left: c(2048, true) } },
+  { ...sample[1], id: 'w2', name: 'م', handle: 'x', slug: 'م', attention: c(1) },
   { ...sample[2], id: 'w3', name: 'x', slug: 'x' },
 ];
 const mode = new URLSearchParams(location.search).get('data') || 'sample';
@@ -135,10 +135,7 @@ test('account projects: the held project leads, rows link to projects, and every
   {
     const { page, errors, context } = await open(1440, 'light', 'sample');
     const main = page.locator('main');
-    assert.match(
-      await main.locator('.head').textContent(),
-      /2 held Lanes need you, in stream-parser\. 4 projects\./,
-    );
+    assert.match(await main.locator('.head').textContent(), /At least 2 decisions need you\. 4 projects\./);
     const names = await main.locator('.row.proj .ttl').allTextContents();
     assert.deepEqual(names, ['stream-parser', 'docs-site', 'shared-tools', 'reading-room']);
     assert.equal(
@@ -155,6 +152,13 @@ test('account projects: the held project leads, rows link to projects, and every
       await page.getByRole('link', { name: 'Import a repository' }).getAttribute('href'),
       '/new/import',
     );
+    assert.match(await main.locator('.row.proj').nth(0).textContent(), /main red.*2 decisions need you/);
+    assert.match(await main.locator('.row.proj').nth(1).textContent(), /main not checked/);
+    assert.match(
+      await main.locator('.row.proj').nth(2).textContent(),
+      /What needs you is not fully reported/,
+    );
+    assert.match(await main.locator('.row.proj').nth(3).textContent(), /main green/);
     assert.match(await main.textContent(), /Items not reported/);
     assert.deepEqual(errors, []);
     await context.close();

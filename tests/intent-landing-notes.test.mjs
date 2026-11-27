@@ -19,6 +19,7 @@ import { successorIntentId } from '../dist/hosted-intent-chain.js';
 const notes = await import(moduleUrl('../convex/projectIntentLandingNotes.ts'));
 const completion = await import(moduleUrl('../convex/projectHostedAcceptanceCompletion.ts'));
 const revertNotice = await import(moduleUrl('../convex/projectHostedRevertNotice.ts'));
+const { read: flowRead } = await import(moduleUrl('../convex/projectLiveLine.ts'));
 const workIndex = await import(moduleUrl('../convex/projectWorkIndex.ts'));
 const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 const itemWork = await import(moduleUrl('../convex/projectItemWork.ts'));
@@ -335,6 +336,14 @@ test('a revert after purge-receipt eviction follows the Item tombstone even if t
   assert.deepEqual(notesOf(f, note.intentId), []);
   assert(f.receipt(original.id));
   assert(f.receipt(final.acceptance.receiptId));
+  // Even with neither an Item note nor a current recovery notice, exact revert evidence survives.
+  f.patch('hostedProjects', f.projectId, { needsFix: undefined });
+  const flow = await f.c.run('flowAfterClearingNotice', (ctx, args) => flowRead._handler(ctx, args), {
+    projectId: f.projectId,
+  });
+  const newest = flow.recentLandings;
+  assert.equal(newest.find(row => row.receiptId === original.id).takenOut, true);
+  assert.equal(newest.find(row => row.receiptId === final.acceptance.receiptId).revert, true);
 });
 
 test('the first revert of a recovered landing records its Item even with an unmarked Intent', async t => {

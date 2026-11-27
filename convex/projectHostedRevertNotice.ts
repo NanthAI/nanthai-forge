@@ -11,6 +11,7 @@ import { markNoteReverted, postIntentLandingNote } from './projectIntentLandingN
 import { activeProject } from './projectAuthority';
 import { requireMemberAuthority } from './projectLaneAuthority';
 import { withoutRawId } from './projectNeedsMe';
+import { rememberRecentRevert } from './projectRecentLandings';
 import { report } from './errors';
 import { invariant } from '../src/errors';
 import { hostedAcceptanceSchema, type HostedAcceptance } from '../src/hosted-acceptance';
@@ -49,7 +50,8 @@ type Revert = {
  *  - the reverted Intent gets a `reverted` needsFix notice (Now and CLI status), unless main-audit
  *    recovery already owns one for this receipt, or the Intent was abandoned.
  * Reads: project, both receipts, the reverted input page, then per Lane its overlap row and the board
- * note's own reads; the Candidate and Intent records; one probe for the Item's system note (3a733ee8).
+ * note's own reads; the Candidate and Intent records; one probe for the Item's system note (3a733ee8);
+ * one read of the small line summary to retain the exact revert even without an Item.
  * Replay-safe: every write is skipped when present.
  */
 export async function noticeRevert(ctx: MutationCtx, input: Revert) {
@@ -62,6 +64,11 @@ export async function noticeRevert(ctx: MutationCtx, input: Revert) {
   if (!originalRow || !revertRow) return { lanes: 0, notes: 0, needsFix: false };
   const original = hostedAcceptanceSchema.parse(JSON.parse(originalRow.value));
   const revert = hostedAcceptanceSchema.parse(JSON.parse(revertRow.value));
+  await rememberRecentRevert(ctx.db, input.projectId, {
+    original: original.id,
+    receipt: revert.id,
+    sequence: revertRow.sequence,
+  });
   const revertLane = await firstLane(ctx, input.projectId, input.receiptId);
   const page = await acceptancePage(ctx, {
     projectId: input.projectId,

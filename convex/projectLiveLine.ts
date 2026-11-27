@@ -2,8 +2,9 @@
 // Copyright 2026 Ferdinando Valsecchi
 import { v } from 'convex/values';
 import { finishQuery } from './cliServer';
-import { accessibleProject } from './projectAuthority';
+import { accessibleProject, publicSourceAvailable } from './projectAuthority';
 import { lineSummary } from './projectLiveLineStore';
+import { recentLandings, type RecentRevert } from './projectRecentLandings';
 import { retainedMainVerdict } from './projectLiveLineRecovery';
 import { legacyLineMain } from './projectLiveLineLegacy';
 import { finishReadSourceDb } from './projectFinishReadReader';
@@ -46,6 +47,19 @@ export const liveLineResult = v.object({
     v.null(),
   ),
   checks: v.optional(lineChecksView),
+  checksConfigured: v.optional(v.boolean()),
+  recentLandings: v.optional(
+    v.array(
+      v.object({
+        receiptId: v.string(),
+        sequence: v.number(),
+        at: v.string(),
+        title: v.union(v.string(), v.null()),
+        takenOut: v.optional(v.literal(true)),
+        revert: v.optional(v.literal(true)),
+      }),
+    ),
+  ),
   /** The Flow view's running day (src/flow-day.ts), from the same summary row; absent until its first step. */
   flow: v.optional(
     v.object({
@@ -82,6 +96,7 @@ export const read = finishQuery({
         main?: import('convex/values').Infer<typeof mainView>;
         exit?: import('convex/values').Infer<typeof liveLineResult>['exit'];
         flow?: unknown;
+        recentReverts?: RecentRevert[];
       } = summary ? JSON.parse(summary.value) : {};
       let main = value.main ?? null;
       // An untouched pre-upgrade project still shows its accepted main. This is an
@@ -126,11 +141,19 @@ export const read = finishQuery({
           main = await legacyLineMain(sourceDb, projectId, original.work.generationId);
       }
       const flow = flowDay(value.flow);
-      if (!flow.main && !flow.audit && main)
-        Object.assign(flow, await retainedMainVerdict(ctx.db, projectId));
-      const checks = includeChecks ? await lineChecks(finishReadSourceDb(ctx), project, marks) : undefined;
+      if (!flow.main && !flow.audit) Object.assign(flow, await retainedMainVerdict(ctx.db, projectId));
+      const [checks, recent] = await Promise.all([
+        includeChecks ? lineChecks(finishReadSourceDb(ctx), project, marks) : undefined,
+        includeChecks && (await publicSourceAvailable(ctx, project, user.subject))
+          ? recentLandings(ctx, project, value.recentReverts)
+          : undefined,
+      ]);
       return {
         ...(checks ? { checks } : {}),
+        ...(project.hasCheckDefinitions === undefined
+          ? {}
+          : { checksConfigured: project.hasCheckDefinitions }),
+        ...(recent ? { recentLandings: recent } : {}),
         lanes: marks.slice(0, 60).map(({ laneId, stage, held, overlap, changedAt, check, mainRed, fix }) => ({
           laneId,
           stage,

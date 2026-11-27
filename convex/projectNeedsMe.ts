@@ -105,6 +105,7 @@ export const needsMeResult = v.object({
   /** Held Lanes past the limit. With `moreIsLowerBound`, at least this many. */
   more: v.number(),
   moreIsLowerBound: v.boolean(),
+  reviewsMore: v.optional(v.literal(true)),
   /** Open approval requests (projectHostedApprovals:list), as its canonical payload. */
   approvals: v.string(),
   /** Whether the viewer can approve or decline (the project owner). */
@@ -255,6 +256,7 @@ async function reason(
   reviewIds: ReadonlySet<string>,
   link: ApprovalLink,
   projectHasNoCheck: boolean,
+  countOnly: boolean,
 ) {
   const owner = await lineOwner(ctx.db, mark.laneId);
   // Binding stamps the submission on the owner row. A new save clears it in
@@ -280,7 +282,8 @@ async function reason(
               ? 'dependency'
               : 'unknown'));
   const ended = state?.timing?.ciEndedAt ?? state?.timing?.settledAt;
-  const parentLaneId = why === 'dependency' && state ? await dependencyLane(ctx, projectId, state.id) : null;
+  const parentLaneId =
+    !countOnly && why === 'dependency' && state ? await dependencyLane(ctx, projectId, state.id) : null;
   return {
     why,
     note: state?.error?.message ? state.error.message.replace(/\s+/g, ' ').slice(0, NOTE_CHARS) : null,
@@ -393,219 +396,223 @@ export const read = query({
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read what needs you.');
       const project = await accessibleProject(ctx, projectId, user.subject);
-      const projectHasNoCheck = project.hasCheckDefinitions === false;
-      // The owner's handle (one indexed read) is read only when a row below needs an approval link.
-      const link = approvalLinks(ctx, project);
-      const [marks, approvals, asks, parks, { reviews }, recomposeAlerts] = await Promise.all([
-        ctx.db
-          .query('projectLiveLineLanes')
-          .withIndex('by_project_and_held', q => q.eq('projectId', projectId).eq('held', true))
-          .take(NEEDS_ME_HELD_LIMIT + 1),
-        openApprovalRequests(ctx, projectId, link),
-        messagesTo(ctx, project, user.subject, true),
-        ctx.db
-          .query('projectHostedParks')
-          .withIndex('by_project_and_parked_for', q =>
-            q.eq('projectId', projectId).eq('parkedFor', user.subject),
-          )
-          .take(NEEDS_ME_PARKED_LIMIT + 1),
-        openLandingReviews(ctx, projectId, link, projectHasNoCheck),
-        project.owner === user.subject
-          ? recentRecomposeAlerts(ctx, projectId, NEEDS_ME_NOTICE_LIMIT + 1)
-          : [],
-      ]);
-      const reviewIds = new Set(reviews.map(review => review.submissionId));
-      const shown = marks.slice(0, NEEDS_ME_HELD_LIMIT);
-      // A goal that is only a raw id names its Item instead (the Lane's Intent is the Item it started from): one
-      // point read, only for such a row.
-      let partition: Id<'projectWorkGenerations'> | null | undefined;
-      const titleOf = async (presence: { goal: string; intentId: string } | null) => {
-        if (!presence) return null;
-        const words = withoutRawId(presence.goal);
-        if (words) return words;
-        if (partition === undefined) {
-          const generation = await selectedGeneration(ctx, project);
-          partition = generation ? recordPartition(generation) : null;
-        }
-        const root = partition ? await record(ctx, partition, 'planningSearch', presence.intentId) : null;
-        const title = root ? (JSON.parse(root.value) as { title?: unknown }).title : null;
-        return typeof title === 'string' && title.trim() ? title.replace(/\s+/g, ' ').trim() : null;
-      };
-      const presenceOf = (laneId: string) =>
-        ctx.db
-          .query('projectHostedPresence')
-          .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', laneId))
-          .unique();
-      // The Lanes whose marks are bound to each review submission: one decision, but every Lane of it waits on the
-      // reader (Item 9b9057a9). Taken from the marks this read already walks, so no read is added.
-      const reviewLanes = new Map<string, string[]>();
-      const marked = await Promise.all(
-        shown.map(async mark => {
-          const recorded = await reason(ctx, projectId, mark, reviewIds, link, projectHasNoCheck);
-          // One decision for all the Lane marks on this exact submission.
-          // A different submission on the same Lane can still have its own hold.
-          if (recorded.why === undefined) {
-            reviewLanes.set(recorded.sibling, [...(reviewLanes.get(recorded.sibling) ?? []), mark.laneId]);
-            return null;
-          }
-          const { parentLaneId, submitter, ...why } = recorded;
-          const presence = await presenceOf(mark.laneId);
-          // A review is for the submitted landing; for other holds the byline names who
-          // acts next. Select only one account so privacy mapping reads no second person.
-          const by = why.why === 'review' ? (submitter ?? presence) : presence;
-          const stamp =
-            by && by.actor === submitter?.actor && by.agent === submitter.agent ? submitter : null;
-          return {
-            laneId: mark.laneId,
-            intentId: presence?.intentId ?? null,
-            title: await titleOf(presence),
-            actor: by?.actor ?? null,
-            agent: by?.agent ?? null,
-            ...(stamp?.agentClient ? { agentClient: stamp.agentClient } : {}),
-            ...(stamp?.agentAuthored ? { agentAuthored: stamp.agentAuthored } : {}),
-            ...why,
-            ...(parentLaneId
-              ? { dependsOn: { laneId: parentLaneId, title: await titleOf(await presenceOf(parentLaneId)) } }
-              : {}),
-          };
-        }),
-      );
-      const reviewRows = await Promise.all(
-        reviews.map(async review => {
-          const presence = review.laneId ? await presenceOf(review.laneId) : null;
-          const laneIds = [
-            ...new Set([review.laneId, ...(reviewLanes.get(review.submissionId) ?? [])]),
-          ].filter(id => id !== null);
-          return {
-            ...review,
-            ...(laneIds.length > 1 ? { laneIds } : {}),
-            intentId: review.intentId ?? presence?.intentId ?? null,
-            title: await titleOf(presence),
-            why: 'review' as const,
-            note: review.note?.replace(/\s+/g, ' ').slice(0, NOTE_CHARS) ?? null,
-          };
-        }),
-      );
-      const held = [...marked.filter(mark => mark !== null), ...reviewRows];
-      // parkedFor is the named holder's account, or the starter's when no one is named (projectHostedPresence.ts
-      // routeLanePark); the Lane's slim presence row holds its title, people, park and last activity.
-      const parked = [];
-      for (const route of parks.slice(0, NEEDS_ME_PARKED_LIMIT)) {
-        const row = await ctx.db
-          .query('projectHostedPresence')
-          .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', route.laneId))
-          .unique();
-        if (!row?.park) continue;
-        parked.push({
-          laneId: row.laneId,
-          intentId: row.intentId,
-          title: await titleOf(row),
-          actor: row.actor,
-          agent: row.agent ?? null,
-          park: {
-            ...row.park,
-            named: Boolean(row.park.to),
-            ...(row.park.to?.includes('/') ? { toAgent: true as const } : {}),
-          },
-          at: row.at,
-        });
-      }
-      // Shared-state decisions (Item 12fde646): the notices sit on the project row already read; the mirror reads its
-      // three status rows only for the owner of a project with a mirror, as the Mirror screen does.
-      const fixes = needsFix(project);
-      const owner = project.owner === user.subject;
-      // The team check reads a role only for a project with notices to show or for its owner's mirror.
-      const team = fixes.length > 0 || owner ? await coordinationAccess(ctx, project, user.subject) : false;
-      // The sealed-secrets counter sits on the project row already read; a role check runs only when it is not zero.
-      const secrets =
-        project.secretsNeeds && (await hasWriteRole(ctx, project, user.subject)) ? project.secretsNeeds : 0;
-      const notices: Notice[] = recomposeAlerts.slice(0, NEEDS_ME_NOTICE_LIMIT).map(alert => ({
-        kind: 'source-proof',
-        id: alert.groupId,
-        summary: alert.summary,
-        next: 'Inspect the retained landing failure.',
-        ...(alert.laneId ? { laneId: alert.laneId } : {}),
-      }));
-      const tookOut: (TakenOut & { id: string })[] = [];
-      let noticesMore = recomposeAlerts.length > NEEDS_ME_NOTICE_LIMIT;
-      let noticesMoreSince = Infinity;
-      if (team) {
-        for (const fix of fixes.slice(NEEDS_ME_NOTICE_LIMIT)) {
-          if (fix.state === 'needs-fix') {
-            const since = typeof fix.at === 'string' ? Date.parse(fix.at) : NaN;
-            if (owner && Number.isFinite(since)) noticesMoreSince = Math.min(noticesMoreSince, since);
-            continue;
-          }
-          const taken = takenOutOf(fix);
-          if (
-            taken?.owner === user.subject &&
-            taken.by !== user.subject &&
-            !taken.back &&
-            !taken.left.includes(user.subject)
-          )
-            noticesMore = true;
-        }
-        for (const fix of fixes.slice(0, NEEDS_ME_NOTICE_LIMIT)) {
-          // A revert somebody ran (J08): FYI for whoever ran it, an offer for the Lane's owner when that is someone
-          // else, nothing for the rest; once brought back or left out it is gone. Entries without these fields (a main
-          // audit's, an older revert) keep the shared-state notice below.
-          const summary = String(fix.summary ?? '')
-            .replace(/\s+/g, ' ')
-            .slice(0, NOTE_CHARS);
-          const taken = fix.state === 'reverted' ? takenOutOf(fix) : null;
-          if (taken) {
-            const { owner: laneOwner, left, back, ...shown } = taken;
-            if (back || left.includes(user.subject)) continue;
-            if (taken.by === user.subject) tookOut.push({ id: fix.intentId, ...shown });
-            else if (laneOwner === user.subject)
-              notices.push({ kind: 'reverted', id: fix.intentId, summary, next: null, taken: shown });
-            continue;
-          }
-          notices.push({
-            kind: fix.state === 'reverted' ? 'reverted' : 'needs-fix',
-            id: fix.intentId,
-            summary,
-            next: typeof fix.undo === 'string' ? fix.undo.slice(0, NOTE_CHARS) : null,
-            ...(typeof fix.at === 'string' && Number.isFinite(Date.parse(fix.at))
-              ? { since: Date.parse(fix.at) }
-              : {}),
-            ...(typeof fix.receiptId === 'string' ? { receiptId: fix.receiptId } : {}),
-            ...(Array.isArray(fix.tests)
-              ? {
-                  tests: fix.tests
-                    .slice(0, 3)
-                    .filter((file: unknown): file is string => typeof file === 'string'),
-                }
-              : {}),
-            ...(typeof fix.moreTests === 'number' ? { moreTests: fix.moreTests } : {}),
-          });
-        }
-      }
-      const [mirror, deployStatus] = await Promise.all([
-        team && owner ? stoppedMirror(ctx, project) : null,
-        deployStatusForViewer(ctx, project, user.subject),
-        addRepairLinks(ctx, projectId, notices),
-      ]);
-      if (mirror) notices.push(mirror);
-      return {
-        held,
-        parked,
-        ...(notices.length ? { notices } : {}),
-        ...(deployStatus ? { deployStatus } : {}),
-        ...(tookOut.length ? { tookOut } : {}),
-        ...(noticesMore ? { noticesMore: true as const } : {}),
-        ...(Number.isFinite(noticesMoreSince) ? { noticesMoreSince } : {}),
-        ...(secrets ? { secrets } : {}),
-        parkedMore: parks.length > NEEDS_ME_PARKED_LIMIT,
-        more: Math.max(0, marks.length - NEEDS_ME_HELD_LIMIT),
-        moreIsLowerBound: marks.length > NEEDS_ME_HELD_LIMIT,
-        approvals,
-        canDecide: project.owner === user.subject,
-        asks: asks.rows,
-        ...(asks.more ? { asksMore: true as const } : {}),
-      };
+      return await readNeedsMe(ctx, project, user.subject);
     } catch (error) {
       return report(error);
     }
   },
 });
+
+/** Reused by the authorized account-page read. Counts need the same eligibility evidence, not titles or links. */
+export async function readNeedsMe(
+  ctx: QueryCtx,
+  project: Doc<'hostedProjects'>,
+  viewer: string,
+  summary?: { marks: readonly Held[] },
+): Promise<typeof needsMeResult.type> {
+  const projectId = project._id;
+  const countOnly = summary !== undefined;
+  const owner = project.owner === viewer;
+  const projectHasNoCheck = project.hasCheckDefinitions === false;
+  // Count-only reviews carry the same submission/attempt handles, so no approval URLs are needed.
+  const link = countOnly ? async () => null : approvalLinks(ctx, project);
+  const [marks, approvals, asks, parks, { reviews, reviewsComplete }, recomposeAlerts] = await Promise.all([
+    summary?.marks ??
+      ctx.db
+        .query('projectLiveLineLanes')
+        .withIndex('by_project_and_held', q => q.eq('projectId', projectId).eq('held', true))
+        .take(NEEDS_ME_HELD_LIMIT + 1),
+    openApprovalRequests(ctx, projectId, link),
+    messagesTo(ctx, project, viewer, true),
+    ctx.db
+      .query('projectHostedParks')
+      .withIndex('by_project_and_parked_for', q => q.eq('projectId', projectId).eq('parkedFor', viewer))
+      .take(NEEDS_ME_PARKED_LIMIT + 1),
+    openLandingReviews(ctx, projectId, link, projectHasNoCheck),
+    owner ? recentRecomposeAlerts(ctx, projectId, NEEDS_ME_NOTICE_LIMIT + 1) : [],
+  ]);
+  const reviewIds = new Set(reviews.map(review => review.submissionId));
+  const shown = marks.slice(0, NEEDS_ME_HELD_LIMIT);
+  // A goal that is only a raw id names its Item instead (the Lane's Intent is the Item it started from): one
+  // point read, only for such a row.
+  let partition: Id<'projectWorkGenerations'> | null | undefined;
+  const titleOf = async (presence: { goal: string; intentId: string } | null) => {
+    if (countOnly || !presence) return null;
+    const words = withoutRawId(presence.goal);
+    if (words) return words;
+    if (partition === undefined) {
+      const generation = await selectedGeneration(ctx, project);
+      partition = generation ? recordPartition(generation) : null;
+    }
+    const root = partition ? await record(ctx, partition, 'planningSearch', presence.intentId) : null;
+    const title = root ? (JSON.parse(root.value) as { title?: unknown }).title : null;
+    return typeof title === 'string' && title.trim() ? title.replace(/\s+/g, ' ').trim() : null;
+  };
+  const presenceOf = (laneId: string) =>
+    ctx.db
+      .query('projectHostedPresence')
+      .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', laneId))
+      .unique();
+  // The Lanes whose marks are bound to each review submission: one decision, but every Lane of it waits on the
+  // reader (Item 9b9057a9). Taken from the marks this read already walks, so no read is added.
+  const reviewLanes = new Map<string, string[]>();
+  const marked = await Promise.all(
+    shown.map(async mark => {
+      const recorded = await reason(ctx, projectId, mark, reviewIds, link, projectHasNoCheck, countOnly);
+      // One decision for all the Lane marks on this exact submission.
+      // A different submission on the same Lane can still have its own hold.
+      if (recorded.why === undefined) {
+        reviewLanes.set(recorded.sibling, [...(reviewLanes.get(recorded.sibling) ?? []), mark.laneId]);
+        return null;
+      }
+      const { parentLaneId, submitter, ...why } = recorded;
+      const presence = countOnly ? null : await presenceOf(mark.laneId);
+      // A review is for the submitted landing; for other holds the byline names who
+      // acts next. Select only one account so privacy mapping reads no second person.
+      const by = why.why === 'review' ? (submitter ?? presence) : presence;
+      const stamp = by && by.actor === submitter?.actor && by.agent === submitter.agent ? submitter : null;
+      return {
+        laneId: mark.laneId,
+        intentId: presence?.intentId ?? null,
+        title: await titleOf(presence),
+        actor: by?.actor ?? null,
+        agent: by?.agent ?? null,
+        ...(stamp?.agentClient ? { agentClient: stamp.agentClient } : {}),
+        ...(stamp?.agentAuthored ? { agentAuthored: stamp.agentAuthored } : {}),
+        ...why,
+        ...(parentLaneId
+          ? { dependsOn: { laneId: parentLaneId, title: await titleOf(await presenceOf(parentLaneId)) } }
+          : {}),
+      };
+    }),
+  );
+  const reviewRows = await Promise.all(
+    reviews.map(async review => {
+      const presence = !countOnly && review.laneId ? await presenceOf(review.laneId) : null;
+      const laneIds = [...new Set([review.laneId, ...(reviewLanes.get(review.submissionId) ?? [])])].filter(
+        id => id !== null,
+      );
+      return {
+        ...review,
+        ...(laneIds.length > 1 ? { laneIds } : {}),
+        intentId: review.intentId ?? presence?.intentId ?? null,
+        title: await titleOf(presence),
+        why: 'review' as const,
+        note: review.note?.replace(/\s+/g, ' ').slice(0, NOTE_CHARS) ?? null,
+      };
+    }),
+  );
+  const held = [...marked.filter(mark => mark !== null), ...reviewRows];
+  // parkedFor is the named holder's account, or the starter's when no one is named (projectHostedPresence.ts
+  // routeLanePark); the Lane's slim presence row holds its title, people, park and last activity.
+  const parked = [];
+  for (const route of parks.slice(0, NEEDS_ME_PARKED_LIMIT)) {
+    const row = await ctx.db
+      .query('projectHostedPresence')
+      .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', route.laneId))
+      .unique();
+    if (!row?.park) continue;
+    parked.push({
+      laneId: row.laneId,
+      intentId: row.intentId,
+      title: await titleOf(row),
+      actor: row.actor,
+      agent: row.agent ?? null,
+      park: {
+        ...row.park,
+        named: Boolean(row.park.to),
+        ...(row.park.to?.includes('/') ? { toAgent: true as const } : {}),
+      },
+      at: row.at,
+    });
+  }
+  // Shared-state decisions (Item 12fde646): the notices sit on the project row already read; the mirror reads its
+  // three status rows only for the owner of a project with a mirror, as the Mirror screen does.
+  const fixes = needsFix(project);
+  // The team check reads a role only for a project with notices to show or for its owner's mirror.
+  const team = fixes.length > 0 || owner ? await coordinationAccess(ctx, project, viewer) : false;
+  // The sealed-secrets counter sits on the project row already read; a role check runs only when it is not zero.
+  const secrets =
+    project.secretsNeeds && (await hasWriteRole(ctx, project, viewer)) ? project.secretsNeeds : 0;
+  const notices: Notice[] = recomposeAlerts.slice(0, NEEDS_ME_NOTICE_LIMIT).map(alert => ({
+    kind: 'source-proof',
+    id: alert.groupId,
+    summary: alert.summary,
+    next: 'Inspect the retained landing failure.',
+    ...(alert.laneId ? { laneId: alert.laneId } : {}),
+  }));
+  const tookOut: (TakenOut & { id: string })[] = [];
+  let noticesMore = recomposeAlerts.length > NEEDS_ME_NOTICE_LIMIT;
+  let noticesMoreSince = Infinity;
+  if (team) {
+    for (const fix of fixes.slice(NEEDS_ME_NOTICE_LIMIT)) {
+      if (fix.state === 'needs-fix') {
+        const since = typeof fix.at === 'string' ? Date.parse(fix.at) : NaN;
+        if (owner && Number.isFinite(since)) noticesMoreSince = Math.min(noticesMoreSince, since);
+        continue;
+      }
+      const taken = takenOutOf(fix);
+      if (taken?.owner === viewer && taken.by !== viewer && !taken.back && !taken.left.includes(viewer))
+        noticesMore = true;
+    }
+    for (const fix of fixes.slice(0, NEEDS_ME_NOTICE_LIMIT)) {
+      // A revert somebody ran (J08): FYI for whoever ran it, an offer for the Lane's owner when that is someone
+      // else, nothing for the rest; once brought back or left out it is gone. Entries without these fields (a main
+      // audit's, an older revert) keep the shared-state notice below.
+      const summary = String(fix.summary ?? '')
+        .replace(/\s+/g, ' ')
+        .slice(0, NOTE_CHARS);
+      const taken = fix.state === 'reverted' ? takenOutOf(fix) : null;
+      if (taken) {
+        const { owner: laneOwner, left, back, ...shown } = taken;
+        if (back || left.includes(viewer)) continue;
+        if (taken.by === viewer) tookOut.push({ id: fix.intentId, ...shown });
+        else if (laneOwner === viewer)
+          notices.push({ kind: 'reverted', id: fix.intentId, summary, next: null, taken: shown });
+        continue;
+      }
+      notices.push({
+        kind: fix.state === 'reverted' ? 'reverted' : 'needs-fix',
+        id: fix.intentId,
+        summary,
+        next: typeof fix.undo === 'string' ? fix.undo.slice(0, NOTE_CHARS) : null,
+        ...(typeof fix.at === 'string' && Number.isFinite(Date.parse(fix.at))
+          ? { since: Date.parse(fix.at) }
+          : {}),
+        ...(typeof fix.receiptId === 'string' ? { receiptId: fix.receiptId } : {}),
+        ...(Array.isArray(fix.tests)
+          ? {
+              tests: fix.tests
+                .slice(0, 3)
+                .filter((file: unknown): file is string => typeof file === 'string'),
+            }
+          : {}),
+        ...(typeof fix.moreTests === 'number' ? { moreTests: fix.moreTests } : {}),
+      });
+    }
+  }
+  const [mirror, deployStatus] = await Promise.all([
+    team && owner ? stoppedMirror(ctx, project) : null,
+    deployStatusForViewer(ctx, project, viewer),
+    countOnly ? undefined : addRepairLinks(ctx, projectId, notices),
+  ]);
+  if (mirror) notices.push(mirror);
+  return {
+    held,
+    parked,
+    ...(notices.length ? { notices } : {}),
+    ...(deployStatus ? { deployStatus } : {}),
+    ...(tookOut.length ? { tookOut } : {}),
+    ...(noticesMore ? { noticesMore: true as const } : {}),
+    ...(Number.isFinite(noticesMoreSince) ? { noticesMoreSince } : {}),
+    ...(secrets ? { secrets } : {}),
+    parkedMore: parks.length > NEEDS_ME_PARKED_LIMIT,
+    more: Math.max(0, marks.length - NEEDS_ME_HELD_LIMIT),
+    moreIsLowerBound: marks.length > NEEDS_ME_HELD_LIMIT,
+    approvals,
+    canDecide: owner,
+    ...(owner && !reviewsComplete ? { reviewsMore: true as const } : {}),
+    asks: asks.rows,
+    ...(asks.more ? { asksMore: true as const } : {}),
+  };
+}

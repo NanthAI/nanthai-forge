@@ -7,6 +7,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { getFunctionName } from 'convex/server';
+import { getDocumentSize } from 'convex/values';
 import { moduleUrl } from './convex-module.mjs';
 import { projectRow, state } from './hosted-fixture.mjs';
 
@@ -14,6 +15,12 @@ const projectBackups = await import(moduleUrl('../convex/projectBackups.ts'));
 const accountProjects = await import(moduleUrl('../convex/accountProjects.ts'));
 const order = await import(moduleUrl('../convex/accountProjectOrder.ts'));
 const line = await import(moduleUrl('../convex/projectLiveLineStore.ts'));
+const { read: needsMe } = await import(moduleUrl('../convex/projectNeedsMe.ts'));
+const { read: liveLine } = await import(moduleUrl('../convex/projectLiveLine.ts'));
+const { needsCount } = await import(moduleUrl('../src/needs-attention.ts'));
+const { flowVerdict } = await import(moduleUrl('../src/flow-day.ts'));
+const { HOSTED_WORK_INDEX_FORMAT } = await import(moduleUrl('../src/work-hosted-summary.ts'));
+const { encodePlanPage, PLAN_ROWS } = await import(moduleUrl('../convex/projectPlanRows.ts'));
 const page = { paginationOpts: { cursor: null, numItems: 20 } };
 const HOUR = 3_600_000;
 
@@ -222,6 +229,251 @@ test('a live shared project behind 201 newer removed shared projects is on the f
   assert.deepEqual(
     first.page.map(row => [row.id, row.role]),
     [['live', 'write']],
+  );
+});
+
+test('Home agrees with Needs me for the same viewer, not the live line holds or Candidate check', async () => {
+  const s = state([]);
+  project(s, 'p', { secretsNeeds: 2, hasCheckDefinitions: true });
+  project(s, 'other', { owner: 'peer' });
+  grant(s, 'projectReaders', 'r', 'other', 'owner');
+  s.caller('owner');
+  await backfill(s);
+  const ask = (projectId, id, kind, extra = {}, recipientActor = 'owner') =>
+    s.tables.projectCoordinationEvents.set(id, {
+      _id: id,
+      _creationTime: s.tables.projectCoordinationEvents.size + 1,
+      projectId,
+      operationId: id,
+      actor: 'agent-principal',
+      at: 1,
+      kind,
+      recipientActor,
+      command:
+        kind === 'handoff'
+          ? {
+              kind,
+              summary: 'The changes are saved',
+              head: 'a'.repeat(64),
+              handBack: { left: 'Choose the next step' },
+            }
+          : {
+              kind,
+              recipient: recipientActor,
+              text: 'Which version?',
+              choices: ['Keep', 'Undo'],
+              context: {},
+              ...extra,
+            },
+    });
+  ask('p', 'question', 'message');
+  ask('p', 'ahead', 'message', { question: { holdsWork: false } });
+  ask('p', 'handback', 'handoff');
+  ask('p', 'not-for-owner', 'message', {}, 'peer');
+  s.tables.projectLiveLineLanes.set('held', {
+    _id: 'held',
+    _creationTime: 1,
+    projectId: 'p',
+    laneId: 'held-on-own-step',
+    held: true,
+    overlap: false,
+    fix: true,
+    stage: 'saved',
+    changedAt: 2,
+  });
+  await s.transaction(async () => {
+    await line.writeLineMain(s.ctx, 'p', { head: 'h', at: '2026-11-16T10:00:00Z', check: 'passed' });
+    await line.lineMainState(s.ctx.db, 'p', { red: true, at: '2026-11-16T10:01:00Z', sequence: 3 });
+  });
+  s.tables.projectHostedMainAudits.set('audit', {
+    _id: 'audit',
+    _creationTime: 1,
+    projectId: 'other',
+    red: { since: '2026-11-16T10:02:00Z' },
+  });
+  const rows = await all(s, 50);
+  const primary = rows.find(row => row.id === 'p');
+  const shared = rows.find(row => row.id === 'other');
+  assert.deepEqual(
+    primary.attention,
+    { n: 4, atLeast: false },
+    'question, hand-back and two secrets; no asked-ahead or agent fix',
+  );
+  for (const row of [primary, shared]) {
+    const attention = await needsMe._handler(s.ctx, { projectId: row.id });
+    assert.deepEqual(row.attention, needsCount(attention));
+    const feed = await liveLine._handler(s.ctx, { projectId: row.id, includeChecks: false });
+    assert.deepEqual(row.verdict, flowVerdict(feed.flow));
+    assert.equal(row.verdict.red, true);
+  }
+  assert.deepEqual(shared.attention, { n: 0, atLeast: false });
+
+  for (let i = 0; i < 14; i++) ask('p', `more-${i}`, 'message');
+  const bounded = (await all(s, 50)).find(row => row.id === 'p');
+  assert.deepEqual(bounded.attention, needsCount(await needsMe._handler(s.ctx, { projectId: 'p' })));
+  assert.equal(bounded.attention.atLeast, true, 'a capped question window is not an exact count');
+});
+
+test('Home reads one page at 50 and 100 projects without per-project function calls or writes', async t => {
+  const s = state([]);
+  for (let i = 0; i < 100; i++) {
+    const id = `scale-${i}`;
+    const generationId = `${id}-plan`;
+    project(s, id, {
+      secretsNeeds: 1,
+      work: { generationId, backupId: 'b', operationId: 'plan', initialRevision: 0, revision: 1 },
+      _creationTime: i + 1,
+    });
+    s.tables.projectWorkGenerations.set(generationId, {
+      _id: generationId,
+      _creationTime: 1,
+      projectId: id,
+      format: HOSTED_WORK_INDEX_FORMAT,
+      status: 'ready',
+      backupId: 'b',
+      planRowsVersion: 1,
+    });
+    for (const status of ['open', 'in-progress', 'closed']) {
+      const key = `${id}-${status}`;
+      s.tables.projectWorkDataRecords.set(key, {
+        _id: key,
+        _creationTime: 1,
+        generationId,
+        collection: PLAN_ROWS,
+        key,
+        parent: `issue:${status}${status === 'closed' ? ':' : ''}`,
+        position: 1,
+        value: encodePlanPage(
+          Array.from({ length: 128 }, (_, position) => ({
+            kind: 'issue',
+            status,
+            id: `${key}-${position}`,
+            position,
+            title: `Update the sample file ${position}`,
+          })),
+        ),
+      });
+    }
+    for (let j = 0; j < 50; j++) {
+      const laneId = `${id}-lane-${j}`;
+      s.tables.projectLiveLineLanes.set(laneId, {
+        _id: laneId,
+        _creationTime: j,
+        projectId: id,
+        laneId,
+        stage: 'saved',
+        held: j < 20,
+        overlap: false,
+        changedAt: j + 1,
+      });
+    }
+    s.tables.projectHostedMainAudits.set(`${id}-audit`, {
+      _id: `${id}-audit`,
+      _creationTime: 2,
+      projectId: id,
+      red: { since: '2026-11-25T12:00:00Z' },
+    });
+  }
+  s.caller('owner');
+  await backfill(s);
+  for (const numItems of [50, 100]) {
+    const meter = { ranges: 0, documents: 0, readBytes: 0 };
+    const count = rows => {
+      meter.documents += rows.length;
+      meter.readBytes += rows.reduce((sum, row) => sum + getDocumentSize(row), 0);
+    };
+    const db = {
+      normalizeId: s.ctx.db.normalizeId,
+      get: async id => {
+        meter.ranges++;
+        const row = await s.ctx.db.get(id);
+        if (row) count([row]);
+        return row;
+      },
+      query: table => {
+        meter.ranges++;
+        const range = s.ctx.db.query(table);
+        for (const method of ['unique', 'take', 'paginate']) {
+          const original = range[method].bind(range);
+          range[method] = async (...args) => {
+            const result = await original(...args);
+            count(
+              !result ? [] : method === 'unique' ? [result] : method === 'paginate' ? result.page : result,
+            );
+            return result;
+          };
+        }
+        return range;
+      },
+    };
+    const start = performance.now();
+    const result = await accountProjects.list._handler(
+      {
+        auth: s.ctx.auth,
+        db,
+        meta: {
+          getTransactionMetrics: async () => ({
+            bytesRead: { remaining: 16 * 1024 * 1024 - meter.readBytes },
+            databaseQueries: { remaining: 4096 - meter.ranges },
+            documentsRead: { remaining: 32768 - meter.documents },
+          }),
+        },
+      },
+      {
+        paginationOpts: { cursor: null, numItems },
+      },
+    );
+    assert.equal(result.page.length, numItems);
+    assert.ok(
+      result.page.every(row => row.verdict.red),
+      'the audit fallback covers even the partial detail rows',
+    );
+    const shown = result.page.filter(row => row.attention.n === 1);
+    assert.ok(shown.every(row => !row.attention.atLeast && row.items.left.n === 128));
+    assert.ok(
+      result.page
+        .filter(row => row.attention.n === 0)
+        .every(row => row.attention.atLeast && row.items === null),
+    );
+    if (numItems === 50) assert.equal(shown.length, 50);
+    if (numItems === 100)
+      assert.ok(
+        shown.length >= 50 && shown.length < 100,
+        'the wider page exhausts detail headroom, not the list',
+      );
+    assert.ok(meter.ranges <= 4096, `indexed page budget (${meter.ranges} ranges)`);
+    assert.ok(meter.documents <= 60 * numItems + 2, `document budget (${meter.documents} rows)`);
+    t.diagnostic(
+      JSON.stringify({
+        numItems,
+        ...meter,
+        responseBytes: Buffer.byteLength(JSON.stringify(result)),
+        wallMs: performance.now() - start,
+        workerPeakRssKiB: process.resourceUsage().maxRSS,
+      }),
+    );
+  }
+});
+
+test('when the account transaction cannot hydrate attention, project rows still page without a false zero', async () => {
+  const s = state([]);
+  project(s, 'p');
+  s.caller('owner');
+  await backfill(s);
+  const ctx = {
+    ...s.ctx,
+    meta: {
+      getTransactionMetrics: async () => ({
+        bytesRead: { remaining: 1024 },
+        databaseQueries: { remaining: 1024 },
+        documentsRead: { remaining: 2048 },
+      }),
+    },
+  };
+  const rows = await all(s, 50, ctx);
+  assert.deepEqual(
+    rows.map(row => [row.id, row.attention]),
+    [['p', { n: 0, atLeast: true }]],
   );
 });
 
@@ -489,10 +741,10 @@ test('a 50-row page re-checks roles only for member rows: owner rows add no read
     let reads = 0;
     const db = new Proxy(s.ctx.db, {
       get: (target, key) =>
-        key === 'get' || key === 'query'
-          ? (...args) => {
-              reads++;
-              return target[key](...args);
+        key === 'query'
+          ? table => {
+              if (table === 'projectContributors' || table === 'projectReaders') reads++;
+              return target[key](table);
             }
           : target[key],
     });
@@ -502,7 +754,8 @@ test('a 50-row page re-checks roles only for member rows: owner rows add no read
   const owned = await reads(true);
   const member = await reads(false);
   // A reader row costs two role reads (no write grant, then the read grant); owner rows none.
-  assert.equal(member - owned, 100);
+  assert.equal(owned, 0);
+  assert.equal(member, 100);
 });
 
 test('class guard: every Convex module that writes a grant row keeps the person order row in the same transaction', async () => {

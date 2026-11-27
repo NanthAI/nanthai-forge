@@ -114,6 +114,22 @@ test('Needs me Flow picture: one source, the home layout, widths, tags and worst
       assert.match(await phone.locator('.flow-rows > li').last().textContent(), /main green/);
     });
 
+    await t.test('a manual revert marks both receipts without incrementing audit recovery', async t => {
+      for (const width of [1440, 390]) {
+        const page = await open(t, width, 'manual-revert');
+        const recent = page.getByRole('navigation', { name: 'Recent landings' });
+        const reversal = recent.getByRole('link', { name: /Undo the parser change.*Revert/ });
+        const original = recent.getByRole('link', { name: /Change the parser.*Taken out of main/ });
+        assert.match(await reversal.getAttribute('href'), /^\/sample-one\/tidepool\/code\/[^/]+$/);
+        assert.notEqual(await original.getAttribute('href'), await reversal.getAttribute('href'));
+        assert.match(
+          await page.getByRole('link', { name: /Audit reverts today/ }).textContent(),
+          /Audit reverts today0/,
+        );
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+      }
+    });
+
     await t.test('the Flow state legend and recorded checks render at reference weight', async t => {
       for (const width of [1440, 390]) {
         const page = await open(t, width, 'busy');

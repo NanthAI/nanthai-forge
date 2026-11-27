@@ -40,6 +40,15 @@ export type LineFeed = {
   exit?: { laneId: string; kind: 'landed' | 'set-aside'; at: number } | null;
   /** The Flow view's running day (src/flow-day.ts `FlowDay`); read it with `flowToday`. */
   flow?: FlowDayFeed;
+  checksConfigured?: boolean;
+  recentLandings?: readonly {
+    receiptId: string;
+    sequence: number;
+    at: string;
+    title: string | null;
+    takenOut?: true;
+    revert?: true;
+  }[];
   /** Recorded runs for open Lanes and available room in the check pipeline. */
   checks?: {
     runs: readonly {

@@ -14,7 +14,17 @@ import { SizedPicture, type PictureFacts } from './Picture';
 import { Tag } from './labels';
 import { FlowChecks, FlowLegend } from './Checks';
 import type { ConflictNote } from '../lane-state';
-import { clock, duration, flowFigures, flowStations, mainHealth, type HeldRow, type Station } from './model';
+import {
+  clock,
+  duration,
+  flowFigures,
+  flowStations,
+  mainHealth,
+  unverifiedMain,
+  type HeldRow,
+  type Station,
+} from './model';
+import { RecentLandings } from './RecentLandings';
 import './flow.css';
 
 /** `red`: one main red's view (code/red/<sequence>, Item ae068e0c). */
@@ -74,7 +84,7 @@ export function FlowRegion({
   const open = feed ? feed.lanes.length + feed.more : undefined;
   const checking = stations.find(station => station.stop === 'checking')!;
   const waiting = stations.flatMap(s => s.held).filter(block => block.colour === 'failed').length;
-  const mainFact = mainHealth(day.verdict, mainCheckedAt, drawnAt);
+  const mainFact = mainHealth(day.verdict, mainCheckedAt ?? day.verdict?.checkedAt ?? undefined, drawnAt);
   const partial = new Set(day.partial);
   const facts: PictureFacts = {
     today: day.landed,
@@ -184,6 +194,8 @@ export function FlowRegion({
                   <Glyph of={mainFact.state} />
                   {mainFact.word}
                 </span>
+              ) : feed ? (
+                unverifiedMain(feed.checksConfigured)
               ) : null}
             </span>
           </li>
@@ -254,7 +266,7 @@ export function FlowRegion({
                 partial.has('reverted') || partial.has('fixedOnTop') ? 'Partial recovery counts' : undefined
               }
             >
-              <span className="k">Reverted today</span>
+              <span className="k">Audit reverts today</span>
               <b className="num">{day.reverted.toLocaleString('en')}</b>
               <span className="s">
                 <b>{day.fixedOnTop.toLocaleString('en')}</b> fixed on top
@@ -262,7 +274,6 @@ export function FlowRegion({
             </A>
             {/* A red main links its red view (why, since when); otherwise what landed. */}
             <A href={mainFact?.red != null ? hrefs.red(mainFact.red) : hrefs.code} title={mainFact?.title}>
-              {mainFact ? null : <span className="k">main</span>}
               {mainFact ? (
                 <b>
                   <span className="st" data-st={mainFact.state}>
@@ -272,11 +283,12 @@ export function FlowRegion({
                 </b>
               ) : (
                 <b>
-                  <span className="nr">not reported</span>
+                  <span className="nr">{unverifiedMain(feed.checksConfigured)}</span>
                 </b>
               )}
             </A>
           </nav>
+          <RecentLandings rows={feed.recentLandings} history={hrefs.code} drawnAt={drawnAt} />
           <FlowChecks
             checks={feed.checks}
             day={day}

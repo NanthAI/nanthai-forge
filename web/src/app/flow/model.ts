@@ -195,6 +195,9 @@ export function flowFigures(feed: LineFeed | undefined, drawnAt: number) {
   return { ...today, failed: mainFailedToday(today), red: verdict?.red === true, verdict };
 }
 
+export const unverifiedMain = (checksConfigured: boolean | undefined) =>
+  checksConfigured === false ? 'main not checked' : 'main health not reported';
+
 export function mainHealth(
   verdict: ReturnType<typeof flowVerdict>,
   checkedAt: number | undefined,

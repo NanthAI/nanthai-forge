@@ -706,6 +706,27 @@ const fixtureFeed: LineFeed = {
   moreIsLowerBound: false,
   main: variant === 'empty' ? null : { head: 'b'.repeat(64), at: new Date(ago(62)).toISOString() },
   ...(first || connect || variant === 'empty' ? {} : { flow }),
+  ...(variant === 'manual-revert'
+    ? {
+        flow: { ...flow, hours: flow.hours.map(hour => [hour[0]!, hour[1]!, hour[2]!, 0, ...hour.slice(4)]) },
+        recentLandings: [
+          {
+            receiptId: uuid(902),
+            sequence: 2,
+            at: new Date(ago(20)).toISOString(),
+            title: 'Undo the parser change',
+            revert: true,
+          },
+          {
+            receiptId: uuid(901),
+            sequence: 1,
+            at: new Date(ago(42)).toISOString(),
+            title: 'Change the parser',
+            takenOut: true,
+          },
+        ],
+      }
+    : {}),
   checks: quiet
     ? { runs: [], free: 4 }
     : stall

@@ -28,7 +28,7 @@ function receipt(f, number, at, projectId = f.projectId) {
     submissionId: id,
     attemptId: id,
     sequence: number,
-    value: '{}',
+    value: JSON.stringify({ at: new Date(at).toISOString() }),
   });
 }
 const publish = (f, at, count = 1, previous = false, sequence) =>
@@ -61,6 +61,52 @@ function boundedProvider(f, receiptBytes) {
     };
   });
 }
+
+test('the recent receipt strip retains a manual revert after its notice clears, without an audit recovery', async t => {
+  const at = Date.parse('2026-11-25T12:00:00Z');
+  t.mock.method(Date, 'now', () => at);
+  const f = await finishFixture(t);
+  await publish(f, at);
+  for (let i = 1; i <= 7; i++) {
+    receipt(f, i, at - 8 + i);
+    const row = f.tables.projectHostedAcceptances.get(`receipt-${i}`);
+    row.value = JSON.stringify({
+      at: new Date(row._creationTime).toISOString(),
+      message: `Landing ${i}\n\nDetails`,
+    });
+  }
+  receipt(f, 8, at, 'another-project');
+  for (const [n, evidence] of [
+    [6, { kind: 'landed', revertedBy: 'receipt-7' }],
+    [7, { kind: 'reverted', revertOf: 'receipt-6' }],
+  ]) {
+    f.insert('projectIntentLandingNotes', {
+      projectId: f.projectId,
+      receiptId: `receipt-${n}`,
+      intentId: 'i',
+      itemId: 'i',
+      at: new Date(at - 8 + n).toISOString(),
+      laneIds: [],
+      commit: 'a'.repeat(64),
+      sequence: n,
+      actor: 'owner',
+      ...evidence,
+    });
+  }
+  const feed = await f.tx('readRecent', read, { projectId: f.projectId });
+  assert.deepEqual(
+    feed.recentLandings.map(row => row.sequence),
+    [7, 6, 5, 4, 3],
+  );
+  assert.equal(feed.recentLandings[0].revert, true);
+  assert.equal(feed.recentLandings[1].takenOut, true);
+  assert.equal(feed.recentLandings[0].title, 'Landing 7');
+  assert.equal(flowToday(feed.flow, at, utcDayStart(at)).reverted, 0);
+  assert.equal(
+    (await f.tx('noStrip', read, { projectId: f.projectId, includeChecks: false })).recentLandings,
+    undefined,
+  );
+});
 
 test('a UTC-day rebuild replaces the live landing count once across tied receipt pages and keeps measured figures', async t => {
   const f = await finishFixture(t);
