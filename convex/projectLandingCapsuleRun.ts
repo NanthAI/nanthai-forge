@@ -4,14 +4,14 @@ import { landingAttemptValue } from './projectHostedLandingAttemptValue';
 import { v, type ObjectType } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { internalAction, type ActionCtx } from './_generated/server';
+import type { CapsuleScope } from './projectLandingCapsuleCapture';
 import {
   capsuleRunArgs,
   capsuleFinishKinds,
   capsulePageBytes,
-  type CapsuleScope,
-} from './projectLandingCapsuleCapture';
-import { capsulePageRows } from './projectLandingCapsuleRemove';
-import { capsuleRefsPage } from './projectLandingCapsuleRefs';
+  capsulePageRows,
+  capsuleRefsPage,
+} from './projectLandingCapsuleFields';
 import { getLandingCapsule, putLandingCapsule } from './projectLandingCapsuleObject';
 import { encodeLandingCapsule } from './projectLandingCapsuleCodec';
 import type { LandingCapsule } from '../src/landing-capsule';
@@ -324,11 +324,7 @@ export async function packLandingCapsule(
       };
       const encoded = encodeLandingCapsule(capsule);
       invariant(
-        encoded.pointer.size <=
-          Object.values(tables)
-            .flat()
-            .reduce((n, text) => n + utf8(text!), 0) +
-            2 * 1024 * 1024,
+        encoded.pointer.size <= rawBytes + 2 * 1024 * 1024,
         'EVIDENCE_CHANGED',
         'Capsule egress exceeded relocated bytes plus its fixed document header.',
       );

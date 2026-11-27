@@ -18,6 +18,7 @@ export const sourceOutput = v.object({
   statePhysical: v.optional(v.object({ sha256: v.string(), size: v.number() })),
   statePhysicalRebind: v.optional(v.boolean()),
   statePhysicalPrevious: v.optional(v.union(v.object({ sha256: v.string(), size: v.number() }), v.null())),
+  statePhysicalComposeBase: v.optional(v.union(v.string(), v.null())),
   sha256: v.string(),
   size: v.number(),
   r2Key: v.optional(v.string()),

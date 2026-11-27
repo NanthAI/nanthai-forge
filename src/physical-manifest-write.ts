@@ -162,6 +162,29 @@ export async function writePhysicalManifest({
   };
 }
 
+function incompletePhysicalPacks(head: PhysicalManifest, main: PhysicalManifest | null) {
+  const key = (pin: PhysicalManifest['chunks'][number]) =>
+    physicalKey(pin.pack?.digest ?? pin.sha256, pin.pack?.nonce);
+  const accepted = new Set(main?.chunks.map(key)),
+    groups = new Map<string, PhysicalManifest['chunks']>();
+  for (const chunk of head.chunks) {
+    const id = key(chunk);
+    const pins = groups.get(id) ?? [];
+    pins.push(chunk);
+    groups.set(id, pins);
+  }
+  return [...groups].filter(
+    ([id, pins]) =>
+      !accepted.has(id) &&
+      pins[0]!.pack &&
+      pins.reduce((sum, pin) => sum + pin.size, 0) !== pins[0]!.pack!.size,
+  );
+}
+
+/** Such a root can serve a Candidate even when main has no usable metadata. */
+export const physicalRootSelfContained = (root: PhysicalManifest) =>
+  incompletePhysicalPacks(root, null).length === 0;
+
 /** Compose alone repairs working roots before they become Candidate roots.
  * Unchanged pins and every live bucket's exact bytes survive the repair. */
 export async function repairPhysicalRoot({
@@ -176,17 +199,7 @@ export async function repairPhysicalRoot({
   put: (bytes: Uint8Array) => Promise<PhysicalPin>;
 }) {
   invariant(state === head.root.state, 'SOURCE_HASH_MISMATCH', 'Repair selects another State.');
-  const key = (pin: PhysicalManifest['chunks'][number]) =>
-    physicalKey(pin.pack?.digest ?? pin.sha256, pin.pack?.nonce);
-  const accepted = new Set(main?.chunks.map(key)),
-    groups = new Map<string, PhysicalManifest['chunks']>();
-  for (const chunk of head.root.chunks) groups.set(key(chunk), [...(groups.get(key(chunk)) ?? []), chunk]);
-  const failing = [...groups].filter(
-    ([id, pins]) =>
-      !accepted.has(id) &&
-      pins[0]!.pack &&
-      pins.reduce((sum, pin) => sum + pin.size, 0) !== pins[0]!.pack!.size,
-  );
+  const failing = incompletePhysicalPacks(head.root, main);
   if (!failing.length) return null;
   const moved = failing.flatMap(([, pins]) => pins).sort((a, b) => a.bucket - b.bucket);
   const bytes = await head.readChunks(moved.map(pin => pin.bucket));

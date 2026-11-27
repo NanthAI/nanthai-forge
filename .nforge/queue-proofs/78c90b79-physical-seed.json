@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectConvexPhysicalManifest.ts": "1738b71244c62a98d5aeb9ab496a5a720e443921bf2e3f6e815b79d41e893d41"
+  },
+  "replay": {
+    "incident": "78c90b79",
+    "test": "incident 78c90b79: deferred compose preserves an existing root proven safe without main",
+    "receipt": "dc995467-0017-4a69-a89a-b5f2be95a712"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "thread:delegated-task:command%3Amcp%3A1263830b-0ac8-4d73-8beb-52983e78a65b%3Adelegate-task%3A18f19acf-f0ae-4482-a287-2467342d1586",
+  "review": {
+    "model": "gemini-4-neon",
+    "session": "thread:delegated-task:command%3Amcp%3A78dd67bb-8ba2-4a3c-a779-e6c068e632a2%3Adelegate-task%3Af050971d-c8ec-4230-9878-a99063d4382e",
+    "receipt": "b015a6ac-7f64-4ac0-8a43-934842d3c85b"
+  },
+  "exercised": {
+    "convex/projectConvexPhysicalManifest.ts": {
+      "executed": [
+        "physicalSourceBinding",
+        "sourcePhysicalManifests"
+      ],
+      "digest": "b80a80eacb9bba555fbbd7ac20305ab147fec503b9959a5754c8ea44cc9c0be2",
+      "units": [
+        [
+          "ForgeError",
+          "c8934d5ec6f70ce797a0d05c3ecfb78031a48937ad3336194885e4520006a12d"
+        ],
+        [
+          "physicalKey",
+          "36e4991061521ac88ee57a471284de7a1a5b007040d0617d6a4b2e9d4efecfd1"
+        ],
+        [
+          "physicalRootSelfContained",
+          "6a8227554d2f9943ff128cfeb7dd2759f1a09ce6c5f3d2e033d30b0c3cb9a4eb"
+        ],
+        [
+          "physicalSourceBinding",
+          "1145053e1282aa01875c752a2b0a8885f9184cc6cdf21d0ccd17d18580c0f8c9"
+        ],
+        [
+          "r2Key",
+          "6139c7ecb1ef81acde791e2ca521e084af827cd6c6564dbe999d38f290e52426"
+        ],
+        [
+          "r2ObjectKey",
+          "b0302afc832e38b632d4f04f1a0daeb5669c62e32039dcf2809a7cda88fcae49"
+        ],
+        [
+          "repairPhysicalRoot",
+          "9862904a9dfa33f5d390b1cd9d87d2df97c79dc412cec5e086861227dcb9daf6"
+        ],
+        [
+          "sourcePhysicalManifests",
+          "6bf80c54c512d38fb7c573d459de1a047a1e14867a318bebf3d83df22e91079e"
+        ],
+        [
+          "writePhysicalManifest",
+          "d5816cdd8350c6d057058dcc008f63dda9716b83a89611251290772820797a8a"
+        ]
+      ],
+      "shell": "d81dcafdf420121aaec4dc76ef93f9311a840911206390b6a127a42df7e2b559"
+    }
+  }
+}

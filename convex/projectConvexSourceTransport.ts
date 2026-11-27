@@ -308,23 +308,16 @@ export function convexSourceTransport(
         reportBindings('source bindings: catalog (physical manifest seed scheduled)');
         return;
       }
-      if (base.descriptor.recipe) {
-        await clock.call(() =>
-          ctx.runMutation(reference('projectPhysicalSeed:queue'), {
-            ...input,
-            state: pin,
-            refresh: true,
-          }),
-        );
-        return;
+      const { object, recipe } = base.descriptor;
+      // Byte-chunked States with a verified closure fit the ordinary action window.
+      // Larger or legacy recipe bases still belong to the background worker.
+      if (object.size <= 8 * 1024 * 1024 && (!recipe || base.closure)) {
+        remember([base]);
+        // Read the exact State before using any of its membership in the writer.
+        const state = parseNativeState(await readSourceExact(io, object));
+        outputFiles.set(object.sha256, state.files);
+        await physical.writePhysicalState?.(pin, files, [object.sha256]);
       }
-      const id = base.descriptor.object.sha256;
-      locations.set(id, base);
-      // Read the exact verified seed State, never infer membership from its metadata.
-      const bytes = await readSourceExact(io, base.descriptor.object);
-      const state = parseNativeState(bytes);
-      outputFiles.set(id, state.files);
-      await physical.writePhysicalState?.(pin, files, [id]);
       if (!locations.get(pin.sha256)?.statePhysical)
         await clock.call(() =>
           ctx.runMutation(reference('projectPhysicalSeed:queue'), {

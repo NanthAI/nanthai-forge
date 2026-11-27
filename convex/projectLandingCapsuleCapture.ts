@@ -15,6 +15,7 @@ import { landingNoteCapsuleBody } from './projectIntentLandingNoteArchive';
 import { LANDING_CAPSULE_TABLES } from '../src/hosted-landing';
 import { capsuleOwnerKind, capsuleControlKey, capsuleControlRow } from './projectLandingCapsuleLedger';
 import { capsuleIndexKind } from './projectLandingCapsuleIndex';
+import { capsuleFinishKinds, capsulePageBytes, capsuleRunArgs } from './projectLandingCapsuleFields';
 import { invariant } from '../src/errors';
 
 export type CapsuleScope = {
@@ -25,21 +26,12 @@ export type CapsuleScope = {
   sequence?: number;
   owner?: string;
 };
-export const capsuleFinishKinds = [
-  'projectHostedLandingRequests',
-  'projectHostedFinishes',
-  'projectHostedFinishOwners',
-  'projectHostedLandingPeers',
-  'projectHostedLandingDesired',
-];
 export const capsulePageOptions = (cursor: string | null) => ({
   cursor,
   numItems: 64,
   maximumRowsRead: 64,
   maximumBytesRead: capsulePageBytes,
 });
-/** One capture, publish or removal call carries at most this many row bytes. */
-export const capsulePageBytes = 128 * 1024;
 /** A batched scope larger than this falls back to its own paginated capture. */
 const batchScopeRows = 32;
 async function owned(
@@ -263,11 +255,6 @@ export const pages = internalMutation({
   },
 });
 
-export const capsuleRunArgs = {
-  projectId: v.id('hostedProjects'),
-  submissionId: v.string(),
-  dueAt: v.number(),
-};
 /** Terminal age alone is insufficient: late acceptance completion and shared fallback still write history. */
 export const begin = internalMutation({
   args: capsuleRunArgs,

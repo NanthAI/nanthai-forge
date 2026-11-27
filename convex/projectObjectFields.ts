@@ -37,6 +37,8 @@ export const objectFields = {
   stateParents: v.optional(v.array(v.string())),
   /** Trusted State-bound physical recipe root; absent until the writer is enabled. */
   statePhysical: v.optional(v.object({ sha256: v.string(), size: v.number() })),
+  /** The exact metadata root proved safe by compose, and the main root it depended on, if any. */
+  statePhysicalLineage: v.optional(v.object({ root: v.string(), base: v.union(v.string(), v.null()) })),
   nonce: v.string(),
   ...r2PlacementFields,
   r2SweepKey: v.optional(v.string()),

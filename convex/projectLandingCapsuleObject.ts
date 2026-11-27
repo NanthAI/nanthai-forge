@@ -109,7 +109,15 @@ export async function putLandingCapsule(
   const body = await putArchiveObject(key(projectId, encoded.pointer), encoded);
   const stored = decodeLandingCapsule(body, encoded.pointer, projectId, submissionId);
   invariant(
-    canonicalPayload(stored) === canonicalPayload(expected),
+    stored.protocol === expected.protocol &&
+      stored.projectId === expected.projectId &&
+      stored.submissionId === expected.submissionId &&
+      canonicalPayload(stored.anchor) === canonicalPayload(expected.anchor) &&
+      Object.keys(stored.tables).length === Object.keys(expected.tables).length &&
+      Object.entries(expected.tables).every(([table, rows]) => {
+        const actual = stored.tables[table as keyof LandingCapsule['tables']];
+        return actual?.length === rows.length && rows.every((row, index) => actual[index] === row);
+      }),
     'EVIDENCE_CHANGED',
     'Stored capsule rows differ from their original captured bytes.',
   );

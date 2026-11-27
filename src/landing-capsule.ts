@@ -28,15 +28,19 @@ export function landingCapsuleTablePins(tables: LandingCapsule['tables']) {
   return LANDING_CAPSULE_TABLES.flatMap((name, index) => {
     const rows = tables[name] ?? [];
     return rows.length
-      ? [[index, rows.length, rows.reduce((n, row) => n + bytes(row), 0), digest(canonicalPayload(rows))]]
+      ? [
+          [
+            index,
+            rows.length,
+            rows.reduce((n, row) => n + bytes(row), 0),
+            digest(canonicalPayload(rows, true)),
+          ],
+        ]
       : [];
   });
 }
 
-export function landingCapsuleText(input: LandingCapsule) {
-  const parsed = schema.safeParse(input);
-  invariant(parsed.success, 'EVIDENCE_CHANGED', 'Landing capsule metadata is invalid.');
-  const value = parsed.data;
+function verifiedCapsuleText(value: LandingCapsule) {
   invariant(
     value.anchor.projectId === value.projectId && value.anchor.id === value.submissionId,
     'EVIDENCE_CHANGED',
@@ -79,7 +83,13 @@ export function landingCapsuleText(input: LandingCapsule) {
       );
     }
   }
-  return canonicalPayload(value);
+  return canonicalPayload(value, true);
+}
+
+export function landingCapsuleText(input: LandingCapsule) {
+  const parsed = schema.safeParse(input);
+  invariant(parsed.success, 'EVIDENCE_CHANGED', 'Landing capsule metadata is invalid.');
+  return verifiedCapsuleText(parsed.data);
 }
 
 export function readLandingCapsule(
@@ -102,7 +112,7 @@ export function readLandingCapsule(
     value.projectId === projectId &&
       value.submissionId === submissionId &&
       value.anchor.version === pointer.version &&
-      landingCapsuleText(value) === text &&
+      verifiedCapsuleText(value) === text &&
       digest(canonicalPayload(landingCapsuleTablePins(value.tables))) ===
         (pointer.tablesDigest ?? digest(pointer.tables ?? '')),
     'EVIDENCE_CHANGED',

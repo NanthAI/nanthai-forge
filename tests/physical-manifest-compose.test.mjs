@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { physicalProject, physicalObjectRow } from './convex-physical-manifest-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { PhysicalManifestReader } from '../dist/physical-manifest.js';
-import { writePhysicalManifest } from '../dist/physical-manifest-write.js';
+import { physicalRootSelfContained, writePhysicalManifest } from '../dist/physical-manifest-write.js';
 import { physicalBucket } from '../dist/physical-manifest-codec.js';
 import { physicalKey } from '../dist/physical-manifest-binary.js';
 import { stateSchema } from '../dist/state/format.js';
@@ -122,16 +122,18 @@ test('compose uses the selected State catalog for a generated merge without a us
   assert.equal(row.statePhysical, undefined);
 });
 
-test('generated compose clears a pre-existing working root outside its descriptor window', async t => {
+async function composeWithExistingRoot(t, lineage) {
   const f = await setup(t),
     mainFile = f.s.file('rootless-main.txt', 'accepted main file'),
     laneFile = f.s.file('rooted-lane.txt', 'working file'),
     lane = await f.save([...f.files, laneFile], f.main, f.files),
-    main = f.s.state([...f.files, mainFile], [f.main.sha256]);
+    mainFiles = [...f.files, mainFile],
+    savedMain = lineage === 'corrupt-main' ? await f.save(mainFiles, f.main, f.files) : undefined,
+    main = savedMain?.state ?? f.s.state(mainFiles, [f.main.sha256]);
   f.s.patch('projectObjects', physicalObjectRow(f.s, f.base.sha256)._id, { statePhysical: undefined });
   f.s.main.head = main.sha256;
   f.s.moveMain(main.sha256, 'main-1');
-  let existing;
+  let existing, root;
   const before = f.requests.length;
   const selected = await compose(f, lane.state, main, async plan => {
     const files = [laneFile, mainFile, ...f.files].sort((a, b) => a.path.localeCompare(b.path));
@@ -147,20 +149,49 @@ test('generated compose clears a pre-existing working root outside its descripto
         }),
       ),
     );
-    const working = await PhysicalManifestReader.open(lane.state.sha256, lane.root.pin, f.read);
+    const parent = lineage === 'self-contained' ? null : (savedMain ?? lane);
+    const working = parent
+      ? await PhysicalManifestReader.open(parent.state.sha256, parent.root.pin, f.read)
+      : null;
     const prior = await writePhysicalManifest({
       state: existing.sha256,
       members: files.map(file => file.blob),
       parent: working,
-      parentMembers: [...f.files, laneFile].map(file => file.blob),
+      parentMembers: (savedMain ? mainFiles : [...f.files, laneFile]).map(file => file.blob),
       put: async bytes => f.s.put(Buffer.from(bytes)),
       describe: async ids => ids.map(sha256 => ({ sha256, size: f.s.objects.get(sha256).length })),
     });
-    f.s.patch('projectObjects', physicalObjectRow(f.s, existing.sha256)._id, { statePhysical: prior.pin });
+    root = prior.pin;
+    f.s.patch('projectObjects', physicalObjectRow(f.s, existing.sha256)._id, {
+      statePhysical: root,
+      ...(lineage
+        ? { statePhysicalLineage: { root: root.sha256, base: savedMain?.root.pin.sha256 ?? null } }
+        : {}),
+    });
+    if (savedMain) {
+      assert.equal(physicalRootSelfContained(prior.root), false);
+      f.s.objects.set(savedMain.root.pin.sha256, Buffer.alloc(savedMain.root.pin.size));
+    }
   });
   assert.deepEqual(selected, existing);
   assert(f.requests.slice(before).every(request => !request.digests.includes(selected.sha256)));
-  assert.equal(physicalObjectRow(f.s, selected.sha256).statePhysical, undefined);
+  return { root, row: physicalObjectRow(f.s, selected.sha256) };
+}
+
+test('generated compose clears a pre-existing working root outside its descriptor window', async t => {
+  const { row } = await composeWithExistingRoot(t);
+  assert.equal(row.statePhysical, undefined);
+});
+
+test('incident 78c90b79: deferred compose preserves an existing root proven safe without main', async t => {
+  const { root, row } = await composeWithExistingRoot(t, 'self-contained');
+  assert.deepEqual(row.statePhysical, root);
+});
+
+test('generated compose deferral clears lineage pinned to a hash-invalid main root', async t => {
+  const { row } = await composeWithExistingRoot(t, 'corrupt-main');
+  assert.equal(row.statePhysical, undefined);
+  assert.equal(row.statePhysicalLineage, undefined);
 });
 for (const differentBuckets of [false, true])
   test(`compose keeps a fully live ${differentBuckets ? 'two-save disjoint' : 'one-save'} root without metadata PUTs`, async t => {
@@ -212,11 +243,10 @@ test('compose after main moved derives a new root without any Lane-written pack'
   f.s.main.head = nextMain.state.sha256;
   f.s.moveMain(nextMain.state.sha256, 'main-1');
   const selected = await compose(f, lane.state, nextMain.state),
-    root = await PhysicalManifestReader.open(
-      selected.sha256,
-      physicalObjectRow(f.s, selected.sha256).statePhysical,
-      f.read,
-    );
+    stored = physicalObjectRow(f.s, selected.sha256),
+    root = await PhysicalManifestReader.open(selected.sha256, stored.statePhysical, f.read);
+  assert.equal(stored.statePhysicalLineage.root, stored.statePhysical.sha256);
+  assert([null, nextMain.root.pin.sha256].includes(stored.statePhysicalLineage.base));
   const mainKeys = new Set(
       nextMain.root.root.chunks.map(pin => physicalKey(pin.pack?.digest ?? pin.sha256, pin.pack?.nonce)),
     ),
@@ -273,6 +303,55 @@ test('a competing compose repair falls back to the catalog and its retry cannot 
   assert.equal(physicalObjectRow(f.s, f.main.sha256).statePhysical, undefined);
   assert(f.s.objects.has(f.main.sha256));
 });
+
+test('a deferred compose keeps a root pinned to the same main and clears a mismatched proof', async t => {
+  const f = await setup(t),
+    { storeSourceOutputs } = await import(moduleUrl('../convex/projectConvexSourceOutput.ts')),
+    { r2Key } = await import(moduleUrl('../convex/r2.ts')),
+    selected = physicalObjectRow(f.s, f.main.sha256),
+    base = physicalObjectRow(f.s, f.base.sha256).statePhysical.sha256;
+  const store = statePhysicalComposeBase =>
+    f.s.run('deferred compose publication', ctx =>
+      storeSourceOutputs(ctx, f.s.projectId, 'synthetic', [
+        { ...f.main, r2Key: r2Key(f.s.projectId, f.main.sha256), statePhysicalComposeBase },
+      ]),
+    );
+  f.s.patch('projectObjects', selected._id, {
+    statePhysicalLineage: { root: selected.statePhysical.sha256, base },
+  });
+  await store(base);
+  assert.deepEqual(physicalObjectRow(f.s, f.main.sha256).statePhysical, selected.statePhysical);
+  await store(null);
+  const updated = physicalObjectRow(f.s, f.main.sha256);
+  assert.equal(updated.statePhysical, undefined);
+  assert.equal(updated.statePhysicalLineage, undefined);
+});
+test('compose persists updated lineage when verification produces the same root pin', async t => {
+  const f = await setup(t),
+    { storeSourceOutputs } = await import(moduleUrl('../convex/projectConvexSourceOutput.ts')),
+    { r2Key } = await import(moduleUrl('../convex/r2.ts')),
+    root = physicalObjectRow(f.s, f.main.sha256).statePhysical,
+    base = physicalObjectRow(f.s, f.base.sha256).statePhysical.sha256;
+  for (const statePhysicalComposeBase of [base, null, null]) {
+    await f.s.run('compose publication with the same pin', ctx =>
+      storeSourceOutputs(ctx, f.s.projectId, 'synthetic', [
+        {
+          ...f.main,
+          r2Key: r2Key(f.s.projectId, f.main.sha256),
+          statePhysical: root,
+          statePhysicalRebind: true,
+          statePhysicalPrevious: root,
+          statePhysicalComposeBase,
+        },
+      ]),
+    );
+    assert.deepEqual(physicalObjectRow(f.s, f.main.sha256).statePhysicalLineage, {
+      root: root.sha256,
+      base: statePhysicalComposeBase,
+    });
+  }
+});
+
 test('compose treats a hash-invalid root read as absent and rebuilds from verified main', async t => {
   const f = await setup(t),
     extra = f.s.file('new.txt', 'new file'),
@@ -292,8 +371,15 @@ test('compose treats a hash-invalid root read as absent and rebuilds from verifi
     return fetch(url, init);
   });
   const selected = await compose(f, saved.state, f.main),
-    pin = physicalObjectRow(f.s, selected.sha256).statePhysical,
+    { statePhysical: pin, statePhysicalLineage } = physicalObjectRow(f.s, selected.sha256),
     reader = await PhysicalManifestReader.open(selected.sha256, pin, f.read);
+  assert(corrupted, 'the action read the corrupt root');
+  assert.deepEqual(statePhysicalLineage, {
+    root: pin.sha256,
+    base: physicalRootSelfContained(reader.root)
+      ? null
+      : physicalObjectRow(f.s, f.main.sha256).statePhysical.sha256,
+  });
   assert.deepEqual(
     (await reader.lookup([extra.blob])).map(entry => entry.sha256),
     [extra.blob],

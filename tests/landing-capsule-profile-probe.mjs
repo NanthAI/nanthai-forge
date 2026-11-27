@@ -6,7 +6,6 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
-import { canonicalPayload } from '../dist/hosted-source-operation.js';
 const data = JSON.parse(readFileSync(process.argv[2], 'utf8'));
 const baselineRssBytes = process.memoryUsage().rss;
 const run = await import(moduleUrl('../convex/projectLandingCapsuleRun.ts'));
@@ -43,7 +42,7 @@ const result = JSON.parse(
         sample();
         const selected = data.transcript[index++];
         assert.equal(getFunctionName(ref), selected?.name);
-        assert.equal(canonicalPayload(args), canonicalPayload(selected.args));
+        assert.deepEqual(args, selected.args);
         return selected.value;
       },
       scheduler: { runAfter: async () => assert.fail('qualified fixture needs no bootstrap continuation') },

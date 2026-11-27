@@ -2,9 +2,12 @@
 // Copyright 2026 Ferdinando Valsecchi
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { getFunctionName } from 'convex/server';
 import { PhysicalManifestReader } from '../dist/physical-manifest.js';
 import { digest } from '../dist/hash.js';
+import { stateByteChunks } from '../dist/state/format.js';
 import { physicalProject as project, physicalObjectRow as row } from './convex-physical-manifest-fixture.mjs';
+import { moduleUrl } from './convex-module.mjs';
 test('captured default-off physical writer leaves old dispatches unchanged even when the setting later turns on', async t => {
   const f = await project(t, 20),
     result = await f.compose(f.files, f.base, 'main-0', false);
@@ -108,8 +111,108 @@ test('29k rootless compose returns catalog fallback before any seed resolver; du
   );
 });
 
+test('a chunked prior seed verifies its exact State and catches up main without starting a full refresh', async t => {
+  const f = await project(t, 10500);
+  const sourceJob = await f.queueSeed();
+  await f.seed();
+  const seedId = f.s.tables.hostedProjects.get(f.s.projectId).physicalSeed.jobId;
+  const body = f.s.objects.get(f.base.sha256);
+  const chunks = stateByteChunks(body, digest);
+  assert(chunks?.length > 1, 'fixture uses the production State chunker above 1 MiB');
+  const leaves = chunks.map(chunk => f.s.put(body.subarray(chunk.offset, chunk.offset + chunk.size)));
+  const tree = f.s.put(
+    JSON.stringify({
+      schema: 1,
+      kind: 'forge-byte-tree',
+      children: leaves.map(leaf => ({ ...leaf, height: 0, length: leaf.size })),
+    }),
+  );
+  const recipe = f.s.put(
+    JSON.stringify({
+      schema: 1,
+      kind: 'forge-object-recipe',
+      object: f.base,
+      tree: { ...tree, height: 1, length: f.base.size },
+    }),
+  );
+  const base = row(f.s, f.base.sha256);
+  f.s.patch('projectObjects', base._id, {
+    location: undefined,
+    r2Key: undefined,
+    r2Committed: undefined,
+    recipe: { digest: recipe.sha256, size: recipe.size },
+    recipeClosure: leaves,
+  });
+  const extra = f.s.file('new.txt', 'new source'),
+    files = [...f.files, extra],
+    main = f.s.state(files, [f.base.sha256]);
+  f.s.main.head = main.sha256;
+  f.s.main.receipt.id = 'main-1';
+  f.s.moveMain(main.sha256, 'main-1');
+  const original = f.c.context.runMutation;
+  let refreshes = 0;
+  f.c.context.runMutation = async (ref, args) => {
+    if (getFunctionName(ref) === 'projectPhysicalSeed:queue' && args.refresh) refreshes++;
+    return original(ref, args);
+  };
+  const { convexSourceTransport } = await import(moduleUrl('../convex/projectConvexSourceTransport.ts'));
+  const transport = convexSourceTransport(f.c.context, { ...sourceJob, step: 0 }, [], undefined, {
+    physicalManifests: true,
+    sourceKind: 'compose',
+  });
+  // Every leaf still matches its own pin, but the reassembled bytes differ from the State pin.
+  f.s.patch('projectObjects', base._id, { recipeClosure: [...leaves].reverse() });
+  await assert.rejects(transport.io.seedPhysicalState(main, files), { code: 'SOURCE_HASH_MISMATCH' });
+  assert.deepEqual(transport.outputs, []);
+  f.s.patch('projectObjects', base._id, { recipeClosure: leaves });
+  assert.equal(refreshes, 0);
+
+  const { head } = await f.compose(files, main, 'main-1');
+  assert.equal(refreshes, 0);
+  assert.equal(f.s.tables.hostedProjects.get(f.s.projectId).physicalSeed.jobId, seedId);
+  for (const pin of [main, head]) {
+    const reader = await PhysicalManifestReader.open(pin.sha256, row(f.s, pin.sha256).statePhysical, f.read);
+    assert.deepEqual(
+      (await reader.lookup([extra.blob])).map(entry => entry?.sha256),
+      [extra.blob],
+    );
+  }
+});
+
+for (const reason of ['an oversized base', 'a recipe without a signed closure'])
+  test(`physical catch-up reserves a background refresh for ${reason}`, async t => {
+    const f = await project(t, 20),
+      sourceJob = await f.queueSeed();
+    await f.seed();
+    const seed = () => f.s.tables.hostedProjects.get(f.s.projectId).physicalSeed;
+    const previous = seed().jobId,
+      main = f.s.state(f.files, [f.base.sha256]),
+      gets = f.c.r2Gets.length,
+      original = f.c.context.runMutation;
+    f.c.context.runMutation = async (ref, args) => {
+      const result = await original(ref, args);
+      if (getFunctionName(ref) !== 'projectPhysicalSeed:queue' || args.refresh) return result;
+      const location = JSON.parse(result);
+      // Change only the hand-off descriptor, so a failed guard cannot be masked
+      // by a multi-megabyte fixture or the background worker's own budget.
+      if (reason === 'an oversized base') location.descriptor.object.size = 8 * 1024 * 1024 + 1;
+      else location.descriptor.recipe = f.base;
+      return JSON.stringify(location);
+    };
+    const { convexSourceTransport } = await import(moduleUrl('../convex/projectConvexSourceTransport.ts'));
+    const transport = convexSourceTransport(f.c.context, { ...sourceJob, step: 0 }, [], undefined, {
+      physicalManifests: true,
+      sourceKind: 'compose',
+    });
+    await transport.io.seedPhysicalState(main, f.files);
+    assert.deepEqual(transport.outputs, []);
+    assert.equal(f.c.r2Gets.length, gets, 'deferral does not download the prior State');
+    assert.notEqual(seed().jobId, previous);
+    assert.deepEqual(seed().state, main);
+    assert.deepEqual(seed().base, f.base);
+  });
+
 test('the writer preserves canonical raw and pack nonce bindings and skips foreign or malformed keys', async () => {
-  const { moduleUrl } = await import('./convex-module.mjs');
   const { physicalSourceBinding } = await import(moduleUrl('../convex/projectConvexPhysicalManifest.ts'));
   const sha256 = digest('source'),
     pack = digest('pack'),

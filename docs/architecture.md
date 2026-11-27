@@ -414,6 +414,14 @@ resolver call. Invalid roots are rebuilt from main; other storage errors fail th
 step for ordinary retry. Adopted raw and packed nonce States retain the exact
 verified object key when compose adds or repairs a root; the commit validates and
 protects that same whole carrier pack instead of reconstructing a canonical key.
+Incremental physical seeding verifies and parses the last seeded State in place
+when its logical body fits in 8 MiB, including chunked States with a signed
+closure. A larger body, a legacy recipe without a closure, or a deferred write
+keeps the background refresh path. The inline path reads the exact base bytes
+once and extends the root from changed bindings without walking catalog pages.
+If generated compose defers, its existing commit keeps a previously proven root
+for the same State when all metadata packs are live or the proof pins the same
+verified main root. Working roots without a usable proof use the exact catalog fallback.
 A compiler-based publication inventory follows Candidate and Channel writes,
 including record dispatch, DB wrappers and renamed imports. Seeds check the exact
 selected head has no working physical root. Work metadata copies cannot create

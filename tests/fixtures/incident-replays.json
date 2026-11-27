@@ -14980,6 +14980,30 @@
       "test": "incident 8b7ab7a9: clean batch resume keeps its rooted main lineage without a full metadata repack"
     },
     {
+      "incident": "78c90b79",
+      "what": "A deferred generated compose retains a proven physical root and avoids catalog reseeding",
+      "file": "tests/physical-manifest-compose.test.mjs",
+      "paths": [
+        "convex/projectConvexPhysicalManifest.ts",
+        "convex/projectConvexSourceActive.ts",
+        "convex/projectConvexSourceLease.ts",
+        "convex/projectHostedCompose.ts",
+        "convex/projectHostedComposeJobs.ts",
+        "convex/projectHostedComposePublish.ts",
+        "convex/projectHostedComposeStore.ts",
+        "convex/projectHostedFinishWake.ts",
+        "convex/projectHostedLandingDesiredWake.ts",
+        "convex/projectHostedLifecycleOverlay.ts",
+        "convex/projectHostedRecords.ts",
+        "convex/projectMetricAliasWriter.ts",
+        "convex/projectMetricComposeMembership.ts",
+        "convex/projectSourceJobs.ts",
+        "convex/schedulerCancel.ts",
+        "src/hosted-compose.ts"
+      ],
+      "test": "incident 78c90b79: deferred compose preserves an existing root proven safe without main"
+    },
+    {
       "incident": "8b7ab7a9",
       "what": "Lose the reply after both exact cohort metadata objects are stored. The retained wake publishes the bindings, dispatches the original compose, and lands under one shared check.",
       "file": "tests/hosted-landing-batches.test.mjs",

@@ -5,7 +5,7 @@ import { internalMutation, type MutationCtx } from './server';
 import type { Doc, Id } from './_generated/dataModel';
 import { projectPurgeWriter } from './projectFinishReadWriter';
 import { capsuleKind, landingCapsulePointer } from './projectLandingCapsuleStore';
-import { capsuleFinishKinds } from './projectLandingCapsuleCapture';
+import { capsuleFinishKinds, capsulePageRows } from './projectLandingCapsuleFields';
 import {
   capsuleControlKey,
   capsuleControlRow,
@@ -27,7 +27,6 @@ import {
 export const capsuleRows = v.array(v.object({ table: v.string(), row: v.string() }));
 export const capsuleProgressKind = 'projectLandingCapsuleProgress';
 /** Rows per publish or removal page; the packer also bounds each page to 128 KB of row bytes. */
-export const capsulePageRows = 64;
 type Part = { table: string; row: string };
 const totalRows = (pointer: LandingCapsulePointer) =>
   (JSON.parse(pointer.tables) as Array<[number, number]>).reduce((n, [, rows]) => n + rows, 0);

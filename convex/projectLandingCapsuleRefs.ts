@@ -3,7 +3,7 @@
 import { makeFunctionReference } from 'convex/server';
 import { v } from 'convex/values';
 import { internalMutation } from './server';
-import { capsuleRunArgs } from './projectLandingCapsuleCapture';
+import { capsuleRefsPage, capsuleRunArgs } from './projectLandingCapsuleFields';
 import {
   wakeLandingCapsule,
   deferCapsuleCheck,
@@ -44,7 +44,6 @@ export const wakeChecks = internalMutation({
   },
 });
 /** References per page; each reads one check or composition row. */
-export const capsuleRefsPage = 16;
 export const page = internalMutation({
   args: {
     ...capsuleRunArgs,

@@ -10,8 +10,18 @@ import type { ObjectLocation } from './projectConvexSourceTransport';
 import { ForgeError } from '../src/errors';
 import { r2Key, r2ObjectKey } from './r2';
 import { physicalKey } from '../src/physical-manifest-binary';
-import { writePhysicalManifest, repairPhysicalRoot } from '../src/physical-manifest-write';
+import {
+  physicalRootSelfContained,
+  writePhysicalManifest,
+  repairPhysicalRoot,
+} from '../src/physical-manifest-write';
 type PhysicalOutput = NonNullable<SourceOutput['physical']>[number];
+type ManifestOutput = {
+  statePhysical: WorkerPin;
+  physical: PhysicalOutput[];
+  statePhysicalComposeBase?: string | null;
+};
+type ManifestAttempt = { manifest: ManifestOutput | null; parentRoot: string | null };
 /** Preserve exact canonical and maintenance nonce keys; never infer an arbitrary URL. */
 export function physicalSourceBinding(
   projectId: Id<'hostedProjects'>,
@@ -58,7 +68,7 @@ export function sourcePhysicalManifests(options: {
 }) {
   const composeEnabled = options.enabled && options.sourceKind === 'compose';
   let composeMain: string | undefined;
-  const pending = new Map<string, Promise<{ statePhysical: WorkerPin; physical: PhysicalOutput[] } | null>>();
+  const pending = new Map<string, Promise<ManifestAttempt>>();
   const entry = (row: ObjectLocation) =>
     physicalSourceBinding(options.projectId, row, options.key(row.descriptor.object.sha256));
   const create = async (
@@ -66,20 +76,23 @@ export function sourcePhysicalManifests(options: {
     files: readonly NativeFile[],
     bases: readonly string[],
     replace = false,
-  ) => {
-    if (!options.enabled) return null;
+  ): Promise<ManifestAttempt> => {
+    if (!options.enabled) return { manifest: null, parentRoot: null };
     const old = options.locations.get(pin.sha256)?.statePhysical;
-    if (old && !replace) return { statePhysical: old, physical: [] };
+    if (old && !replace) return { manifest: { statePhysical: old, physical: [] }, parentRoot: null };
     let running = pending.get(pin.sha256);
     if (running) return running;
     running = (async () => {
       let parent: PhysicalManifestReader | null = null;
+      let parentRoot: string | null = null;
       const preferred = options.sourceKind === 'sync' ? [...bases].reverse() : bases;
       for (const id of preferred) {
-        const row = options.locations.get(id);
-        if (!row?.statePhysical) continue;
+        const row = options.locations.get(id),
+          root = row?.statePhysical;
+        if (!row || !root) continue;
         try {
           parent = await options.reader(row);
+          parentRoot = root.sha256;
           break;
         } catch (error) {
           if (
@@ -90,15 +103,13 @@ export function sourcePhysicalManifests(options: {
           options.log('source bindings: catalog (physical parent invalid or unavailable; writer skipped)');
         }
       }
-      if (!parent) return null;
+      if (!parent) return { manifest: null, parentRoot: null };
       const physical: PhysicalOutput[] = [];
       // Wide catch-up stays background work too. Ordinary incremental writes only resolve changes.
-      if (parent) {
-        const before = new Set(options.members(parent.root.state) ?? []);
-        if (new Set(files.filter(file => !before.has(file.blob)).map(file => file.blob)).size > 100) {
-          options.log('source bindings: catalog (physical catch-up deferred)');
-          return null;
-        }
+      const before = new Set(options.members(parent.root.state) ?? []);
+      if (new Set(files.filter(file => !before.has(file.blob)).map(file => file.blob)).size > 100) {
+        options.log('source bindings: catalog (physical catch-up deferred)');
+        return { manifest: null, parentRoot };
       }
       const result = await writePhysicalManifest({
         state: pin.sha256,
@@ -120,21 +131,35 @@ export function sourcePhysicalManifests(options: {
       });
       if (!result) {
         options.log('source bindings: catalog (legacy physical bindings; writer skipped)');
-        return null;
+        return { manifest: null, parentRoot };
       }
       options.log('source bindings: incremental physical manifest');
-      return { statePhysical: result.pin, physical };
+      return {
+        parentRoot,
+        manifest: {
+          statePhysical: result.pin,
+          physical,
+          ...(replace
+            ? { statePhysicalComposeBase: physicalRootSelfContained(result.root) ? null : parentRoot }
+            : {}),
+        },
+      };
     })();
     pending.set(pin.sha256, running);
     return running;
   };
-  const existing = async (pin: WorkerPin, files: readonly NativeFile[], bases: readonly string[]) => {
+  const existing = async (
+    pin: WorkerPin,
+    files: readonly NativeFile[],
+    bases: readonly string[],
+    proveLineage = false,
+  ) => {
     if (options.locations.get(pin.sha256)?.statePhysical) return;
     const row = options.locations.get(pin.sha256);
     if (!row) return;
     const binding = entry(row);
     if (!binding) return;
-    const result = await create(pin, files, bases);
+    const { manifest: result } = await create(pin, files, bases, proveLineage);
     if (!result) return;
     const output: SourceOutput = {
       ...pin,
@@ -180,13 +205,13 @@ export function sourcePhysicalManifests(options: {
     };
     const [head, main] = await Promise.all([open(row), open(mainRow)]);
     if (!head && main && !options.members(mainId)) await loadMain?.();
-    if (!head && !row.statePhysical) return existing(pin, files, [mainId]);
+    if (!head && !row.statePhysical) return existing(pin, files, [mainId], true);
     if (!head) {
       // Regenerate the invalid derived root from verified main membership.
       const original = row.statePhysical;
       delete row.statePhysical;
       try {
-        await existing(pin, files, [mainId]);
+        await existing(pin, files, [mainId], true);
         const output = options.outputs.at(-1);
         if (output?.sha256 === pin.sha256 && output.statePhysical) {
           output.statePhysicalRebind = true;
@@ -225,6 +250,9 @@ export function sourcePhysicalManifests(options: {
       statePhysical: result.pin,
       statePhysicalRebind: true,
       statePhysicalPrevious: row.statePhysical ?? null,
+      statePhysicalComposeBase: physicalRootSelfContained(result.root)
+        ? null
+        : mainRow?.statePhysical?.sha256,
       physical,
       ...(binding.recipe
         ? { recipe: binding.recipe }
@@ -252,17 +280,23 @@ export function sourcePhysicalManifests(options: {
     generated: boolean,
   ): Promise<Pick<
     SourceOutput,
-    'statePhysical' | 'statePhysicalRebind' | 'statePhysicalPrevious' | 'physical'
+    | 'statePhysical'
+    | 'statePhysicalRebind'
+    | 'statePhysicalPrevious'
+    | 'statePhysicalComposeBase'
+    | 'physical'
   > | null> => {
-    if (!composeEnabled) return create(pin, files, bases);
+    if (!composeEnabled) return (await create(pin, files, bases)).manifest;
     if (!generated || !composeMain || pin.sha256 === composeMain) return null;
     // A generated State can have a Lane or an intermediate Candidate as a
     // logical parent. Its physical metadata must extend only the selected main.
     const previous = options.locations.get(pin.sha256)?.statePhysical ?? null;
-    const manifest = await create(pin, files, [composeMain], true);
-    // The commit also sees existing States outside this action's descriptor
-    // window. Replace any old working binding even when we publish rootless.
-    return { ...manifest, statePhysicalRebind: true, statePhysicalPrevious: previous };
+    const { manifest, parentRoot } = await create(pin, files, [composeMain], true);
+    // The commit may see a root outside this action's descriptor window. On
+    // deferral, it can retain a proven binding without granting a working root.
+    return manifest
+      ? { ...manifest, statePhysicalRebind: true, statePhysicalPrevious: previous }
+      : { statePhysicalComposeBase: parentRoot };
   };
   return {
     output,

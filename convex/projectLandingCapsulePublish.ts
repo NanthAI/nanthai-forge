@@ -2,13 +2,8 @@
 // Copyright 2026 Ferdinando Valsecchi
 import { v } from 'convex/values';
 import { internalMutation } from './server';
-import { landingCapsulePointer as pointerField } from './projectLandingCapsuleFields';
-import {
-  capsuleRows,
-  removeVerifiedCapsuleRows,
-  capsuleProgressKind,
-  capsulePageRows,
-} from './projectLandingCapsuleRemove';
+import { capsulePageRows, landingCapsulePointer as pointerField } from './projectLandingCapsuleFields';
+import { capsuleRows, removeVerifiedCapsuleRows, capsuleProgressKind } from './projectLandingCapsuleRemove';
 import { capsuleIndexKind } from './projectLandingCapsuleIndex';
 import { capsuleKind } from './projectLandingCapsuleStore';
 import { splitCapsulePins } from './projectLandingCapsulePins';

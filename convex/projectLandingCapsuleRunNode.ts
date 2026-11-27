@@ -3,7 +3,7 @@
 'use node';
 import { v } from 'convex/values';
 import { internalAction } from './_generated/server';
-import { capsuleRunArgs } from './projectLandingCapsuleCapture';
+import { capsuleRunArgs } from './projectLandingCapsuleFields';
 import { packLandingCapsule } from './projectLandingCapsuleRun';
 
 /** The same packer for a landing whose captured history exceeds the V8 packer's memory bound. */

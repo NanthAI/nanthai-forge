@@ -27,6 +27,9 @@ export type SourceOutput = {
   statePhysical?: { sha256: string; size: number };
   statePhysicalRebind?: boolean;
   statePhysicalPrevious?: { sha256: string; size: number } | null;
+  /** Main metadata pin for a compose proof, or null for a self-contained root.
+   * Without a root, this is the main pin against which to judge a deferred output. */
+  statePhysicalComposeBase?: string | null;
   r2Key?: string;
   recipe?: { sha256: string; size: number };
   recipeClosure?: { sha256: string; size: number; pack?: ObjectPack }[];
@@ -193,7 +196,7 @@ export async function storeSourceOutputs(
       );
     }
     // A concurrent rebind can prove a different lineage for the same State.
-    // Fall back to its exact catalog instead of restoring a superseded proof.
+    // Keep that root only when its proof carries into this compose.
     const statePhysical =
       pin.statePhysicalRebind &&
       pin.statePhysicalPrevious !== undefined &&
@@ -201,19 +204,33 @@ export async function storeSourceOutputs(
       !samePhysical(old?.statePhysical, pin.statePhysical)
         ? undefined
         : pin.statePhysical;
+    const priorLineage = old?.statePhysicalLineage;
+    const keepPhysical =
+      priorLineage !== undefined &&
+      priorLineage.root === old?.statePhysical?.sha256 &&
+      (priorLineage.base === null || priorLineage.base === pin.statePhysicalComposeBase);
+    const deferred = !pin.statePhysical && pin.statePhysicalComposeBase !== undefined;
+    const clearPhysical =
+      !statePhysical &&
+      !!old?.statePhysical &&
+      !keepPhysical &&
+      (deferred || (pin.statePhysicalRebind && pin.statePhysicalPrevious !== undefined));
+    const lineage =
+      statePhysical && pin.statePhysicalComposeBase !== undefined
+        ? { root: statePhysical.sha256, base: pin.statePhysicalComposeBase }
+        : undefined;
     const graph = {
       ...(closure === undefined ? {} : { recipeClosure: closure }),
       ...(pin.stateGeneration === undefined ? {} : { stateGeneration: pin.stateGeneration }),
       ...(pin.stateParents === undefined ? {} : { stateParents: pin.stateParents }),
       ...(statePhysical === undefined ? {} : { statePhysical }),
+      ...(lineage === undefined ? {} : { statePhysicalLineage: lineage }),
       ...(pin.stateSize === undefined ? {} : { stateSize: pin.stateSize }),
     };
-    const patchGraph =
-      pin.statePhysicalRebind &&
-      pin.statePhysicalPrevious !== undefined &&
-      !statePhysical &&
-      old?.statePhysical
-        ? { ...graph, statePhysical: undefined }
+    const patchGraph = clearPhysical
+      ? { ...graph, statePhysical: undefined, statePhysicalLineage: undefined }
+      : statePhysical && !samePhysical(old?.statePhysical, statePhysical)
+        ? { ...graph, statePhysicalLineage: lineage }
         : graph;
     if (old?._id !== undefined && old.packMembers && !old.r2Committed) {
       const retained = (await findSourceObjects(ctx, projectId, [pin.sha256])).get(pin.sha256);
@@ -260,7 +277,12 @@ export async function storeSourceOutputs(
       (old.stateGeneration === undefined && pin.stateGeneration !== undefined) ||
       (old.stateParents === undefined && pin.stateParents !== undefined) ||
       (old.statePhysical === undefined && statePhysical !== undefined) ||
-      (pin.statePhysicalRebind && !samePhysical(old.statePhysical, statePhysical)) ||
+      clearPhysical ||
+      (statePhysical !== undefined &&
+        pin.statePhysicalRebind &&
+        !samePhysical(old.statePhysical, statePhysical)) ||
+      (lineage !== undefined &&
+        (priorLineage?.root !== lineage.root || priorLineage?.base !== lineage.base)) ||
       (old.stateSize === undefined && pin.stateSize !== undefined) ||
       (old.recipeClosure === undefined && pin.recipeClosure !== undefined)
     )
