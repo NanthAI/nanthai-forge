@@ -51,7 +51,7 @@ export function History(props: CodeProps) {
   const [retry, setRetry] = useState(0);
   const receipt = useCodeReceipt(projectId, listed || loading ? '' : route.rest, retry);
   const selected = listed ?? receipt.value?.landings.find(row => row.receiptId === route.rest) ?? null;
-  const at = (rest: string) => pathHref(hrefFor({ ...route, rest }), path);
+  const at = (rest: string) => pathHref(hrefFor({ ...route, section: rest ? '' : 'history', rest }), path);
   const sentence = path ? pathSentence(path, file) : everySentence(history, props.flow);
   const [cli, setCli] = useState(false);
   const args = JSON.stringify(path ? { op: 'log', path, limit: 50 } : { op: 'log', limit: 50 });
@@ -115,7 +115,7 @@ export function History(props: CodeProps) {
               />
             ))}
             {path ? (
-              <PathFoot file={file} clear={hrefFor({ ...route, rest: '' })} />
+              <PathFoot file={file} clear={hrefFor({ ...route, section: 'history', rest: '' })} />
             ) : history.next ? (
               <div className="pf">
                 <button

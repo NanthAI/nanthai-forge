@@ -8,6 +8,7 @@
  *   code/HANDLE/SLUG/history/BEFORE.json             the 25 landings before sequence BEFORE
  *   code/HANDLE/SLUG/history/RECEIPT.json            one exact landing
  *   code/HANDLE/SLUG/file-history/PATH/BEFORE.json   one window of a file's landings ('-' for newest)
+ *   code/HANDLE/SLUG/STATE/find/NAME.json           filename matches for the UTF-8 hex term
  *   code/HANDLE/SLUG/STATE/open/PATH.json            a folder with its ancestors, or a file with its first page
  *   code/HANDLE/SLUG/STATE/more/PATH/CURSOR.json     the next page of one folder
  *   code/HANDLE/SLUG/STATE/page/PATH/OFFSET.json     the next page of one file
@@ -35,8 +36,9 @@ const PAIRS = new RegExp(`^(?:[a-f0-9]{128}){1,${CODE_TOUCHED_PAIRS}}$`);
 
 type CodeRead = {
   state: string;
-  want: 'open' | 'more' | 'page' | 'changes' | 'touched';
+  want: 'open' | 'more' | 'page' | 'changes' | 'touched' | 'find';
   path?: string;
+  name?: string;
   base?: string;
   cursor?: number;
   offset?: number;
@@ -51,13 +53,16 @@ export type CodeAddress =
  * (projectCodeBrowse.ts readCode), so a bad address is a 404 before any function runs. */
 function pathOf(segment: string | undefined): string | undefined {
   if (segment === '-') return '';
-  if (!segment || segment.length > PUBLIC_CODE_PATH_BYTES * 2 || !/^(?:[a-f0-9]{2})+$/.test(segment))
-    return undefined;
+  const path = textOf(segment, PUBLIC_CODE_PATH_BYTES);
+  return path && safeRelative(path) && path.split('/').length <= CODE_DIR_DEPTH + 1 ? path : undefined;
+}
+
+function textOf(segment: string | undefined, maxBytes: number): string | undefined {
+  if (!segment || segment.length > maxBytes * 2 || !/^(?:[a-f0-9]{2})+$/.test(segment)) return undefined;
   try {
     const bytes = new Uint8Array(segment.length / 2);
     for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(segment.slice(i * 2, i * 2 + 2), 16);
-    const path = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-    return safeRelative(path) && path.split('/').length <= CODE_DIR_DEPTH + 1 ? path : undefined;
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
   } catch {
     return undefined;
   }
@@ -85,6 +90,10 @@ export function codeAddress(parts: readonly string[]): CodeAddress | null {
   }
   const [state, want, ...rest] = at;
   if (!state || !STATE.test(state)) return null;
+  if (want === 'find') {
+    const name = textOf(rest[0], 384);
+    return rest.length === 1 && name?.trim() && name.length <= 128 ? { read: { state, want, name } } : null;
+  }
   if (want === 'changes')
     return rest.length === 1 && STATE.test(rest[0]!) ? { read: { state, want, base: rest[0]! } } : null;
   const path = pathOf(rest[0]);

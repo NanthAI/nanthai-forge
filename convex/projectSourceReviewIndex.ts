@@ -23,7 +23,7 @@ export async function indexedReviewBytes(
   const seeds = new Map(initial?.map(pin => [pin.sha256, pin]));
   const args = { projectId: backup.projectId, owner: actor };
   const reader = exchangeObjectReader(ctx, true);
-  return async (ids: string[]): Promise<Buffer[]> => {
+  return async (ids: string[], maximumObjectBytes?: number): Promise<Buffer[]> => {
     for (const id of ids)
       invariant(/^[a-f0-9]{64}$/.test(id), 'BAD_ARGUMENT', 'Select an exact native source identity.');
     let pins: { sha256: string; size: number }[];
@@ -59,6 +59,11 @@ export async function indexedReviewBytes(
         return pin;
       });
     }
+    invariant(
+      maximumObjectBytes === undefined || pins.every(pin => pin.size <= maximumObjectBytes),
+      'SOURCE_UNAVAILABLE',
+      'A retained object is too large for this read.',
+    );
     // This reader checks current access, storage health, size and content identity before/after bytes.
     let values: Buffer[];
     try {

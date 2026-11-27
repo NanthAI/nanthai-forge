@@ -86,7 +86,7 @@ function fromQuery(p: URLSearchParams): Pick {
     const file = p.get('file');
     return file
       ? { dest: { place: 'code', section: 'files', rest: file }, search: pin(p.get('head')) }
-      : { dest: { place: 'code', section: '', rest: '' } };
+      : { dest: { place: 'code', section: 'history', rest: '' } };
   }
   if (p.get('workPage') === 'lanes' || section === 'lanes') return { dest: lanes() };
   if (

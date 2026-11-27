@@ -51,7 +51,7 @@ async function fixture(out) {
       automatic: false, check: { runId: 'run-' + sequence, testsSkipped: false }, firstCheck: 'admission-run',
       batch: false, docsMerged: false, ...more,
     });
-    const page = (landings, scanned, nextBefore, missing = 0) => ({ landings, missing, scanned, nextBefore });
+    const page = (landings, scanned, nextBefore, missing = 0) => ({ landings, missing, scanned, nextBefore, newestHead: HEAD, traceable: landings.length });
     const P = ${JSON.stringify(PATH)}, O = ${JSON.stringify(OTHER)}, L = ${JSON.stringify(LONG)};
     // Each path's steps by their start; a function answers per attempt.
     let failed = 0;
@@ -94,6 +94,7 @@ async function fixture(out) {
       query: async (ref, args) => {
         const name = getFunctionName(ref);
         window.calls.push(['query', name, args]);
+        if (name === 'projectCode:changing') return JSON.stringify({ partial: false, lanes: [{ id: 'active', title: 'Tidy the parser', paths: [P] }] });
         if (name === 'projectCode:history' && args.receiptId)
           return JSON.stringify({ landings: [land(50, 'Parser: first version', { check: null })].filter(row => row.receiptId === args.receiptId), nextCursor: null });
         if (name !== 'projectCode:fileHistory') throw new Error('unexpected query ' + name);
@@ -106,10 +107,13 @@ async function fixture(out) {
       },
       action: async (ref, args) => {
         window.calls.push(['action', getFunctionName(ref), args]);
+        if (getFunctionName(ref) === 'projectCodeLineHistory:read') return JSON.stringify({ origins: [0] });
+        if (args.want === 'find') return JSON.stringify({ matches: [P], total: 1 });
         if (args.want === 'changes') return JSON.stringify({ state: args.state, changes: [{ path: P, status: 'modified' }], total: 1 });
         const dir = (path, names) => ({ path, entries: names.map(([name, kind]) => ({ name, path: (path ? path + '/' : '') + name, kind })), total: names.length, next: null });
         const dirs = [dir('', [['src', 'dir']]), dir('src', [['parser', 'dir'], ['lines.ts', 'file']]), dir('src/parser', [['stream-parser.ts', 'file']])];
         const text = 'export class StreamParser {}\\n';
+        if (!args.path) return JSON.stringify({ state: HEAD, files: 2, kind: 'dir', dirs });
         return JSON.stringify({ state: HEAD, files: 2, kind: 'file', dirs, file: { available: true, path: args.path, blob: 'c'.repeat(64), mode: 'file', page: { kind: 'text', text, offset: 0, nextOffset: null, totalCharacters: text.length } } });
       },
       mutation: () => Promise.reject(new Error('no writes here')),
@@ -206,6 +210,53 @@ test('What landed narrowed to one file: bounded steps, kept rows, exact address,
   const list = view => view.getByRole('region', { name: 'What landed' });
   const titles = view => list(view).locator('a.hrow .ttl').allTextContents();
 
+  const ordinary = await open(base);
+  const tree = ordinary.getByRole('region', { name: 'Files', exact: true });
+  await tree.getByRole('button', { name: /src.*1 open Lane/ }).waitFor();
+  await tree.getByRole('searchbox', { name: 'File name' }).fill('stream-parser');
+  assert.ok(
+    !(await ordinary.evaluate(() => window.calls.some(([, , args]) => args.want === 'find'))),
+    'typing does not read source',
+  );
+  await tree.getByRole('button', { name: 'Find', exact: true }).click();
+  await tree.getByRole('link', { name: PATH }).click();
+  await at(ordinary, `${base}/files/${PATH}`);
+  const context = ordinary.getByRole('region', { name: 'In this file' });
+  await context.getByRole('link', { name: 'Tidy the parser' }).waitFor();
+  const lineReads = () =>
+    ordinary.evaluate(() => window.calls.filter(([, name]) => name === 'projectCodeLineHistory:read').length);
+  assert.equal(await lineReads(), 0);
+  await ordinary.getByRole('link', { name: 'Line 1', exact: true }).click();
+  const origin = context
+    .getByRole('link', { name: 'Stream parser: handle split UTF-8' })
+    .and(context.locator('a[href*="view=changes"]'));
+  await origin.waitFor();
+  assert.equal(await lineReads(), 1);
+  const changes = await origin.getAttribute('href');
+  assert.equal(new URL(changes, 'https://forge.test').searchParams.get('file'), PATH);
+  await origin.click();
+  await ordinary.waitForURL(
+    url =>
+      url.pathname === `${base}/00000300-0000-4000-8000-000000000000` &&
+      url.searchParams.get('view') === 'changes',
+  );
+  await ordinary.getByTitle(PATH, { exact: true }).waitFor();
+  assert.ok(
+    await ordinary.evaluate(
+      path =>
+        window.calls.some(
+          ([kind, , args]) => kind === 'action' && args.want === 'changes' && args.path === path,
+        ),
+      PATH,
+    ),
+    'the landing read prioritizes the attributed file',
+  );
+  const pinnedFile = await open(
+    `${base}/files/${PATH}?at=${'a'.repeat(64)}&receipt=00000300-0000-4000-8000-000000000000#L1`,
+  );
+  await pinnedFile.locator('#L1.sel').waitFor();
+  assert.equal(await pinnedFile.getByRole('heading', { name: 'Changing now' }).count(), 0);
+
   // A deep link reads the file's first step once, and never the live page of every landing.
   const deep = await open(`${base}?path=${q(PATH)}`);
   assert.deepEqual(await titles(deep), [
@@ -297,7 +348,7 @@ test('What landed narrowed to one file: bounded steps, kept rows, exact address,
   );
   // Clear lists every landing; Back returns to the narrowed list from the steps already read.
   await list(deep).getByRole('button', { name: 'Clear the path' }).click();
-  await at(deep, base);
+  await at(deep, `${base}/history`);
   await list(deep).getByText('Docs: the import format').waitFor();
   assert.equal(await list(deep).locator('.chip').count(), 0);
   await deep.goBack();
@@ -307,7 +358,7 @@ test('What landed narrowed to one file: bounded steps, kept rows, exact address,
   // Keyboard: the find field takes a path; Enter narrows to it; Up and Down move between rows.
   await list(deep).getByRole('searchbox', { name: 'Narrow to one file' }).fill(OTHER);
   await deep.keyboard.press('Enter');
-  await at(deep, base, OTHER);
+  await at(deep, `${base}/history`, OTHER);
   await list(deep).getByText('Lines: drain in one place').waitFor();
   assert.deepEqual(await titles(deep), ['Lines: drain in one place']);
   await deep.goBack();
@@ -361,7 +412,7 @@ test('What landed narrowed to one file: bounded steps, kept rows, exact address,
   for (let i = 0; i < 12; i++) {
     await find.fill(`src/other-${i}.ts`);
     await evicted.keyboard.press('Enter');
-    await at(evicted, base, `src/other-${i}.ts`);
+    await at(evicted, `${base}/history`, `src/other-${i}.ts`);
     await evicted.getByRole('alert').waitFor();
   }
   await evicted.evaluate(path => window.release(`${path}:205`), PATH);
@@ -384,9 +435,9 @@ test('What landed narrowed to one file: bounded steps, kept rows, exact address,
   const touched = files.getByRole('region', { name: 'In this file' });
   const all = touched.getByRole('link', { name: 'All landings that touched it' });
   await all.waitFor();
-  assert.equal(await all.getAttribute('href'), `${base}?path=${PATH}`);
+  assert.equal(await all.getAttribute('href'), `${base}/history?path=${PATH}`);
   await all.click();
-  await at(files, base, PATH);
+  await at(files, `${base}/history`, PATH);
   await list(files).getByText('End of stream flushes held bytes').waitFor();
 
   // An older match linked from elsewhere is one exact receipt read, beside the file's first step.

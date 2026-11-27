@@ -52,7 +52,7 @@ export const placeSections: Record<ProjectPlace, readonly string[]> = {
   needs: [''],
   lanes: ['', 'history', 'touching', 'sessions'],
   plan: [''],
-  code: ['', 'files'],
+  code: ['files', 'history'],
   stats: [''],
   settings: ['', 'checks', 'secrets', 'mirror', 'agents', 'project', 'you'],
 };
@@ -221,14 +221,15 @@ export function parseAppPath(pathname: string): AppRoute {
   if (segment && !place) return { frame: 'missing', path: pathname };
   const resolved: ProjectPlace = place ?? 'needs';
   if (resolved === 'code') {
-    // What landed, or one landing's receipt; files/… is a folder or a file. A bare path (an older link) is a file.
+    // Files is the ordinary entry. A receipt keeps its short URL, and older bare file paths still open.
+    if (tail.length === 1 && tail[0] === 'history') return project(first, second, 'code', 'history', '');
     if (tail[0] === 'files') return project(first, second, 'code', 'files', tail.slice(1).join('/'));
     if (tail.length === 1 && receiptShape.test(tail[0]!)) return project(first, second, 'code', '', tail[0]!);
     // One main red (ae068e0c): red/<audit event sequence>, the view a Main broke row's Why opens. An old bare file
     // link to a file at red/<digits> opens this view instead; file links have used files/ since that form.
     if (tail.length === 2 && tail[0] === 'red' && /^\d{1,15}$/.test(tail[1]!))
       return project(first, second, 'code', '', `red/${tail[1]}`);
-    return project(first, second, 'code', tail.length ? 'files' : '', tail.join('/'));
+    return project(first, second, 'code', 'files', tail.join('/'));
   }
   const [named = '', ...detail] = tail;
   // History replaced To read (Item c613e6bc): the old address opens History, and the screen corrects the address.

@@ -24,7 +24,7 @@ type ReviewSelection = {
 
 type Manifest = z.infer<typeof nativeManifestSchema>;
 type Pin = { sha256: string; size: number };
-type ReadBytes = (ids: string[]) => Promise<Buffer[]>;
+type ReadBytes = (ids: string[], maximumObjectBytes?: number) => Promise<Buffer[]>;
 import { reviewPaths, reviewTextPage } from './source-review-format.js';
 export { reviewPaths, reviewTextPage, type ReviewPath } from './source-review-format.js';
 export async function readNativeSourceReview(
@@ -50,9 +50,14 @@ export function nativeReviewBytes(manifest: Manifest, read: (pins: Pin[]) => Pro
     );
     return file;
   }
-  return async ids => {
-    const pins = ids.map(pin),
-      values = await read(pins);
+  return async (ids, maximumObjectBytes) => {
+    const pins = ids.map(pin);
+    invariant(
+      maximumObjectBytes === undefined || pins.every(pin => pin.size <= maximumObjectBytes),
+      'SOURCE_UNAVAILABLE',
+      'A retained object is too large for this read.',
+    );
+    const values = await read(pins);
     invariant(
       values.length === pins.length &&
         values.every((value, i) => value.length === pins[i]!.size && digest(value) === ids[i]),

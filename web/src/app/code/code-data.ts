@@ -113,6 +113,8 @@ function visitorPath(base: string, args: Record<string, unknown>): string {
       return `${base}/${state}/more/${path}/${Number(args.cursor ?? 0)}.json`;
     case 'page':
       return `${base}/${state}/page/${path}/${Number(args.offset ?? 0)}.json`;
+    case 'find':
+      return `${base}/${state}/find/${hex(String(args.name ?? ''))}.json`;
     case 'changes':
       return `${base}/${state}/changes/${String(args.base)}.json`;
     default:
@@ -223,10 +225,16 @@ export function useRead<T>(key: string | null, read: () => Promise<T>, retry = 0
   return state.key === key ? state : { value: null, error: '', loading: key !== null };
 }
 
-export function useChanges(projectId: ProjectId, row: CodeHistoryRow | null) {
+export function useChanges(projectId: ProjectId, row: CodeHistoryRow | null, path: string | null = null) {
   const reader = useReader();
-  return useRead<Changes>(row ? `changes:${row.base}:${row.head}` : null, () =>
-    browse<Changes>(reader, { projectId, state: row!.head, base: row!.base, want: 'changes' }),
+  return useRead<Changes>(row ? JSON.stringify([projectId, row.base, row.head, path]) : null, () =>
+    browse<Changes>(reader, {
+      projectId,
+      state: row!.head,
+      base: row!.base,
+      want: 'changes',
+      ...(path ? { path } : {}),
+    }),
   );
 }
 

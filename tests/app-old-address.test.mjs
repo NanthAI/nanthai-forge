@@ -156,7 +156,7 @@ const queries = [
   ['&projectTab=decisions', project('plan')],
   ['&projectTab=coordination', `${base}?view=needs#fyi`],
   ['&projectTab=activity&activity=1', `${base}?view=needs#fyi`],
-  ['&projectTab=delivery', project('code')],
+  ['&projectTab=delivery', project('code', 'history')],
   ['&tab=code&file=src/a%20b.ts', project('code', 'files', 'src/a b.ts')],
   [
     `&projectTab=delivery&file=README.md&head=${'b'.repeat(64)}`,

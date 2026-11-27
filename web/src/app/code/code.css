@@ -37,6 +37,10 @@
   .path-foot { display: flex; flex-wrap: wrap; gap: var(--s-2) var(--s-3); align-items: center; }
   .path-none { display: grid; gap: var(--s-3); justify-items: start; }
   .hrow .ttl.none { color: var(--text-2); font-weight: var(--w-regular); }
+  .file-finder { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); padding: var(--s-2) var(--gut); border-bottom: var(--rule) solid var(--line); }
+  .file-finder .inp { flex: 1 1 8ch; min-width: 0; width: 100%; }
+  .saved-path-mark { width: var(--s-2); height: var(--s-2); flex: none; background: var(--active); }
+  .code-f .quiet p { overflow-wrap: anywhere; }
   .tree ul { list-style: none; margin: 0; padding: 0; }
   .tree a, .tree button.dir { display: flex; align-items: center; gap: var(--s-2); width: 100%; height: var(--ctl-h); padding: 0 var(--s-3) 0 calc(14px + var(--d, 0) * 14px); color: var(--text-2); font-size: var(--t-small); min-width: 0; text-align: left; background: transparent; border: 0; border-radius: 0; }
   .tree button.dir { color: var(--text); font-weight: var(--w-strong); }

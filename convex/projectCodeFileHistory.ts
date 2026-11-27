@@ -24,7 +24,7 @@ const CANDIDATE_BYTES = 1024 * 1024;
 const encoder = new TextEncoder();
 const documentBytes = (row: object) => encoder.encode(JSON.stringify(row)).length;
 type Candidate = Extract<HostedRecord, { kind: 'candidate' }>;
-type Match = boolean | null;
+type Match = { itemId: string } | false | null;
 
 export async function readCodeHistoryRow(
   ctx: QueryCtx,
@@ -60,6 +60,7 @@ export async function codeFileHistory(
   path: string,
   before: number | null,
   visitor: boolean,
+  itemLinks = false,
 ): Promise<CodeFileHistoryPage> {
   invariant(
     safeRelative(path) &&
@@ -96,6 +97,7 @@ export async function codeFileHistory(
   const landings: CodeFileHistoryPage['landings'] = [];
   const seen = new Map<string, Match>();
   let missing = 0;
+  let traceable = 0;
   let bytes = 0;
   let scanned = 0;
   while (scanned < rows.length && landings.length < MATCHES_PER_PAGE) {
@@ -163,13 +165,21 @@ export async function codeFileHistory(
       }
       scanned += 1;
       if (touched === null) missing += 1;
-      if (touched) landings.push(await readCodeHistoryRow(ctx, row, visitor, receipt));
+      if (touched) {
+        if (!missing) traceable++;
+        const landing = await readCodeHistoryRow(ctx, row, visitor, receipt);
+        landings.push(itemLinks && !landing.batch ? { ...landing, itemId: touched.itemId } : landing);
+      }
       if (landings.length === MATCHES_PER_PAGE) break;
     }
     if (end < batch.length) break;
   }
   return {
     landings,
+    ...(itemLinks ? { traceable } : {}),
+    ...(!visitor && recent.length
+      ? { newestHead: (JSON.parse(recent[0]!.value) as HostedAcceptance).candidate.head }
+      : {}),
     missing,
     scanned,
     nextBefore: scanned && (scanned < rows.length || hasOlder) ? rows[scanned - 1]!.sequence : null,
@@ -190,11 +200,17 @@ async function candidateMatch(
   path: string,
 ): Promise<Match> {
   const candidate = JSON.parse(await hostedRecordBody(ctx, record)) as Candidate;
-  return candidate.kind === 'candidate' &&
-    candidate.id === receipt.candidate.id &&
-    candidate.base.head === receipt.previous.head &&
-    candidate.result.status === 'clean' &&
-    candidate.result.head === receipt.candidate.head
-    ? (candidate.governance?.paths.includes(path) ?? null)
+  if (
+    !(
+      candidate.kind === 'candidate' &&
+      candidate.id === receipt.candidate.id &&
+      candidate.base.head === receipt.previous.head &&
+      candidate.result.status === 'clean' &&
+      candidate.result.head === receipt.candidate.head
+    )
+  )
+    return null;
+  return candidate.governance
+    ? candidate.governance.paths.includes(path) && { itemId: candidate.intentId }
     : null;
 }

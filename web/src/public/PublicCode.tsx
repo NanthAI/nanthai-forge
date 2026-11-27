@@ -4,9 +4,7 @@
 // the site's cached public read (convex/publicCode.ts). The views read through VisitorCodeContext, so no read reaches
 // Convex and no Lane or Item link appears. Loaded with its route.
 import { useMemo } from 'react';
-import type { CodeProps, CodeRoute } from '../app/code/CodePlace';
-import { Files } from '../app/code/Files';
-import { History } from '../app/code/History';
+import { CodeScreen, type CodeProps, type CodeRoute } from '../app/code/CodePlace';
 import { VisitorCodeContext, type ProjectId, type VisitorHistory } from '../app/code/code-data';
 import '../app/code/code.css';
 
@@ -28,7 +26,7 @@ export default function PublicCode({
   };
   return (
     <VisitorCodeContext.Provider value={visitor}>
-      {route.section === 'files' ? <Files {...props} /> : <History {...props} />}
+      <CodeScreen {...props} />
     </VisitorCodeContext.Provider>
   );
 }

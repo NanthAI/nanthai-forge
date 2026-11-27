@@ -38,19 +38,19 @@ Walked: `history` (status and a two-entry log), `landings`, `lane-history`, `hel
 
 ## Web history and Code, as specified (Items 3968a655, 90e5bc9c)
 
-The rebuilt Code place answers J18-1 for history and leaves blame and compare open. Question 64 on 581bd373 stays open for the owner. The run brief settled its first half: history is a list of landings.
+Code opens Files at main. Question 64 on 581bd373 puts line history beside the file and keeps comparison within the existing landing and Candidate views.
 
 - **History is landings, not commits.** Code → What landed lists main's receipts, newest first, 25 at a time. Each row has the title from the landing message, who landed it (a public handle and agent run), when, and the check. A row opens its receipt: why, who and with which app, how it was checked, time to main where saved evidence covers it, the files it changed, and links to the files as that landing left them and to the Lane. Only receipt fields are read. A missing message is said as "Landing" plus the short State, never invented. A landing with no saved evidence shows no time to main.
 - **Files at an exact State.** Code → Files reads main, or any landing's State through `?at=`. Folders arrive one page at a time and the file one page at a time, so a large repository never downloads whole. A deep link opens its folders. `#L` selects a line. Binary files, submodules, missing paths and unavailable sources are said in words. Another source is never substituted.
-- **A file's history.** The file pane lists the landings that touched it, and "All landings that touched it" opens What landed narrowed to that file (`code?path=FILE`, also typed in the list's find field). Each step back is one bounded read of up to 96 receipts that returns up to 8 matches. The toolbar counts matches against receipts looked at ("2 of 96 landings"), the foot says how far it looked and offers "Look further back" even when a step matched nothing, and receipts whose changed paths were not kept are counted as unknown, never as a miss. A failed step keeps the rows already read and says when they were read. The path is the address, so Clear and Back walk it. A folder path finds nothing yet: folders need their own bounded matcher.
+- **A file's history.** The file pane lists the landings that touched it, and "All landings that touched it" opens What landed narrowed to that file (`code/history?path=FILE`, also typed in the list's find field; old `code?path=FILE` links still work). Each step back is one bounded read of up to 96 receipts that returns up to 8 matches. The toolbar counts matches against receipts looked at ("2 of 96 landings"), the foot says how far it looked and offers "Look further back" even when a step matched nothing, and receipts whose changed paths were not kept are counted as unknown, never as a miss. A failed step keeps the rows already read and says when they were read. The path is the address, so Clear and Back walk it. A folder path finds nothing yet: folders need their own bounded matcher.
 - **Visibility.** History and files read from the same project as the file reader. On a public project a signed-out visitor gets the same views from "Browse the code" (Item 4c164732): one cached public GET per page (no Convex connection), no person named, no Lane or Item links and no write control. A private or missing project says "No public project at this address" alike.
-- **Open: folders in the path filter, blame** (who wrote this line) and **compare any two States**. Both have exact readers on the server (`history` blame, the source reader's two-State compare). Their phase is question 64, and full-text search stays with 8dcd61fc. When they come, they link from the file pane next to "Landings that touched it" and keep the file's visibility.
-- **Not shown yet:** Lanes changing this file now, and graph coverage per file. No read gives per-Lane paths cheaply today.
+- **Find and follow.** Submit a file name to search basenames at the open version. At main, the tree and Changing now show a bounded snapshot of saved open-Lane paths for people who can read coordination evidence. Select a text line number to follow a recorded recent landing to that file's change. A line without enough retained evidence has no origin shown. This is Forge landing history, not imported Git blame.
+- **Open:** folders in the landing path filter, comparison of any two versions, graph coverage per file, and full-text search (8dcd61fc).
 
 ## Dead ends
 
 - "Show me the history of this file" on the web beyond its recent landings.
-- "Who wrote this line?" on the web.
+- "Who wrote this line?" when it predates retained Forge landing evidence.
 - "Find where this function is called" on the web.
 - Pasting a receipt id anywhere in the web app.
 

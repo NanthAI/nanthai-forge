@@ -8,24 +8,21 @@ import { A } from '../frames';
 import { hrefFor } from '../paths';
 import { navigate } from '../router';
 import type { CodeProps } from './CodePlace';
-import { useFileHistory, type FileHistoryView } from './use-file-history';
+import { type FileHistoryView } from './use-file-history';
 import { ago, landedAt, landedBy, pathHref, plural, titleOf, typedPath } from './code-words';
 
 export function FileHistory({
-  projectId,
+  file,
   path,
-  before,
   route,
 }: {
-  projectId: CodeProps['projectId'];
+  file: FileHistoryView;
   path: string;
-  before: number | null;
   route: CodeProps['route'];
 }) {
-  const file = useFileHistory(projectId, path, before);
   const all = (
     <div className="pf">
-      <A className="lk" href={pathHref(hrefFor({ ...route, section: '', rest: '' }), path)}>
+      <A className="lk" href={pathHref(hrefFor({ ...route, section: 'history', rest: '' }), path)}>
         All landings that touched it
       </A>
     </div>
@@ -173,7 +170,8 @@ export function PathBar({
   count: string;
 }) {
   const [typed, setTyped] = useState('');
-  const go = (to: string | null) => navigate(pathHref(hrefFor({ ...route, rest: '' }), to));
+  const go = (to: string | null) =>
+    navigate(pathHref(hrefFor({ ...route, section: 'history', rest: '' }), to));
   return (
     <div className="tbar" role="search" aria-label="Narrow what landed">
       <label className="find">

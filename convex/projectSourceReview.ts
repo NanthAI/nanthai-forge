@@ -74,7 +74,7 @@ export async function renderCheckpointSource<T extends object>(
   input: Pick<ReviewInput, 'projectId' | 'backupId' | 'base' | 'head' | 'anchor'>,
   actor: string,
   viewOnly: boolean,
-  render: (bytes: (ids: string[]) => Promise<Buffer[]>) => Promise<T>,
+  render: (bytes: (ids: string[], maximumObjectBytes?: number) => Promise<Buffer[]>) => Promise<T>,
 ) {
   const started = performance.now();
   const backup = await checkpoint(

@@ -53,9 +53,11 @@ const readArgs = {
     v.literal('changes'),
     v.literal('touched'),
     v.literal('entry'),
+    v.literal('find'),
     v.literal('secret-example-names'),
   ),
   path: v.optional(v.string()),
+  name: v.optional(v.string()),
   base: v.optional(v.string()),
   cursor: v.optional(v.number()),
   offset: v.optional(v.number()),
@@ -73,6 +75,7 @@ async function readCode(ctx: ActionCtx, input: ReadInput, actor: string): Promis
       (path === '' || (safeRelative(path) && path.split('/').length <= CODE_DIR_DEPTH + 1)) &&
       (input.cursor === undefined || (Number.isSafeInteger(input.cursor) && input.cursor >= 0)) &&
       (input.offset === undefined || (Number.isSafeInteger(input.offset) && input.offset >= 0)) &&
+      (input.want !== 'find' || Boolean(input.name?.trim() && input.name.length <= 128)) &&
       (input.pairs ?? []).length <= CODE_TOUCHED_PAIRS &&
       (input.pairs ?? []).every(pair => state.test(pair.base) && state.test(pair.head)),
     'BAD_ARGUMENT',
@@ -136,10 +139,18 @@ async function readCode(ctx: ActionCtx, input: ReadInput, actor: string): Promis
     if (!listed.available)
       return JSON.stringify({ state: input.state, available: false, reason: listed.reason });
     // A signed-in member also gets each file's two blobs, so the page can draw the diff from storage (no visitor can).
+    const paths = listed.paths ?? [];
+    const picked = path
+      ? paths.find(entry => entry.path === path && entry.status !== 'unchanged')
+      : undefined;
     return JSON.stringify({
       state: input.state,
       base: input.base,
-      ...changedPaths(listed.paths ?? [], undefined, actor !== ''),
+      ...changedPaths(
+        picked ? [picked, ...paths.filter(entry => entry !== picked)] : paths,
+        undefined,
+        actor !== '',
+      ),
     });
   }
   const result = await renderCheckpointSource(
@@ -204,6 +215,23 @@ async function openCode(
     };
   }
   if (input.want === 'page') return { file: await page() };
+  if (input.want === 'find') {
+    const name = input.name!.trim().normalize('NFC').toLowerCase();
+    const matches: string[] = [];
+    let total = 0;
+    let bytes = 0;
+    const encoder = new TextEncoder();
+    for (const { path } of files) {
+      const target = name.includes('/') ? path : path.slice(path.lastIndexOf('/') + 1);
+      if (!target.normalize('NFC').toLowerCase().includes(name)) continue;
+      total++;
+      if (matches.length === total - 1 && matches.length < 40) {
+        bytes += encoder.encode(JSON.stringify(path)).length + 1;
+        if (bytes <= 16 * 1024) matches.push(path);
+      }
+    }
+    return { matches, total };
+  }
   // A folder comes with its subfolders' first pages; `ahead` names the folder whose next level is listed.
   if (input.want === 'more')
     return {

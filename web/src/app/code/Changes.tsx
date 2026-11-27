@@ -12,9 +12,10 @@ import { DiffModeToggle, DiffView, useDiffMode, type DiffMode } from '../../diff
 import { Head, crumbsFor } from '../Place';
 import { A } from '../frames';
 import { hrefFor } from '../paths';
+import { useSearch } from '../router';
 import { readFileBody, type FileBody as DrawnFile } from '../lane/file-diff';
 import type { CodeProps } from './CodePlace';
-import { plural, titleOf } from './code-words';
+import { plural, titleOf, typedPath } from './code-words';
 import { useChanges, VisitorCodeContext, type CodeChange, type CodeHistoryRow } from './code-data';
 
 /** Files drawn before "Show all". */
@@ -33,10 +34,11 @@ export function Changes({
   row,
   loading,
 }: CodeProps & { row: CodeHistoryRow | null; loading: boolean }) {
-  const changes = useChanges(projectId, row);
+  const target = typedPath(useSearch().get('file') ?? '');
+  const visitor = Boolean(useContext(VisitorCodeContext));
+  const changes = useChanges(projectId, row, visitor ? null : target);
   const [mode, setMode] = useDiffMode();
   const [all, setAll] = useState(false);
-  const visitor = Boolean(useContext(VisitorCodeContext));
   const repoAt = (path = '') =>
     row
       ? `${hrefFor({ ...route, section: 'files', rest: path })}?at=${row.head}&receipt=${row.receiptId}`

@@ -27,6 +27,8 @@ function useFileHistoryReader(projectId: ProjectId) {
 /** The landings that touched one file, as far back as the reader has asked: one bounded read per step. */
 export type FileHistoryView = {
   rows: CodeHistoryRow[];
+  newestHead?: string;
+  traceable?: number;
   /** Examined receipts whose changed paths were not kept, so whether they touched the file is unknown. */
   missing: number;
   /** Receipts examined in all; null when a page did not say. */
@@ -63,11 +65,12 @@ export function useFileHistory(
   projectId: ProjectId,
   path: string | null,
   before: number | null = null,
+  state: string | null = null,
 ): FileHistoryView {
   const ask = useFileHistoryReader(projectId);
   const kept = useRef(new Map<string, FileHistoryEntry>());
   const [, redraw] = useReducer((n: number) => n + 1, 0);
-  const key = path === null ? null : JSON.stringify([projectId, path, before]);
+  const key = path === null ? null : JSON.stringify([projectId, path, before, state]);
   const put = (at: string, change: (was: FileHistoryEntry) => FileHistoryEntry) => {
     const all = kept.current;
     const was = all.get(at) ?? {
@@ -115,6 +118,8 @@ export function useFileHistory(
   const next = pages.length ? pages.at(-1)!.nextBefore : null;
   return {
     rows: pages.flatMap(page => page.landings),
+    newestHead: pages[0]?.newestHead,
+    traceable: pages[0]?.traceable,
     missing: pages.reduce((total, page) => total + page.missing, 0),
     scanned: pages.every(page => page.scanned !== undefined)
       ? pages.reduce((total, page) => total + (page.scanned ?? 0), 0)

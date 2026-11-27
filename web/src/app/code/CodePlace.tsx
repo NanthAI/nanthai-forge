@@ -5,6 +5,8 @@
 // who is reading, so the signed-out public pages (4c164732) mount them under their own route.
 import { Component, type ReactNode } from 'react';
 import type { AppRoute } from '../paths';
+import { useSearch } from '../router';
+import { timelinePath } from './code-words';
 import type { PlaceProps } from '../screens';
 import { Files } from './Files';
 import { History } from './History';
@@ -31,6 +33,15 @@ export default function CodePlace({ route, projectId, projectName, feed, feedErr
     mainHead: feed === undefined ? undefined : (feed.main?.head ?? null),
     flow: feedError ? undefined : feed?.flow,
   };
+  return <CodeScreen {...props} />;
+}
+
+export function CodeScreen(props: CodeProps) {
+  const search = useSearch();
+  const { route } = props;
+  // Old /code?path= links named the ledger. Keep them valid after Files becomes the default.
+  const oldLedger = !route.rest && !search.has('at') && timelinePath(`?${search}`) !== null;
+  if (oldLedger && route.section === 'files') return <History {...props} route={{ ...route, section: '' }} />;
   return route.section === 'files' ? <Files {...props} /> : <History {...props} />;
 }
 

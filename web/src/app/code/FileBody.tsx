@@ -4,7 +4,7 @@
 // the highlight worker (nothing is tokenized on the page), binary and submodule files said in words, and the next part
 // on request. A Markdown file opens as a document with a Source toggle (Item 8e847a17). Long lines scroll inside the
 // file, never the page.
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { Tokens } from '../../code-tokens';
 import { Segment } from '../../ds';
 import { requestHighlight } from '../../highlight-client';
@@ -16,31 +16,30 @@ import { plural, selectedLine } from './code-words';
 const MarkdownFile = lazy(() => import('./MarkdownFile'));
 const isMarkdown = (path: string) => /\.(md|markdown|mdown)$/i.test(path);
 
-function useHash() {
-  const [hash, setHash] = useState(() => location.hash);
-  useEffect(() => {
-    const update = () => setHash(location.hash);
-    addEventListener('hashchange', update);
-    return () => removeEventListener('hashchange', update);
-  }, []);
-  return hash;
+function subscribeLine(update: () => void) {
+  addEventListener('hashchange', update);
+  return () => removeEventListener('hashchange', update);
+}
+
+export function useCodeLine() {
+  return useSyncExternalStore(subscribeLine, () => selectedLine(location.hash));
 }
 
 export function FileBody({
   file,
   onMore,
   repo,
+  line,
 }: {
   file: NonNullable<Source['file']>;
   onMore: () => void;
+  line: number | null;
   /** Where a Markdown file's links and images resolve; without it every file reads as source. */
   repo?: Omit<MarkdownSource, 'path'>;
 }) {
   const text = useMemo(() => file.pages.map(page => page.text).join(''), [file.pages]);
   const lines = useMemo(() => text.replace(/\n$/, '').split('\n'), [text]);
   const [tokens, setTokens] = useState<{ text: string; lines: SourceToken[][] } | null>(null);
-  const hash = useHash();
-  const line = selectedLine(hash);
   // A link to one line (#L42) is a link into the source.
   const [view, setView] = useState<'document' | 'source'>(() =>
     selectedLine(location.hash) ? 'source' : 'document',

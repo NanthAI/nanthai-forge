@@ -12,6 +12,15 @@ const history = await import(moduleUrl('../src/code-history.ts'));
 const words = await import(moduleUrl('../web/src/app/code/code-words.ts'));
 const { folderPage, withChildren, ancestors, pathKind, changedPaths, CODE_DIR_PAGE, CODE_AHEAD_BYTES } = tree;
 const { keepListing, listingNeed } = await import(moduleUrl('../web/src/app/code/listing.ts'));
+const { parseAppPath } = await import(moduleUrl('../web/src/app/paths.ts'));
+
+test('Code opens Files while landing receipts and pinned file paths keep their addresses', () => {
+  const receipt = '6f1088ea-07aa-446e-95da-f272e4eaec85';
+  assert.equal(parseAppPath('/ada/atlas/code').section, 'files');
+  assert.equal(parseAppPath('/ada/atlas/code/history').section, 'history');
+  assert.equal(parseAppPath(`/ada/atlas/code/${receipt}`).rest, receipt);
+  assert.equal(parseAppPath('/ada/atlas/code/files/src/a%20b.ts').rest, 'src/a b.ts');
+});
 
 const state = (...paths) =>
   paths.sort().map(path => ({ path, mode: path.endsWith('.lnk') ? 'symlink' : 'file' }));

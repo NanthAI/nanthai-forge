@@ -5,7 +5,8 @@
 import { v } from 'convex/values';
 import { query } from './cliServer';
 import { internalQuery } from './server';
-import { accessibleProject, publicSourceAvailable } from './projectAuthority';
+import { accessibleProject, coordinationProject, publicSourceAvailable } from './projectAuthority';
+import { coordinationAccess } from './projectAudience';
 import { isPublicProject } from './publicVisibility';
 import { report } from './errors';
 import { invariant } from '../src/errors';
@@ -75,7 +76,44 @@ export const fileHistory = query({
         'PROJECT_UNAVAILABLE',
         'This Forge project is unavailable with the current account.',
       );
-      return JSON.stringify(await codeFileHistory(ctx, projectId, path, before, false));
+      const itemLinks = await coordinationAccess(ctx, project, user.subject);
+      return JSON.stringify(await codeFileHistory(ctx, projectId, path, before, false, itemLinks));
+    } catch (error) {
+      return report(error);
+    }
+  },
+});
+
+/** A visit-wide snapshot of saved evidence only. The slim overlap rows already carry up to ten exact paths.
+ * No buckets, writes, subscriptions or reads per file; a capped or incomplete projection stays explicit. */
+export const changing = query({
+  args: { projectId: v.id('hostedProjects') },
+  returns: v.string(),
+  handler: async (ctx, { projectId }) => {
+    try {
+      const user = await ctx.auth.getUserIdentity();
+      invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read saved Lane changes.');
+      const project = await accessibleProject(ctx, projectId, user.subject);
+      if (!(await coordinationAccess(ctx, project, user.subject))) return 'null';
+      const page = await ctx.db
+        .query('projectHostedOverlapLanes')
+        .withIndex('by_project_and_open_and_activity', q => q.eq('projectId', projectId).eq('open', true))
+        .order('desc')
+        .paginate({ cursor: null, numItems: 51, maximumRowsRead: 51, maximumBytesRead: 128 * 1024 });
+      const rows = page.page.slice(0, 50).filter(row => row.landed?.laneHead !== row.head || row.reopenedAt);
+      return JSON.stringify({
+        partial:
+          !page.isDone ||
+          page.page.length > 50 ||
+          rows.some(row => !row.complete || row.pathSummary.pathCount > row.pathSummary.paths.length),
+        lanes: rows
+          .filter(row => row.pathSummary.paths.length)
+          .map(row => ({
+            id: row.laneId,
+            title: row.intent,
+            paths: row.pathSummary.paths,
+          })),
+      });
     } catch (error) {
       return report(error);
     }
@@ -84,6 +122,32 @@ export const fileHistory = query({
 
 /** Select the exact registered State for signed-in Code or its retained checkpoint fallback.
  * Unreadable projects answer like missing ones. Visitors can only select public checkpoints. */
+export const lineStates = internalQuery({
+  args: { projectId: v.id('hostedProjects'), states: v.array(v.string()) },
+  returns: v.object({
+    backupId: v.union(v.id('projectBackups'), v.null()),
+    rows: v.array(v.union(objectDocument, v.null())),
+  }),
+  handler: async (ctx, { projectId, states }) => {
+    try {
+      const user = await ctx.auth.getUserIdentity();
+      invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read line history.');
+      const project = await coordinationProject(ctx, projectId, user.subject);
+      invariant(states.length <= 8, 'BAD_ARGUMENT', 'Choose a bounded set of landing versions.');
+      const rows = await Promise.all(
+        states.map(async state => {
+          if (project.sourceAuthority?.mode !== 'server') return null;
+          const row = await findStoredObject(ctx, projectId, state);
+          return row && !row.removed && isStored(row) && (await isRegisteredState(ctx, row)) ? row : null;
+        }),
+      );
+      return { backupId: project.work?.backupId ?? null, rows };
+    } catch (error) {
+      return report(error);
+    }
+  },
+});
+
 export const checkpoint = internalQuery({
   args: { projectId: v.id('hostedProjects'), state: v.optional(v.string()) },
   returns: v.object({

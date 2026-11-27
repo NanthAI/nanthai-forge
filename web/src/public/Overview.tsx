@@ -89,7 +89,7 @@ export function RecentLandings({ project, overview }: Pick<ProjectPage, 'project
         </p>
       )}
       <div className="pf">
-        <a className="lk" href={projectCode(project, '')} onClick={followLink}>
+        <a className="lk" href={projectCode(project, 'history')} onClick={followLink}>
           All landings, in Code › History
         </a>
       </div>

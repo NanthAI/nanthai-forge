@@ -807,10 +807,10 @@ design-system behaviour layer out of the first paint.
   top of the Lane ahead shows where each line came from (`line-origin.ts`:
   main, the Lane ahead's pinned save, this Lane), and only while that Lane still
   holds the pinned save.
-- Code (`web/src/app/code/`, lazy): `/{handle}/{project}/code` lists what
-  landed, newest first, one receipt per row (`projectCode:history`, 25
-  receipts a page, receipt fields only); `code/{receiptId}` opens one receipt.
-  `code?path={file}` narrows the list to one file: it reads that file's
+- Code (`web/src/app/code/`, lazy): `/{handle}/{project}/code` opens Files at
+  main. `code/history` lists what landed, newest first, one receipt per row
+  (`projectCode:history`, 25 receipts a page); `code/{receiptId}` opens one receipt.
+  `code/history?path={file}` narrows the list to one file (`code?path={file}` still works): it reads that file's
   history one step at a time (`projectCode:fileHistory`, no subscription) and
   not the live page of every landing; steps already read stay for the visit.
   `code/files/{path}` reads files at main, and `?at={64-hex State}` pins any
@@ -819,8 +819,18 @@ design-system behaviour layer out of the first paint.
   64 KiB more), one 16,000-character file page, or a landing's changed paths.
   Opening a file also reads its landing history, newest first, from a page of
   receipts and the exact Candidate path lists retained during composition.
-  Each page checks up to eight receipts, and older receipts can be read in
-  place. Receipts without a retained list are reported as unavailable. The
+  Each page scans up to 96 receipts and returns up to eight matches. Older
+  receipts can be read in place. Receipts without a retained list are reported
+  as unavailable. Find searches basenames (or `folder/name`) at the selected
+  version on submit; it returns at most 40 paths and 16 KiB of path data. Changing now uses one
+  snapshot of at most 50 open Lanes’ saved path summaries per main view, with
+  partial coverage named. It reads no path buckets and has no subscription.
+  Selecting a text line can follow up to four recent landing transitions from
+  the existing history page when its version matches. Registered States use
+  batched metadata lookups and verified R2 bytes; a retained checkpoint can
+  check one transition. Unavailable origins are not guessed. The project’s
+  coordination audience can see saved paths and line origins; public visitors
+  can still find and read files without this Work evidence. The
   signed-in and public readers share the same lookup and do no State or R2
   reads for file history. The tab
   keeps every folder it was sent (`code/listing.ts`): a folder you can see opens

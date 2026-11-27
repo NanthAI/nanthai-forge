@@ -13,12 +13,15 @@ import { ConvexError } from 'convex/values';
 import {
   fixture,
   checkpoint,
+  preparedCheckpoint,
   commitValidatedCheckpoint,
   asLegacyRows,
   upload,
 } from './project-exchange-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { interceptDefaultR2 } from './default-r2.mjs';
+import { meterWorkIO } from './hosted-read-set.mjs';
+import { NativeSource } from '../dist/native-source.js';
 import worker from '../dist/public-code-worker.js';
 import {
   PUBLIC_CODE_DELIVERY,
@@ -30,6 +33,7 @@ import {
 const contract = await import(moduleUrl('../convex/projectAccessContract.ts'));
 const projectCode = await import(moduleUrl('../convex/projectCode.ts'));
 const projectCodeBrowse = await import(moduleUrl('../convex/projectCodeBrowse.ts'));
+const projectCodeLineHistory = await import(moduleUrl('../convex/projectCodeLineHistory.ts'));
 const route = await import(moduleUrl('../convex/publicHttp.ts'));
 const publicRead = await import(moduleUrl('../convex/publicRead.ts'));
 // Absent before this Item; the matrix must still run and fail on behaviour, not on the import.
@@ -113,7 +117,7 @@ async function setup(t, visibility) {
           throw error instanceof ConvexError ? error : new Error(String(error?.message ?? error));
         }
       };
-  return { ...s, head, ran };
+  return { ...s, head, ran, source };
 }
 
 const outcome = async run => {
@@ -132,6 +136,154 @@ const memberReads = {
   source: (s, projectId = 'project') =>
     projectCodeBrowse.read._handler(s.ctx, { projectId, state: s.head, want: 'open', path: '' }),
 };
+
+test('line history traces final line numbers through recorded edits and rechecks coordination access', async t => {
+  const s = await setup(t, 'public');
+  const project = s.tables.hostedProjects.get('project');
+  project.sourceAuthority = { mode: 'server', epoch: 1 };
+  const path = 'src/story.ts';
+  const state = async (text, parent) => {
+    const blob = text == null ? null : await upload(s, Buffer.from(text));
+    const state = await upload(
+      s,
+      Buffer.from(
+        JSON.stringify({
+          schema: 1,
+          kind: 'forge-source-state',
+          parents: [parent],
+          files: blob ? [{ path, mode: 'file', blob: blob.sha256 }] : [],
+          message: '',
+          at: '2026-01-01T00:00:00Z',
+        }),
+      ),
+    );
+    s.tables.projectHostedStates.set(state.sha256, {
+      projectId: 'project',
+      head: state.sha256,
+      size: state.size,
+    });
+    return [state.sha256, blob?.sha256];
+  };
+  const [empty] = await state(null, s.head);
+  const [older] = await state('older\nwill be removed\n', empty);
+  const [head, blob] = await state('newer\nolder\n', older);
+  const run = (
+    pairs = [
+      { base: older, head },
+      { base: empty, head: older },
+    ],
+  ) => projectCodeLineHistory.read._handler(s.ctx, { projectId: 'project', path, blob, pairs });
+  s.caller(null);
+  assert.equal((await outcome(run)).code, 'PROJECT_UNAVAILABLE');
+  s.caller('stranger');
+  assert.equal((await outcome(run)).code, 'PROJECT_UNAVAILABLE');
+  s.caller('writer');
+  const before = s.ran.length;
+  const meter = meterWorkIO(s.ctx, s.tables);
+  t.after(() => meter.restore());
+  const io = await meter.cost(async () => assert.deepEqual(JSON.parse(await run()).origins, [0, 1]));
+  assert.deepEqual(s.ran.slice(before), [
+    'projectCode:lineStates',
+    'projectObjects:resolve',
+    'projectCode:lineStates',
+  ]);
+  assert.equal(io.writeDocuments, 0);
+  t.diagnostic(`line history: ${JSON.stringify(io)}`);
+  assert.deepEqual(
+    JSON.parse(
+      await run([
+        { base: older, head },
+        { base: older, head },
+      ]),
+    ).origins,
+    [0, null],
+    'the older transition has the wrong ending blob',
+  );
+  const original = s.ctx.runQuery;
+  s.ctx.runQuery = (ref, args) => {
+    if (getFunctionName(ref) === 'projectCode:lineStates' && !args.states.length) s.caller('stranger');
+    return original(ref, args);
+  };
+  assert.equal(
+    (await outcome(run)).code,
+    'PROJECT_UNAVAILABLE',
+    'access lost during the read excludes derived data',
+  );
+});
+
+test('line history can trace a file whose versions and contents come from a retained checkpoint', async t => {
+  const s = await setup(t, 'private');
+  const archive = new NativeSource(s.source.store.root);
+  const blob = archive.put(Buffer.from('new in this landing\nexport const a = 1;\n'));
+  const path = 'a.ts';
+  const head = archive.writeState(
+    [{ path, blob, mode: 'file' }],
+    [s.head],
+    'synthetic landing',
+    '2026-01-01T00:00:00Z',
+  );
+  const data = s.source.store.load();
+  data.nativeHead = head;
+  s.source.store.save(data);
+  const next = await preparedCheckpoint(s, s.source.store);
+  const backupId = await commitValidatedCheckpoint(s, next);
+  s.tables.hostedProjects.get('project').work.backupId = backupId;
+  s.caller('owner');
+  const opened = JSON.parse(
+    await projectCodeLineHistory.read._handler(s.ctx, {
+      projectId: 'project',
+      path,
+      blob,
+      pairs: [{ base: s.head, head }],
+    }),
+  );
+  assert.deepEqual(opened.origins, [0, null]);
+});
+
+test('saved paths are a bounded snapshot for the coordination audience, not public source', async t => {
+  const s = await setup(t, 'public');
+  s.tables.projectHostedOverlapLanes ??= new Map();
+  const row = {
+    projectId: 'project',
+    open: true,
+    complete: true,
+    lastActivityAt: 1,
+    head: 'saved',
+    intent: 'Read a file',
+    pathSummary: { paths: ['src/story.ts'], pathCount: 11 },
+  };
+  s.tables.projectHostedOverlapLanes.set('active', { ...row, laneId: 'active' });
+  s.tables.projectHostedOverlapLanes.set('finished', {
+    ...row,
+    laneId: 'finished',
+    landed: { laneHead: 'saved' },
+  });
+  s.tables.projectHostedOverlapLanes.set('closed', { ...row, laneId: 'closed', open: false });
+  const read = () => projectCode.changing._handler(s.ctx, { projectId: 'project' }).then(JSON.parse);
+  s.caller('stranger');
+  assert.equal(await read(), null);
+  s.caller('writer');
+  assert.deepEqual(await read(), {
+    partial: true,
+    lanes: [{ id: 'active', title: 'Read a file', paths: ['src/story.ts'] }],
+  });
+  const meter = meterWorkIO(s.ctx, s.tables);
+  t.after(() => meter.restore());
+  for (const count of [50, 100]) {
+    for (let index = 1; index < count; index++) {
+      const laneId = `lane-${index}`;
+      s.tables.projectHostedOverlapLanes.set(laneId, { ...row, laneId, lastActivityAt: index + 2 });
+    }
+    const io = await meter.cost(async () => {
+      const snap = await read();
+      assert.equal(snap.partial, true);
+      assert.ok(snap.lanes.length <= 50, 'never ship more than the page');
+    });
+    assert.equal(io.writeDocuments, 0);
+    assert.ok(io.readBytes < 128 * 1024, 'does not scan all Lane paths or load buckets');
+    t.diagnostic(`saved paths at ${count} Lanes: ${JSON.stringify(io)}`);
+  }
+});
 
 test('the source projection returns only root .env.example names and checks project access', async t => {
   const s = await setup(t, 'private');
@@ -233,6 +385,18 @@ test('signed-in Code opens a registered exact State without loading its stale Wo
   const folder = JSON.parse(await read({ want: 'more', path: 'src' }));
   assert.equal(folder.dirs[0].entries[0].path, 'src/current.ts');
   assert.deepEqual(received, [bytes.length], 'the next listing can use existing verified State bytes');
+  assert.deepEqual(JSON.parse(await read({ want: 'find', name: 'CURRENT' })), {
+    state: pin.sha256,
+    matches: ['src/current.ts'],
+    total: 1,
+  });
+  assert.deepEqual(JSON.parse(await read({ want: 'find', name: 'src' })).matches, [], 'only basenames match');
+  assert.deepEqual(
+    JSON.parse(await read({ want: 'find', name: 'src/CURRENT' })).matches,
+    ['src/current.ts'],
+    'a directory can narrow duplicate names',
+  );
+  assert.deepEqual(JSON.parse(await read({ want: 'find', name: 'other/CURRENT' })).matches, []);
   const beforeFile = s.ran.length;
   const file = JSON.parse(await read({ want: 'page', path: 'src/current.ts' }));
   assert.equal(file.file.page.text, 'export const current = true;\n');
@@ -425,6 +589,8 @@ test('signed out, a public project reads its history, folders and file pages thr
     JSON.parse(root.body).dirs[0].entries.map(entry => entry.path),
     ['a.ts'],
   );
+  const matches = JSON.parse((await visitor(s, `ada/atlas/${s.head}/find/${hex('A.TS')}.json`)).body);
+  assert.deepEqual(matches, { state: s.head, matches: ['a.ts'], total: 1 });
   const file = JSON.parse((await visitor(s, `ada/atlas/${s.head}/open/${hex('a.ts')}.json`)).body);
   assert.equal(file.kind, 'file');
   assert.equal(file.file.page.text, 'export const a = 1;\n');

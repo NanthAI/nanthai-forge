@@ -14,6 +14,8 @@ export const CODE_HISTORY_WHY_CHARS = 600;
 
 export type CodeHistoryRow = {
   receiptId: string;
+  /** Only on file-history reads allowed to follow coordination links. */
+  itemId?: string;
   sequence: number;
   /** When main moved (ISO). */
   at: string;
@@ -42,6 +44,10 @@ export type CodeHistoryRow = {
 
 export type CodeFileHistoryPage = {
   landings: CodeHistoryRow[];
+  /** The exact head at the start of the scan; do not align a different main version to it. */
+  newestHead?: string;
+  /** Only returned to the coordination audience: matching rows before the first unknown transition. */
+  traceable?: number;
   /** Receipts examined on this page whose exact changed paths were not retained. */
   missing: number;
   /** Every receipt examined on this page. Older cached responses omitted the count. */

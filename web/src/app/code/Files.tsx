@@ -9,7 +9,11 @@ import { hrefFor } from '../paths';
 import { useSearch } from '../router';
 import { RegionBoundary, type CodeProps } from './CodePlace';
 import { pinnedState, plural, short } from './code-words';
-import { FileBody } from './FileBody';
+import { FileBody, useCodeLine } from './FileBody';
+import { Changing, SavedMark, useChanging } from './Changing';
+import { FindFile } from './FindFile';
+import { LineHistory } from './LineHistory';
+import { useFileHistory } from './use-file-history';
 import { useCodeReceipt, useHistory, type CodeDir } from './code-data';
 import { useSource, type Source } from './use-source';
 import { FileHistory } from './FileHistory';
@@ -21,7 +25,9 @@ export function Files(props: CodeProps) {
   const state = pinned ?? mainHead ?? null;
   const path = route.rest;
   const source = useSource(projectId, state, path);
-  const history = useHistory(projectId);
+  const history = useHistory(projectId, { skip: !pinned });
+  const work = useChanging(projectId, !pinned && Boolean(state));
+  const selectedLine = useCodeLine();
   const receiptId = pinned ? (search.get('receipt') ?? '') : '';
   const listed =
     pinned && history.rows.find(row => row.head === pinned && (!receiptId || row.receiptId === receiptId));
@@ -75,6 +81,8 @@ export function Files(props: CodeProps) {
     source.dirs.get(parent)?.entries.some(entry => entry.path === path && entry.kind !== 'dir');
   const before = landing ? landing.sequence + 1 : null;
   const touched = Boolean(state && knownFile && (!pinned || (!history.loading && !exact.loading)));
+  const fileHistory = useFileHistory(projectId, touched ? path : null, before, state);
+  const head = source.file?.state === state && source.file.path === path ? source.file.head : null;
   return (
     <>
       <Head trail={crumbsFor(route, projectName)} sentence={sentence}>
@@ -108,7 +116,9 @@ export function Files(props: CodeProps) {
           </div>
           <div className="body">
             <RegionBoundary label="The files">
-              <Tree source={source} href={href} path={path} />
+              <FindFile projectId={projectId} state={state} href={href}>
+                <Tree source={source} href={href} path={path} saved={work.paths} />
+              </FindFile>
             </RegionBoundary>
           </div>
         </section>
@@ -145,6 +155,7 @@ export function Files(props: CodeProps) {
                 key={`${source.file.state}:${source.file.path}`}
                 file={source.file}
                 onMore={source.morePage}
+                line={selectedLine}
                 repo={{ projectId, state: source.file.state, href }}
               />
             ) : source.loading ? (
@@ -157,22 +168,39 @@ export function Files(props: CodeProps) {
           </div>
         </section>
         <section className={`pane quiet${isFile ? '' : ' off'}`} aria-label="In this file" data-weight="ref">
-          <div className="ph plain">
-            <h2>Landings that touched it</h2>
-          </div>
           <div className="body">
-            {touched ? (
-              <FileHistory
-                key={JSON.stringify([projectId, state, path, before])}
+            {isFile ? <Changing work={work} path={path} route={route} /> : null}
+            {state &&
+            head?.available &&
+            head.blob &&
+            head.page?.kind === 'text' &&
+            (head.mode === 'file' || head.mode === 'executable') &&
+            (work.value || (pinned && fileHistory.traceable !== undefined)) ? (
+              <LineHistory
+                key={JSON.stringify([projectId, state, path])}
                 projectId={projectId}
                 path={path}
-                before={before}
                 route={route}
+                blob={head.blob}
+                state={state}
+                line={selectedLine}
+                file={fileHistory}
               />
             ) : null}
+            <div className="ph plain">
+              <h2>Landings that touched it</h2>
+            </div>
+            {touched ? <FileHistory file={fileHistory} path={path} route={route} /> : null}
             {landing || !touched ? (
               <div className="pf">
-                <A className="lk" href={hrefFor({ ...route, section: '', rest: landing?.receiptId ?? '' })}>
+                <A
+                  className="lk"
+                  href={hrefFor({
+                    ...route,
+                    section: landing ? '' : 'history',
+                    rest: landing?.receiptId ?? '',
+                  })}
+                >
                   {landing ? 'This landing’s receipt' : 'Everything that landed'}
                 </A>
               </div>
@@ -184,7 +212,17 @@ export function Files(props: CodeProps) {
   );
 }
 
-function Tree({ source, href, path }: { source: Source; href: (to: string) => string; path: string }) {
+function Tree({
+  source,
+  href,
+  path,
+  saved,
+}: {
+  source: Source;
+  href: (to: string) => string;
+  path: string;
+  saved: ReturnType<typeof useChanging>['paths'];
+}) {
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
   const root = source.dirs.get('');
   if (!root)
@@ -220,6 +258,7 @@ function Tree({ source, href, path }: { source: Source; href: (to: string) => st
                 <span className="nm" dir="auto">
                   {entry.name}
                 </span>
+                <SavedMark lanes={saved.get(entry.path)?.size ?? 0} />
                 {entry.kind !== 'file' ? <span className="n">{entry.kind}</span> : null}
               </A>
             </li>
@@ -239,6 +278,7 @@ function Tree({ source, href, path }: { source: Source; href: (to: string) => st
               <span className="nm" dir="auto">
                 {entry.name}
               </span>
+              <SavedMark lanes={saved.get(entry.path)?.size ?? 0} />
               <span className="n">{entry.files?.toLocaleString()}</span>
             </button>
             {expanded ? (

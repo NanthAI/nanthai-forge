@@ -26,7 +26,7 @@ export const sectionLabels: Record<ProjectPlace, Record<string, string>> = {
   needs: { '': 'Needs me' },
   lanes: { '': 'Open', history: 'History', touching: 'Who is touching what', sessions: 'Sessions' },
   plan: { '': 'Backlog' },
-  code: { '': 'What landed', files: 'Files' },
+  code: { '': 'What landed', files: 'Files', history: 'What landed' },
   stats: { '': 'Stats' },
   settings: {
     '': 'People and access',

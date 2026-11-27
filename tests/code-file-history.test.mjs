@@ -68,6 +68,20 @@ test('the first page finds eight matches beyond the newest eight receipts and re
   assert.equal(earlier.nextBefore, null);
 });
 
+test('a gap in retained change lists leaves newer file origins traceable, not older ones', async () => {
+  const f = fixture('private');
+  f.add(3, [path]);
+  f.add(2, undefined);
+  f.add(1, [path]);
+  const page = await f.read();
+  assert.deepEqual(
+    page.landings.map(row => row.sequence),
+    [3, 1],
+  );
+  assert.equal(page.missing, 1);
+  assert.equal(page.traceable, 1);
+});
+
 test('a sparse scan stops at its read budget and resumes without skipping a landing', async t => {
   const f = fixture('private');
   for (let i = 1; i <= 112; i++) f.add(i, i === 16 ? [path] : ['other.ts']);
@@ -77,7 +91,15 @@ test('a sparse scan stops at its read budget and resumes without skipping a land
   const io = await meter.cost(async () => {
     first = await f.read();
   });
-  assert.deepEqual(first, { landings: [], missing: 0, scanned: 96, nextBefore: 17 });
+  assert.equal(
+    first.newestHead,
+    'b'.repeat(64),
+    'the scan pins the newest inspected head even without a file match',
+  );
+  assert.deepEqual(
+    { ...first, newestHead: undefined },
+    { landings: [], missing: 0, scanned: 96, nextBefore: 17, newestHead: undefined, traceable: 0 },
+  );
   assert.ok(io.readDocuments <= 289, `read ${io.readDocuments} documents`);
   assert.ok(io.readBytes <= 1_200_000, `read ${io.readBytes} bytes`);
   assert.equal(io.writeDocuments, 0);

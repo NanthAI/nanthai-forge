@@ -114,6 +114,7 @@ const reads = {
   },
   [`${code}/history/${oldest.receiptId}.json`]: { landings: [oldest] },
   [`${code}/${HEAD}/open/-.json`]: { state: HEAD, files: 2, kind: 'dir', dirs: [rootDir] },
+  [`${code}/${HEAD}/find/${hex('index')}.json`]: { state: HEAD, matches: ['src/index.ts'], total: 1 },
   [`${code}/${HEAD}/more/${hex('src')}/0.json`]: { state: HEAD, dirs: [srcDir] },
   [`${code}/${HEAD}/open/${hex('README.md')}.json`]: {
     state: HEAD,
@@ -279,7 +280,11 @@ test('public code screens signed out: browse, read, history, nothing reaches Con
     const names = await view.locator('main button, main a, main [role=button]').allTextContents();
     for (const name of names) assert.doesNotMatch(name, WRITES, `${where}: "${name}" is not for visitors`);
     assert.equal(
-      await view.locator('main form, main textarea, main input:not([type=search])').count(),
+      await view
+        .locator(
+          'main form:not([role=search][aria-label="Find a file"]), main textarea, main input:not([type=search])',
+        )
+        .count(),
       0,
       where,
     );
@@ -295,6 +300,17 @@ test('public code screens signed out: browse, read, history, nothing reaches Con
   await tree.getByRole('link', { name: 'README.md' }).waitFor();
   assert.match(await home.locator('.head .sit').textContent(), /2 files at main/);
   assert.ok(!asked.some(path => path.includes('/file-history/')), 'folders send no file history read');
+  // Filename search is read-only: typing is idle, and submitting sends one cached GET.
+  const finder = tree.getByRole('search', { name: 'Find a file' });
+  await finder.getByRole('searchbox', { name: 'File name' }).fill('index');
+  assert.ok(!asked.some(path => path.includes('/find/')));
+  await finder.getByRole('button', { name: 'Find', exact: true }).click();
+  await tree.getByRole('link', { name: 'src/index.ts' }).waitFor();
+  assert.deepEqual(
+    asked.filter(path => path.includes('/find/')),
+    [`${code}/${HEAD}/find/${hex('index')}.json`],
+  );
+  await finder.getByRole('button', { name: 'Clear' }).click();
   // A folder opens in place; a file opens beside the tree.
   await tree.getByRole('button', { name: /src/ }).click();
   await tree.getByRole('link', { name: 'index.ts' }).click();
@@ -332,7 +348,7 @@ test('public code screens signed out: browse, read, history, nothing reaches Con
   await noWrites(home, 'files');
 
   // History: newest first, earlier pages on request, a receipt with no Lane or Item link.
-  const history = await open('/ada/atlas/code');
+  const history = await open('/ada/atlas/code/history');
   const list = history.getByRole('region', { name: 'What landed' });
   assert.equal(await list.locator('a.hrow').count(), 2);
   await list.getByRole('button', { name: 'Show earlier landings' }).click();
