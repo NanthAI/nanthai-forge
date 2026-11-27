@@ -13,7 +13,7 @@ import { moduleUrl } from './convex-module.mjs';
 
 const flowDay = await import(moduleUrl('../src/flow-day.ts'));
 const period = await import(moduleUrl('../src/stats-period.ts'));
-const { statsDay } = await import(moduleUrl('../src/stats-estimate.ts'));
+const { statsCarry, statsDay, statsFailedDay } = await import(moduleUrl('../src/stats-estimate.ts'));
 const stats = await import(moduleUrl('../web/src/app/stats/model.ts'));
 const { flowFigures } = await import(moduleUrl('../web/src/app/flow/model.ts'));
 const lanes = await import(moduleUrl('../web/src/app/lanes/model.ts'));
@@ -73,9 +73,51 @@ test('Stats renders the live first landing while the first hourly summary is sti
     createElement(StatsView, { data, period: selected, now, liveLanded: live, usePart: assert.fail }),
   );
   assert.match(html, /<b>1 landing today\.<\/b>/);
-  assert.match(html, /first hourly summary/);
+  assert.match(html, /Opening Stats after a landing requests the first hourly summary/);
   assert.match(html, /midnight UTC/);
   assert.match(html, /same number of days before it/);
+});
+
+test('Stats keeps the first reporting day provisional after the hourly summary arrives', () => {
+  const now = at('2026-11-23T07:55:00Z');
+  const selected = monthPeriod(now);
+  const row = dayRow('2026-11-23', 2, at('2026-11-23T07:49:00Z'));
+  const data = period.statsRangeReply([row], selected);
+  const props = { data, period: selected, now, usePart: assert.fail };
+  const live = renderToStaticMarkup(createElement(StatsView, { ...props, liveLanded: 3 }));
+  assert.match(live, /<b>3 landings today\.<\/b>/);
+  assert.match(live, /Live count since 00:00 UTC/);
+  assert.match(live, /provisional through 07:49 UTC/);
+  assert.match(live, /reporting day ends at midnight UTC/);
+  assert.match(
+    live,
+    /Trends appear once this period and the same number of days before it both have summaries/,
+  );
+  assert.doesNotMatch(live, /1 closed day|comparison with your own history starts at/);
+
+  const snapshot = renderToStaticMarkup(createElement(StatsView, props));
+  assert.match(snapshot, /<b>2 landings today so far\.<\/b>/);
+  assert.match(snapshot, /provisional through 07:49 UTC/);
+  assert.doesNotMatch(snapshot, /Live count|1 closed day/);
+
+  const mixed = period.statsRangeReply([dayRow('2026-11-22', 1), row], selected);
+  const mixedHtml = renderToStaticMarkup(createElement(StatsView, { ...props, data: mixed, liveLanded: 3 }));
+  assert.match(mixedHtml, /1 closed day and 1 partial day/);
+  assert.doesNotMatch(mixedHtml, /2 closed days/);
+});
+
+test('Stats gives live-only reporting guidance when a prior reporting day could not be measured', () => {
+  const now = at('2026-11-23T04:15:00Z');
+  const selected = monthPeriod(now);
+  const failed = statsFailedDay('2026-11-22', statsCarry(null));
+  const data = period.statsRangeReply([failed], selected);
+  const html = renderToStaticMarkup(
+    createElement(StatsView, { data, period: selected, now, liveLanded: 3, usePart: assert.fail }),
+  );
+  assert.match(html, /<b>3 landings today\.<\/b>/);
+  assert.match(html, /Opening Stats after a landing requests the first hourly summary/);
+  assert.match(html, /reporting day ends at midnight UTC/);
+  assert.match(html, /not measured: its close did not finish/);
 });
 
 test('Stats describes a historical period with no summary without claiming it had no landings', () => {

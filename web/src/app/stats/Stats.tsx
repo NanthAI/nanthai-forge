@@ -203,6 +203,40 @@ export function StatsView({
   const shown = withLiveToday(read, liveLanded, period, now);
   const data = shown.data;
   const w = data.window;
+  const hasDayFigures = data.cover.closed > 0 || data.cover.notMeasured > 0;
+  const summary = soFarOf(data.todayUpTo);
+  const today = new Date(now).toISOString().slice(0, 10);
+  const todaySummary = summary?.day === today && data.cover.last === today ? summary : null;
+  const firstDay =
+    !busy &&
+    holdsToday(period, now) &&
+    (todaySummary ? data.cover.first === today : data.cover.closed === 0 && shown.live && w.landings > 0);
+  const firstDayPartial = firstDay ? partialWords(w) : null;
+  const firstDayHeadline = firstDay ? (
+    <>
+      <b>
+        {plural(w.landings, 'landing')} today{shown.live ? '' : ' so far'}.
+      </b>
+      {firstDayPartial ? (
+        <>
+          {' '}
+          <Hint text={firstDayPartial}>Some days read in part.</Hint>
+        </>
+      ) : null}
+      <span className="stats-freshness">
+        {shown.live ? 'Live count since 00:00 UTC. ' : null}
+        {todaySummary
+          ? `${shown.live ? 'Other figures are' : 'Figures are'} provisional through ${todaySummary.time} UTC.`
+          : 'Opening Stats after a landing requests the first hourly summary. Later hours with landings are summarized as they end.'}{' '}
+        The reporting day ends at midnight UTC.
+      </span>
+      {period.kind !== 'all' ? (
+        <span className="stats-freshness">
+          Trends appear once this period and the same number of days before it both have summaries.
+        </span>
+      ) : null}
+    </>
+  ) : null;
   const asOf = derivedAsOf(data, period, now, shown.live, liveLanded ?? 0);
   const billing = hrefFor({ frame: 'account', place: 'billing' });
   const freshness = busy ? null : <Freshness data={data} period={period} now={now} live={shown.live} />;
@@ -211,37 +245,24 @@ export function StatsView({
       {period.error}
     </p>
   ) : null;
-  if (!data.cover.closed && !data.cover.notMeasured) {
-    const hasLiveLandings = w.landings > 0;
+  if (!hasDayFigures) {
     const todayOnly = shown.live && period.kind !== 'all' && period.from === period.to;
-    const sentence = hasLiveLandings
-      ? `${plural(w.landings, 'landing')} today.`
-      : todayOnly
-        ? 'No landings reported today.'
-        : `No landing figures ${periodWords(period)}.`;
+    const sentence = todayOnly ? 'No landings reported today.' : `No landing figures ${periodWords(period)}.`;
     return (
       <>
-        <Head trail={trail} sentence={<b>{sentence}</b>}>
+        <Head trail={trail} sentence={firstDayHeadline ?? <b>{sentence}</b>}>
           {picker}
         </Head>
         {notice}
-        <Region title={data.perMonth ? 'Landings per month' : 'Landings per day'}>
-          <p className="stats-readout">
-            {hasLiveLandings ? (
-              <>
-                Today’s figures usually start with the first hourly summary. The reporting day ends at
-                midnight UTC.
-                {period.kind !== 'all'
-                  ? ' The trend compares this period with the same number of days before it, once both have figures.'
-                  : null}
-              </>
-            ) : period.kind === 'all' ? (
-              'Figures appear after Forge summarises the landings.'
-            ) : (
-              'Try a longer period.'
-            )}
-          </p>
-        </Region>
+        {firstDayHeadline ? null : (
+          <Region title={data.perMonth ? 'Landings per month' : 'Landings per day'}>
+            <p className="stats-readout">
+              {period.kind === 'all'
+                ? 'Figures appear after Forge summarises the landings.'
+                : 'Try a longer period.'}
+            </p>
+          </Region>
+        )}
       </>
     );
   }
@@ -250,10 +271,12 @@ export function StatsView({
       <Head
         trail={trail}
         sentence={
-          <>
-            <Sentence data={data} period={period} asOf={asOf} />
-            {freshness}
-          </>
+          firstDayHeadline ?? (
+            <>
+              <Sentence data={data} period={period} asOf={asOf} />
+              {freshness}
+            </>
+          )
         }
       >
         {picker}
@@ -345,7 +368,7 @@ function Freshness({
 function Sentence({ data, period, asOf }: { data: StatsRead; period: Period; asOf: string | null }) {
   const w = data.window,
     c = w.comparison,
-    when = coverWords(period, data.cover),
+    when = coverWords(period, data.cover, soFarOf(data.todayUpTo)?.day),
     part = partialWords(w),
     mark = part ? (
       <>

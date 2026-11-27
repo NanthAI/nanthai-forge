@@ -8,6 +8,7 @@ import { Key, Table } from '../../ds';
 import { agentAppLabels, type AgentApp } from '../start/agent-apps';
 import {
   clock,
+  coverDayWords,
   dayName,
   duration,
   gapWords,
@@ -18,6 +19,7 @@ import {
   percent,
   plural,
   scale,
+  soFarOf,
 } from './model';
 import type { StatsAgents, StatsMonths, StatsTrend, StatsWaited } from '../../../../src/stats-period';
 
@@ -89,7 +91,7 @@ export function PerDay({ days, months = false }: { days: Array<[string, number |
               className="stats-days"
               data-dense={days.length > 14 || undefined}
               role="group"
-              aria-label={months ? 'Landings per closed month' : 'Landings per closed day'}
+              aria-label={caption}
             >
               {days.map(([day, n], i) => (
                 <button
@@ -355,6 +357,7 @@ export function Trend({ r }: { r: StatsTrend }) {
         this period, so there is nothing of this project’s own to set beside it yet.
       </p>
     );
+  const provisional = soFarOf(r.todayUpTo)?.day === now.cover.last;
   type Row = (typeof TREND)[number];
   const cell = (l: TrendLine, row: Row) => {
     const n = row.value(l);
@@ -364,15 +367,23 @@ export function Trend({ r }: { r: StatsTrend }) {
     <>
       <p
         className="stats-readout"
-        title="Rates, medians and landings per closed day, so two periods compare however many of their days closed. Days not measured are left out of both."
+        title={
+          provisional
+            ? 'Rates, medians and landings per day with figures, including the provisional summary. Days not measured are left out of both.'
+            : 'Rates, medians and landings per closed day, so two periods compare however many of their days closed. Days not measured are left out of both.'
+        }
       >
-        <b>This period</b> {spanWords(now)} ({plural(now.cover.closed, 'closed day')}), beside{' '}
-        <b>the one before</b> {spanWords(then)} ({plural(then.cover.closed, 'closed day')}).
+        <b>This period</b> {spanWords(now)} ({coverDayWords(now.cover, provisional)}), beside{' '}
+        <b>the one before</b> {spanWords(then)} ({coverDayWords(then.cover, false)}).
       </p>
       <Table<Row>
         caption="This period beside the one before"
         columns={[
-          { key: 'm', title: 'Figure', cell: row => row.title },
+          {
+            key: 'm',
+            title: 'Figure',
+            cell: row => (provisional && row.key === 'n' ? 'Landings per day with figures' : row.title),
+          },
           { key: 'a', title: 'This period', numeric: true, cell: row => cell(now, row) },
           { key: 'b', title: 'The one before', numeric: true, cell: row => cell(then, row) },
           {

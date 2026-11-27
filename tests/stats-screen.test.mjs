@@ -33,7 +33,7 @@ async function fixture(out) {
     import {ProjectFrame} from ${JSON.stringify(join(root, 'web/src/app/frames.tsx'))};
     import {statsCarry, statsDay, statsFailedDay} from ${JSON.stringify(join(root, 'src/stats-estimate.ts'))};
     import {classifyRuns} from ${JSON.stringify(join(root, 'src/stats-runs.ts'))};
-    import {statsRangeReply} from ${JSON.stringify(join(root, 'src/stats-period.ts'))};
+    import {previousRange, statsRangeReply} from ${JSON.stringify(join(root, 'src/stats-period.ts'))};
     import {periodOf} from ${JSON.stringify(join(root, 'web/src/app/stats/model.ts'))};
     import {useState} from 'react';
     import ${JSON.stringify(join(root, 'web/src/app/app.css'))};
@@ -75,6 +75,7 @@ async function fixture(out) {
       tokens: nov,
       // Today so far (Item 580b1a1a): the open day's provisional row, counted up to 10:00 UTC.
       today: [...nov, [dayAt(2026, 10, 19), 12]],
+      firstSummary: [[dayAt(2026, 10, 19), 2]],
       // By agent: one person without recorded attempts, and a setup below the first-try baseline beside a rare setup.
       notCounted: [[base, 30]],
       dominant: [[base, 30]],
@@ -116,7 +117,8 @@ async function fixture(out) {
       const landings = day(start, n);
       const d = statsDay(name, landings, runsOf(landings), carry, 6);
       carry = statsCarry(d);
-      if (sample === 'today' && i === plan.length - 1) return {...d, provisional: Date.UTC(2026, 10, 19, 10)};
+      if ((sample === 'today' || sample === 'firstSummary') && i === plan.length - 1)
+        return {...d, provisional: Date.UTC(2026, 10, 19, 10)};
       return sample === 'landingsCut' ? {...d, partial: true} : d;
     });
     const client = new ConvexReactClient('https://forge.test.convex.cloud');
@@ -128,7 +130,12 @@ async function fixture(out) {
       const days = all.filter(d => d.day >= period.from && d.day <= period.to);
       const data = statsRangeReply(days, period);
       // Each fold's part, recorded so the test can tell an unopened fold made no read.
-      const usePart = part => ((window.foldReads ??= new Set()).add(part), statsRangeReply(days, period, part));
+      const usePart = part => {
+        (window.foldReads ??= new Set()).add(part);
+        const before = part === 'trend' ? previousRange(period) : null;
+        const previous = before ? all.filter(d => d.day >= before.from && d.day <= before.to) : [];
+        return statsRangeReply(days, period, part, previous);
+      };
       const live = new URLSearchParams(location.search).get('live');
       return h(StatsView, {data, period, busy: new URLSearchParams(search).has('busy'), now, liveLanded: live === null ? null : Number(live), usePart, onPeriod: setSearch});
     }
@@ -497,13 +504,28 @@ test('stats: short headline, one freshness line, today so far, comparison, table
     );
   }
   const firstDay = await open(390, 'none', 'dark', 'live=2');
-  assert.equal(await firstDay.locator('.sit').textContent(), '2 landings today.');
+  assert.equal(await firstDay.locator('.sit b').textContent(), '2 landings today.');
   assert.match(await firstDay.locator('main').textContent(), /first hourly summary.*midnight UTC/);
   assert.equal(await firstDay.getByRole('button', { name: 'Against the days before' }).count(), 0);
   assert.equal(await firstDay.evaluate(() => window.foldReads?.size ?? 0), 0);
   await firstDay.getByLabel('Period').selectOption('last');
   assert.equal(await firstDay.locator('.sit').textContent(), 'No landing figures in October 2026.');
   assert.match(await firstDay.locator('main').textContent(), /Try a longer period\./);
+  const firstSummary = await open(390, 'firstSummary', 'dark', 'live=3');
+  assert.equal(await firstSummary.locator('.sit b').textContent(), '3 landings today.');
+  assert.deepEqual(await firstSummary.locator('.stats-freshness').allTextContents(), [
+    'Live count since 00:00 UTC. Other figures are provisional through 10:00 UTC. The reporting day ends at midnight UTC.',
+    'Trends appear once this period and the same number of days before it both have summaries.',
+  ]);
+  assert.equal(await firstSummary.getByRole('group', { name: 'Landings per day' }).count(), 1);
+  assert.doesNotMatch(await firstSummary.locator('.sit').textContent(), /closed day|starts at 50 landings/);
+  const recent = await open(390, 'today', 'dark', 'from=2026-11-17&to=2026-11-19');
+  await recent.getByRole('button', { name: 'Against the days before' }).click();
+  assert.match(
+    await recent.getByRole('table', { name: 'This period beside the one before' }).textContent(),
+    /Landings per day with figures/,
+  );
+  assert.match(await recent.locator('.stats-readout[title]').textContent(), /1 partial day/);
   const empty = await open(390, 'none', 'dark', 'live=0&from=2026-11-19&to=2026-11-19');
   assert.equal(await empty.locator('.sit').textContent(), 'No landings reported today.');
   const early = await open(390, 'early');

@@ -79,21 +79,32 @@ export function periodOf(search: URLSearchParams, now: number): Period {
 /** "in November 2026", "from 3 Nov to 18 Nov 2026", or "yet" for All time. */
 export const periodWords = (p: Period) =>
   p.kind === 'all' ? 'yet' : p.kind === 'custom' && !p.error ? `from ${p.label}` : `in ${p.label}`;
-/** The closed days the figures cover, until the whole period has closed: "over 17–18 Nov 2026 (2 closed days)", never
- * "in November 2026" for two days. A day not measured (its close did not finish) is not a closed day: it is in neither
- * the span nor the count, and a period holding one has not wholly closed. */
-export function coverWords(period: Period, cover: StatsCover) {
+/** The reply includes the provisional summary in its measured-day count. */
+export function coverDayWords(cover: StatsCover, partialDay: boolean) {
+  if (!partialDay) return plural(cover.closed, 'closed day');
+  return cover.closed > 1 ? `${plural(cover.closed - 1, 'closed day')} and 1 partial day` : '1 partial day';
+}
+
+/** The days the figures cover. A day not measured (its close did not finish) is left out of the span and count. */
+export function coverWords(period: Period, cover: StatsCover, provisionalDay?: string) {
   const { first, last } = cover;
   if (first === null || last === null) return periodWords(period);
-  if (period.kind !== 'all' && first === period.from && last === period.to && !cover.notMeasured)
+  const partialDay = last === provisionalDay;
+  if (
+    period.kind !== 'all' &&
+    first === period.from &&
+    last === period.to &&
+    !cover.notMeasured &&
+    !partialDay
+  )
     return periodWords(period);
-  const closed = `(${plural(cover.closed, 'closed day')})`;
-  if (first === last) return `on ${shortDay(first, true)} ${closed}`;
+  const coverage = coverDayWords(cover, partialDay);
+  if (first === last) return `on ${shortDay(first, true)} (${coverage})`;
   const span =
     first.slice(0, 7) === last.slice(0, 7)
       ? `${Number(first.slice(8))}–${shortDay(last, true)}`
       : `${shortDay(first, first.slice(0, 4) !== last.slice(0, 4))} – ${shortDay(last, true)}`;
-  return `over ${span} ${closed}`;
+  return `over ${span} (${coverage})`;
 }
 
 /** The period holds today (UTC), so today's row counts so far (Item 580b1a1a). All time always does. */
