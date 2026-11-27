@@ -31,7 +31,8 @@ import { findObject } from './projectObjectFind';
 import { openSiblingLanes } from './projectHostedStartPeers';
 import { dormantCutoff } from './projectHostedDormancy';
 import { intentFinished, successorIntentId } from '../src/hosted-intent-chain';
-import { executeCommand } from './projectWorkCommand';
+import { stagePlanningCapture } from './projectPlanningCapture';
+import { wakePlanningCaptures } from './projectPlanningCaptureWake';
 import { selectedGeneration } from './projectWorkIndexStore';
 import { latestItemIntentHead } from './projectItemIntentHeads';
 import { itemIntentPage } from './projectItemIntentPages';
@@ -49,6 +50,7 @@ const args = {
   ),
   agentClient: v.optional(v.string()),
   noticeVersion: v.optional(v.literal(1)),
+  planningItemIdVersion: v.optional(v.literal(1)),
   openLanesVersion: v.optional(v.union(v.literal(1), v.literal(2), v.literal(3))),
   /** The guard-set revision the caller holds (feature preflight-guard-set, 13ea93bf). */
   guardRevision: v.optional(v.string()),
@@ -84,6 +86,7 @@ type Input = {
   authorship?: AuthorshipClaim;
   agentClient?: string;
   noticeVersion?: 1;
+  planningItemIdVersion?: 1;
   openLanesVersion?: 1 | 2 | 3;
   guardRevision?: string;
   agent?: string;
@@ -105,11 +108,13 @@ function startReply(
   openLanesVersion?: 1 | 2 | 3,
   guardSet?: GuardCandidates | null,
   laneTitle?: string,
+  planningItemIdVersion?: 1,
 ) {
-  const { openLanes, ...parsed } = hostedStartResultSchema.parse(value);
+  const { openLanes, planningItemId, ...parsed } = hostedStartResultSchema.parse(value);
   // Reply-only: never part of the stored result a replayed start returns.
   const result = {
     ...parsed,
+    ...(planningItemIdVersion && planningItemId ? { planningItemId } : {}),
     ...(guardSet ? { guardSet } : {}),
     ...(openLanesVersion === 3 && laneTitle ? { laneTitle } : {}),
   };
@@ -154,6 +159,7 @@ async function execute(
   // The agent slug only labels the Lane for other agents: a retry from another session is the same start.
   const {
     noticeVersion,
+    planningItemIdVersion,
     openLanesVersion,
     // Never part of the payload hash: a retried start is the same start (13ea93bf).
     guardRevision,
@@ -375,7 +381,14 @@ async function execute(
       'The original operation did not complete.',
     );
     return canonicalPayload(
-      startReply(terminal.result, noticeVersion, openLanesVersion, guardSet, overlapIntent),
+      startReply(
+        terminal.result,
+        noticeVersion,
+        openLanesVersion,
+        guardSet,
+        overlapIntent,
+        planningItemIdVersion,
+      ),
     );
   }
   const { main, reverted, initialHead, ownerOnly, stack } = prepared.validated ?? (await validateStart());
@@ -393,7 +406,18 @@ async function execute(
     project.autonomyPolicy?.autoCreatePlanningItem !== false
       ? await selectedGeneration(ctx, project)
       : null;
-  if (capture) planningItemId = intentId;
+  if (capture && payload.intent.kind === 'new') {
+    await stagePlanningCapture(ctx, project, capture, {
+      itemId: intentId,
+      operationId: first.id,
+      title: payload.intent.outcome,
+      at: first.at,
+      agent,
+      agentClient,
+    });
+    planningItemId = intentId;
+    await wakePlanningCaptures(ctx, projectId);
+  }
   // From the pin on, hosted paths own the Intent's status; the journal copy leaves it (projectWorkStore).
   const pin = action === 'start' ? unpinned : undefined;
   if (pin)
@@ -498,32 +522,6 @@ async function execute(
         authorityEpoch: expected.authorityEpoch,
       },
     });
-  // The existing versioned Work writer publishes the Item and its search rows in this transaction.
-  // No caller can observe a linked Lane before its Item exists; retry returns the original receipt above.
-  if (capture && payload.intent.kind === 'new')
-    await executeCommand(
-      ctx,
-      {
-        projectId,
-        operationId: first.id,
-        command: JSON.stringify({
-          action: 'put-planning-item',
-          operationId: first.id,
-          itemId: intentId,
-          expectedVersion: 0,
-          kind: 'issue',
-          title: payload.intent.outcome,
-          status: 'in-progress',
-          // An unplanned outcome was not an explicit publication to the public Plan.
-          hidden: true,
-          reason: 'Captured on Lane start',
-          agent,
-          agentClient,
-        }),
-      },
-      project.owner,
-      { server: true, startGeneration: capture },
-    );
   const pendingFixes = needsFix(project);
   // A new Intent has no other Lanes: no read.
   const openLanes =
@@ -534,6 +532,7 @@ async function execute(
     schema: 1,
     operationId,
     intentId,
+    ...(capture ? { planningItemId: intentId } : {}),
     lane,
     at: first.at,
     ...(recovery ? { fixBrief: fixBrief(recovery) } : {}),
@@ -557,7 +556,9 @@ async function execute(
       actor,
       startOperationId: operationId,
     });
-  return canonicalPayload(startReply(result, noticeVersion, openLanesVersion, guardSet, overlapIntent));
+  return canonicalPayload(
+    startReply(result, noticeVersion, openLanesVersion, guardSet, overlapIntent, planningItemIdVersion),
+  );
 }
 
 export const start = receiptMutation({

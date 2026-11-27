@@ -74,7 +74,7 @@ export function commandProjection(
   project: Doc<'hostedProjects'>,
   generation: Doc<'projectWorkGenerations'>,
   backup: Doc<'projectBackups'>,
-  input: { operationId: string; revision: number },
+  input: { operationId: string; revision: number; at?: string },
   owner: string,
   command: Command,
   request: string,
@@ -114,7 +114,7 @@ export function commandProjection(
   data.hostedEvents = values('events');
   data.planningItems = [...values('planningVersions'), ...values('planningItems')];
   data.planningComments = values('planningComments');
-  const at = retainedEvent?.at ?? new Date().toISOString(),
+  const at = retainedEvent?.at ?? input.at ?? new Date().toISOString(),
     event: HostedEvent = retainedEvent ?? {
       projectKey: project.key,
       archiveSha256: backup.digest,

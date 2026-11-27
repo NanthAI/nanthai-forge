@@ -36,7 +36,7 @@ export const intentStates = query({
 });
 
 /** Full ids of the planning items whose id starts with `prefix` (8+ hex characters): one range read
- * on the existing by_generation_and_collection_and_key index, at most one key past the candidate
+ * on the canonical Issue key index, at most one key past the candidate
  * limit. No scan, no search, no bodies; `more` says there are further matches. */
 export const resolveId = query({
   args: { projectId: v.id('hostedProjects'), prefix: v.string() },
@@ -51,12 +51,13 @@ export const resolveId = query({
       );
       const generation = await selectedGeneration(ctx, project);
       invariant(generation, 'PROJECT_WORK_INDEX_MISSING', 'The Work index is unavailable.');
-      const rows = await planningRootsWithPrefix(
-        ctx,
-        recordPartition(generation),
-        prefix,
-        planningIdMaxCandidates + 1,
-      );
+      // A captured Item is immediately addressable in the canonical store, before its list rows are packed.
+      const rows = await ctx.db
+        .query('projectHostedRecordHeads')
+        .withIndex('by_project_and_kind_and_key', q =>
+          q.eq('projectId', projectId).eq('kind', 'issue').gte('key', prefix).lt('key', `${prefix}\uffff`),
+        )
+        .take(planningIdMaxCandidates + 1);
       return canonicalPayload({
         ids: rows.slice(0, planningIdMaxCandidates).map(row => row.key),
         more: rows.length > planningIdMaxCandidates,

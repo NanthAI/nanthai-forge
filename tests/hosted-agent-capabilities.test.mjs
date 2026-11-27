@@ -75,6 +75,20 @@ test('planned start negotiates both worker-owned status and CLI metric provenanc
   assert.ok(result.features.includes('metric-cli-provenance'));
 });
 
+test('outcome starts negotiate the captured Item id in the existing discovery read', async () => {
+  const s = setup();
+  const result = JSON.parse(
+    await s.call('capabilities', capabilities, {
+      projectId: s.projectId,
+      ...capabilityOptions('.', false, false, 'start', { outcome: 'Keep the Lane linked' }),
+    }),
+  );
+  assert.ok(result.features.includes('start-planning-item'));
+  assert.ok(result.features.includes('planning-status-worker'));
+  assert.ok(result.features.includes('metric-cli-provenance'));
+  assert.equal(s.counts.length, 1);
+});
+
 test('explicit discovery shows live queue switch booleans and older clients keep their reply shape', async t => {
   const s = setup();
   const switches = [

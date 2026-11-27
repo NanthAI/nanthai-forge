@@ -34,6 +34,7 @@ export async function storeVersion(
   encoded: ReturnType<typeof hostedRecordValue>,
   provenance?: WorkProvenance,
   liveProjection = false,
+  pendingPlanningCapture?: Doc<'projectHostedRecordHeads'>['pendingPlanningCapture'],
 ): Promise<'copied' | 'same' | 'refreshed' | 'different'> {
   const projectId = project._id;
   const { record, ref } = encoded;
@@ -49,8 +50,29 @@ export async function storeVersion(
   if (old?.purged !== undefined) return 'same';
   if (old && (old.digest !== ref.digest || old.bytes !== ref.bytes)) return 'different';
   if (!old) {
-    await insertVersion(ctx, projectId, encoded, head, provenance, undefined, liveProjection);
+    await insertVersion(
+      ctx,
+      projectId,
+      encoded,
+      head,
+      provenance,
+      undefined,
+      liveProjection,
+      pendingPlanningCapture,
+    );
     return 'copied';
+  }
+  if (head?.pendingPlanningCapture !== undefined && provenance) {
+    invariant(
+      head.recordId === old._id &&
+        head.pendingPlanningCapture.command === provenance.command &&
+        head.pendingPlanningCapture.at === provenance.at,
+      'WORK_STALE',
+      'The captured Item differs from its original creation command.',
+    );
+    await ctx.db.patch(old.bodyId, { ...provenance, value: '' });
+    await ctx.db.patch(old._id, { inline: encoded.value });
+    await ctx.db.patch(head._id, { pendingPlanningCapture: undefined });
   }
   // A head stored before heads kept their value (and notes their own status) is brought up to date.
   const indexed = hostedRecordIndex(record),
@@ -93,6 +115,7 @@ async function insertVersion(
   provenance?: WorkProvenance,
   planningItemId = head?.planningItemId,
   liveProjection = false,
+  pendingPlanningCapture?: Doc<'projectHostedRecordHeads'>['pendingPlanningCapture'],
 ) {
   const { record, ref, value } = encoded;
   invariant(record.kind !== 'candidate', 'BAD_ARGUMENT', 'Work metadata copies cannot publish a Candidate.');
@@ -108,7 +131,13 @@ async function insertVersion(
     // Historical backlog import uses the ordinary projection too. Its creation
     // must not backfill summaries or add per-Item writes to an import page.
     if (liveProjection && !(record.version === 1 && record.item.imported))
-      await retainAuditVersion(ctx, projectId, head, record.item, provenance?.actor);
+      await retainAuditVersion(
+        ctx,
+        projectId,
+        head,
+        record.item,
+        provenance?.actor ?? (pendingPlanningCapture ? record.item.author : undefined),
+      );
   }
   const indexed = { ...hostedRecordIndex(record), version: record.version },
     identity = { projectId, kind: record.kind, key: record.id };
@@ -132,6 +161,7 @@ async function insertVersion(
       ...(inline === undefined ? {} : { value: inline }),
       ...(planningItemId === undefined ? {} : { planningItemId }),
       ...(planningTimes === undefined ? {} : { planningTimes }),
+      ...(pendingPlanningCapture === undefined ? {} : { pendingPlanningCapture }),
     };
   if (!head) await ctx.db.insert('projectHostedRecordHeads', pointer);
   else if (head.version < record.version) {

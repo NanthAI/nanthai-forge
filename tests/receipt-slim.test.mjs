@@ -208,6 +208,7 @@ const healthy = {
       schema: 1,
       operationId: opId,
       intentId: lane.intentId,
+      planningItemId: lane.intentId,
       lane,
       at: '2026-11-06T06:05:05.722Z',
       path: laneRoot,
@@ -362,6 +363,7 @@ test('a healthy brief still names what the next step needs', () => {
   const start = slimReceipt(healthy.start);
   assert.equal(start.operationId, opId);
   assert.equal(start.result.lane.laneId, laneId);
+  assert.equal(start.result.planningItemId, lane.intentId);
   assert.equal(start.result.path, laneRoot);
   assert.deepEqual(start.result.checkout, { downloadedObjects: 0 }, 'the warm-start proof stays');
   assert.deepEqual(start.localLanes, { idle: 2 }, 'the stderr hint lists them; the count stays');

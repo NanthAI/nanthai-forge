@@ -55,11 +55,12 @@ export const readLimits = { documents: 4096 };
  * adds, so a read that skips the production layer still gets body pages. A test that must see body-page reads as
  * production does turns `outer` off for its own transactions and restores it. */
 export const fixtureLayers = { outer: true };
-export function lanesFixture({ legacyWorkRecords = false } = {}) {
+export function lanesFixture({ legacyWorkRecords = false, commitSchedules = false } = {}) {
   const wallClockTables = new Set(['projectHostedOperations']);
   const tables = Object.fromEntries(Object.keys(schema.tables).map(name => [name, new Map()]));
   const counts = [];
   const scheduled = [];
+  let scheduleId = 0;
   let serial = 0,
     aliasSerial = 0,
     commitClock = fixtureCommitStart,
@@ -79,6 +80,7 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
       // object, so a snapshot copies the row index, never the documents. Deep-cloning every
       // table per transaction made each call cost the whole database (quadratic in a queue run).
       // The transaction's own writes copy a table's index on first write only.
+      const schedules = commitSchedules ? [] : scheduled;
       const baseline = Object.fromEntries(
           Object.entries(tables).map(([table, rows]) => [table, new Map(rows)]),
         ),
@@ -296,12 +298,12 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
         // Scheduled work is recorded, never run (a save's trial merge, flip 4): tests read `scheduled`.
         scheduler: {
           runAfter: async (delay, fn, args) => {
-            scheduled.push({ fn, args, delay });
-            return `scheduled-${scheduled.length}`;
+            schedules.push({ fn, args, delay });
+            return `scheduled-${++scheduleId}`;
           },
           runAt: async (at, fn, args) => {
-            scheduled.push({ fn, args, at });
-            return `scheduled-${scheduled.length}`;
+            schedules.push({ fn, args, at });
+            return `scheduled-${++scheduleId}`;
           },
           cancel: async () => {},
         },
@@ -555,6 +557,7 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
             if (row === null) tables[table].delete(id);
             else tables[table].set(id, resolveFixtureCommit(row, commitClock));
           }
+          if (commitSchedules) scheduled.push(...schedules);
           if (name === 'observerBudgetPage') lastReadSet = unchanged;
           counts.push(meter);
           return result;

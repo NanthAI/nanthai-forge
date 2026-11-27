@@ -15,6 +15,7 @@ import {
   planningInitiativeCountsFeature,
   planningWaitingFeature,
   startLaneTitle,
+  startPlanningItem,
 } from './hosted-contract-features.js';
 import { hostedAgentPlanningActions, type HostedAgentAddress } from './hosted-agent-contract.js';
 import { backgroundSaveOperation } from './hosted-save-pending.js';
@@ -81,7 +82,11 @@ export function capabilityOptions(
               : (action === 'status' || action === 'observe') && input.summary === true
                 ? ['queue-switch-state']
                 : ['metric-cli-provenance']),
-          ...(startWithIntent ? [startLaneTitle] : []),
+          ...(startWithIntent
+            ? [startLaneTitle]
+            : action === 'start' && !input.planningItemId
+              ? [startPlanningItem]
+              : []),
           ...(action === 'planning' || action === 'put-planning-item' ? [planningFeature] : []),
           ...(action === 'planning' ? [planningHistoryFeature] : []),
           ...(planningAudit ? [planningAuditFeature] : []),

@@ -130,6 +130,7 @@ function startFinished(result: Json): boolean {
 function briefStart(result: Json): Json {
   const lane = obj(result.lane);
   const out: Json = { lane: { laneId: lane?.laneId }, path: result.path };
+  if (typeof result.planningItemId === 'string') out.planningItemId = result.planningItemId;
   if (typeof result.rules === 'string') out.rules = result.rules;
   // The warm-start proof (objects fetched) stays; bytes only when something was fetched.
   const checkout = obj(result.checkout);

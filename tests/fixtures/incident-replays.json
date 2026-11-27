@@ -15203,6 +15203,22 @@
       "test": "incident 846c635b: planned start continues an Item after 24 finished Intents with constant reads"
     },
     {
+      "incident": "2209abb0",
+      "what": "Ten overlapping starts return immediately readable private Items while one Plan wake sequences their shared projections",
+      "file": "tests/planning-start-capture.test.mjs",
+      "paths": [
+        "convex/projectHostedLifecycleOverlay.ts",
+        "convex/projectHostedRecords.ts",
+        "convex/projectHostedStart.ts",
+        "convex/projectMetricAliasWriter.ts",
+        "src/landing-repair-notice.ts",
+        "src/landing-worker-context.ts",
+        "src/landing-worker-status.ts",
+        "src/landing-worker-wake.ts"
+      ],
+      "test": "incident 2209abb0: ten overlapping agent starts commit private Items and Lane links without a shared Work write"
+    },
+    {
       "incident": "368d2d2e",
       "what": "An authenticated browser shard remains active beyond the stall window and a late pickup clears an earlier stall.",
       "file": "tests/hosted-landing-supervisor.test.mjs",

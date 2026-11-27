@@ -19,6 +19,8 @@ export const sourceStateV2Feature = 'source-state-v2';
 export const feedCommitOrder = 'feed-commit-order';
 /** An Intent-id-only start asks for its title using the slot reserved for bare status. */
 export const startLaneTitle = 'start-lane-title';
+/** An outcome-only start can receive its captured Item id on the start reply. */
+export const startPlanningItem = 'start-planning-item';
 /** Undo asks for its mutation in the slot reserved for bare status. */
 export const laneUndo = 'lane-undo';
 /** Withdraw asks in the slot reserved for bare status (9bc8204c): projectHostedLanding:cancel takes and
@@ -266,6 +268,7 @@ export const advertisedFeatures = (asked: readonly string[]) => [
   ...(asked.includes(agentHooksFeature) ? [agentHooksFeature] : []),
   ...(asked.includes(feedCommitOrder) ? [feedCommitOrder] : []),
   ...(asked.includes(startLaneTitle) ? [startLaneTitle] : []),
+  ...(asked.includes(startPlanningItem) ? [startPlanningItem] : []),
   ...(asked.includes(laneUndo) ? [laneUndo] : []),
   ...(asked.includes(landingCancelReason) ? [landingCancelReason] : []),
   ...(asked.includes(syncResolutionReuse) ? [syncResolutionReuse] : []),

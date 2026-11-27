@@ -62,6 +62,7 @@ export const hostedStartSchema = z
     authorship: authorshipFields.authorship,
     agentClient: authorshipFields.agentClient,
     noticeVersion: z.literal(1).optional(),
+    planningItemIdVersion: z.literal(1).optional(),
     /** The client reads openLanes in the reply (capability openLanesVersion); 2 adds each Lane's `resolves`
      * (feature start-open-lanes-resolves) and 3 returns a title for an Intent-id-only start. Never hashed. */
     openLanesVersion: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional(),
@@ -175,6 +176,7 @@ export const hostedStartResultSchema = z
     schema: z.literal(1),
     operationId: z.uuid(),
     intentId: z.uuid(),
+    planningItemId: z.uuid().optional(),
     lane: hostedLaneSelectionSchema.nullable(),
     at: z.iso.datetime(),
     /** Reply-only placement hint for starts that already read the existing Intent by id. */

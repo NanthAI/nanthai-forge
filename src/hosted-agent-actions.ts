@@ -620,6 +620,9 @@ export async function executeHostedAgent(
             }
           : {}),
         ...(session.capabilities.needsFix !== undefined ? { noticeVersion: 1 } : {}),
+        ...(session.capabilities.features?.includes('start-planning-item')
+          ? { planningItemIdVersion: 1 }
+          : {}),
         ...(session.capabilities.openLanesVersion === 1
           ? {
               openLanesVersion:

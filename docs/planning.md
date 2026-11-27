@@ -30,7 +30,9 @@ key on successive pages is the same group. Grouping doesn't fetch unseen parents
 Hosted projects with a prepared Plan capture a title-only Item when an agent starts a new Lane from an
 outcome instead of an existing Item or Intent. The Item is already In progress, shares its ID with the
 Intent, and is visible to project members, not visitors. Forge copies only the outcome, not the
-constraints, and uses no model. Retrying the start returns the same Lane and does not add another Item.
+constraints, and uses no model. Start returns the captured Item's ID to clients that support it. That
+ID opens the Item immediately while the Plan list and search index update in the background. Retrying
+the start returns the same Lane and Item.
 
 **Link work to Items** is on by default. Owners can turn it off in Settings → Project → Plan, or with
 `nforge agent ROOT set-policy '{"autoCreatePlanningItem":false}'`. Pass `true` to re-enable it. This changes

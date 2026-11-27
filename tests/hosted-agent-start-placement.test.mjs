@@ -102,6 +102,26 @@ test('start sends a local hook opt-out only to a server that accepts it, on the 
   assert.equal(starts[1].args.hooks, 'off');
 });
 
+test('a completed checkout exposes the captured Item id returned on the existing start mutation', async t => {
+  stateHome(t);
+  const s = agentFixture(t);
+  s.caps.features = ['start-planning-item'];
+  signedDownloads(t, s);
+  const mutate = s.exchange.client.mutation;
+  s.exchange.client.mutation = async (ref, args) => {
+    const result = await mutate(ref, args);
+    if (getFunctionName(ref) !== 'projectHostedStart:start') return result;
+    const started = JSON.parse(result);
+    return JSON.stringify({ ...started, planningItemId: started.intentId });
+  };
+  const path = join(s.root, '..', 'lanes', 'captured');
+  const reply = await s.transport().dispatch('start', { outcome: 'Publish the linked Item', path });
+  const starts = s.calls.filter(call => call.name === 'projectHostedStart:start');
+  assert.equal(starts.length, 1);
+  assert.equal(starts[0].args.planningItemIdVersion, 1);
+  assert.equal(reply.result.planningItemId, s.lane.intentId);
+});
+
 test('Lane status names a live approval and keeps the status call budget for old and settled entries', async t => {
   stateHome(t);
   const s = agentFixture(t);

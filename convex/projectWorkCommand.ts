@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import { findWorkEvent } from './projectWorkEventStore';
-import { readHostedRecord, writeHostedRecord } from './projectHostedRecords';
+import { readHostedRecord, recordHead, writeHostedRecord } from './projectHostedRecords';
 import { parseWork } from '../src/work-unified-types';
 import { commandPayloadRows, commandPlanningRows, commandValues } from './projectWorkCommandRows';
 import { v } from 'convex/values';
@@ -34,7 +34,9 @@ import {
 import { intentAuthority } from './projectContributors';
 import { selectedGeneration, record, recordPartition } from './projectWorkIndexStore';
 import { generationHead } from './projectWorkHead';
-import type { PlanningWriteContext } from './projectWorkCommandContext';
+import { verifiedCapture } from './projectPlanningCapture';
+import { capturePageSize, pendingCaptures } from './projectPlanningCaptureWake';
+import { planningWriteContext, type PlanningWriteContext } from './projectWorkCommandContext';
 import { commandKeys, commandProjection, commandAliasRows } from './projectWorkProjection';
 import { appendWork } from './projectWork';
 import { commutativeCommand } from './projectWorkCommandRun';
@@ -65,8 +67,10 @@ export async function executeCommand(
     purge?: true;
     planning?: PlanningWriteContext | undefined;
     ownerBatch?: (project: Doc<'hostedProjects'>) => Promise<PlanningWriteContext>;
-    /** A start has already checked that this generation is ready, in the same transaction. */
+    /** A trusted worker has already checked that this generation is ready, in this transaction. */
     startGeneration?: NonNullable<Awaited<ReturnType<typeof selectedGeneration>>>;
+    /** Time pinned by the atomic start, when its canonical Item first became readable. */
+    captureAt?: string;
     planningClose?: string | undefined;
     planningRestore?: string | undefined;
     /** The reviewed import endpoint replays source hierarchy, even before a later page creates its parent. */
@@ -169,7 +173,7 @@ export async function executeCommand(
         rawPutCommand = JSON.stringify(command);
         rawPutRequest = metadataRequest(command);
       }
-      await serverPutWriter(ctx, command);
+      if (options.captureAt === undefined) await serverPutWriter(ctx, command);
     }
   } else if (project.owner !== user.subject && command.action !== 'intent' && 'intentId' in command) {
     await intentAuthority(ctx, input.projectId, user.subject, command.intentId);
@@ -267,7 +271,7 @@ export async function executeCommand(
   const planning = options.planning ?? (member ? undefined : await options.ownerBatch?.(project));
   const selected = planning?.selected ?? options.startGeneration ?? (await selectedGeneration(ctx, project));
   invariant(selected, 'PROJECT_WORK_INDEX_MISSING', 'Prepare the hosted Work index before writing.');
-  const generation = planning?.generation ?? (await generationHead(ctx, selected));
+  let generation = planning?.generation ?? (await generationHead(ctx, selected));
   const backup = planning?.backup ?? (await ctx.db.get(generation.backupId));
   invariant(
     backup?.projectId === project._id && backup.status === 'stored',
@@ -278,7 +282,26 @@ export async function executeCommand(
     planning?.record(collection, key) ?? record(ctx, recordPartition(generation), collection, key);
   const lookup = (keys: { collection: string; key: string }[]) =>
     Promise.all(keys.map(key => load(key.collection, key.key)));
-  const rows = await lookup(commandKeys(command, input));
+  const keys = commandKeys(command, input);
+  let rows = await lookup(keys);
+  if (
+    options.captureAt === undefined &&
+    (command.action === 'put-planning-item' || command.action === 'comment-planning-item')
+  ) {
+    const missing: string[] = [];
+    if (!rows.some(row => row?.collection === 'planningItems' && row.key === command.itemId))
+      missing.push(command.itemId);
+    if (
+      command.action === 'put-planning-item' &&
+      command.parentId &&
+      !(await load('planningItems', command.parentId))
+    )
+      missing.push(command.parentId);
+    if (missing.length && (await sequenceCapturesThrough(ctx, project, missing, planning))) {
+      generation = planning?.generation ?? (await generationHead(ctx, selected));
+      rows = await lookup(keys);
+    }
+  }
   if (member && command.action === 'put-planning-item' && command.expectedVersion === 0) {
     // commandKeys already read all four identities the reducer can resolve this Item ID through.
     invariant(
@@ -453,7 +476,7 @@ export async function executeCommand(
       project,
       generation,
       backup,
-      { ...input, revision },
+      { ...input, revision, ...(options.captureAt === undefined ? {} : { at: options.captureAt }) },
       user.subject,
       command,
       request,
@@ -555,6 +578,7 @@ export async function executeCommand(
     ...(options.server ? { server: true as const } : {}),
   });
   const planned =
+    options.captureAt === undefined &&
     !options.fromRollup &&
     !options.planningImport &&
     command.action === 'put-planning-item' &&
@@ -619,6 +643,69 @@ export async function executeCommand(
   }
   return event;
 }
+async function sequenceCapture(
+  ctx: MutationCtx,
+  project: Doc<'hostedProjects'>,
+  head: Doc<'projectHostedRecordHeads'>,
+  planning: PlanningWriteContext,
+) {
+  const pending = head.pendingPlanningCapture!;
+  const capture = await verifiedCapture(ctx, project, planning.generation, head);
+  if (!capture) {
+    // This head cannot prove its original bytes. Keep its canonical Item and recovery data,
+    // but remove it from the drain range so the rest of this page can commit.
+    if (pending.state !== 'repair') {
+      await ctx.db.patch(head._id, { pendingPlanningCapture: { ...pending, state: 'repair' } });
+      console.error('FORGE_PLANNING_CAPTURE_NEEDS_REPAIR', { projectId: project._id, itemId: head.key });
+    }
+    return false;
+  }
+  const { at, operationId, command } = capture;
+  if (command !== pending.command)
+    await ctx.db.patch(head._id, { pendingPlanningCapture: { ...pending, command } });
+  await executeCommand(ctx, { projectId: project._id, operationId, command }, project.owner, {
+    server: true,
+    captureAt: at,
+    planning,
+  });
+  return true;
+}
+
+/** Apply older captures in start order before a command can name a still-pending Item. */
+export async function sequenceCapturesThrough(
+  ctx: MutationCtx,
+  project: Doc<'hostedProjects'>,
+  ids: string[],
+  context?: PlanningWriteContext,
+) {
+  const heads = (
+    await Promise.all([...new Set(ids)].map(id => recordHead(ctx, project._id, 'issue', id)))
+  ).filter(head => head?.pendingPlanningCapture !== undefined);
+  if (!heads.length) return false;
+  const through = Math.max(...heads.map(head => head!._creationTime));
+  const planning = context ?? (await planningWriteContext(ctx, project));
+  for (;;) {
+    const page = await pendingCaptures(ctx, project._id, through).take(capturePageSize);
+    for (const head of page) await sequenceCapture(ctx, project, head, planning);
+    if (page.length < capturePageSize) break;
+  }
+  // A targeted operation can also retry a damaged head after its canonical version is repaired.
+  for (const head of heads)
+    if (head?.pendingPlanningCapture?.state === 'repair') await sequenceCapture(ctx, project, head, planning);
+  return true;
+}
+
+export async function sequencePlanningCaptures(ctx: MutationCtx, project: Doc<'hostedProjects'>) {
+  const heads = await pendingCaptures(ctx, project._id).take(capturePageSize + 1);
+  const itemIds: string[] = [];
+  if (heads.length) {
+    const planning = await planningWriteContext(ctx, project);
+    for (const head of heads.slice(0, capturePageSize))
+      if (await sequenceCapture(ctx, project, head, planning)) itemIds.push(head.key);
+  }
+  return { itemIds, more: heads.length > capturePageSize };
+}
+
 export const command = mutation({
   args: { projectId: v.id('hostedProjects'), operationId: v.string(), command: v.string() },
   returns: hostedWorkEventDocument,

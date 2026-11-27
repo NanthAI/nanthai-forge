@@ -1441,11 +1441,20 @@ the existing creator/assignee authority rule for contributors; the project owner
 can start any hosted Intent. Concurrent new or sibling starts write distinct
 resource and operation rows and the Intent-scoped child revision used by
 lifecycle cascades; they do not update the Intent record or global Work revision
-merely to add a Lane. The exception is a new agent outcome with Plan capture on:
-in the same mutation as the Intent and Lane, it publishes a versioned Item through
-the normal Work writer. Concurrent Item writes share that Work head. Capture is
-skipped if the planning index is not ready; starts that already name an Item or
-Intent take no new planning path.
+merely to add a Lane. A new agent outcome with Plan capture on publishes the
+private canonical Item and its Intent and Lane links in that same mutation. Its
+full and short IDs resolve immediately. The existing Plan wake batches pending
+creation commands into the shared Work journal and Plan list and search
+projections. An edit or parent link that arrives first sequences the older
+pending creations before applying its own change. One fenced wake covers a burst
+of starts and publishes up to ten Items per transaction. A continuation handles
+the remaining pages. Publishing a rebuilt Work generation rearms pending
+captures. A lifecycle wake can also sequence its pending Item. The publisher
+verifies the immutable first version and can reconstruct a damaged capture command
+when the version proves its exact result. An unverifiable version retains its
+repair data while later Items continue. Idle calls are zero. Capture is skipped
+if the planning index is not ready. Starts that name an existing Item or Intent
+take their existing path.
 
 `projectHostedLanes:head` returns the current head and record/source/lifecycle
 versions. `detail` hydrates one current or exact historical canonical record.
