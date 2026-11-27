@@ -200,6 +200,8 @@ export async function findRuntimeViolations(root, { onBundle } = {}) {
     absWorkingDir: root,
     entryPoints: entries,
     bundle: true,
+    // The guard walks the input graph. Share generated chunks so common dependencies are emitted once.
+    splitting: true,
     write: false,
     outdir: join(root, '.convex-runtime-check'),
     platform: 'browser',
@@ -293,7 +295,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (violations.length) process.exit(1);
   if (v8)
     console.log(
-      `Convex V8 graph: ${v8.entries} entries, ${v8.modules} modules, ${v8.bytes} bundled bytes (unshared entry outputs).`,
+      `Convex V8 graph: ${v8.entries} entries, ${v8.modules} modules, ${v8.bytes} bundled bytes with shared chunks.`,
     );
   const bundled = await checkConvexBundles(root, { registeredOnly: true });
   console.log(
