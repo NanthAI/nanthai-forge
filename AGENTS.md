@@ -69,7 +69,7 @@ Reads (`show`, `diff`, `peers`, `history`) and reply detail (`--detail`, MCP `re
 
 - Report only results you observed. Label unrun benchmarks as unrun. Measure before claiming a performance gain.
 
-**Ask the owner first** on restrictions, extra user steps, limits, quotas, pricing or paid services, access, retention, deletions and irreversible actions. Give the exact scope, alternatives, recommendation and numbers. Production changes (including `--prod`), package publication, announcements and outside-user trials need explicit owner approval. Ordinary reversible implementation within the requested scope proceeds without another approval.
+**Ask the owner first** on restrictions, extra user steps, limits, quotas, pricing or paid services, access, retention, deletions and irreversible actions. Give the exact scope, alternatives, recommendation and numbers. Never spend past remaining API credits into card auto-refill or unbudgeted charges: any API-billed path (the review script, credit runners, Pi or any other API-key provider) may run only with a hard cap that stops at the remaining credit, and uncapped API paths (such as Pi builders) are forbidden unless the owner explicitly says so. Production changes (including `--prod`), package publication, announcements and outside-user trials need explicit owner approval. Ordinary reversible implementation within the requested scope proceeds without another approval.
 
 ## Engineering defaults
 

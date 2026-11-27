@@ -56,6 +56,8 @@ For Phase 7 (owner, 2026-11-16), UI and web builders use Claude through Claude C
 
 Builder model choice (owner, 2026-11-23): Sonnet by default. Opus only for core queue, landing and ledger work, security and access, deletion and purge safety, and root-cause hunts a Sonnet already failed. Review rounds run through [the review script](review-api.md) on the API credits, GPT-6.2 Sol first; Claude reviews alone only when GPT's daily cap is spent or the builder is not Claude; a core Lane gets both providers in one merged round, a UI Lane with a mock also runs the mock check (`scripts/review-mock.mjs`) and the lead's look starts from its list; a subscription reviewer only after both caps.
 
+API credit cap rule (owner, 2026-11-27): never spend past remaining API credits into card auto-refill. Reviews through [the review script](review-api.md) on the API credit stay the default review route while bounded by their cap. Any API-billed path (the review script, credit runners, Pi or any other API-key provider) may run only with a hard cap that stops at the remaining credit; uncapped paths such as Pi builders are forbidden unless the owner explicitly says so. Because the review script tracks only its own spend log, account for any other org or key usage before relying on its local cap.
+
 The approval design on Issue 7f085ec9 treats AI and human approvals equally, binds approval to exact heads and classifies the change rather than its author. Mandatory human or multiple-human approval is not the selected design. Implementation/enablement remains tracked there; this instruction does not change an existing gate.
 
 Now has no user-facing money or ledger; operator Convex costs stay internal (Issue 50f2e809). Public mirroring follows [Sync identity](../workflows.md#sync-identity), preserving personal Git identity.
@@ -228,6 +230,10 @@ Before relying on hosted compute or a vendor, tell the owner who pays, estimated
 monthly cost at real scale and alternatives. Prefer bounded hosted work over a
 new operator-side source worker. No paid CI or runner without an owner-approved
 spend limit. Projects bring their own check runners; do not make Forge fund them.
+Any API-billed model path (the review script, credit runners, Pi or any other API-key
+provider) may run only with a hard cap that stops at the remaining credit and never
+spills into card auto-refill; uncapped paths such as Pi builders are forbidden unless
+the owner explicitly says so.
 When paid services are in use, include month-to-date billed spend in lead reports.
 
 Idle clients make zero Convex calls. No polling, subscription churn, per-item

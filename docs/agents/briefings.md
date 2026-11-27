@@ -62,6 +62,10 @@ If a command waits for approval and nobody can answer, cancel it and use the rou
 2. Follow AGENTS.md secret handling and owner decision rights. Never print secrets
    or environment values, read credentials raw into output, use production or
    deploy/publish/change accounts/backfill without the stated authorization.
+   Never spend past remaining API credits into card auto-refill: any API-billed path
+   (the review script, credit runners, Pi or any other API-key provider) requires a
+   hard cap that stops at remaining credit, and uncapped paths such as Pi builders
+   are forbidden unless the owner explicitly says so.
    Compare secrets by hash; use private delivery. Tests use synthetic fixtures.
 3. State calls per record/operation, total Convex calls and DB I/O, peak memory and
    wall time at current scale plus growth. Calls must not rise; idle is zero.
@@ -100,7 +104,10 @@ If a command waits for approval and nobody can answer, cancel it and use the rou
    says so. A UI Lane with a design mock adds `--mock MOCK.png --shot SHOT.png` (repeatable) to the same
    command: the mock check runs after the code review on the Item it already read, you paste its result on
    the Item and fix the mismatches or say why one stays; the lead's mock look then starts from that list. If it refuses (no key, both caps spent), tell the lead on the Item and use the
-   reviewer the brief names, or a subscription reviewer; never raise a cap yourself. `--spend` prints
+   reviewer the brief names, or a subscription reviewer; never raise a cap yourself. Never spend past remaining
+   API credits into card auto-refill: any API-billed path (this script, credit runners, Pi or any other API-key
+   provider) may run only with a hard cap that stops at the remaining credit, and uncapped paths such as Pi
+   builders are forbidden unless the owner explicitly says so. `--spend` prints
    today's and the month's spend per provider. A core queue change still takes the fresh-context session
    review recorded in its [queue proof](#attaching-queue-proof); the script does not qualify for that.
    The reviewer prompt must include the AGENTS.md safety line verbatim.

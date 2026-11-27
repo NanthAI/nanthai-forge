@@ -1,6 +1,6 @@
 # Review round by API call
 
-A builder's one review round is a single API request instead of a subscription agent, unless the brief names a model reviewer. The script reads the
+A builder's one review round defaults to a single API request on the API credits instead of a subscription agent, unless the brief names a model reviewer. Nothing may spend past remaining API credits into card auto-refill: every API-billed path (this script, credit runners, Pi or any other API-key provider) may run only with a hard cap that stops at the remaining credit, and uncapped paths such as Pi builders are forbidden unless the owner explicitly says so. The script reads the
 Lane's saved diff and the Item from Forge, sends them to the OpenAI Responses API or the Anthropic
 Messages API, and prints findings ranked by severity with `file:line`, then tokens and dollars.
 Forge cost is two reads (one `diff` page, one `planning` item) and no writes; idle is zero.
@@ -205,8 +205,15 @@ unknown billing and is logged as the worst case (`estimated: true`); a 4xx logs 
 The log is `~/.forge-review/spend.jsonl` (override `FORGE_REVIEW_SPEND_LOG`), one JSON line per row:
 `kind` (`reserve` or `call`), `id`, `time`, `lane`, `item`, `provider`, `model`, `tier`, and on `call` rows
 `inputTokens`, `cachedTokens`, `cacheWriteTokens`, `outputTokens`, `usd`. `--spend` is the sum the lead
-reads; by hand, `jq -s 'map(select(.kind=="call").usd)|add'`. Caps stop accidents, not a determined
-override; the platform spend limit is the hard stop.
+reads; by hand, `jq -s 'map(select(.kind=="call").usd)|add'`. Never raise a cap yourself or spend past
+remaining credit into card auto-refill. Caps stop accidents, not a determined override; the platform spend
+limit (set at or below remaining credit, with auto-refill unable to trigger past it) is the hard stop.
+
+Known gap (Phase 8 follow-up `c7db302c`): the local spend log counts only calls made by this script, so
+other use of the same provider org or key (for example another runner or manual API use) can exhaust the
+remaining credit without the script knowing. Until `c7db302c` caps against the provider's real remaining
+balance, keep org keys isolated or lower `monthlyCreditUsd` in `~/.forge-review/config.json` to match
+the actual remaining credit whenever a key is shared.
 
 The script reads only regular files under the Lane (no symlinks, no `..`), named by real diff file
 headers, never by diff content.
