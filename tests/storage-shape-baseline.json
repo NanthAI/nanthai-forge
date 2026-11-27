@@ -1,0 +1,130 @@
+{
+  "convex/authPasskeyWire.ts": {
+    "1067afc0df386a68bf0c6310": 1
+  },
+  "convex/autonomyFields.ts": {
+    "802cb943039c32a748f80292": 1
+  },
+  "convex/discussionAttachmentCaps.ts": {
+    "bbe7af2c087276569dc046bf": 1
+  },
+  "convex/gitServeLane.ts": {
+    "4aa5fc74c5586b7ea9861673": 1
+  },
+  "convex/projectExchangeActions.ts": {
+    "20df957dfe588e89cfeea55b": 1
+  },
+  "convex/projectGithubInbound.ts": {
+    "178e221fe0169a15694655fe": 1
+  },
+  "convex/projectGithubInboundQueue.ts": {
+    "09072dd3be78ac2e0eccff3e": 1
+  },
+  "convex/projectHostedActionsPlan.ts": {
+    "03dfd462d5d63fdb79e9595f": 1
+  },
+  "convex/projectHostedAgent.ts": {
+    "710fbc13a5f4eb4d7879700b": 1,
+    "1833c309c1ee5f6860bea45c": 1
+  },
+  "convex/projectHostedLandingDesired.ts": {
+    "21f786d309aa9771bbc4951d": 1
+  },
+  "convex/projectHostedLandingOrder.ts": {
+    "60b915827b54bd6d9864e003": 1
+  },
+  "convex/projectHostedLandingReplay.ts": {
+    "11bba706f312483adc2754f4": 1
+  },
+  "convex/projectHostedLandingWake.ts": {
+    "f41b4e84762ff8403061eb3f": 1
+  },
+  "convex/projectIntentLandingNoteFields.ts": {
+    "73dc108c2023d19882a05a8f": 1
+  },
+  "convex/projectInvitationInbox.ts": {
+    "4f0ea70f0a22cba643ae7fb3": 1
+  },
+  "convex/projectLooseEndsDetails.ts": {
+    "e4ec92eeef60a2e4c4ef22f8": 1
+  },
+  "convex/projectObjectDownloads.ts": {
+    "c7629a9260f795743c996f39": 1,
+    "81e0c0338e212c67be268bab": 1
+  },
+  "convex/projectPlanningArchiveBackfill.ts": {
+    "9430329441f0ea8acbccb88a": 1,
+    "5b6319066eb2ef51199592e6": 1,
+    "695ed320426aff5f908cf9d5": 1
+  },
+  "convex/projectPlanningArchiveBackfillRun.ts": {
+    "baf157264a36a1a1a4789e3c": 1
+  },
+  "src/agent-connect-formats.ts": {
+    "32aeb97342f77bc9e2003f1f": 1,
+    "274baada3df3dde2102ba65d": 1
+  },
+  "src/auth-cli.ts": {
+    "67ce93102f4045c6d2897f60": 1
+  },
+  "src/auth-status.ts": {
+    "85b11f6420a013f672790ca0": 1
+  },
+  "src/check-compact-output.ts": {
+    "b521e96005366dfbf949f7e9": 1
+  },
+  "src/first-check-risk.ts": {
+    "46f8028d1b09631d65bae3b7": 1
+  },
+  "src/git-serve-protocol.ts": {
+    "0f12c54832f2fddbedb3cfa8": 1,
+    "2fa52b0a83629be240f961af": 1
+  },
+  "src/hosted-agent-submission-wait.ts": {
+    "70ca51adcf8c058e6c03c6e0": 1
+  },
+  "src/hosted-agent-transport.ts": {
+    "fda9b86616a73c2c74318822": 1,
+    "daf9790385cfab398065623e": 1,
+    "99cb37ca5122bec5c28658ac": 1,
+    "16f22b84abef652b17013590": 1,
+    "d855b1fe3ee05cfdbd4f9a90": 1
+  },
+  "src/hosted-checkout-delta-settle.ts": {
+    "91952652285e1b830cf66558": 1
+  },
+  "src/hosted-cross-head-proof.ts": {
+    "95ece82d4c6ca206510d0baf": 1,
+    "fa1d7bd06866a9586b8a987b": 1,
+    "c6878418c4e8877e3267e416": 1
+  },
+  "src/hosted-github-mirror.ts": {
+    "3262cb545da8b9ea95cb8bcd": 1,
+    "11e5be15bcd03166327ac999": 1
+  },
+  "src/hosted-overlap.ts": {
+    "fdb613afd0e8d992b3fa3061": 1
+  },
+  "src/landing-audit-cadence.ts": {
+    "834c93e871f1d7aad0b747fa": 1
+  },
+  "src/module-graph-jvm.ts": {
+    "890c9506d176c56b1689e0d3": 1
+  },
+  "src/project-routes.ts": {
+    "77858e02d587761126e8a290": 1,
+    "7380f85ec25ad3e8d8c63c3f": 1
+  },
+  "src/work-base-scrub.ts": {
+    "3b584ff1b282f49a5e87fd9a": 1
+  },
+  "src/work-record-reachability.ts": {
+    "3bf6d909bf127bb845b34ba3": 1
+  },
+  "src/work-records.ts": {
+    "6e20284614d7cdfaa6a7b9f5": 1
+  },
+  "web/src/app/stats/Charts.tsx": {
+    "bd7a9b1ae50fbb3dd3419771": 1
+  }
+}

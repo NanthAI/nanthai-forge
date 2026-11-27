@@ -24,6 +24,7 @@ import { currentCounts, growthFindings, readBaseline as readGrowthBaseline } fro
 import { errorTeachingFindings } from './check-error-teaching.mjs';
 import { dsClassClashFindings } from './check-ds-class-clash.mjs';
 import { instanceLiteralFindings } from './check-instance-literals.mjs';
+import { storageShapeBaseline, storageShapeFindings } from './check-storage-shapes.mjs';
 import { docsCommandsFindings } from './check-docs-commands.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -55,6 +56,9 @@ function walk(dir) {
 
 errors.push(...landingModelFindings(read));
 const files = walk(root);
+const knownStorageShapes = json(storageShapeBaseline);
+for (const path of Object.keys(knownStorageShapes))
+  if (!existsSync(resolve(root, path))) errors.push(...storageShapeFindings(path, '', knownStorageShapes));
 // Local preflight (Forge) names the saved changed paths in a file (src/agent-preflight-static.ts). Every
 // per-file scan below is a pure function of one file, so then only the changed files are scanned; the
 // cross-file checks further down always run in full. Never scoped when a scanner or its allowlist
@@ -63,7 +67,12 @@ const files = walk(root);
 const preflightChanged = (() => {
   try {
     const list = readFileSync(process.env.FORGE_PREFLIGHT_CHANGED_FILE, 'utf8').split('\0').filter(Boolean);
-    return list.some(path => path.startsWith('scripts/') || !existsSync(resolve(root, path))) ? null : list;
+    return list.some(
+      path =>
+        path.startsWith('scripts/') || path === storageShapeBaseline || !existsSync(resolve(root, path)),
+    )
+      ? null
+      : list;
   } catch {
     return null;
   }
@@ -94,6 +103,7 @@ for (const file of files) {
       source = readFileSync(file, 'utf8');
     errors.push(...landingAttemptForkFindings(path.split(sep).join('/'), source));
     errors.push(...networkBoundaryFindings(path, source));
+    errors.push(...storageShapeFindings(path.split(sep).join('/'), source, knownStorageShapes));
     errors.push(...workStoreAccessFindings(path.split(sep).join('/'), source));
     if (['.ts', '.tsx'].includes(extname(file))) {
       errors.push(...idleQueryFindings(path, source));

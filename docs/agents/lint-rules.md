@@ -48,6 +48,15 @@ The [code structure audit](#code-structure-audit) records proposed path conventi
 | Cross-head shared risk | test | identical-entry overlap removal also removed global/declared inputs and shared-folder risk (1018d0f8 review). Analysis and publication must judge the complete deltas; only an unchanged complete tree bypasses path risk | `tests/hosted-cross-head-reuse.test.mjs`, `tests/hosted-first-check-landing.test.mjs` |
 | Message mirror | test | the finish message dropped from the mirror commit (eacfdb6e, b30284de) | `tests/landing-message-mirror.test.mjs` |
 
+## Stored shapes and compatibility readers
+
+The foundation check catches new competing record validators, legacy or versioned reader
+declarations, and conditional dispatch on old formats in Convex and application TypeScript.
+A temporary format arm or compatibility reader needs a nearby `@remove-after YYYY-MM-DD`
+comment on the validator, reader, or branch. The initial
+`tests/storage-shape-baseline.json` fingerprints existing findings. Remove entries as existing
+paths retire. New compatibility work uses the dated comment.
+
 ## Bounded web reads
 
 Every page of the rebuilt app (`web/src/app/`, each place and the shell) opens with one bounded
