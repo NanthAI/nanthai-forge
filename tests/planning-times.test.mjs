@@ -9,10 +9,8 @@ import { spendEvent } from '../scripts/convex-spend-model.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { setup, seedHistoricalIssueVersion } from './hosted-planning-fixture.mjs';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';
-import { setWorkRecord } from './hosted-fixture.mjs';
 import { installPlanningSearch } from './planning-search-fixture.mjs';
 import { meterReads } from './hosted-read-set.mjs';
-import { indexedRecord } from '../dist/work-hosted-index.js';
 import { hostedRecordValue } from '../dist/hosted-records.js';
 import { workStoreRecord } from '../dist/work-store-records.js';
 
@@ -25,14 +23,12 @@ const { provePlanningTimes } = await import(moduleUrl('../convex/projectPlanning
 const backfill = await import(moduleUrl('../convex/projectPlanningTimesBackfill.ts'));
 const index = await import(moduleUrl('../convex/projectWorkIndex.ts'));
 const { command } = await import(moduleUrl('../convex/projectWorkCommand.ts'));
-const { recordPartition } = await import(moduleUrl('../convex/projectWorkIndexStore.ts'));
 
 process.env.R2_SECRET_ACCESS_KEY = 'synthetic-planning-proof-key';
 
 async function fixture(t) {
   const s = await setup(t);
   const project = s.tables.hostedProjects.get(s.projectId);
-  const { generationId } = project.work;
   const put = async (item, mode = 'historical') => {
     const encoded = hostedRecordValue(workStoreRecord('planningVersions', item));
     if (mode === 'records') return storeVersion(s.ctx, { _id: s.projectId }, encoded);
@@ -51,14 +47,10 @@ async function fixture(t) {
       ).value,
     );
   const walk = (item, limit = undefined) =>
-    withPlanningTimes(
-      s.ctx,
-      project,
-      generationId,
-      JSON.stringify(item),
-      planningHistoryBudget(undefined, limit),
-    ).then(JSON.parse);
-  const derive = item => provePlanningTimes(s.ctx, generationId, head(item.id)).then(proof => proof.times);
+    withPlanningTimes(s.ctx, project, JSON.stringify(item), planningHistoryBudget(undefined, limit)).then(
+      JSON.parse,
+    );
+  const derive = item => provePlanningTimes(s.ctx, head(item.id)).then(proof => proof.times);
   const fill = (cursor, headCursor) =>
     backfill.page._handler(s.ctx, { projectId: s.projectId, cursor, headCursor });
   return { ...s, put, head, detail, walk, derive, fill };
@@ -212,16 +204,9 @@ test('list and detail emit only the missing or stale fallback label, with unchan
   const meter = meterReads(s.ctx);
   const plain = await meter.cost(() => endpoints(s, ids[0], false));
   const project = s.tables.hostedProjects.get(s.projectId);
-  const generation = s.tables.projectWorkGenerations.get(project.work.generationId);
   const walk = await meter.cost(async () => {
     for (const item of [...current, current[0]])
-      await withPlanningTimes(
-        s.ctx,
-        project,
-        recordPartition(generation),
-        JSON.stringify(item),
-        planningHistoryBudget(),
-      );
+      await withPlanningTimes(s.ctx, project, JSON.stringify(item), planningHistoryBudget());
   });
   const cold = await meter.cost(async () => {
     assert.deepEqual(await endpoints(s, ids[0]), warm);
@@ -270,174 +255,25 @@ test('backfilling an old Item preserves full list and detail replies when its ti
   assert.deepEqual(await endpoints(s, id), before);
 });
 
-test('an unavailable journal snapshot cannot pin null and hide later retained evidence', async t => {
+test('an incomplete canonical snapshot cannot pin null before the exact body is restored', async t => {
   const s = await fixture(t);
   const id = randomUUID();
   const closed = snapshot(id, 1, 'closed');
   await s.put(closed);
   const recordId = s.head(id).recordId;
-  await s.ctx.db.patch(recordId, { journalSegment: 'synthetic-journal-pin' });
+  const { bodyId } = s.tables.projectHostedRecords.get(recordId);
+  const { value } = s.tables.projectHostedRecordBodies.get(bodyId);
+  await s.ctx.db.patch(bodyId, { value: '' });
   await s.ctx.db.patch(s.head(id)._id, { planningTimes: undefined });
   await s.put(snapshot(id, 2, 'closed'));
-  assert.equal((await s.detail(id)).closedAt, null);
   assert.deepEqual((await s.fill(null)).blocked, [id]);
   assert.equal(s.head(id).planningTimes, undefined);
-  const generation = s.tables.projectWorkGenerations.get(
-    s.tables.hostedProjects.get(s.projectId).work.generationId,
-  );
-  for (const entry of indexedRecord('planningVersions', closed.operationId, id, 1, closed))
-    setWorkRecord(s.tables, `recovered-${entry.key}`, {
-      ...entry,
-      _id: `recovered-${entry.key}`,
-      _creationTime: 1,
-      projectId: s.projectId,
-      generationId: recordPartition(generation),
-    });
+  await s.ctx.db.patch(bodyId, { value });
   const before = await endpoints(s, id);
   assert.equal(JSON.parse(before[0].page[0].value).closedAt, closed.at);
   assert.equal(JSON.parse(before[1].value).closedAt, closed.at);
   assert.equal((await s.fill(null)).filled, 1);
   assert.deepEqual(await endpoints(s, id), before);
-});
-
-test('restore backfill recovers chunked legacy shelf evidence and refuses a missing chunk', async t => {
-  const s = await fixture(t);
-  const id = randomUUID();
-  const closed = snapshot(id, 1, 'closed');
-  const shelf = snapshot(id, 2, 'archived', { was: 'closed', body: 'x'.repeat(40 * 1024) });
-  const restored = snapshot(id, 3, 'closed');
-  await s.put(closed);
-  await s.ctx.db.patch(s.head(id)._id, { planningTimes: undefined });
-  await s.put(shelf);
-  await s.ctx.db.patch(s.head(id).recordId, { journalSegment: 'synthetic-journal-pin' });
-  await s.put(restored);
-  const generation = s.tables.projectWorkGenerations.get(
-    s.tables.hostedProjects.get(s.projectId).work.generationId,
-  );
-  const [header, ...chunks] = indexedRecord('planningVersions', shelf.operationId, id, 2, shelf);
-  assert.equal(chunks.length, 2);
-  const retain = entry =>
-    setWorkRecord(s.tables, `shelf-${entry.key}`, {
-      ...entry,
-      _id: `shelf-${entry.key}`,
-      _creationTime: 1,
-      projectId: s.projectId,
-      generationId: recordPartition(generation),
-    });
-  retain(header);
-  retain(chunks[0]);
-  assert.deepEqual((await s.fill(null)).blocked, [id]);
-  assert.equal(s.head(id).planningTimes, undefined);
-  retain(chunks[1]);
-  assert.equal((await s.detail(id)).closedAt, closed.at);
-  assert.equal((await s.fill(null)).filled, 1);
-  assert.deepEqual(times(await s.detail(id)), { lastStatusChangeAt: restored.at, closedAt: closed.at });
-});
-
-test('restoring an exact archived Issue version preserves paged audit, Item times and the purge target', async t => {
-  const s = await fixture(t);
-  const { page } = await import(moduleUrl('../convex/projectPlanningHistoryRestore.ts'));
-  const { itemHistory } = await import(moduleUrl('../convex/projectHostedPlanning.ts'));
-  const { archivedTargetPage } = await import(moduleUrl('../convex/projectPlanningArchiveIndex.ts'));
-  const id = randomUUID();
-  const first = snapshot(id, 1, 'closed', { body: 'archive content '.repeat(3000) });
-  await s.put(first);
-  const original = s.tables.projectHostedRecords.get(s.head(id).recordId);
-  const { canonicalPayload } = await import('../dist/hosted-source-operation.js');
-  const { encodeArchiveBytes } = await import('../dist/landing-capsule-bytes.js');
-  const { journalSegmentText, journalTablePins } = await import('../dist/journal-segment.js');
-  const archive = {
-    protocol: 1,
-    kind: 'forge-journal-segment',
-    projectId: s.projectId,
-    scope: 'records',
-    from: 1,
-    through: 1,
-    tables: {
-      projectHostedRecords: [canonicalPayload(original)],
-      projectHostedRecordBodies: [canonicalPayload(s.tables.projectHostedRecordBodies.get(original.bodyId))],
-    },
-  };
-  const { pointer } = encodeArchiveBytes(journalSegmentText(archive), 2, journalTablePins(archive.tables));
-  const segment = pointer.sha256;
-  const range = { scope: archive.scope, from: archive.from, through: archive.through };
-  await s.ctx.db.insert('projectJournalSegments', {
-    projectId: s.projectId,
-    category: 'record',
-    key: segment,
-    ...range,
-    value: canonicalPayload({ ...range, pointer }),
-  });
-  await s.ctx.db.patch(original._id, { journalSegment: segment });
-  await s.ctx.db.delete(original.bodyId);
-  await s.ctx.db.insert('projectHostedRecordBodies', {
-    projectId: s.projectId,
-    value: '',
-    operationId: first.operationId,
-    actor: 'archived-writer',
-  });
-  await s.ctx.db.patch(s.head(id)._id, { planningTimes: undefined });
-  await s.put(snapshot(id, 2, 'archived', { was: 'closed' }));
-  await s.put(snapshot(id, 3, 'closed'));
-  const project = s.tables.hostedProjects.get(s.projectId);
-  const generationId = recordPartition(s.tables.projectWorkGenerations.get(project.work.generationId));
-  for (const entry of indexedRecord('planningVersions', first.operationId, id, 1, first))
-    setWorkRecord(s.tables, `restorable-${entry.key}`, {
-      ...entry,
-      _id: `restorable-${entry.key}`,
-      _creationTime: 1,
-      projectId: s.projectId,
-      generationId,
-    });
-
-  const read = async () => {
-    const pages = [];
-    let cursor = null;
-    do {
-      const text = await itemHistory._handler(s.ctx, {
-        projectId: s.projectId,
-        itemId: id,
-        limit: 1,
-        cursor,
-      });
-      pages.push(text);
-      cursor = JSON.parse(text).nextCursor;
-      assert.ok(pages.length < 5);
-    } while (cursor);
-    return { planning: await endpoints(s, id), pages };
-  };
-  const before = await read();
-  assert.equal(JSON.parse(before.pages[0]).historyStartsAt, first.at);
-  assert.equal(JSON.parse(before.planning[1].value).closedAt, first.at);
-  assert.equal(
-    before.pages.flatMap(text => JSON.parse(text).events).find(event => event.version === 1).actor,
-    'archived-writer',
-  );
-  const input = {
-    projectId: s.projectId,
-    generationId,
-    cursor: null,
-    pins: [{ key: id, version: 1, digest: original.digest, bytes: original.bytes, segment }],
-    apply: false,
-  };
-  assert.deepEqual(await page._handler(s.ctx, input), {
-    cursor: null,
-    scanned: 1,
-    matched: [{ key: id, version: 1 }],
-    changed: 0,
-  });
-  assert.equal(s.tables.projectHostedRecords.get(original._id).journalSegment, segment);
-  const forged = { ...input.pins[0], digest: 'f'.repeat(64) };
-  await assert.rejects(() => page._handler(s.ctx, { ...input, pins: [forged], apply: true }), workStale);
-  assert.equal((await page._handler(s.ctx, { ...input, apply: true })).changed, 1);
-  assert.equal((await page._handler(s.ctx, { ...input, apply: true })).changed, 0);
-  assert.equal(s.tables.projectHostedRecords.get(original._id).journalSegment, undefined);
-  assert.deepEqual(await read(), before);
-  const target = await archivedTargetPage(s.ctx, s.projectId, [{ kind: 'issue', itemId: id }], {
-    target: 0,
-    after: null,
-  });
-  assert.deepEqual(target.keys, [segment]);
 });
 
 test('backfill verification visits every head despite byte splits, including heads on later pages', async t => {

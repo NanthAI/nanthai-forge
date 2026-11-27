@@ -69,12 +69,7 @@ type Result =
 
 /** Follow adjacent immutable status headers; load bodies only for timestamp/shelf evidence.
  * A checkpoint holds version numbers, not dates or body bytes. Never advance it past a gap. */
-export async function provePlanningTimes(
-  ctx: QueryCtx,
-  partition: Id<'projectWorkGenerations'>,
-  head: Head,
-  cursor?: HeadCursor,
-): Promise<Result> {
+export async function provePlanningTimes(ctx: QueryCtx, head: Head, cursor?: HeadCursor): Promise<Result> {
   const scan = planningHistoryBudget(scanBytes);
   let evidenceBytes = 0;
   const readBytes = () => scan.readBytes + evidenceBytes;
@@ -98,7 +93,7 @@ export async function provePlanningTimes(
     if (!row || row.purged) return null;
     const evidence = planningHistoryBudget(snapshotBytes, Infinity);
     try {
-      const item = await recordSnapshot(ctx, partition, row, evidence);
+      const item = await recordSnapshot(ctx, row, evidence);
       return item?.version === row.version && item.id === head.key && item.status === row.status
         ? item
         : null;

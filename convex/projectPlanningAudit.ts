@@ -15,7 +15,7 @@ import { hostedRecordBody } from './projectHostedRecords';
 import { itemLanePage, itemLanePosition, type ItemLanePosition } from './projectItemLanePage';
 import { itemNoteKey, itemNotePage, noteKey } from './projectItemNotePage';
 import { cursorJson, itemLandingFromNote } from './projectItemLandingHistory';
-import { legacyVersions, legacyVersionValue, planningHistoryBudget } from './projectPlanningHistory';
+import { planningHistoryBudget } from './projectPlanningHistory';
 import { storeItem } from './projectWorkStoreReads';
 import { auditPrefix, auditVersion, type AuditVersion } from './projectPlanningAuditWindow';
 
@@ -66,32 +66,14 @@ export function writerIdentity(
   };
 }
 
-/** Load a hosted Issue record snapshot and its recorded actor in at most one body read (plus one legacy event lookup for pre-cutover rows). */
+/** Load a hosted Issue record snapshot and its recorded actor in at most one body read (with one operation lookup when the body does not carry its actor). */
 export async function loadVersionSnapshot(
   ctx: QueryCtx,
   projectId: Id<'hostedProjects'>,
-  partition: Id<'projectWorkGenerations'> | null,
   row: Doc<'projectHostedRecords'>,
   charge: Budget,
 ): Promise<{ item: PlanningItem; actor?: string } | null> {
   if (charge.exhausted || row.purged !== undefined) return null;
-  if (row.journalSegment) {
-    if (!partition) return null;
-    let read = 0;
-    for await (const legacy of legacyVersions(ctx, partition, row.key)) {
-      if (read++ >= 64 || !charge.record(legacy)) break;
-      const header = JSON.parse(legacy.value) as PlanningItem;
-      if (header.version === row.version && !header.purged) {
-        const value = await legacyVersionValue(ctx, partition, legacy, charge);
-        if (value === null) return null;
-        const item = JSON.parse(value) as PlanningItem;
-        const actor = await lookupEventActor(ctx, projectId, item.operationId, charge);
-        return { item, actor };
-      }
-      if (header.version < row.version) break;
-    }
-    return null;
-  }
   let raw: string | undefined = row.inline;
   let actor: string | undefined;
   const body = await ctx.db.get(row.bodyId);
@@ -277,7 +259,6 @@ function decodeCursor(
 export async function readItemAuditHistory(
   ctx: QueryCtx,
   project: Doc<'hostedProjects'>,
-  partition: Id<'projectWorkGenerations'> | null,
   input: { itemId: string; limit?: number; cursor?: string | null },
 ) {
   const pageLimit = Math.min(Math.max(Math.trunc(input.limit ?? 50), 1), MAX_LIMIT);
@@ -310,10 +291,8 @@ export async function readItemAuditHistory(
       )
       .unique();
     if (v1 && v1.purged === undefined && charge.record(v1)) {
-      // The header (or its inline body) dates version 1; a journal-segment row must prove its body is retained.
-      const at = v1.journalSegment
-        ? (await loadVersionSnapshot(ctx, project._id, partition, v1, charge))?.item.at
-        : v1.inline === undefined
+      const at =
+        v1.inline === undefined
           ? new Date(v1._creationTime).toISOString()
           : (JSON.parse(v1.inline) as { item?: PlanningItem }).item?.at;
       if (at) {
@@ -453,7 +432,7 @@ export async function readItemAuditHistory(
             versionHasMore = true;
             break;
           }
-          const snap = await loadVersionSnapshot(ctx, project._id, partition, row, charge);
+          const snap = await loadVersionSnapshot(ctx, project._id, row, charge);
           if (!snap) {
             versionBudgetHit = true;
             versionHasMore = true;

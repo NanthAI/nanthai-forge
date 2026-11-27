@@ -195,7 +195,6 @@ export const detail = query({
           ? withPlanningTimes(
               ctx,
               project,
-              recordPartition(generation),
               value,
               planningHistoryBudget(),
               pinned,
@@ -357,7 +356,6 @@ export async function journalWorkRecordsRead(
         ? await initiativeCloseHistory(
             ctx,
             project,
-            recordPartition(generation),
             initiativeId,
             Date.now(),
             typeof input.planningHistory === 'number' ? input.planningHistory : undefined,
@@ -386,7 +384,6 @@ export async function journalWorkRecordsRead(
     }
     const numItems = Math.min(input.paginationOpts.numItems, 100);
     const store = readsStore(input.collection, input.parentId);
-    const partition = recordPartition(generation);
     const payloads = new Map<string, Promise<Map<string, string>>>();
     const readItem = (id: string) => storeItem(ctx, project._id, id);
     const continuation = linkedLandingCursor(input.paginationOpts.cursor, input);
@@ -419,15 +416,7 @@ export async function journalWorkRecordsRead(
       const result = [];
       for (const { planningTimes, ...row } of rows) {
         if (planningHistory && !input.counts)
-          row.value = await withPlanningTimes(
-            ctx,
-            project,
-            partition,
-            row.value,
-            charge,
-            planningTimes,
-            fallback,
-          );
+          row.value = await withPlanningTimes(ctx, project, row.value, charge, planningTimes, fallback);
         result.push(row);
       }
       return result;

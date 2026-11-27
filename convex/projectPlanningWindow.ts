@@ -108,7 +108,6 @@ const versionRow = (ctx: QueryCtx, projectId: Id<'hostedProjects'>, key: string,
 async function classify(
   ctx: QueryCtx,
   project: Doc<'hostedProjects'>,
-  partition: Id<'projectWorkGenerations'> | null,
   scope: { fromMs: number; untilMs: number; initiativeId?: string; olderPage: boolean },
   itemId: string,
   rows: Row[],
@@ -178,7 +177,7 @@ async function classify(
       // A return to Closed from a shelf preserves the earlier close (same rule as initiativeCloseHistory).
       if (isShelved(before.status)) {
         if (charge.exhausted) return null;
-        const was = (await loadVersionSnapshot(ctx, project._id, partition, before, charge))?.item.was;
+        const was = (await loadVersionSnapshot(ctx, project._id, before, charge))?.item.was;
         if (was === undefined) unresolved = true;
         if (was === undefined || was === 'closed') tags.add('changed');
         else closed = row;
@@ -205,13 +204,12 @@ async function classify(
 async function describe(
   ctx: QueryCtx,
   project: Doc<'hostedProjects'>,
-  partition: Id<'projectWorkGenerations'> | null,
   entry: Classified,
   charge: Budget,
   window: { fromMs: number; untilMs: number },
 ): Promise<WindowAuditItem | 'budget' | 'missing'> {
   const load = async (row: Row | null) =>
-    row ? await loadVersionSnapshot(ctx, project._id, partition, row, charge) : null;
+    row ? await loadVersionSnapshot(ctx, project._id, row, charge) : null;
   const latest = await load(entry.newest);
   if (!latest) return charge.exhausted ? 'budget' : 'missing';
   const optional = async (row: Row | null) => (row === entry.newest ? latest : await load(row));
@@ -263,7 +261,6 @@ async function describe(
 export async function readBacklogWindowAudit(
   ctx: QueryCtx,
   project: Doc<'hostedProjects'>,
-  partition: Id<'projectWorkGenerations'> | null,
   input: {
     initiativeId?: string;
     from: string;
@@ -320,7 +317,7 @@ export async function readBacklogWindowAudit(
   }
   const oldestItem =
     oldest && scanBudget.record(oldest)
-      ? (await loadVersionSnapshot(ctx, project._id, partition, oldest, charge))?.item
+      ? (await loadVersionSnapshot(ctx, project._id, oldest, charge))?.item
       : undefined;
   const recordsFrom = oldest && recordedLater(oldestItem?.at, oldest) ? oldest._creationTime : null;
   const purgedItems = new Set(
@@ -387,7 +384,7 @@ export async function readBacklogWindowAudit(
   let unresolved = 0;
   let stoppedAt: number | null = null;
   for (const [itemId, group] of grouped) {
-    const entry = await classify(ctx, project, partition, scope, itemId, group.rows, charge);
+    const entry = await classify(ctx, project, scope, itemId, group.rows, charge);
     if (entry === 'listed') continue;
     if (!entry) {
       // Out of budget: the next page starts at this Item, so nothing is dropped. A first Item that cannot
@@ -426,7 +423,7 @@ export async function readBacklogWindowAudit(
   const items: WindowAuditItem[] = [];
   let shown = 0;
   for (const entry of remaining.slice(0, pageLimit)) {
-    const item = await describe(ctx, project, partition, entry, detail, { fromMs, untilMs });
+    const item = await describe(ctx, project, entry, detail, { fromMs, untilMs });
     if (item === 'budget') break;
     shown++;
     if (item === 'missing') unresolved++;

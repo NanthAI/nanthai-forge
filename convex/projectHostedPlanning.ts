@@ -6,7 +6,7 @@ import { query, type QueryCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
 import { recordCaller } from './projectHostedFrictionStore';
 import { latestItemIntentHead } from './projectItemIntentHeads';
-import { recordPartition, selectedGeneration } from './projectWorkIndexStore';
+import { selectedGeneration } from './projectWorkIndexStore';
 import { isPlanningPrefix, isPlanningUuid, planningIdMaxCandidates } from '../src/planning-id';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
@@ -107,9 +107,7 @@ export const itemHistory = query({
         'Item history is available to project members.',
       );
       invariant(isPlanningUuid(itemId), 'BAD_ARGUMENT', 'itemId: expected the full Item UUID.');
-      const generation = await selectedGeneration(ctx, project);
-      const partition = generation ? recordPartition(generation) : null;
-      return canonicalPayload(await readItemAuditHistory(ctx, project, partition, { itemId, limit, cursor }));
+      return canonicalPayload(await readItemAuditHistory(ctx, project, { itemId, limit, cursor }));
     } catch (error) {
       return report(error);
     }
@@ -146,10 +144,8 @@ export const windowHistory = query({
           'BAD_ARGUMENT',
           'initiativeId: expected the full Initiative UUID.',
         );
-      const generation = await selectedGeneration(ctx, project);
-      const partition = generation ? recordPartition(generation) : null;
       return canonicalPayload(
-        await readBacklogWindowAudit(ctx, project, partition, {
+        await readBacklogWindowAudit(ctx, project, {
           initiativeId,
           from,
           until,

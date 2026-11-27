@@ -5,9 +5,7 @@ import type { Doc, Id } from './_generated/dataModel';
 import type { QueryCtx } from './_generated/server';
 import { isShelved } from '../src/work-planning-types';
 import { planningStatusTransition } from '../src/work-planning-state';
-import { digest } from '../src/state/hash';
 import { hostedRecordBody } from './projectHostedRecords';
-import { splitRecordTable } from './projectWorkRecordTables';
 import { instant, planningTime, type PlanningTimesRead } from './projectPlanningTimes';
 
 export { instant } from './projectPlanningTimes';
@@ -59,82 +57,12 @@ export function planningHistoryBudget(byteLimit = pageBytes, maxVersions = perIt
   };
 }
 
-export async function* legacyVersions(
-  ctx: QueryCtx,
-  partition: Id<'projectWorkGenerations'>,
-  itemId: string,
-) {
-  yield* ctx.db
-    .query(splitRecordTable('planningVersions'))
-    .withIndex('by_generation_and_collection_and_parent_and_position', q =>
-      q.eq('generationId', partition).eq('collection', 'planningVersions').eq('parent', itemId),
-    )
-    .order('desc');
-}
-
-/** Read chunks only for selected legacy snapshots, under the same caller byte budget as headers. */
-export async function legacyVersionValue(
-  ctx: QueryCtx,
-  partition: Id<'projectWorkGenerations'>,
-  row: { key: string; value: string },
-  charge: ReturnType<typeof planningHistoryBudget>,
-) {
-  const { payloadKey, payloadParts } = JSON.parse(row.value) as {
-    payloadKey?: string;
-    payloadParts?: number;
-  };
-  if (payloadKey === undefined) return row.value;
-  if (
-    charge.exhausted ||
-    !Number.isSafeInteger(payloadParts) ||
-    payloadParts! < 1 ||
-    !payloadKey.startsWith(`${row.key}:`)
-  )
-    return null;
-  const collection = 'planningVersions:payload';
-  const chunks: string[] = [];
-  const rows = ctx.db
-    .query(splitRecordTable(collection))
-    .withIndex('by_generation_and_collection_and_parent_and_position', q =>
-      q.eq('generationId', partition).eq('collection', collection).eq('parent', payloadKey),
-    );
-  for await (const part of rows) {
-    if (
-      !charge.record(part) ||
-      part.position !== chunks.length ||
-      part.key !== `${payloadKey}:${chunks.length}`
-    )
-      return null;
-    chunks.push(part.value);
-    if (chunks.length === payloadParts) break;
-  }
-  if (chunks.length !== payloadParts) return null;
-  const value = chunks.join('');
-  return payloadKey === `${row.key}:${digest(value)}` ? value : null;
-}
-
 export async function recordSnapshot(
   ctx: QueryCtx,
-  partition: Id<'projectWorkGenerations'>,
   row: IssueRecord,
   charge: ReturnType<typeof planningHistoryBudget>,
 ): Promise<Snapshot | null> {
   if (charge.exhausted) return null;
-  if (row.journalSegment) {
-    // Earlier journal policies could move Item bodies to R2. The journal's exact legacy version
-    // remains usable where retained; otherwise leave this time unproved within the page budget.
-    let read = 0;
-    for await (const legacy of legacyVersions(ctx, partition, row.key)) {
-      if (read++ >= charge.maxVersions || !charge.record(legacy)) break;
-      const snapshot = JSON.parse(legacy.value) as Snapshot;
-      if (snapshot.version === row.version && !snapshot.purged) {
-        const value = await legacyVersionValue(ctx, partition, legacy, charge);
-        return value === null ? null : (JSON.parse(value) as Snapshot);
-      }
-      if (snapshot.version < row.version) break;
-    }
-    return null;
-  }
   if (row.inline === undefined && !charge.spend(row.bytes)) return null;
   return JSON.parse(await hostedRecordBody(ctx, row)).item;
 }
@@ -142,7 +70,6 @@ export async function recordSnapshot(
 async function* earlierVersions(
   ctx: QueryCtx,
   project: Project,
-  partition: Id<'projectWorkGenerations'>,
   item: Snapshot,
   charge: ReturnType<typeof planningHistoryBudget>,
 ): AsyncGenerator<VersionRead> {
@@ -156,7 +83,7 @@ async function* earlierVersions(
     .order('desc');
   for await (const row of rows) {
     if (!charge.record(row) || row.purged) break;
-    yield { ...row, snapshot: () => recordSnapshot(ctx, partition, row, charge) };
+    yield { ...row, snapshot: () => recordSnapshot(ctx, row, charge) };
   }
 }
 
@@ -223,7 +150,6 @@ export function planningTimesFallbackReporter() {
 export async function withPlanningTimes(
   ctx: QueryCtx,
   project: Project,
-  partition: Id<'projectWorkGenerations'>,
   value: string,
   charge: ReturnType<typeof planningHistoryBudget>,
   pinned?: PlanningTimesRead,
@@ -240,7 +166,7 @@ export async function withPlanningTimes(
   reportFallback?.(pinned ? 'stale' : 'missing');
   const { lastStatusChangeAt, closeKept } = await itemTimes(
     item,
-    earlierVersions(ctx, project, partition, item, charge),
+    earlierVersions(ctx, project, item, charge),
     charge.maxVersions,
   );
   return JSON.stringify({
@@ -256,7 +182,6 @@ export async function withPlanningTimes(
 export async function initiativeCloseHistory(
   ctx: QueryCtx,
   project: Project,
-  partition: Id<'projectWorkGenerations'>,
   initiativeId: string,
   now: number,
   day?: number,
@@ -346,15 +271,13 @@ export async function initiativeCloseHistory(
         snapshot: async () => {
           const id = inWindow?.shelfId;
           const header = outside ?? (id ? await ctx.db.get(id) : null);
-          return header && (outside || charge.record(header))
-            ? recordSnapshot(ctx, partition, header, charge)
-            : null;
+          return header && (outside || charge.record(header)) ? recordSnapshot(ctx, header, charge) : null;
         },
       });
       if (restored === null) unresolved++;
       if (restored !== false) continue;
     }
-    const item = await recordSnapshot(ctx, partition, row, charge);
+    const item = await recordSnapshot(ctx, row, charge);
     const at = instant(item?.at);
     if (!Number.isFinite(at)) unresolved++;
     else if (item?.kind === 'issue' && at >= start && at <= end)

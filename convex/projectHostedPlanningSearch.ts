@@ -219,9 +219,7 @@ export async function searchPlanning(
         head && pins.record(head) && head.version === preview.version && head.status === preview.status
           ? pinnedPlanningTimes(head)
           : undefined;
-      items[index] = JSON.parse(
-        await withPlanningTimes(ctx, project, recordPartition(generation), JSON.stringify(item), charge, pin),
-      );
+      items[index] = JSON.parse(await withPlanningTimes(ctx, project, JSON.stringify(item), charge, pin));
     }
   }
   return {

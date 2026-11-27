@@ -4,7 +4,7 @@ import { getDocumentSize, v } from 'convex/values';
 import { internal } from './_generated/api';
 import { internalAction, internalMutation } from './server';
 import { invariant } from '../src/errors';
-import { recordPartition, selectedGeneration } from './projectWorkIndexStore';
+import { selectedGeneration } from './projectWorkIndexStore';
 import { pinnedPlanningTimes } from './projectPlanningTimes';
 import {
   openPlanningHeadCursor,
@@ -37,7 +37,6 @@ export const page = internalMutation({
     invariant(project && !project.removal, 'PROJECT_UNAVAILABLE', 'Select an existing Forge project.');
     const generation = await selectedGeneration(ctx, project);
     invariant(generation, 'PROJECT_WORK_INDEX_MISSING', 'Prepare the hosted Work index first.');
-    const partition = recordPartition(generation);
     // Item keys are unique within this project and kind. A keyset range cannot return an
     // incomplete SplitRequired page or advance past a head the iterator did not visit.
     const heads = ctx.db.query('projectHostedRecordHeads').withIndex('by_project_and_kind_and_key', q => {
@@ -62,7 +61,7 @@ export const page = internalMutation({
       const resume = checkpoint?.key === head.key ? checkpoint : undefined;
       if (resume) result.headCursor = undefined;
       if (!pinnedPlanningTimes(head)) {
-        const proof = await provePlanningTimes(ctx, partition, head, resume);
+        const proof = await provePlanningTimes(ctx, head, resume);
         result.readBytes += proof.readBytes;
         if ('resume' in proof || 'blocked' in proof) {
           result.nextCursor = last;

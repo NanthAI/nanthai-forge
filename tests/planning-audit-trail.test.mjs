@@ -637,7 +637,7 @@ test('window read lists each Item once across scan pages, keeps its older close 
     let cursor = null;
     let pages = 0;
     do {
-      const page = await readBacklogWindowAudit(s.ctx, project, null, {
+      const page = await readBacklogWindowAudit(s.ctx, project, {
         ...(initiativeId ? { initiativeId } : {}),
         from: '2026-11-15',
         until: '2026-11-18',
@@ -683,7 +683,7 @@ test('an Item that moves out of an Initiative and back is listed once on an init
   let cursor = null;
   let pages = 0;
   do {
-    const page = await readBacklogWindowAudit(s.ctx, project, null, {
+    const page = await readBacklogWindowAudit(s.ctx, project, {
       initiativeId: home,
       from: '2026-11-15',
       until: '2026-11-18',
@@ -828,7 +828,7 @@ test('window read names where imported records begin and flags Items recorded af
 
   const { readBacklogWindowAudit } = await import(moduleUrl('../convex/projectPlanningWindow.ts'));
   const project = await s.ctx.db.get(s.projectId);
-  const read = (from, until) => readBacklogWindowAudit(s.ctx, project, null, { from, until });
+  const read = (from, until) => readBacklogWindowAudit(s.ctx, project, { from, until });
   const before = await read('2026-10-01', '2026-11-05');
   assert.equal(before.items.length, 0);
   assert.equal(before.coverage, 'partial', 'an empty window before the store began is not complete');
