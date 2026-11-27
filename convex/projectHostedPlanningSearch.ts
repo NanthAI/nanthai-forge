@@ -16,6 +16,8 @@ import { report } from './errors';
 import { readProjectRole } from './projectAuthority';
 import { planningHistoryBudget, withPlanningTimes } from './projectPlanningHistory';
 import type { Doc } from './_generated/dataModel';
+import { recordHead } from './projectHostedRecords';
+import { pinnedPlanningTimes } from './projectPlanningTimes';
 
 export const searchFields = {
   text: v.string(),
@@ -206,10 +208,21 @@ export async function searchPlanning(
   }
   if (planningHistory) {
     const charge = planningHistoryBudget();
-    for (const [index, item] of items.entries())
+    // Search previews come from the selected Work generation. Read pins only for an exact preview
+    // version and status. Keep the existing history budget intact for old or mismatched previews.
+    const pins = planningHistoryBudget(512 * 1024);
+    for (const [index, item] of items.entries()) {
+      const preview = item as { id: string; version: number; status: string; purged?: unknown };
+      const head =
+        pins.exhausted || preview.purged ? null : await recordHead(ctx, project._id, 'issue', preview.id);
+      const pin =
+        head && pins.record(head) && head.version === preview.version && head.status === preview.status
+          ? pinnedPlanningTimes(head)
+          : undefined;
       items[index] = JSON.parse(
-        await withPlanningTimes(ctx, project, recordPartition(generation), JSON.stringify(item), charge),
+        await withPlanningTimes(ctx, project, recordPartition(generation), JSON.stringify(item), charge, pin),
       );
+    }
   }
   return {
     workRevision: (await workHead(ctx, project._id))?.revision ?? project.work?.revision,
