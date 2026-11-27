@@ -8,23 +8,12 @@
 // the Lane's current save. Needs me is read only while the Lane is held or a landing is named; otherwise nothing.
 import { useMemo, useState } from 'react';
 import { useQuery } from 'convex/react';
-import { makeFunctionReference } from 'convex/server';
 import type { Id } from '../../../../convex/_generated/dataModel';
 import { State } from '../../ds';
 import { decideTarget, useProjectDecide } from './decide';
-import { AheadKeys, DecisionKeys } from './DecisionKeys';
-import {
-  aheadRow,
-  inPageApprovalNext,
-  needsView,
-  protectedApprovalCopy,
-  type Approval,
-  type NeedsRead,
-} from './model';
-
-const needsRead = makeFunctionReference<'query', { projectId: Id<'hostedProjects'> }, NeedsRead>(
-  'projectNeedsMe:read',
-);
+import { AheadKeys, DecisionKeys, DECLINE_REASON_MAX } from './DecisionKeys';
+import { needsRead } from './count';
+import { aheadRow, inPageApprovalNext, needsView, protectedApprovalCopy, type Approval } from './model';
 
 /** Needs me's read and view, only while the Lane is held; the Lane page's hold sentence and its decision share it. */
 export function useHeldView(projectId: Id<'hostedProjects'>, held: boolean) {
@@ -55,12 +44,18 @@ export function LaneDecision({
   const decide = useProjectDecide(projectId);
   // A plain status line, not the behaviour layer: it stays after the hold ends, saying what happened.
   const [message, announce] = useState('');
+  const [approvalNote, setApprovalNote] = useState<{ attempt: string; text: string }>();
   const row = useMemo(() => {
     const now = read?.view.now ?? [];
-    const named = submission ? now.find(entry => entry.landing?.submissionId === submission) : undefined;
-    return named ?? (held ? now.find(entry => entry.laneId === laneId) : undefined);
+    return now.find(
+      entry =>
+        (entry.laneId === laneId || entry.laneIds?.includes(laneId)) &&
+        (submission ? entry.landing?.submissionId === submission : held),
+    );
   }, [read, laneId, submission, held]);
   const target = row ? decideTarget(row) : null;
+  const attempt = row?.landing?.attemptId;
+  const reason = approvalNote && approvalNote.attempt === attempt ? approvalNote.text : '';
   const protectedReason = row ? protectedApprovalCopy(row) : null;
   const said = message ? (
     <p className="quietline" role="status">
@@ -83,11 +78,26 @@ export function LaneDecision({
             {protectedReason ?? row.note}
           </p>
         ) : null}
+        {attempt ? (
+          <label className="f">
+            <span>
+              Approval reason <span className="faint">(optional)</span>
+            </span>
+            <input
+              className="inp"
+              value={reason}
+              dir="auto"
+              maxLength={DECLINE_REASON_MAX}
+              onChange={event => setApprovalNote({ attempt, text: event.target.value })}
+            />
+          </label>
+        ) : null}
         <div className="btns">
           <DecisionKeys
             laneId={laneId}
             target={target}
             reviewCheck={row.reviewCheck}
+            reason={reason}
             decide={decide}
             announce={announce}
           />
@@ -95,7 +105,8 @@ export function LaneDecision({
         {said}
       </section>
     );
-  if (!request) return said;
+  // An approval link must never fall through to controls for another request on this Lane.
+  if (submission || !request) return said;
   const ahead = aheadRow(request);
   const declined = request.state === 'declined';
   // Item 4f1f7984: a granted request is not listed in Needs me; this page says so, with nothing to decide.

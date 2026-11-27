@@ -16,6 +16,8 @@ export type CheckRead = {
   laneId: string;
   title: string | null;
   candidateId: string | null;
+  /** The exact link no longer points at the submission's live attempt. */
+  pinned?: true;
   landing: {
     submissionId: string;
     operationId: string;
@@ -64,6 +66,10 @@ export const verdictWords: Record<SuspectVerdict, string> = {
 /** The head's state: glyph, word and colour for where this landing is. */
 export function verdictState(read: CheckRead): { st: StateKind; word: string } {
   const state = read.landing?.state;
+  if (read.pinned)
+    return read.run
+      ? { st: read.run.status === 'failed' ? 'failed' : 'stale', word: 'Earlier check' }
+      : { st: 'stale', word: 'Check unavailable' };
   if (!read.landing) return { st: 'stale', word: 'No landing yet' };
   if (state === 'landed') return { st: 'passed', word: 'Landed' };
   if (state === 'checking' || state === 'landing') return { st: 'active', word: read.landing.label };
@@ -92,6 +98,16 @@ export function checkSentence(
   read: CheckRead,
   time: (iso: string) => string,
 ): { lead: string; rest: string } {
+  if (read.pinned)
+    return read.run
+      ? {
+          lead: 'This is the check from the earlier attempt.',
+          rest: 'Open the current Lane to see what happened next.',
+        }
+      : {
+          lead: 'The check linked from this Lane is not available.',
+          rest: 'Forge has not substituted a different check.',
+        };
   const cause = read.cause;
   if (cause) {
     const since = cause.mainFailingSince

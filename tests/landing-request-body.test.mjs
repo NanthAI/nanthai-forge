@@ -32,7 +32,7 @@ const logical = row => {
   return value;
 };
 
-test('all 24 landing ticket indexes retain exact logical reads while cold bodies and observer projections stay unindexed', async () => {
+test('all landing ticket indexes retain exact logical reads while cold bodies and observer projections stay unindexed', async () => {
   const s = state([]),
     ctx = landingRequestBodies(finishReadWriter(s.ctx));
   const value = ticket();
@@ -43,10 +43,12 @@ test('all 24 landing ticket indexes retain exact logical reads while cold bodies
   assert.equal(raw.batchSelection, undefined);
   assert.equal(schema.tables.projectHostedLandingBodies.export().indexes.length, 0);
   const indexes = schema.tables.projectHostedLandingRequests.export().indexes;
+  const compensation = indexes.find(index => index.indexDescriptor === 'by_project_and_revert_and_phase');
+  assert.deepEqual(compensation?.fields, ['projectId', 'revertOf', 'phase']);
   assert.equal(
     indexes.length,
-    24,
-    'run/phase probes reuse checkWakeVersion; cancellation attribution adds one private root index',
+    25,
+    'History adds one exact completed-compensation index to the 24 existing indexes',
   );
   for (const index of indexes) {
     const row = await ctx.db

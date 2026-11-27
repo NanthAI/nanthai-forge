@@ -6,7 +6,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { finishFixture, desired, api } from './hosted-finish-fixture.mjs';
+import { compose, finishFixture, desired, api } from './hosted-finish-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { synthetic } from './hosted-revert-fixture.mjs';
 
@@ -81,6 +81,30 @@ test('a failed check names the same cause and next step in status and the land w
   assert.deepEqual(page.events.at(-1).failureCause, expected, 'the wait event an agent receives carries it');
   assert.equal(Object.keys(expected.suspects).join(), 'change,test,main,ci');
   assert.equal(read.expected, null, 'a settled check states no expected answer time');
+});
+
+test('a pinned Lane check still reads the failed attempt after another Candidate is composed', async t => {
+  const { f, active, runId, landing, replies } = await submitted(t);
+  for (let i = 0; i < active.plan.shardCount; i++)
+    await f.rawChecks.callback(f.rawChecks.shard(active, i, i === 0 ? 'failed' : 'passed'));
+  await f.rawChecks.callback(f.rawChecks.complete(active, 'failed'));
+  await f.drain();
+  const attemptId = landing().attemptId;
+  f.moveMain();
+  const main = f.currentMain();
+  const newer = await compose(
+    f.c,
+    f.c.selection([f.lane], [], {
+      expectedMain: { head: main.head, receiptId: main.receipt.id },
+    }),
+  );
+  const latest = (await replies()).screen;
+  assert.equal(latest.candidateId, newer.id);
+  assert.equal(latest.run, null);
+  const pinned = laneId =>
+    f.tx('pinnedCheck', screen.forLane, { projectId: f.projectId, laneId, attemptId }).then(JSON.parse);
+  assert.equal((await pinned(f.lane.laneId)).run.runId, runId);
+  assert.equal((await pinned(randomUUID())).run, null, 'the attempt must have selected this Lane');
 });
 
 test('a check still running carries no cause in any agent reply and the screen states its usual time honestly', async t => {

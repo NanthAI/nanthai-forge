@@ -24,6 +24,7 @@ import { reviewGroupLabels, reviewGroups, type ReviewGroup } from '../../../../s
 import { Avatar, Band, CodeBox, Key, State } from '../../ds';
 import { DiffModeToggle, useDiffMode, type DiffMode } from '../../diff-view';
 import { A } from '../frames';
+import { CHECK_ATTEMPT, checkAttemptHref } from '../check/route';
 import { RecordedWho } from '../RecordedWho';
 import { declaredModel, recordedIdentity } from '../who-links';
 import type { LineFeed } from '../Line';
@@ -53,7 +54,7 @@ import { landingBrowserIO } from '../../lane/landing-browser-io';
 import { takenOutText, useTakeOut } from '../take-out';
 import { conflictNote, heldWhyState, laneState } from '../lane-state';
 import { LaneDecision, useHeldView } from '../needs/LaneDecision';
-import { holdLine, parkLine } from '../needs/model';
+import { holdLine, parkLine, protectedApprovalCopy } from '../needs/model';
 import { uniqueBy } from '../../ui/unique';
 import { CopyKey } from '../start/parts';
 import { PurgeFile } from './PurgeFile';
@@ -268,11 +269,17 @@ export function ReviewPage({
   const closed = Boolean(lane.landed) || lane.state !== 'active';
   const isHeld = Boolean(stop?.held) && !lane.landed;
   // An approval link names its landing (Item 0a99ab23): Needs me is read for that exact attempt too.
-  const linked = lane.landed ? null : new URLSearchParams(location.search).get('submission');
+  const params = new URLSearchParams(location.search);
+  const linked = lane.landed ? null : params.get('submission');
   const heldView = useHeldView(projectId, isHeld || Boolean(linked));
-  const heldRow = heldView
-    ? [...heldView.view.now, ...heldView.view.fyi].find(row => row.laneId === lane.laneId)
-    : undefined;
+  const heldRows = [...(heldView?.view.now ?? []), ...(heldView?.view.fyi ?? [])];
+  const heldRow = heldRows.find(
+    row =>
+      (linked === null || row.submissionId === linked) &&
+      (row.laneId === lane.laneId || row.laneIds?.includes(lane.laneId)),
+  );
+  const checkAttempt =
+    params.get(CHECK_ATTEMPT) ?? (heldRow?.why === 'check-failed' ? heldRow.attemptId : undefined);
   const client = useConvex();
   const landing = useMemo(() => new BrowserLanding(landingBrowserIO(client, projectId)), [client, projectId]);
   const takeOut = useTakeOut(landing);
@@ -407,14 +414,29 @@ export function ReviewPage({
         </pre>
       ) : null}
       <Stops reply={reply} stop={stop} heldWhy={heldRow?.why ?? null} />
-      <nav className="strip" aria-label="Lane sections">
-        <A href={laneHref} aria-current={thread || history ? undefined : 'page'}>
+      <nav className="lane-sections" aria-label="Lane sections">
+        <A
+          className="btn ghost"
+          href={checkAttemptHref(laneHref, checkAttempt)}
+          aria-current={thread || history ? undefined : 'page'}
+        >
           Changes
         </A>
-        <A href={laneHref + '/history'} aria-current={history ? 'page' : undefined}>
+        <A className="btn ghost" href={checkAttemptHref(laneHref + '/check', checkAttempt)}>
+          Checks
+        </A>
+        <A
+          className="btn ghost"
+          href={checkAttemptHref(laneHref + '/history', checkAttempt)}
+          aria-current={history ? 'page' : undefined}
+        >
           History
         </A>
-        <A href={laneHref + '/thread'} aria-current={thread ? 'page' : undefined}>
+        <A
+          className="btn ghost"
+          href={checkAttemptHref(laneHref + '/thread', checkAttempt)}
+          aria-current={thread ? 'page' : undefined}
+        >
           Thread
         </A>
       </nav>
@@ -519,6 +541,13 @@ export function ReviewPage({
             who={who}
             itemId={itemId}
             itemLabel={itemLabel}
+            approvalHold={
+              heldRow?.why === 'review'
+                ? (protectedApprovalCopy(heldRow) ?? 'Waits for project owner approval.')
+                : linked || (isHeld && !heldView)
+                  ? 'Not reported.'
+                  : null
+            }
           />
         </div>
       )}
@@ -552,15 +581,22 @@ function Stops({
   return (
     <div className="pad" style={{ paddingBlock: 'var(--s-2) var(--s-3)' }}>
       <div
-        className="stops"
+        className="stops lane-stops"
         role="img"
         data-st={tone}
         aria-label={`This Lane is at ${STOPS[at]!.label}${said.note ? `, ${said.note}` : ''}`}
       >
         {STOPS.map((entry, index) => (
           <div key={entry.stage} className={index < at ? 'on' : index === at ? 'at' : undefined}>
-            {entry.label}
-            {note[entry.stage] ? <small>{note[entry.stage]}</small> : null}
+            {entry.stage === 'ready' ? (
+              <>
+                <span className="lane-ready-full">{entry.label}</span>
+                <span className="lane-ready-short">Ready</span>
+              </>
+            ) : (
+              entry.label
+            )}
+            {note[entry.stage] ? <small title={note[entry.stage]}>{note[entry.stage]}</small> : null}
           </div>
         ))}
       </div>
@@ -1084,6 +1120,7 @@ function Side({
   who,
   itemId,
   itemLabel,
+  approvalHold,
 }: {
   reply: Reply;
   entries: Entry[];
@@ -1091,6 +1128,7 @@ function Side({
   who: string;
   itemId: string;
   itemLabel: string;
+  approvalHold: string | null;
 }) {
   const { lane } = reply;
   const guarded = entries.filter(entry => entry.file.protected).length;
@@ -1186,7 +1224,14 @@ function Side({
               : 'None of these files'}
         </dd>
         <dt>Approval</dt>
-        <dd>{reply.supervised ? 'A person approves each landing.' : 'Lands after a passing check.'}</dd>
+        <dd>
+          {approvalHold ??
+            (reply.supervised
+              ? 'A person approves each landing.'
+              : guarded
+                ? 'Changing a protected path requires approval.'
+                : 'Follows the project’s landing policy.')}
+        </dd>
       </dl>
       {lane.landed ? (
         <>

@@ -154,7 +154,7 @@ export const accept = mutation({
  * retained for this submission (fe5bea80): when the queue is busy or main moved, the finish driver
  * takes its turn or recomposes, and that fresh attempt lands with it only for identical source. */
 export const approve = mutation({
-  args: selection,
+  args: { ...selection, reason: v.optional(v.string()) },
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
@@ -171,8 +171,9 @@ export const approve = mutation({
 export async function approveHeldLanding(
   ctx: MutationCtx,
   actor: import('../src/autonomy-policy').AcceptanceActor,
-  input: AcceptanceIdentity,
+  input: AcceptanceIdentity & { reason?: string },
 ) {
+  const { reason, ...selection } = input;
   invariant(
     actor.kind === 'person',
     'PROJECT_UNAVAILABLE',
@@ -182,12 +183,12 @@ export async function approveHeldLanding(
   if (await acceptanceRow(ctx, { projectId: input.projectId, receiptId: attempt.operations.accept }))
     return await publishSelected(
       ctx,
-      { ...input, channel: 'main', owner: attempt.operations.accept, token: 0 },
+      { ...selection, channel: 'main', owner: attempt.operations.accept, token: 0 },
       Date.now(),
       actor,
       state,
     );
-  await grantOwnerApproval(ctx, row, actor, attempt);
+  const why = await grantOwnerApproval(ctx, row, actor, attempt, reason);
   // A builder waiting on the Lane's approval request returns now, not only once it lands.
   await settleAttemptApprovals(ctx, {
     projectId: input.projectId,
@@ -195,6 +196,7 @@ export async function approveHeldLanding(
     operationId: attempt.operations.accept,
     by: actor.id,
     status: 'granted',
+    ...(why ? { reason: why } : {}),
   });
   if (row.earlyReview && (held(state) || row.ownerGrant?.attemptId === attempt.id)) {
     const plan =
@@ -208,7 +210,7 @@ export async function approveHeldLanding(
   }
   const claim = await claimReadyLanding(
     ctx,
-    { ...input, channel: 'main', owner: attempt.operations.accept },
+    { ...selection, channel: 'main', owner: attempt.operations.accept },
     Date.now(),
     false,
   );

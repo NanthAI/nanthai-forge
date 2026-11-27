@@ -215,7 +215,7 @@ export const decide = mutation({
         };
         landing =
           status === 'granted'
-            ? await approveHeldLanding(ctx, actor, selection)
+            ? await approveHeldLanding(ctx, actor, { ...selection, ...(reason ? { reason } : {}) })
             : await declineHeldLanding(ctx, actor.id, {
                 ...selection,
                 operationId: input.operationId,

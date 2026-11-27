@@ -16,6 +16,7 @@ import {
   laneOverlap,
   lanePaths,
   mainEvidence,
+  pinnedLaneLanding,
 } from './projectFailureCauseRead';
 import { report } from './errors';
 import { landingStateOf, type LandingStateName } from '../src/landing-state';
@@ -80,9 +81,9 @@ export function expectedFromSamples(samples: readonly (readonly unknown[])[]) {
  * No writes, no scheduler, no log fetch, no polling.
  */
 export const forLane = query({
-  args: { projectId: v.id('hostedProjects'), laneId: v.string() },
+  args: { projectId: v.id('hostedProjects'), laneId: v.string(), attemptId: v.optional(v.string()) },
   returns: v.string(),
-  handler: async (ctx, { projectId, laneId }) => {
+  handler: async (ctx, { projectId, laneId, attemptId }) => {
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read a landing check.');
@@ -98,7 +99,11 @@ export const forLane = query({
         : null;
       const title = intent ? (intentTitle.safeParse(JSON.parse(intent.value)).data?.outcome ?? null) : null;
       const { count, lane } = await lanePaths(ctx, overlap);
-      const { candidateId, request } = await laneLandingRequest(ctx, projectId, laneId);
+      const pinned =
+        attemptId === undefined ? null : await pinnedLaneLanding(ctx, projectId, laneId, attemptId);
+      const latest = attemptId === undefined ? await laneLandingRequest(ctx, projectId, laneId) : null;
+      const candidateId = pinned?.attempt.candidate.id ?? latest?.candidateId ?? null;
+      const request = pinned?.row ?? latest?.request;
       const main = await mainEvidence(ctx, projectId);
       if (!request)
         return canonicalPayload({
@@ -107,13 +112,28 @@ export const forLane = query({
           candidateId,
           landing: null,
           run: null,
+          ...(attemptId === undefined ? {} : { pinned: true }),
           cause: null,
           main,
           lane: lane ? { count: count!, complete: lane.complete } : null,
           expected: null,
         });
-      const { state, row } = await loadLanding(ctx, { projectId, submissionId: request.submissionId });
-      const { summary, step, reDefers } = await landingRun(ctx, projectId, row, state);
+      const { state, row } =
+        pinned ?? (await loadLanding(ctx, { projectId, submissionId: request.submissionId }));
+      const { summary, step, reDefers } = await landingRun(ctx, projectId, row, state, pinned?.attempt);
+      if (pinned && pinned.attempt.id !== state.attemptId)
+        return canonicalPayload({
+          laneId,
+          title,
+          candidateId,
+          landing: null,
+          run: summary,
+          pinned: true,
+          cause: null,
+          main,
+          lane: null,
+          expected: null,
+        });
       // A passed entry parked behind an older one names it, from the row in hand (43b51a5e).
       const landing = landingStateOf({ ...state, orderWait: landingOrderWaitForReader(row, state) }, laneId);
       const cause = causeFrom({ state, laneId, summary, step, lane, main, reDefers });

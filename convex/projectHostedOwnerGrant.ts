@@ -78,13 +78,16 @@ export async function grantOwnerApproval(
   row: Doc<'projectHostedLandingRequests'>,
   actor: AcceptanceActor,
   attempt: HostedLandingAttempt,
+  reason?: string,
 ) {
   invariant(
     actor.kind === 'person',
     'PROJECT_UNAVAILABLE',
     'Owner approval requires explicit person acceptance.',
   );
-  if (row.ownerGrant?.attemptId === attempt.id && row.ownerGrant.actor === actor.id) return;
+  if (row.ownerGrant?.attemptId === attempt.id && row.ownerGrant.actor === actor.id)
+    return row.ownerGrant.reason;
+  const why = reason?.trim().slice(0, 500) || undefined;
   const grant: OwnerGrant = {
     actor: actor.id,
     attemptId: attempt.id,
@@ -97,9 +100,11 @@ export async function grantOwnerApproval(
       : {}),
     candidateDigest: attempt.candidate.digest,
     at: Date.now(),
+    ...(why ? { reason: why } : {}),
     ...(attempt.candidate.head ? { head: attempt.candidate.head } : {}),
   };
   await ctx.db.patch(row._id, { ownerGrant: grant });
+  return why;
 }
 /** The owner person a retained grant names for this exact attempt, or undefined. */
 export function grantedApproval(

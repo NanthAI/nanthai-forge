@@ -153,12 +153,14 @@ export function DecisionKeys({
   laneId,
   target,
   reviewCheck,
+  reason,
   decide,
   announce,
 }: {
   laneId: string | null;
   target: DecideTarget;
   reviewCheck: HeldLane['reviewCheck'];
+  reason?: string;
   decide: Decide;
   announce: (text: string, show?: boolean) => void;
 }) {
@@ -180,7 +182,7 @@ export function DecisionKeys({
       : 'Approve now';
   const approve = () => {
     setConfirmation(null);
-    return run(laneId, target, 'grant', 'Approved. Landing on main.');
+    return run(laneId, target, 'grant', 'Approved. Landing on main.', reason);
   };
   return (
     <>

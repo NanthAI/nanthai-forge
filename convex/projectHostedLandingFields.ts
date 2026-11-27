@@ -452,6 +452,8 @@ export const hostedLandingTables = {
         held: v.optional(v.literal(true)),
         verifiedDigest: v.optional(v.string()),
         at: v.number(),
+        /** Optional text recorded on this exact approval. Never part of matching or carrying the grant. */
+        reason: v.optional(v.string()),
         /** The Candidate head the owner accepted (shown as acceptedBy.head once it lands). */
         head: v.optional(v.string()),
       }),
@@ -495,6 +497,7 @@ export const hostedLandingTables = {
     .index('by_project_and_orderWait_and_sequence', ['projectId', 'orderWait', 'sequence'])
     .index('by_project_and_hold', ['projectId', 'hold'])
     .index('by_project_and_revert_and_sequence', ['projectId', 'revertOf', 'sequence'])
+    .index('by_project_and_revert_and_phase', ['projectId', 'revertOf', 'phase'])
     .index('by_project_and_candidate_and_sequence', ['projectId', 'candidateId', 'sequence'])
     .index('by_project_and_candidate_and_phase_and_sequence', [
       'projectId',

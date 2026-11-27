@@ -65,6 +65,83 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
 
   try {
     await t.test(
+      'a failed Lane opens the exact check in one action and keeps six stops on the same track',
+      async t => {
+        const lane = '/sample-owner/tide-pool/lanes/7a2b4c6d-8e9f-4a1b-8c3d-5e6f7a8b9c0d';
+        for (const viewport of [DESK, PHONE]) {
+          const page = await open(t, viewport, 'routes&s=failed-check', '/sample-owner/tide-pool');
+          const pin = '?checkAttempt=b1c2d3e4-f5a6-4b7c-8d9e-0f1a2b3c4d5e';
+          const openLane = page
+            .getByRole('region', { name: 'FYI', exact: true })
+            .getByRole('link', { name: 'Open the Lane' });
+          await openLane.waitFor();
+          assert.equal(await openLane.getAttribute('href'), lane + pin);
+          await openLane.click();
+          await page.waitForURL(url => url.pathname === lane && url.search === pin);
+          const sections = page.getByRole('navigation', { name: 'Lane sections' });
+          await sections.waitFor();
+          assert.deepEqual(await sections.getByRole('link').allTextContents(), [
+            'Changes',
+            'Checks',
+            'History',
+            'Thread',
+          ]);
+          assert.equal(
+            await sections.getByRole('link', { name: 'Changes' }).getAttribute('aria-current'),
+            'page',
+          );
+          const stops = page.getByRole('img', { name: /^This Lane is at / }).locator(':scope > div');
+          assert.equal(await stops.count(), 6);
+          assert.equal(
+            new Set(await stops.evaluateAll(cells => cells.map(cell => cell.getBoundingClientRect().y))).size,
+            1,
+          );
+          await page.evaluate(() => window.newerAttempt());
+          await sections.getByRole('link', { name: 'Checks' }).click();
+          await page.waitForURL(url => url.pathname === `${lane}/check` && url.search === pin);
+          await page.getByText('parser-check.test.ts', { exact: true }).waitFor();
+          assert.equal(
+            await page.getByRole('link', { name: 'What was checked' }).getAttribute('href'),
+            `${lane}/checked?run=c4ea9854-508d-4650-afc6-2c50460e5bbb`,
+          );
+        }
+      },
+    );
+
+    await t.test(
+      'History shows check evidence and takes the exact automatic landing out through a new checked landing',
+      async t => {
+        for (const viewport of [DESK, PHONE]) {
+          const page = await open(
+            t,
+            viewport,
+            'routes&s=history-revert',
+            '/sample-owner/tide-pool/lanes/history',
+          );
+          const row = page.getByRole('listitem').filter({ hasText: 'Land the parser fix' });
+          await row.getByRole('button', { name: 'Land the parser fix' }).click();
+          assert.match(await row.textContent(), /Check passed · Time to main: 2 min 3 s/);
+          const older = page.getByRole('listitem').filter({ hasText: 'An older landing' });
+          await older.getByRole('button', { name: 'An older landing' }).click();
+          assert.match(await older.textContent(), /Check not reported · Time to main: not reported/);
+          assert.equal(await older.getByRole('button', { name: 'Take it out of main' }).count(), 0);
+          assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+          await row.getByRole('button', { name: 'Take it out of main' }).click();
+          const next = page.getByRole('link', { name: 'Follow its check' });
+          await next.waitFor();
+          assert.equal(
+            await next.getAttribute('href'),
+            '/sample-owner/tide-pool/lanes/e1466198-0daa-472b-af5f-0385a2d46af3/check',
+          );
+          const { selected, request } = await page.evaluate(() => window.historyRevert);
+          assert.deepEqual(selected, { kind: 'receipt', receiptId: '22ca439f-b51a-4354-ac2b-73ee10598fb5' });
+          assert.equal(request.revertOf, selected.receiptId);
+          assert.equal(request.check.checkId, 'ec2999b2-cfca-41ed-b506-5ee1990922cc');
+        }
+      },
+    );
+
+    await t.test(
       'the same live Lane and board reads show the failure to readers and let an authorized writer dismiss it',
       async t => {
         const board = '/sample-owner/tide-pool/lanes';
@@ -647,15 +724,26 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
     await t.test(
       '0a99ab23: an approval link decides the landing it names, not another of the Lane',
       async t => {
-        const page = await open(t, DESK, 's=linked&submission=a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d');
-        const decision = page.getByRole('region', { name: 'Your decision' });
-        await decision.waitFor();
-        await decision.getByRole('button', { name: 'Approve and land' }).click();
-        await page.waitForFunction(() => window.__decide?.length === 1);
-        const [sent] = await page.evaluate(() => window.__decide);
-        assert.equal(sent.submissionId, 'a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d');
-        assert.equal(sent.attemptId, 'b1c2d3e4-f5a6-4b7c-8d9e-0f1a2b3c4d5e');
-        assert.equal(await page.getByRole('dialog', { name: 'Approve without a check?' }).count(), 0);
+        for (const viewport of [DESK, PHONE]) {
+          const page = await open(t, viewport, 's=linked&submission=a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d');
+          const decision = page.getByRole('region', { name: 'Your decision' });
+          await decision.waitFor();
+          await page
+            .getByRole('region', { name: 'About this Lane' })
+            .getByText('Changes a protected path: package.json.', { exact: true })
+            .waitFor();
+          if (viewport === DESK)
+            await decision
+              .getByRole('textbox', { name: 'Approval reason (optional)' })
+              .fill('  Covered by the release review.  ');
+          await decision.getByRole('button', { name: 'Approve and land' }).click();
+          await page.waitForFunction(() => window.__decide?.length === 1);
+          const [sent] = await page.evaluate(() => window.__decide);
+          assert.equal(sent.submissionId, 'a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d');
+          assert.equal(sent.attemptId, 'b1c2d3e4-f5a6-4b7c-8d9e-0f1a2b3c4d5e');
+          assert.equal(sent.reason, viewport === DESK ? 'Covered by the release review.' : undefined);
+          assert.equal(await page.getByRole('dialog', { name: 'Approve without a check?' }).count(), 0);
+        }
       },
     );
 

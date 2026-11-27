@@ -186,8 +186,18 @@ test('incident 9497ec68: protected review starts beside CI, stays idle through m
   f.advanceClock(60 * 60_000);
   assert.equal(await f.drain(), 0);
   assert.equal(f.counts.length, readCount, 'idle owner wait performs zero Convex calls');
-  const approved = JSON.parse(await f.tx('earlyOwnerApprove', acceptance.approve, held.selection));
+  const approved = JSON.parse(
+    await f.tx('earlyOwnerApprove', acceptance.approve, {
+      ...held.selection,
+      reason: 'The protected change is in scope.',
+    }),
+  );
   assert.equal(approved.status, 'pending');
+  assert.equal(
+    [...f.tables.projectHostedLandingRequests.values()].find(row => row.submissionId === state.id).ownerGrant
+      .reason,
+    'The protected change is in scope.',
+  );
   f.advanceClock(1_000);
   await settleDue();
   const exact = f.runs().at(-1);
@@ -415,7 +425,12 @@ test('agents, device sign-ins and contributors cannot approve or decline; the li
   const { f, state, select } = await heldLanding(t);
   for (const actor of [device, 'contributor']) {
     await assert.rejects(
-      f.tx('approveRefused', acceptance.approve, await select(), actor),
+      f.tx(
+        'approveRefused',
+        acceptance.approve,
+        { ...(await select()), reason: 'Unauthorized approval' },
+        actor,
+      ),
       code('PROJECT_UNAVAILABLE'),
     );
     await assert.rejects(
@@ -458,6 +473,30 @@ test('the owner approves the exact held attempt and the waiting submission lands
   assert.equal(by.head, read.submission.acceptance.head, 'the exact Candidate the owner accepted landed');
   assert.deepEqual(by.paths, ['selected.txt']);
   assert.equal(by.carried, undefined);
+});
+
+test('approval reason is optional, bounded, replay-safe and adds no approval transaction work', async t => {
+  const costs = [];
+  for (const reason of [undefined, `  ${'X'.repeat(510)}  `]) {
+    const { f, state, select } = await heldLanding(t);
+    const input = await select();
+    const readGrant = () =>
+      [...f.tables.projectHostedLandingRequests.values()].find(row => row.submissionId === state.id)
+        .ownerGrant;
+    const args = { ...input, ...(reason === undefined ? {} : { reason }) };
+    const approval = JSON.parse(await f.tx('approve', acceptance.approve, args));
+    const { ranges, documents, writes } = f.counts.at(-1);
+    costs.push({ ranges, documents, writes });
+    assert.equal(approval.status, 'landed');
+    assert.equal(readGrant().reason, reason === undefined ? undefined : 'X'.repeat(500));
+    assert.equal(readGrant().attemptId, input.attemptId);
+    const replay = JSON.parse(
+      await f.tx('approveAgain', acceptance.approve, { ...args, reason: 'Different text' }),
+    );
+    assert.equal(replay.receipt.id, approval.receipt.id);
+    assert.equal(readGrant().reason, reason === undefined ? undefined : 'X'.repeat(500));
+  }
+  assert.deepEqual(costs[1], costs[0]);
 });
 
 test('48049998 replay: a protected-path policy hold has no Lane request, yet Needs me offers Approve and Decline on its exact attempt', async t => {
@@ -785,6 +824,35 @@ test('approving the held landing directly also grants the Lane request; declinin
       row => row.targetKey === `lane:${f.lane.laneId}`,
     );
     assert.match(lane.body, /declined the approval request.*split the migration first/);
+  }
+});
+
+test('both exact grant paths retain the reason and deliver one Lane notice for multiline text', async t => {
+  for (const via of ['landing', 'lane']) {
+    const { f, laneId, read: approval, decide } = await requestedLane(t);
+    const { read } = await hold(f);
+    const reason = 'Release verified.\n\tMigration checked.';
+    if (via === 'landing') {
+      const result = JSON.parse(
+        await f.tx('approveWithReason', acceptance.approve, {
+          projectId: f.projectId,
+          submissionId: read.submission.id,
+          attemptId: read.submission.attemptId,
+          reason,
+        }),
+      );
+      assert.equal(result.status, 'landed');
+    } else {
+      assert.equal((await decide('grant', f.lane.head, 'owner', reason)).landing.status, 'landed');
+    }
+    const after = await approval();
+    assert.equal(after.status, 'granted');
+    assert.match(after.decision.reason, /Release verified\.\s+Migration checked\./);
+    const notices = [...f.tables.projectBoardMessages.values()].filter(
+      row => row.targetKey === `lane:${laneId}`,
+    );
+    assert.equal(notices.length, 1, `${via} grant must notify the requester`);
+    assert.match(notices[0].body, /granted the approval request.*Release verified\. Migration checked\./);
   }
 });
 

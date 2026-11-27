@@ -1,0 +1,86 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedLandingFields.ts": "84639852c659667be8baba35497d6cca1359d5669a2cdc1fa333794d62da0576"
+  },
+  "replay": {
+    "incident": "687d1eda",
+    "test": "incident 687d1eda hold record: a parked landing leaves held, released and its re-landing receipt in landings and lane-history",
+    "receipt": "c143de04-ca17-44d1-a053-f90c948ff131"
+  },
+  "authorModel": "gpt-5.4",
+  "authorSession": "thread:delegated-task:command%3Amcp%3A90e8ad7d-74a8-4f1f-b5a0-77ab2a94aa6c%3Adelegate-task%3A532a4e12-794f-465b-ae69-11ac19fba5ef",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "thread:delegated-task:command%3Amcp%3A088e5d53-e7ab-464f-a6a3-ca08147d96b0%3Adelegate-task%3A4cb17251-7ad3-4478-aa43-531ec9d861fc",
+    "receipt": "535fc930-cb61-4ca3-a7cc-154fa3c1621a"
+  },
+  "exercised": {
+    "convex/projectHostedLandingFields.ts": {
+      "executed": [
+        "cohortHoldEvidence"
+      ],
+      "digest": "11be536e42e76075330455d09be8c4fe7d37c20097aab0d3a6e72bc0cf777083",
+      "units": [
+        [
+          "alarm",
+          "67f78a5aed19a4c79893f8b743c19b39e1b06ffa69c4909673eba3a2e5e99a92"
+        ],
+        [
+          "cohortHoldEvidence",
+          "fb18e66549510265c0eab7e48b10632d73882627194a13d5cd5a3bda5650aed1"
+        ],
+        [
+          "defineTable",
+          "b47c67ba5772cdb88aa4a6b681e8b5447b2dc09879b915898b6f088274e1b34b"
+        ],
+        [
+          "grant",
+          "6aea945bc2dc6100270c9909ad0564c23207063377a7ebaab5e9de3874e24424"
+        ],
+        [
+          "hostedLandingTables",
+          "b3aef883f33450bf3b989e26dc2049ffc758306103d6201c8f189c5fe52e5ca2"
+        ],
+        [
+          "landingCapsulePointer",
+          "b4a05c9a433c3db6366f6cf04fbbbb9c73f92c48735a867e5bc7b95d8bb6c2f6"
+        ],
+        [
+          "landingReplay",
+          "43c3709aadbd6c2f1fc489613d425ec3f5024efaae6f1d274f1a8a67558a868e"
+        ],
+        [
+          "lease",
+          "47220463e4e7e6cfab3594b7a172b75d9c4e4210278122dbfbd87d3694a3cf3b"
+        ],
+        [
+          "mainRedHoldValidator",
+          "59e715583180ec908b854f5e28662ed42f405f0e61f03bb291d815de033b5b0a"
+        ],
+        [
+          "phase",
+          "9609b8512f6d116e2ad42c512abe916aef43279d8cd6b272060f17b5914a058c"
+        ],
+        [
+          "replayCause",
+          "574b0e15d337707715f1652d3fd28e8d4163ebdcbb3403180fcb115f4992cd1e"
+        ],
+        [
+          "runnerAccounting",
+          "34c00ddaf08d8a850200ec6782891f74b25f9e891a6450d54cf276aad435c364"
+        ],
+        [
+          "supersededCheck",
+          "89e2ae5ef1660438ade4618df43e4edc2c65bd622983fc215b192f083c02af8d"
+        ],
+        [
+          "v",
+          "c9b23930c9b094848cdb5f563a16f0a2f497fc28d7ea9a82afca6bc52741e95f"
+        ]
+      ],
+      "shell": "5d7eb26b48578107dcb80e3a7f0dfe63d184ce32a518ab7a4b03a4837d15025a"
+    }
+  }
+}

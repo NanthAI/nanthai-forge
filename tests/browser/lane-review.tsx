@@ -13,15 +13,17 @@
 import type { ReactNode } from 'react';
 import { ProjectFrame } from '../../web/src/app/frames';
 import { createRoot } from 'react-dom/client';
-import { ConvexProvider, type ConvexReactClient } from 'convex/react';
+import { ConvexProvider, useQuery, type ConvexReactClient } from 'convex/react';
 import { getFunctionName } from 'convex/server';
 import '../../web/src/ds';
 import '../../web/src/app/app.css';
 import { PlaceScreen } from '../../web/src/app/screens';
 import { useRoute } from '../../web/src/app/router';
+import { needsRead } from '../../web/src/app/needs/count';
 import { ReviewPage } from '../../web/src/app/lane/LaneReview';
 import type { Reply } from '../../web/src/app/lane/review-model';
 import { laneHistoryFixture } from './lane-history';
+import { historyRevertFixture } from './landing-history-revert';
 
 const params = new URLSearchParams(location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'dark';
@@ -77,7 +79,10 @@ let fallbackComparison:
 const listeners = new Map<string, Set<() => void>>();
 const client = {
   query: async (ref: unknown, { cursor }: { cursor: string | null }) => {
-    if (getFunctionName(ref as never) === 'projectHostedLaneHistory:saves') return history.read(cursor);
+    const name = getFunctionName(ref as never);
+    const result = historyRevert.query(name);
+    if (scenario === 'history-revert' && result !== undefined) return result;
+    if (name === 'projectHostedLaneHistory:saves') return history.read(cursor);
     throw new Error('Unexpected fixture query');
   },
   action: async (ref: unknown, args: { projectId: string; request: string }) => {
@@ -100,6 +105,10 @@ const client = {
       sessionStorage.setItem('fixture.noteWrites', JSON.stringify(writes));
       if (writes.length === 1) throw new Error('Synthetic lost reply');
       return {};
+    }
+    if (scenario === 'history-revert') {
+      const result = historyRevert.mutation(name, args);
+      if (result !== undefined) return result;
     }
     if (
       name === 'projectHostedApprovals:decide' ||
@@ -150,7 +159,16 @@ const client = {
         listeners.set(name, callbacks);
         return () => callbacks.delete(update);
       },
-      localQueryResult: () => reads.get(name),
+      localQueryResult: () => {
+        if (name === 'projectFailureCause:forLane' && scenario === 'failed-check') {
+          const selected = (args as { attemptId?: string }).attemptId === FAILED_ATTEMPT;
+          return JSON.stringify({
+            ...JSON.parse(reads.get(name) as string),
+            ...(!selected ? { run: null, landing: null } : {}),
+          });
+        }
+        return reads.get(name);
+      },
       journal: () => undefined,
     };
   },
@@ -159,6 +177,7 @@ const client = {
 const PEER = '3c1f9a20-5b7e-4d2a-9c11-2f0e6b8a4d19';
 const LANE = '7a2b4c6d-8e9f-4a1b-8c3d-5e6f7a8b9c0d';
 const ITEM = '9e8d7c6b-5a49-4382-9170-6f5e4d3c2b1a';
+const historyRevert = historyRevertFixture(LANE);
 const INTENT = '2a3f12de-8371-4310-a004-f9cae1ef291c';
 const TITLE = scenario === 'uuid-title' ? INTENT : 'Stream parser: handle split UTF-8';
 const reads = new Map<string, unknown>();
@@ -166,6 +185,7 @@ const BASE = 'b'.repeat(64);
 const AHEAD_HEAD = 'a1'.repeat(32);
 const HEAD = 'c3'.repeat(32);
 const LINKED_SUBMISSION = 'a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d';
+const FAILED_ATTEMPT = 'b1c2d3e4-f5a6-4b7c-8d9e-0f1a2b3c4d5e';
 
 async function reply(): Promise<Reply> {
   const stream = {
@@ -363,7 +383,7 @@ async function reply(): Promise<Reply> {
           },
         }
       : {}),
-    supervised: true,
+    supervised: scenario !== 'linked',
     protectedRules: 2,
     files: { current: true, complete: true, total: files.length, offset: 0, nextOffset: null, items: files },
     conflicts:
@@ -429,7 +449,13 @@ const feed = {
   main: { head: BASE },
 };
 
-function Frame({ children, current = route }: { children: ReactNode; current?: typeof route }) {
+function Frame({
+  children,
+  current = route,
+}: {
+  children: ReactNode;
+  current?: Extract<ReturnType<typeof useRoute>, { frame: 'project' }>;
+}) {
   if (!routed && !params.has('frame')) return <main id="main">{children}</main>;
   return (
     <ProjectFrame
@@ -447,14 +473,19 @@ function Frame({ children, current = route }: { children: ReactNode; current?: t
 
 function Routed() {
   const current = useRoute();
-  if (current.frame !== 'project' || current.place !== 'lanes') throw new Error('Expected a Lanes route');
+  const needs = useQuery(
+    needsRead,
+    current.frame === 'project' && current.place === 'needs' ? { projectId: 'p1' as never } : 'skip',
+  );
+  if (current.frame !== 'project') throw new Error('Expected a project route');
   return (
-    <Frame current={{ ...current, place: 'lanes' }}>
+    <Frame current={current}>
       <PlaceScreen
         route={current}
         projectId={'p1' as never}
         projectName="tide-pool"
         feed={feed}
+        needsRead={needs}
         viewerHandle="sample-owner"
       />
     </Frame>
@@ -471,7 +502,7 @@ void reply().then(data => {
         actor: 'sample-two',
         agent: 'salt-wren',
         why: 'review',
-        note: null,
+        note: which === 'older' ? 'needs owner approval: protected paths package.json' : null,
         submissionId: which === 'older' ? LINKED_SUBMISSION : '9b8a7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d',
         attemptId:
           which === 'older' ? 'b1c2d3e4-f5a6-4b7c-8d9e-0f1a2b3c4d5e' : 'c2d3e4f5-a6b7-4c8d-9e0f-1a2b3c4d5e6f',
@@ -485,6 +516,32 @@ void reply().then(data => {
     });
   if (routed) {
     reads.set('projectLaneReview:read', JSON.stringify(data));
+    if (scenario === 'history-revert')
+      reads.set('projectLandingReads:list', JSON.stringify(historyRevert.page));
+    if (scenario === 'failed-check')
+      reads.set(
+        'projectFailureCause:forLane',
+        JSON.stringify({
+          laneId: LANE,
+          title: TITLE,
+          candidateId: null,
+          landing: { state: 'check-failed', label: 'Held: its check failed', at: '2026-11-17T09:02:03.000Z' },
+          run: {
+            runId: 'c4ea9854-508d-4650-afc6-2c50460e5bbb',
+            status: 'failed',
+            files: { total: 1, failed: 1, flaky: 0 },
+            failed: [
+              { file: 'parser-check.test.ts', firstError: 'An incomplete byte sequence was accepted.' },
+            ],
+            flaky: [],
+            timings: { wallSeconds: 12, shards: 1 },
+            cost: null,
+          },
+          cause: null,
+          main: null,
+          lane: null,
+        }),
+      );
     reads.set('projectDiscussionThread:read', {
       canRead: true,
       before: null,
@@ -524,13 +581,52 @@ void reply().then(data => {
       JSON.stringify({ total: 0, listed: 0, more: false, entries: [] }),
     );
     // Lanes' Needs you shares the frame's Needs me read (e317b6ea): nothing waits on this reader.
-    reads.set('projectNeedsMe:read', {
-      held: [],
-      more: 0,
-      moreIsLowerBound: false,
-      approvals: '{}',
-      canDecide: false,
-    });
+    if (scenario !== 'linked')
+      reads.set('projectNeedsMe:read', {
+        held:
+          scenario === 'failed-check'
+            ? [
+                {
+                  laneId: LANE,
+                  title: TITLE,
+                  actor: 'sample-owner',
+                  agent: null,
+                  why: 'check-failed',
+                  note: null,
+                  submissionId: LINKED_SUBMISSION,
+                  attemptId: FAILED_ATTEMPT,
+                  since: 1_790_000_000_000,
+                },
+              ]
+            : [],
+        more: 0,
+        moreIsLowerBound: false,
+        approvals: '{}',
+        canDecide: false,
+      });
+    if (scenario === 'failed-check') {
+      reads.set(
+        'projectNeedsFyi:read',
+        JSON.stringify({
+          owner: true,
+          state: { clearedAt: null, clearedSequence: null, dismissed: [] },
+          landings: [],
+          landingsMore: false,
+          broke: [],
+          settings: [],
+          access: [],
+          messages: [],
+          messagesMore: false,
+        }),
+      );
+      Object.assign(window, {
+        newerAttempt() {
+          const read = reads.get('projectNeedsMe:read') as { held: object[] };
+          reads.set('projectNeedsMe:read', { ...read, held: [] });
+          for (const notify of listeners.get('projectNeedsMe:read') ?? []) notify();
+        },
+      });
+    }
     reads.set(
       'projectNowOverlaps:now',
       JSON.stringify({

@@ -8,6 +8,7 @@ import { z } from 'zod';
 import type { Doc, Id } from './_generated/dataModel';
 import type { QueryCtx } from './server';
 import { composeRow } from './projectHostedComposeStore';
+import { landingRow, landingStateFromRow } from './projectHostedLandingStore';
 import { deferredOrigin, landingAttemptRow, loadLandingAttempt } from './projectHostedLandingAttemptRead';
 import { loadHostedCheck } from './projectHostedCheckStore';
 import { checkFailureStep } from './projectHostedCheckFailure';
@@ -15,7 +16,7 @@ import { auditRow, parkExactOnMainRed, parkOnMainRed } from './projectHostedMain
 import { summarizeCheckRun } from '../src/hosted-check-summary';
 import { failureCause, failureCauseField } from '../src/check-failure-cause';
 import { landingStateOf } from '../src/landing-state';
-import type { HostedLandingState } from '../src/hosted-landing';
+import type { HostedLandingAttempt, HostedLandingState } from '../src/hosted-landing';
 import { overlapLaneChanges } from './projectHostedOverlapChanges';
 
 const composeCandidate = z.looseObject({ candidateId: z.uuid() });
@@ -79,6 +80,46 @@ export async function laneLandingRequest(ctx: QueryCtx, projectId: Project, lane
   return { candidateId, request: request ?? null };
 }
 
+/** Resolve an FYI link without consulting the newest composition. The exact attempt's submission
+ * must have selected this Lane. If the retained binding is gone, do not substitute a different run. */
+export async function pinnedLaneLanding(
+  ctx: QueryCtx,
+  projectId: Project,
+  laneId: string,
+  attemptId: string,
+) {
+  const key = { projectId, attemptId };
+  const attemptRow = await landingAttemptRow(ctx, key);
+  if (!attemptRow) return null;
+  const row = await landingRow(ctx, { projectId, submissionId: attemptRow.submissionId }, false);
+  if (!row) return null;
+  const state = landingStateFromRow(row);
+  const composeOperationId = state.request.finish?.composeOperationId;
+  const compose = composeOperationId
+    ? { actor: state.actor, operationId: composeOperationId }
+    : await ctx.db
+        .query('projectHostedComposes')
+        .withIndex('by_project_and_candidate', q =>
+          q.eq('projectId', projectId).eq('candidateId', state.request.candidateId),
+        )
+        .unique();
+  const selected =
+    compose &&
+    (await ctx.db
+      .query('projectHostedComposeSelections')
+      .withIndex('by_project_and_actor_and_operation_and_kind_and_key', q =>
+        q
+          .eq('projectId', projectId)
+          .eq('actor', compose.actor)
+          .eq('operationId', compose.operationId)
+          .eq('kind', 'inputs')
+          .eq('key', laneId),
+      )
+      .unique());
+  if (!selected) return null;
+  return { state, row, attempt: await loadLandingAttempt(ctx, key, attemptRow) };
+}
+
 /** The check run summary and failing step of one landing attempt: attempt (1-2), run (1), and only for a
  * failed run that names no test file its job summaries (at most 64). */
 export async function landingRun(
@@ -86,14 +127,16 @@ export async function landingRun(
   projectId: Project,
   row: Doc<'projectHostedLandingRequests'>,
   state: HostedLandingState,
+  pinned?: HostedLandingAttempt,
 ) {
   const attemptKey = { projectId, attemptId: state.attemptId };
-  const live = await landingAttemptRow(ctx, attemptKey);
-  const attempt = row.capsule && !live ? null : await loadLandingAttempt(ctx, attemptKey, live);
+  const live = pinned ? null : await landingAttemptRow(ctx, attemptKey);
+  const attempt = pinned ?? (row.capsule && !live ? null : await loadLandingAttempt(ctx, attemptKey, live));
   const loaded = attempt?.check
     ? await loadHostedCheck(ctx, { projectId, runId: attempt.check.runId })
     : null;
   const summary = loaded ? summarizeCheckRun(loaded.run) : null;
+  if (pinned && pinned.id !== state.attemptId) return { summary, step: null, reDefers: false };
   const step =
     loaded && loaded.run.status === 'failed' ? await checkFailureStep(ctx, projectId, loaded.run) : null;
   // Only a failed run gets re-land advice: a passing or running check reads nothing more.

@@ -19,7 +19,13 @@ export async function landedTiming(ctx: QueryCtx, projectId: Id<'hostedProjects'
   if (!acceptance) return null;
   const request = await landingRow(ctx, { projectId, submissionId: acceptance.submissionId }, false);
   const state = request ? (JSON.parse(request.value) as HostedLandingState) : null;
-  const stops = landingStops(statsLanding(JSON.parse(acceptance.value) as HostedAcceptance, state));
+  return landedTimingOf(JSON.parse(acceptance.value) as HostedAcceptance, state);
+}
+
+/** Same receipt/row calculation in History, without reading either row again. */
+export function landedTimingOf(receipt: HostedAcceptance, state: HostedLandingState | null) {
+  if (!state || !(state.timing?.submittedAt || state.at)) return null;
+  const stops = landingStops(statsLanding(receipt, state));
   const round = (s: number | null) => (s === null ? null : Math.round(s));
   return {
     toMain: round(stops.toMain),

@@ -5,7 +5,7 @@ import type { Doc, Id } from './_generated/dataModel';
 import { acceptancePage, acceptancePlan } from './projectHostedAcceptanceStore';
 import { composeLaneSchema, validateComposePage } from '../src/hosted-compose';
 import { postSystemLaneNote } from './projectBoardSystem';
-import { BOARD_TEXT_CHARS } from '../src/board-text';
+import { BOARD_TEXT_CHARS, boardTextProblem } from '../src/board-text';
 import { approvalPath } from '../src/project-routes';
 import { accountFor } from './urlIdentity';
 
@@ -253,6 +253,11 @@ export async function noteDecision(
   operationId: string,
   reason?: string,
 ) {
+  const before = `The project owner ${status === 'granted' ? 'granted' : 'declined'} the approval request on Lane ${row.laneId.slice(0, 8)}`;
+  const after = status === 'granted' ? ' It can land now.' : ' Address it, then request-approval again.';
+  const detail = reason?.replace(/\s+/g, ' ').trim();
+  const base = `${before}.${after}`;
+  const withReason = detail ? fitNote(`${before}: `, detail, `.${after}`) : base;
   await postSystemLaneNote(ctx, {
     projectId: row.projectId,
     // Deterministic per decision, so a replay returns the first note.
@@ -261,10 +266,6 @@ export async function noteDecision(
     reason: 'approval',
     fromLaneId: row.laneId,
     author: by,
-    text: fitNote(
-      `The project owner ${status === 'granted' ? 'granted' : 'declined'} the approval request on Lane ${row.laneId.slice(0, 8)}${reason ? ': ' : '.'}`,
-      reason ?? '',
-      `${reason ? '.' : ''}${status === 'granted' ? ' It can land now.' : ' Address it, then request-approval again.'}`,
-    ),
+    text: boardTextProblem(withReason) ? base : withReason,
   });
 }

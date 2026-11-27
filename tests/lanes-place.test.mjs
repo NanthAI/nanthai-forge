@@ -651,7 +651,7 @@ function readsFixture() {
     sourceAuthority: { mode: 'server', epoch: 1 },
   });
   /** One accepted landing. `intentId` adds its finish row (the Intent it landed for); `who` overrides the builder. */
-  const accept = (sequence, message, { intentId, who = {} } = {}) => {
+  const accept = (sequence, message, { intentId, who = {}, undo } = {}) => {
     const id = randomUUID();
     const submissionId = randomUUID();
     s.insert('projectHostedAcceptances', {
@@ -666,6 +666,7 @@ function readsFixture() {
         message,
         actor: { id: 'owner', kind: 'agent' },
         automatic: true,
+        ...(undo ? { undo: { kind: 'revert', receiptId: undo === true ? id : undo } } : {}),
         ...who,
       }),
     });
@@ -679,6 +680,7 @@ function readsFixture() {
         wake: null,
         value: JSON.stringify({ source: { intentId } }),
       });
+    return { id, submissionId };
   };
   /** A planned Item: its Issue head with the value inline, as the record store keeps it. */
   const plan = (id, title) =>
@@ -723,6 +725,98 @@ function readsFixture() {
   const set = (actor, args) => s.call('mark', reads.mark, { projectId, ...args }, actor);
   return { s, projectId, accept, plan, intent, list, set };
 }
+
+test('History reads recorded check and time, and offers only writable automatic exact-receipt undo', async () => {
+  const f = readsFixture();
+  const intentId = randomUUID();
+  const laneId = randomUUID();
+  const put = (sequence, check, stamp = {}) => {
+    const { id, submissionId } = f.accept(sequence, `Landing ${sequence}`, {
+      who: { check, ...stamp.fields },
+      undo: stamp.undoId ?? true,
+    });
+    if (!stamp.noTiming)
+      f.s.insert('projectHostedLandingRequests', {
+        projectId: f.projectId,
+        submissionId,
+        intentId,
+        operationId: randomUUID(),
+        attemptId: randomUUID(),
+        channel: 'main',
+        sequence,
+        phase: 'landed',
+        actor: 'owner',
+        runnable: false,
+        runId: null,
+        value: JSON.stringify({
+          at: '2026-11-17T09:00:00.000Z',
+          timing: { committedAt: '2026-11-17T09:02:03.000Z' },
+        }),
+      });
+    if (stamp.reverted)
+      f.s.insert('projectIntentLandingNotes', {
+        projectId: f.projectId,
+        receiptId: id,
+        intentId,
+        itemId: intentId,
+        kind: 'landed',
+        laneIds: [laneId],
+        revertedBy: randomUUID(),
+        actor: 'owner',
+        commit: 'b'.repeat(64),
+        sequence,
+        at: '2026-11-17T09:02:03.000Z',
+      });
+    return id;
+  };
+  const checked = put(4, { runId: randomUUID() });
+  const unchecked = put(3, null, { fields: { automatic: false } });
+  const reverted = put(2, { runId: randomUUID() }, { reverted: true });
+  const unknown = put(1, undefined, { noTiming: true, undoId: randomUUID() });
+  const { rows } = await f.list('owner', 'recent', { evidence: true });
+  assert.deepEqual(
+    rows.map(row => [row.receiptId, row.check, row.toMain, row.canRevert, row.reverted]),
+    [
+      [checked, 'passed', 123, true, false],
+      [unchecked, 'unchecked', 123, false, false],
+      [reverted, 'passed', 123, false, true],
+      [unknown, null, null, false, false],
+    ],
+  );
+  assert.equal(rows[2].laneId, laneId);
+  assert((await f.list('reader', 'recent', { evidence: true })).rows.every(row => !row.canRevert));
+});
+
+test('History does not offer undo again after an independent landing is compensated', async () => {
+  const f = readsFixture();
+  const { id } = f.accept(1, 'Independent landing', { undo: true });
+  const original = async () =>
+    (await f.list('owner', 'recent', { evidence: true })).rows.find(row => row.receiptId === id);
+  assert.equal((await original()).canRevert, true);
+  const reverse = (sequence, phase) =>
+    f.s.insert('projectHostedLandingRequests', {
+      projectId: f.projectId,
+      submissionId: randomUUID(),
+      operationId: randomUUID(),
+      attemptId: randomUUID(),
+      revertOf: id,
+      channel: 'main',
+      sequence,
+      phase,
+      actor: 'owner',
+      runnable: false,
+      runId: null,
+      value: '{}',
+    });
+  reverse(2, 'checking');
+  assert.equal((await original()).canRevert, true, 'a pending reverse is not proof of compensation');
+  reverse(3, 'landed');
+  reverse(4, 'terminal-failed');
+  assert.equal(f.s.tables.projectIntentLandingNotes.size, 0);
+  const reloaded = await original();
+  assert.equal(reloaded.reverted, true);
+  assert.equal(reloaded.canRevert, false);
+});
 
 test('To read keeps read state per account: one reader marking does not clear another', async () => {
   const f = readsFixture();

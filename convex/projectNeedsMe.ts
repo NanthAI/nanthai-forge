@@ -288,6 +288,7 @@ async function reason(
     why,
     note: state?.error?.message ? state.error.message.replace(/\s+/g, ' ').slice(0, NOTE_CHARS) : null,
     submissionId: state?.id ?? null,
+    ...(why === 'check-failed' && state ? { attemptId: state.attemptId } : {}),
     ...(why === 'review' && state && row
       ? {
           attemptId: state.attemptId,

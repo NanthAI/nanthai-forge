@@ -5,6 +5,15 @@
    the design system's (review.css, figures.css, core.css); every value is a token. */
 
 [data-ds] {
+  .lane-sections { display: flex; flex-wrap: wrap; gap: var(--s-1); padding: var(--s-1) var(--gut); border-bottom: var(--rule) solid var(--line); }
+  .lane-sections > [aria-current='page'] { background: var(--surface-3); }
+  .lane-stops.stops { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .lane-stops .lane-ready-short { display: none; }
+  @media (max-width: 600px) {
+    .lane-stops.stops > div { padding-inline: var(--s-1); font-size: var(--t-micro); }
+    .lane-stops .lane-ready-full { display: none; }
+    .lane-stops .lane-ready-short { display: inline; }
+  }
   .lane-p { grid-template-columns: minmax(0, 1fr) 400px; align-items: start; }
   .lane-p > .pane:not(.side) { align-self: stretch; }
   .lane-p > .side { position: sticky; top: var(--stick-top, 0px); }

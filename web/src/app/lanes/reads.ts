@@ -79,6 +79,10 @@ export type Landed = {
   /** The model the agent run declared ('not-declared' or 'unknown' when it did not); null for a person. */
   model: string | null;
   automatic: boolean;
+  check?: 'passed' | 'unchecked' | null;
+  toMain?: number | null;
+  canRevert?: boolean;
+  reverted?: boolean;
   laneId: string | null;
   read: boolean;
 };
@@ -105,6 +109,7 @@ export function useHistoryPages(projectId: Id<'hostedProjects'>, filter: History
   const client = useConvex();
   const args = {
     projectId,
+    evidence: true,
     view: filter.unread ? ('unread' as const) : ('recent' as const),
     ...(filter.by ? { by: filter.by } : {}),
     ...(filter.item ? { item: filter.item } : {}),

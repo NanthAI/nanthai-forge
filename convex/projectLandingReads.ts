@@ -8,12 +8,17 @@
 // (at most HISTORY_PAGE + 1, plus the few read one by one in the unread view; at most HISTORY_SCAN when filtered,
 // since receipts have no actor or Item index) + 3 indexed rows per listed landing (its finish, Lane head and Item
 // head; up to 3 more for the Intent's goal when it is not an Item's first) and, with the Item filter, 1 finish row per
-// scanned receipt. It re-runs when a landing is accepted, the
-// reader marks, or a listed Item changes; never on a clock. mark: 1 read + 1 write, idempotent.
+// scanned receipt. History evidence uses the request and exact landing note instead of the finish and Lane
+// head where retained. Missing links fall back to the older reads, inside the same page limits. The query
+// re-runs on changes to the records it reads, never on a clock. mark: 1 read + 1 write, idempotent.
 import { v } from 'convex/values';
 import { mutation, query } from './cliServer';
 import { accessibleProject, requireDeviceWrite } from './projectAuthority';
-import { projectRole } from './projectRole';
+import { hasWriteRole, projectRole } from './projectRole';
+import { landingRow } from './projectHostedLandingStore';
+import { landedTimingOf } from './projectLaneTiming';
+import type { HostedAcceptance } from '../src/hosted-acceptance';
+import type { HostedLandingState } from '../src/hosted-landing';
 import { finishRow } from './projectHostedFinishWake';
 import { hostedRecordBody, recordHead } from './projectHostedRecords';
 import { LANDING_READ_SET } from './projectLandingReadFields';
@@ -75,7 +80,7 @@ function byMatches(by: string, who: ReturnType<typeof whoOf>) {
   return who.actor === by.slice(0, slash) && who.agentRun === by.slice(slash + 1);
 }
 
-const intentOf = async (
+const legacyIntentOf = async (
   ctx: QueryCtx,
   projectId: Id<'hostedProjects'>,
   row: Doc<'projectHostedAcceptances'>,
@@ -127,9 +132,11 @@ export const list = query({
     item: v.optional(v.string()),
     /** Only landings built by an agent run, or only those a person built (df06081d). */
     kind: v.optional(v.union(v.literal('agent'), v.literal('person'))),
+    /** History needs receipt evidence; the lighter FYI read does not. */
+    evidence: v.optional(v.boolean()),
   },
   returns: v.string(),
-  handler: async (ctx, { projectId, view = 'unread', before, by, item, kind }) => {
+  handler: async (ctx, { projectId, view = 'unread', before, by, item, kind, evidence }) => {
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read what landed.');
@@ -139,7 +146,11 @@ export const list = query({
         'BAD_ARGUMENT',
         'by: a handle or handle/run; item: an Item id.',
       );
-      await accessibleProject(ctx, projectId, user.subject);
+      const project = await accessibleProject(ctx, projectId, user.subject);
+      const canRevert =
+        evidence &&
+        project.sourceAuthority?.mode === 'server' &&
+        (await hasWriteRole(ctx, project, user.subject));
       const state = await readState(ctx, projectId, user.subject);
       const through = state?.through ?? -1;
       const marked = new Set(state?.read ?? []);
@@ -163,11 +174,16 @@ export const list = query({
         if (rows.length === HISTORY_PAGE) break;
         last = row.sequence;
         if (view === 'unread' && isRead(row.sequence)) continue;
-        const receipt = JSON.parse(row.value) as Receipt;
+        const receipt = JSON.parse(row.value) as Receipt &
+          Pick<HostedAcceptance, 'check' | 'checked' | 'undo'>;
         const who = whoOf(receipt);
         if (by && !byMatches(by, who)) continue;
         if (kind && (who.agent ? 'agent' : 'person') !== kind) continue;
-        const intentId = await intentOf(ctx, projectId, row);
+        // Reuse the request row in place of the finish row for modern History: it carries both the
+        // Intent link and recorded submission timing. Retained legacy records can still link via finish.
+        const request = evidence ? await landingRow(ctx, row, false) : null;
+        const intentId =
+          request?.intentId ?? request?.heldIntent ?? (await legacyIntentOf(ctx, projectId, row));
         let selected: Doc<'projectHostedRecordHeads'> | null | undefined;
         if (item) {
           if (!intentId) continue;
@@ -176,14 +192,46 @@ export const list = query({
           selected = intentHeads.get(intentId);
           if (selected?.planningItemId !== item) continue;
         }
-        const lane = intentId
-          ? await ctx.db
-              .query('projectHostedRecordHeads')
-              .withIndex('by_project_and_kind_and_parent', q =>
-                q.eq('projectId', projectId).eq('kind', 'lane').eq('parent', intentId),
-              )
-              .first()
-          : null;
+        const note =
+          intentId && evidence
+            ? await ctx.db
+                .query('projectIntentLandingNotes')
+                .withIndex('by_project_and_receipt_and_intent_and_kind', q =>
+                  q
+                    .eq('projectId', projectId)
+                    .eq('receiptId', row.receiptId)
+                    .eq('intentId', intentId)
+                    .eq('kind', 'landed'),
+                )
+                .unique()
+            : null;
+        const lane =
+          intentId && !note?.laneIds.length
+            ? await ctx.db
+                .query('projectHostedRecordHeads')
+                .withIndex('by_project_and_kind_and_parent', q =>
+                  q.eq('projectId', projectId).eq('kind', 'lane').eq('parent', intentId),
+                )
+                .first()
+            : null;
+        const exactUndo =
+          receipt.automatic === true &&
+          receipt.undo?.kind === 'revert' &&
+          receipt.undo.receiptId === row.receiptId;
+        // The compensation itself proves undo even when the original Intent has no Item.
+        // One indexed probe per displayed exact-undo target, never a scan of failed or pending reverses.
+        const reverted =
+          Boolean(note?.revertedBy) ||
+          (evidence &&
+            exactUndo &&
+            Boolean(
+              await ctx.db
+                .query('projectHostedLandingRequests')
+                .withIndex('by_project_and_revert_and_phase', q =>
+                  q.eq('projectId', projectId).eq('revertOf', row.receiptId).eq('phase', 'landed'),
+                )
+                .first(),
+            ));
         const message = ((await landingMessageText(ctx, projectId, receipt)) ?? '').trim();
         const displayItem = await itemOf(ctx, projectId, intentId);
         rows.push({
@@ -196,8 +244,24 @@ export const list = query({
           goal: displayItem ? null : await goalOf(ctx, projectId, intentId, selected),
           ...who,
           automatic: receipt.automatic === true,
-          laneId: lane?.key ?? null,
+          laneId: note?.laneIds[0] ?? lane?.key ?? null,
           read: isRead(row.sequence),
+          ...(evidence
+            ? {
+                check: receipt.check
+                  ? 'passed'
+                  : receipt.check === null || receipt.checked === false
+                    ? 'unchecked'
+                    : null,
+                toMain:
+                  landedTimingOf(
+                    receipt as HostedAcceptance,
+                    request ? (JSON.parse(request.value) as HostedLandingState) : null,
+                  )?.toMain ?? null,
+                canRevert: Boolean(canRevert && exactUndo && !reverted),
+                reverted,
+              }
+            : {}),
         });
       }
       // Nothing is left when the range ended inside its budget and every row of it was looked at.

@@ -30,7 +30,7 @@ export function decideTarget(row: {
 }
 
 type Selection = { projectId: Id<'hostedProjects'> } & HeldAttempt;
-const approveLanding = makeFunctionReference<'mutation', Selection, string>(
+const approveLanding = makeFunctionReference<'mutation', Selection & { reason?: string }, string>(
   'projectHostedAcceptance:approve',
 );
 const declineLanding = makeFunctionReference<
@@ -62,7 +62,7 @@ export function useProjectDecide(projectId: Id<'hostedProjects'>): Decide {
           ...(input.reason ? { reason: input.reason } : {}),
         })
       : input.decision === 'grant'
-        ? approve(selection!)
+        ? approve({ ...selection!, ...(input.reason ? { reason: input.reason } : {}) })
         : decline({ ...selection!, operationId, ...(input.reason ? { reason: input.reason } : {}) }));
     pending.current.delete(key);
     return reply;

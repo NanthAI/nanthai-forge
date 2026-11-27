@@ -4,8 +4,13 @@
 // overview's Landed today. The first page is read when the page opens (35f62c2c: never behind a fold), and the empty
 // state shows only when that read came back with no rows. Read state is per account (convex/projectLandingReads.ts),
 // so every device and the CLI agree; nothing here holds a landing or counts toward Needs you.
-import { useState, type KeyboardEvent, type ReactNode } from 'react';
-import { Group, Key, Region } from '../../ds';
+import { useMemo, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useConvex } from 'convex/react';
+import { Group, Key, Region, State } from '../../ds';
+import { BrowserLanding } from '../../lane/hosted-landing-client';
+import { landingBrowserIO } from '../../lane/landing-browser-io';
+import { takenOutText, useTakeOut } from '../take-out';
+import { duration } from '../check/check-model';
 import { A } from '../frames';
 import { RecordedWho } from '../RecordedWho';
 import { recordedIdentity, type WhoProject } from '../who-links';
@@ -56,6 +61,10 @@ export function History({ route, projectId, projectName }: LanesProps) {
   const history = useHistoryPages(projectId, filter);
   const { queue } = useQueue(projectId);
   const mark = useMarkRead();
+  const client = useConvex();
+  const landing = useMemo(() => new BrowserLanding(landingBrowserIO(client, projectId)), [client, projectId]);
+  const takeOut = useTakeOut(landing);
+  const [taken, setTaken] = useState<ReadonlySet<string>>(new Set());
   const [done, setDone] = useState<Done>(null);
   const [failed, setFailed] = useState('');
   const run = (args: Mark, words: string, undo?: Mark) => {
@@ -97,22 +106,43 @@ export function History({ route, projectId, projectName }: LanesProps) {
         })
       }
       onMarkAll={newest => run({ projectId, through: newest }, 'Marked everything as read.')}
+      takeOutBusy={takeOut.busy}
+      taken={taken}
+      onTakeOut={async row => {
+        if (takeOut.busy || taken.has(row.receiptId)) return;
+        if (await takeOut.press(row.receiptId, `Take “${titleOf(row)}” out of main`))
+          setTaken(was => new Set(was).add(row.receiptId));
+      }}
       showEarlier={history.showEarlier}
       busy={history.busy}
       earlierFailed={history.earlierFailed}
       status={
-        done ? (
-          <div className="notice" data-st="passed">
-            <p>{done.words}</p>
-            <Key size="sm" onClick={done.undo}>
-              Undo
-            </Key>
-          </div>
-        ) : failed ? (
-          <div className="notice" data-st="failed">
-            <p>{failed}</p>
-          </div>
-        ) : null
+        <>
+          {takeOut.error || takeOut.done ? (
+            <div className="notice" data-st={takeOut.error ? 'failed' : 'passed'}>
+              <p>
+                {takeOut.error ?? takenOutText}{' '}
+                {takeOut.done && !takeOut.error ? (
+                  <A href={hrefFor({ ...route, section: '', rest: `${takeOut.done.laneId}/check` })}>
+                    Follow its check
+                  </A>
+                ) : null}
+              </p>
+            </div>
+          ) : null}
+          {done ? (
+            <div className="notice" data-st="passed">
+              <p>{done.words}</p>
+              <Key size="sm" onClick={done.undo}>
+                Undo
+              </Key>
+            </div>
+          ) : failed ? (
+            <div className="notice" data-st="failed">
+              <p>{failed}</p>
+            </div>
+          ) : null}
+        </>
       }
     />
   );
@@ -131,6 +161,9 @@ export type HistoryViewProps = {
   onFilter: (next: Partial<HistoryFilter>) => void;
   onMark: (read: number[]) => void;
   onMarkAll: (newest: number) => void;
+  takeOutBusy?: boolean;
+  taken?: ReadonlySet<string>;
+  onTakeOut?: (row: Landed) => void;
   showEarlier: () => void;
   busy: boolean;
   earlierFailed: boolean;
@@ -322,6 +355,17 @@ export function HistoryView(props: HistoryViewProps) {
                   laneHref={row.laneId ? props.laneHref(row.laneId) : null}
                   receiptHref={props.receiptHref(row.receiptId)}
                   onMark={props.onMark}
+                  takeOut={
+                    row.canRevert && props.onTakeOut ? (
+                      <Key
+                        size="sm"
+                        disabled={Boolean(props.takeOutBusy || props.taken?.has(row.receiptId))}
+                        onClick={() => props.onTakeOut?.(row)}
+                      >
+                        {props.taken?.has(row.receiptId) ? 'Taking it out of main…' : 'Take it out of main'}
+                      </Key>
+                    ) : null
+                  }
                 />
               ))}
             </Group>
@@ -387,6 +431,7 @@ function HistoryRow({
   laneHref,
   receiptHref,
   onMark,
+  takeOut,
 }: {
   row: Landed;
   project?: WhoProject | undefined;
@@ -397,6 +442,7 @@ function HistoryRow({
   laneHref: string | null;
   receiptHref: string;
   onMark: (read: number[]) => void;
+  takeOut: ReactNode;
 }) {
   const title = titleOf(row);
   const who = whoOf(row);
@@ -445,7 +491,21 @@ function HistoryRow({
               {row.message}
             </p>
           ) : null}
-          <p className="t3">{row.automatic ? 'Landed by project policy.' : 'Accepted by a person.'}</p>
+          <p className="t3">
+            {row.automatic ? 'Landed by project policy.' : 'Accepted by a person.'}
+            {row.reverted ? ' Taken out of main.' : ''}
+          </p>
+          <p className="t2">
+            {row.check === 'passed' ? (
+              <State word="Done">Check passed</State>
+            ) : row.check === 'unchecked' ? (
+              'Not checked'
+            ) : (
+              'Check not reported'
+            )}
+            {' · '}Time to main:{' '}
+            <span className="num">{row.toMain == null ? 'not reported' : duration(row.toMain)}</span>
+          </p>
           <div className="btns">
             <A className="btn sm" href={receiptHref}>
               Receipt
@@ -455,6 +515,7 @@ function HistoryRow({
                 Its Lane
               </A>
             ) : null}
+            {takeOut}
             {row.read ? null : (
               <Key size="sm" kind="ghost" onClick={() => onMark([row.sequence])}>
                 Mark as read

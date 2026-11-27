@@ -26,7 +26,7 @@ import {
   type CheckRead,
 } from './check-model';
 import { useCheckActions } from './use-check-actions';
-import { checkLaneOf } from './route';
+import { CHECK_ATTEMPT, checkAttemptHref, checkLaneOf } from './route';
 import './check.css';
 
 type ProjectRoute = Extract<AppRoute, { frame: 'project' }>;
@@ -44,13 +44,21 @@ export default function CheckScreen({
 }) {
   // check/route.ts serves this screen only where the address names a Lane's check.
   const laneId = checkLaneOf(route) ?? '';
-  const { value, error } = useSafeQuery(api.projectFailureCause.forLane, { projectId, laneId });
+  const attemptId = new URLSearchParams(location.search).get(CHECK_ATTEMPT);
+  const { value, error } = useSafeQuery(api.projectFailureCause.forLane, {
+    projectId,
+    laneId,
+    ...(attemptId === null ? {} : { attemptId }),
+  });
   const read = value ? (JSON.parse(value) as CheckRead) : null;
   const at = (patch: Partial<ProjectRoute>) => hrefFor({ ...route, ...patch });
   const trail = [
     { label: projectName, href: at({ place: 'needs', section: '', rest: '' }) },
     { label: 'Lanes', href: at({ section: '', rest: '' }) },
-    { label: read?.title ?? laneId.slice(0, 8), href: at({ section: '', rest: laneId }) },
+    {
+      label: read?.title ?? laneId.slice(0, 8),
+      href: checkAttemptHref(at({ section: '', rest: laneId }), attemptId),
+    },
     { label: 'Landing check' },
   ];
   if (error)
