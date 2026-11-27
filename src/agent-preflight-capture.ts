@@ -181,13 +181,18 @@ function spawnStreaming(
  * (stdout and stderr, which preflight sent to our stderr) copied through to ours (not held in memory; for a
  * measured run once it ends) and its last TAIL_BYTES returned, so a failed run can say why it failed.
  * `stream.echo: false` keeps a comparison run's output off our stderr; `stream.onText` sees the whole
- * output as text, chunk by chunk (never held whole), so a caller can scan it past the kept tail. */
+ * output as text, chunk by chunk (never held whole), so a caller can scan it past the kept tail.
+ * `echoAfter` lets a caller decide after scanning, then relays the same disk capture in chunks. */
 export function spawnCaptured(
   command: string,
   args: string[],
   options: SpawnSyncOptions,
   measure = true,
-  stream: { echo?: boolean; onText?: (text: string) => void } = {},
+  stream: {
+    echo?: boolean;
+    onText?: (text: string) => void;
+    echoAfter?: (run: ReturnType<typeof spawnStreaming>) => boolean;
+  } = {},
 ) {
   const directory = mkdtempSync(join(tmpdir(), 'forge-preflight-err-'));
   const file = join(directory, 'stderr.txt');
@@ -199,17 +204,19 @@ export function spawnCaptured(
     let truncated = false;
     const decoder = stream.onText ? new StringDecoder('utf8') : undefined;
     const chunk = Buffer.alloc(64 * 1024);
+    const echo = (read: number) => {
+      try {
+        writeSync(2, chunk, 0, read);
+      } catch {
+        /* A closed stderr never fails the run. */
+      }
+    };
     /** Copies whatever the child has written since the last call to our stderr, the scanner and the tail. */
     const drain = () => {
       for (;;) {
         const read = readSync(reader, chunk, 0, chunk.length, null);
         if (!read) break;
-        if (stream.echo !== false)
-          try {
-            writeSync(2, chunk, 0, read);
-          } catch {
-            /* A closed stderr never fails the run. */
-          }
+        if (stream.echo !== false && !stream.echoAfter) echo(read);
         if (decoder) stream.onText!(decoder.write(chunk.subarray(0, read)));
         tail = Buffer.concat([tail, chunk.subarray(0, read)]);
         if (tail.length > TAIL_BYTES * 2) {
@@ -219,14 +226,21 @@ export function spawnCaptured(
       }
     };
     try {
-      // Static checks need diagnostics, not an extra timing process between their timeout and program,
-      // and they print while they run (the Convex guard takes seconds): only tests are measured.
+      // Static checks need diagnostics, without an extra timing process between their timeout and program.
       // Tests are measured too, in their own process group, so a per-file timeout or the end of
       // preflight takes every process they started with them.
       const run = spawnStreaming(command, args, capturedOptions, directory, drain, measure);
       closeSync(fd);
       drain();
       if (decoder) stream.onText!(decoder.end());
+      if (stream.echoAfter?.(run)) {
+        for (let offset = 0; ;) {
+          const read = readSync(reader, chunk, 0, chunk.length, offset);
+          if (!read) break;
+          echo(read);
+          offset += read;
+        }
+      }
       return {
         ...run,
         tail: tail.subarray(Math.max(0, tail.length - TAIL_BYTES)).toString('utf8'),

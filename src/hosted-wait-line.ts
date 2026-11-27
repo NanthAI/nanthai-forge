@@ -28,6 +28,21 @@ const defined = (value: Json): Json =>
  */
 export function waitEventLine(event: unknown): { line: Json; key: string } | undefined {
   const e = obj(event);
+  if (e.type === 'submission-progress') {
+    const line = defined({
+      type: 'submission',
+      operationId: e.operationId,
+      phase: e.phase,
+      state: 'pending',
+      reason: e.reason ?? undefined,
+      error: e.error,
+      waitingFor: e.waitingFor,
+      stall: e.stall,
+      terminal: false,
+      ok: false,
+    });
+    return { line: { ...line, version: e.version }, key: JSON.stringify(line) };
+  }
   if (e.type === 'submission') {
     const submission = obj(e.submission),
       observation = obj(submission.observation),

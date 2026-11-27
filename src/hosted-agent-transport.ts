@@ -99,7 +99,6 @@ import { savedDuration } from './hosted-save-pending.js';
 import { preflightResult } from './hosted-land-gates.js';
 import type { LandGateEntry } from './hosted-land-gates.js';
 import { liveLanding, ownsLiveLanding } from './landing-freeze.js';
-import { rememberLandingPaths } from './preflight-learned.js';
 import { hostedLaneDirty, inspectUnsavedLane } from './hosted-lane-dirty.js';
 import { deltaApplyPending, finishPendingCheckoutDelta } from './hosted-checkout-delta-pending.js';
 import { agentDefaultLines, type EffectiveAgentDefaults } from './agent-parallel-defaults.js';
@@ -608,16 +607,17 @@ export class HostedAgentTransport {
         throw hostedActionError(error, 'Intent set-aside');
       }
     }
-    if (requestedAction === 'diff')
+    if (requestedAction === 'diff') {
       return {
         schema: 1,
         transport: 'hosted',
         action: 'diff',
         operationId: null,
         resolved: null,
-        ...(await diffHostedSource(this, input)),
+        ...(await diffHostedSource(this, input, signal)),
         ...this.unsavedDiffNotice(input),
       };
+    }
     if (requestedAction === 'landings')
       return {
         schema: 1,
@@ -1762,7 +1762,9 @@ export class HostedAgentTransport {
         waitUntil: this.waitUntil ?? dispatchedAt + AGENT_WAIT_SECONDS * 1000,
         landWhenRoom: this.serverFeatures?.includes('land-when-room') ?? false,
         ...(signal ? { signal } : {}),
-        pathNotice: this.protectedPaths.bind(this),
+        pathNotice: paths => {
+          if (paths) this.protectedPaths(paths);
+        },
         saveNotice: async capture => {
           if (!this.protectedPolicy) return;
           const files = new Map(capture.marker.state.files.map(file => [file.path, file]));
@@ -1771,10 +1773,10 @@ export class HostedAgentTransport {
               files.set(change.path, { path: change.path, blob: change.after.blob, mode: change.after.mode });
             else files.delete(change.path);
           }
-          await this.protectedNotice({
-            ...capture.marker,
-            state: { ...capture.marker.state, files: [...files.values()] },
-          });
+          await this.protectedNotice(
+            { ...capture.marker, state: { ...capture.marker.state, files: [...files.values()] } },
+            capture.changes.map(change => change.path),
+          );
         },
         finishGates: async (
           laneId: string,
@@ -1784,12 +1786,13 @@ export class HostedAgentTransport {
           early?: Parameters<NonNullable<HostedAgentSession['finishGates']>>[4],
           beforePreflight?: Parameters<NonNullable<HostedAgentSession['finishGates']>>[5],
         ) => {
-          await this.protectedNotice(readHostedLaneCheckout(root));
-          const read = await this.overlapAdvice(laneId, capabilities.agentDefaults?.preflight !== 'off');
-          const selected = readHostedLaneCheckout(root)?.selection;
+          const preflight = capabilities.agentDefaults?.preflight !== 'off';
+          const read = await this.overlapAdvice(laneId, preflight || !!this.protectedPolicy);
+          const checkout = readHostedLaneCheckout(root);
+          const selected = checkout?.selection;
           const changeBase = selected ? laneChangeBase(root, selected) : undefined;
           const advice: typeof read & { changedPaths?: SavedChangedPaths | undefined } =
-            capabilities.agentDefaults?.preflight !== 'off' && selected?.laneId === laneId
+            preflight && selected?.laneId === laneId
               ? {
                   ...read,
                   changedPaths: await savedChangedPaths(
@@ -1802,9 +1805,12 @@ export class HostedAgentTransport {
               : read;
           const main = advice.changedPaths?.mainHead ?? advice.behindMain.head ?? this.knownMain;
           if (advice.changedPaths?.complete) this.protectedPaths(advice.changedPaths.paths);
+          else await this.protectedNotice(checkout);
           // The paths this landing carries, so its check failure can teach the next preflight.
-          if (advice.changedPaths?.complete) rememberLandingPaths(root, laneId, advice.changedPaths.paths);
-          const checkout = readHostedLaneCheckout(root);
+          if (advice.changedPaths?.complete) {
+            const { rememberLandingPaths } = await import('./preflight-learned.js');
+            rememberLandingPaths(root, laneId, advice.changedPaths.paths);
+          }
           const hostedChecks =
             capabilities.agentDefaults?.preflight !== 'off' &&
             checkout?.selection.laneId === laneId &&
@@ -1822,6 +1828,11 @@ export class HostedAgentTransport {
           await early?.({
             queueProof: hostedChecks?.queueProof,
             dirty: thisCheckout && hostedLaneDirty(root, { refresh: true, selection: { laneId, head } }),
+            savedHead: read.savedHead ?? read.overlaps?.head,
+            recovering: Boolean(read.recovery),
+            ...((read.savedHead ?? read.overlaps?.head) === head && read.behindMain.baseHead === changeBase
+              ? { overlap: read.behindMain }
+              : {}),
           });
           // The gates read the preflight planner and the test-selection graph; only a finish loads them.
           const { finishGates } = await import('./agent-default-gates.js');
@@ -2429,10 +2440,20 @@ export class HostedAgentTransport {
       return undefined;
     }
   }
-  private async protectedNotice(marker: ReturnType<typeof readHostedLaneCheckout>) {
+  private async protectedNotice(marker: ReturnType<typeof readHostedLaneCheckout>, capturedPaths?: string[]) {
     if (!marker || !this.protectedPolicy) return;
     const notice = checkoutProtectedPathNotice(this.root, marker, this.protectedPolicy, this.knownMain);
-    this.reportProtectedNotice(notice);
+    if (notice?.coverage !== 'unavailable') this.reportProtectedNotice(notice);
+    else if (capturedPaths)
+      this.reportProtectedNotice(
+        mainFilteredNotice(
+          this.root,
+          this.protectedPolicy,
+          capturedPaths,
+          marker.state.files,
+          this.knownMain,
+        ),
+      );
   }
   private protectedPaths(paths: string[] | null) {
     if (!this.protectedPolicy) return;
@@ -2667,7 +2688,6 @@ export class HostedAgentTransport {
         laneId,
         'Run preflight with the Lane folder printed by start as ROOT (not the project folder): it tests the saved files there.',
       );
-    await this.protectedNotice(marker);
     const { preflightPlan, readPreflightReceipt, runPreflight, withPreflightSlot } =
       await import('./agent-preflight.js');
     // retry reruns what the last run left: the files it stopped for time, else the test files it
@@ -2695,7 +2715,8 @@ export class HostedAgentTransport {
       `The last preflight of this saved head stopped no file for time and left no failed test files to rerun alone; run preflight without "retry": ${hostedRecoveryCommand(root, 'preflight', { laneId })}.`,
     );
     const advice = await readHostedOverlapAdvice(this, laneId, true);
-    if (command.run && advice.overlaps?.head && advice.overlaps.head !== marker.selection.head) {
+    const savedHead = advice.savedHead ?? advice.overlaps?.head;
+    if (command.run && savedHead && savedHead !== marker.selection.head) {
       const parameters = { message: 'Bring the Lane binding up to date' };
       const command = hostedRecoveryCommand(root, 'save', parameters);
       throw new ForgeError(
@@ -2720,10 +2741,13 @@ export class HostedAgentTransport {
         root,
         marker,
         changed?.mainHead ?? advice.behindMain.head ?? this.knownMain,
+        advice.behindMain,
+        Boolean(advice.recovery || (command.retry && last?.outcome === 'failed')),
       );
       if (stale) throw stale;
     }
     if (changed?.complete) this.protectedPaths(changed.paths);
+    else await this.protectedNotice(marker);
     const hostedChecks = await this.preflightHostedChecks(root, marker, base, changed);
     if (hostedChecks?.queueProof)
       process.stderr.write(
@@ -3255,6 +3279,9 @@ export type HostedAgentSession = {
     early?: (found: {
       queueProof?: import('./hosted-agent-finish.js').QueueProofPreview | undefined;
       dirty?: boolean;
+      overlap?: Parameters<typeof preflightBaseRefusal>[3];
+      recovering?: boolean;
+      savedHead?: string | undefined;
     }) => Promise<void>,
     /** Called before local preflight runs or a stored result is used. */
     beforePreflight?: (main: string | undefined) => void,

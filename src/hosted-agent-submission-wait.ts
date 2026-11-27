@@ -721,8 +721,14 @@ async function observeHostedSubmissionsOnce(
                 // The feed already carries the current pending phase. Keep it separate from the
                 // drained submission: it has no Candidate, advice, terminal receipt or replay cursor.
                 const { pending, phase, version, submissionId } = observed;
-                if (pending && version > (noted.progress.get(submissionId)?.version ?? -1))
-                  noted.progress.set(submissionId, {
+                const baseline = current.get(selected[0]!)!;
+                const lastProgress = noted.progress.get(submissionId);
+                const prior =
+                  lastProgress && lastProgress.version >= baseline.submission.version
+                    ? lastProgress
+                    : undefined;
+                if (pending && version >= (prior?.version ?? baseline.submission.version)) {
+                  const progress: PendingProgress = {
                     attemptId: pending.attemptId,
                     version,
                     phase,
@@ -734,7 +740,36 @@ async function observeHostedSubmissionsOnce(
                     ...(pending.lastProgressAt ? { lastProgressAt: pending.lastProgressAt } : {}),
                     ...(pending.holdCode ? { error: { code: pending.holdCode } } : {}),
                     ...(pending.orderWait ? { orderWait: { submissionId: pending.orderWait } } : {}),
-                  });
+                  };
+                  noted.progress.set(submissionId, progress);
+                  // A rider update is presentation only. The canonical observation still owns
+                  // the resume cursor, attempt pins, terminal outcome and full hold details.
+                  const line = {
+                    type: 'submission-progress',
+                    operationId: selected[0]!,
+                    version,
+                    phase,
+                    reason: pending.reason,
+                    error: pending.holdCode,
+                    waitingFor: pending.orderWait,
+                    stall: pending.stall?.message,
+                  };
+                  const old = prior ?? baseline.submission;
+                  const oldWait = (prior ? prior.orderWait : baseline.orderWait) as
+                    | { submissionId?: string }
+                    | undefined;
+                  if (
+                    line.phase !== old.phase ||
+                    line.reason !== old.observation.pendingReason ||
+                    line.error !==
+                      (old.error?.code === 'MAIN_RED' || old.error?.code === 'CI_DOWN'
+                        ? old.error.code
+                        : undefined) ||
+                    line.waitingFor !== oldWait?.submissionId ||
+                    line.stall !== old.observation.stall?.message
+                  )
+                    emit(line);
+                }
                 if (!observed.needsSync && !['landed', 'terminal-failed'].includes(observed.phase)) continue;
                 const key = `${observed.phase}:${observed.version}:${observed.needsSync}`;
                 for (const operation of selected) {

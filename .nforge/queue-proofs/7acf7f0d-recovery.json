@@ -1,0 +1,248 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectBoardPeerLanding.ts": "169f88699211659a7f586500a56e8ab34e589ca33afd4d74777437f59331df0a",
+    "convex/projectHostedOverlaps.ts": "221070f477ec4a64be36dc99c54e09fbbaa08a39d53d4567591f1d520f20b1b9"
+  },
+  "replay": {
+    "incident": "7acf7f0d",
+    "test": "behind-main preflight recovers from the hosted Lane’s latest check failure or composition conflict after a new save",
+    "receipt": "eca8a0ba-9758-4ad7-b829-69219f3c982f"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "thread:delegated-task:command%3Amcp%3A628d128b-7d76-4542-92fb-a2a9130503a6%3Adelegate-task%3Ae9086a49-a686-4fbd-bc37-f9357d7f6e60",
+  "review": {
+    "model": "gemini-4-neon",
+    "session": "thread:delegated-task:command%3Amcp%3Acb3d93f2-109b-48a9-8d1d-d88e8c4cd086%3Adelegate-task%3A2fc58618-696b-44c5-b5ce-8b063f26cce8",
+    "receipt": "f0a8f261-bd05-4ac3-9f39-562e0063c929"
+  },
+  "exercised": {
+    "convex/projectBoardPeerLanding.ts": {
+      "executed": [
+        "lanePreflightRecovery",
+        "latestCandidateLanding",
+        "latestLaneCompose"
+      ],
+      "digest": "4186af24486a612101a71eb056f5c6f88dec81aa6081ec76c4138451477633bc",
+      "units": [
+        [
+          "composeCandidate",
+          "443f6c4783030b9ed45d387e4fa8f0269a53c130606c2e03e87c94eea56744b6"
+        ],
+        [
+          "composeRow",
+          "6d1690ca7576a44d53b47bba902f7bdff2078a397da53ffdaebea4a436702a1c"
+        ],
+        [
+          "landingRequestOriginalDb",
+          "a9f19a52539d45d17b75d712dc87fa83e2a23ad236ca667fa42a0df42959f07c"
+        ],
+        [
+          "lanePreflightRecovery",
+          "a0396ea0e50ad091addbddc8f11cbf8dbea9de742d1716f32fef5ef85e9167c8"
+        ],
+        [
+          "latestCandidateLanding",
+          "251e6736a567f6e85cedb1cac887d46619011b7dbd7c18a3a884e64582ed866e"
+        ],
+        [
+          "latestLaneCompose",
+          "30194af1f17db85411b1360d28179d395f39e662a63ba87a3cb8d87764ee819f"
+        ],
+        [
+          "peerLatestLanding",
+          "1e369ed33043e0a0c9c1ef91c136985551965f0117a8bb3305e028e193a17ba1"
+        ],
+        [
+          "recoveryCompose",
+          "e841119506844e25b9911158d5e658e21bf73b012be1f0f81d8dc64799f25de1"
+        ],
+        [
+          "settledLanding",
+          "5ae869b9141480807282f52f41cae54f4e9215d105b70f5df0cd68015a582f63"
+        ],
+        [
+          "z",
+          "0be8b14a719fbad954f3dc9bb19b1716bed3a588afba2e97f0a99e168ee0a700"
+        ]
+      ],
+      "shell": "b9932c4406ef8f9a99076a095dc8d5e8f22b35ac6ec6fee4e600a61748adf757"
+    },
+    "convex/projectHostedOverlaps.ts": {
+      "executed": [
+        "dormantHeadsComplete",
+        "read",
+        "savedPaths"
+      ],
+      "digest": "71a8d7df9bd6e14411ded3966a3db1f07f8c2ff60e963f4e379fe92b5de07c3b",
+      "units": [
+        [
+          "IDLE_NOTICE_MS",
+          "a2becfe45406f03bad4e3d24935a6500d77699dea8d7126466b5a6fd19472979"
+        ],
+        [
+          "RETIRED_OVERLAPS",
+          "7e7851b37a2ec647371aed2c25cdd72f31e05255c144f49a441b73a5feb6f2a2"
+        ],
+        [
+          "SCOPE_PATHS",
+          "55af2eeeb05589bd6aa8b3700c5a4e02cb0ff5928daecdd9943fe664de355e47"
+        ],
+        [
+          "SCOPE_PATH_CHARS",
+          "7b5369fd2d1f78458737b3dc935e43dee44905d3f1a9d92b1055480e33d25e04"
+        ],
+        [
+          "accessibleProject",
+          "50a4d4f1047573513f361192189b40078a2daa64c945e440ac80ed1a45c7d270"
+        ],
+        [
+          "activeProject",
+          "d18cc6b641cd45a0e474d0afe7700101c46cef8057b70e172637d1e1d30d2be9"
+        ],
+        [
+          "boardDelivery",
+          "6e079b97c44786ff2bc9a7783e969c554a6ce394e3256a55eda92bc49957f63a"
+        ],
+        [
+          "dormantCutoff",
+          "296ec804589946459afa695c6bb59a534dd449afa9b13d16905a842244c33162"
+        ],
+        [
+          "dormantHeadsComplete",
+          "0c29edd9dbff7dcd4085eb7053470067b91cbff65d7c70067fd53980ab75964c"
+        ],
+        [
+          "dormantHostedPresence",
+          "46da94202616bd87acc2b5830078507b611d48c6627d4f19a0ed471d9302b509"
+        ],
+        [
+          "effectivePolicy",
+          "3cdc0ff32407b7603d7a90387ef5e3b5e63f8a4336f55bfdf7f1dac19863e36e"
+        ],
+        [
+          "hasSymbolFacts",
+          "aa489acaf47bac9314c465d18b2d1b46c41cd9ad0b42201535d9a67eb10c0922"
+        ],
+        [
+          "hasWriteRole",
+          "5b8d0c0f15dd72bb7b2511088443f66af002a4c0e145a635ea1889dc97f13320"
+        ],
+        [
+          "hostedLaneSchema",
+          "3ae272c97f1db7904a3d8c6e5bcca5843553b538502a2884c781a0ab8ab1a561"
+        ],
+        [
+          "hostedOverlapAdvice",
+          "d081289116e84b6766d5b8cbcb4985a6280d66fe427a65a042424a67ca0e92d5"
+        ],
+        [
+          "hostedStartMain",
+          "b363e9608e562023c7b2963703c2aa02c302faf29032c2afe9c22405b82e1a0a"
+        ],
+        [
+          "invariant",
+          "a25036d770aae805d10bdb41ade261044ed7f7ba6fbbf3ccd57a32c56a3d4c20"
+        ],
+        [
+          "landingRequestOriginalDb",
+          "a9f19a52539d45d17b75d712dc87fa83e2a23ad236ca667fa42a0df42959f07c"
+        ],
+        [
+          "laneConflicts",
+          "1f19d235087816f722168c7b3d1885176d9871c5ee304e9708bb41658e8f7e2b"
+        ],
+        [
+          "lanePreflightRecovery",
+          "58c02ee60df1bd4480efe525b7d125bf38eec8b0897842ad8e39bb6cd5d81c5e"
+        ],
+        [
+          "liveOpenOverlapLanes",
+          "83d3f88608bb3431ede4c01d1a8bfb7076246191dfda52835739929fc2c26fe0"
+        ],
+        [
+          "logIoAttribution",
+          "ff3c6d23c40a163650d6b895110d9a95359ab0b869676941faf00b3f281966f7"
+        ],
+        [
+          "overlapLaneChanges",
+          "628849fc7edecaaa3be28705c4d3bc3f1f390388de35d1cf4b9d52caae64039e"
+        ],
+        [
+          "overlapLaneEntries",
+          "951308437547f9fa44c1a0d0145afea24f285d0513969cbd2eca365d15aeb40d"
+        ],
+        [
+          "overlapMainFor",
+          "9000442e28fd3c383e97b5119ff94eadf05ef257c6bf941955983ddb17bc877a"
+        ],
+        [
+          "peerLandings",
+          "baedf42980eabfee118f82bf37496f020dd9704eaf43852eea2d66b5643037a2"
+        ],
+        [
+          "presenceMayShare",
+          "1f6aaf27288344bd470385be52ed8783af77c3ce41e43cdc0c8cfcbdefd3b65f"
+        ],
+        [
+          "query",
+          "b72499cc9795ae8f2c36d2a63bb565781633a55213e2c3ac3d4ddebbfc182a68"
+        ],
+        [
+          "read",
+          "2f868b377256c949a2b073f1b3e8b60d57b35348519a55bd8c0315b1f3936920"
+        ],
+        [
+          "readHostedPresence",
+          "bb326d650f5ad5c10c59e9cde88ad0e755a915b7eb350d99f2c3e79b9a1658e0"
+        ],
+        [
+          "readHostedRecord",
+          "f8ebe857e46255798f036f3db0acb78682a740661afb1147e12c1163e7ad5ee2"
+        ],
+        [
+          "report",
+          "11f51c908ed7b15c3270a2410f7282cdb9c431b81d35e62cdff8695c9d306e0b"
+        ],
+        [
+          "safeRelative",
+          "a564119d8a416b43910c54979b452ee8cfab1843cdd094be7f95c5df74f02d8e"
+        ],
+        [
+          "sameResolution",
+          "ac032c58b8f6bea8c44a50d6d8cd9080f36cf2afa543ef5fc753ef68a66e1108"
+        ],
+        [
+          "sameStack",
+          "51e51cb37ae1feb072b4e7932edf5994d6a1b221de874a5f1ad45888179ab788"
+        ],
+        [
+          "savedPaths",
+          "ec81d7ac050144f511e0b51c579102ce45329aa644902829bc1b3b35c90f4874"
+        ],
+        [
+          "stackOffer",
+          "e64e86eddea171aa44a9e5828e6f30c2609127d285a03721d9e79c4e334ec7ec"
+        ],
+        [
+          "stackRestackHint",
+          "1e0b1f4be74b688c11f4380583769594929c6f5273c806a4b205c7ae2505d48b"
+        ],
+        [
+          "stackingMode",
+          "70686b752ee785e461dbe016e850530f616a1599a06d1cf61312bfbb43bd4ad5"
+        ],
+        [
+          "supersededSummary",
+          "425a47b806e535ec455e60bced5e81f8fa879da98af35b6d71f634ddb539d971"
+        ],
+        [
+          "v",
+          "c9b23930c9b094848cdb5f563a16f0a2f497fc28d7ea9a82afca6bc52741e95f"
+        ]
+      ],
+      "shell": "3430c8bb35b62e9dbac2e52d753979d00c0419f4c3108812accf1733ec503456"
+    }
+  }
+}

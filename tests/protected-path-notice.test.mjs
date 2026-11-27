@@ -3,7 +3,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { getFunctionName } from 'convex/server';
 import { join } from 'node:path';
 import { policyPreset } from '../dist/autonomy-policy.js';
 import { digest } from '../dist/hash.js';
@@ -120,6 +121,34 @@ test('direct preflight and land without prior explicit save both explain approva
     .transport()
     .dispatch('finish', { operationId: randomUUID(), message: 'Land protected edit', accept: true });
   assert.deepEqual(land.result.protectedPathNotice.paths, ['.github/workflows/check.yml']);
+});
+
+test('a preflight-off cold-base landing warns from its hosted saved paths', async t => {
+  const s = await fixture(t);
+  rmSync(join(clientCacheRoot(s.root), 'objects', s.main.head));
+  const query = s.exchange.client.query;
+  s.exchange.client.query = (ref, args) =>
+    getFunctionName(ref) === 'projectHostedOverlaps:read'
+      ? Promise.resolve(
+          JSON.stringify({
+            behindMain: { head: s.main.head, commits: 0, conflictingPaths: [], more: 0, coverage: 'hosted' },
+            ...(args.paths
+              ? { changedPaths: { paths: ['.github/workflows/check.yml'], complete: true } }
+              : {}),
+          }),
+        )
+      : query(ref, args);
+  const out = [];
+  t.mock.method(process.stderr, 'write', line => {
+    out.push(String(line));
+    return true;
+  });
+  const land = await s
+    .transport()
+    .dispatch('finish', { operationId: randomUUID(), message: 'Protected edit' });
+  assert.deepEqual(land.result.protectedPathNotice?.paths, ['.github/workflows/check.yml']);
+  assert.match(out.join(''), /The owner must approve this landing/);
+  assert.doesNotMatch(out.join(''), /Protected-path coverage is unavailable/);
 });
 
 test('ad80e037: a protected file whose saved bytes equal main (merged in by a sync, or reverted) needs no approval notice, with no added call', async t => {

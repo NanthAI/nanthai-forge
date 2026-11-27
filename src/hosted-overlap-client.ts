@@ -25,6 +25,8 @@ const advice = z.object({
   }),
   /** The Lane's saved base-to-head paths, when asked (paths:true) and current. */
   changedPaths: z.object({ paths: z.array(z.string()), complete: z.boolean() }).optional(),
+  savedHead: z.string().optional(),
+  recovery: z.enum(['CHECK_FAILED', 'COMPOSITION_CONFLICT']).optional(),
   /** Related open Lanes, when asked (presence, capability presenceVersion) by a write member. */
   presence: presenceSchema.optional(),
   /** Board notes since the client's cursor, when asked (board:{after}) and any arrived. */

@@ -3,12 +3,18 @@
 Inline preflight in `land --save` checks the saved Lane. Standalone preflight
 also uses the saved Lane, but can test edits made while waiting for a local slot.
 Such a run reports `workingTree:true` and leaves the saved Lane's receipt alone.
-If an ordinary Lane has yet to incorporate current main, both commands stop
-before running tests or using a saved preflight result and print the Lane's
-exact `save --sync` command. Run it, follow any conflict
-resolution it reports, then rerun preflight or land. Landing rechecks its main
-pin when preparing composition, so a pass on the earlier source cannot be
-submitted against a new base. Plan-only preflight can still preview the saved files.
+An ordinary Lane can run local preflight while disjoint from newer main. Forge
+composes onto current main and checks the exact Candidate. If main has changed
+paths the Lane also changes, or a landing is recovering from a check failure or
+composition conflict, Forge stops before using stale local preflight evidence
+and prints the exact `save --sync` command. A checkout whose saved head disagrees
+with the hosted Lane still gets the command to update its binding. Plan-only
+preflight can still preview the saved files.
+Recovery is read from the Lane's hosted history, including after a new save or
+from a different checkout. When main moves during preflight, landing refreshes
+the saved-path comparison once against the main selected for composition.
+If that observation is incomplete, the hosted composition and Candidate check
+still judge the result.
 Standalone preflight on a sync resolution uses the main that was merged into its
 draft. The landing checks against the main it selects for composition.
 

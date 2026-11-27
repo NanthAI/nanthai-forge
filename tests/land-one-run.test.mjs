@@ -78,11 +78,12 @@ test('Item 168e4ed8: a dirty Lane and stale pins are reported together in one pa
   quiet(t);
   s.lane.version++;
   const transport = s.transport();
-  // An edit lands in the folder after the land's save check, before its gates.
-  const notice = transport.protectedNotice.bind(transport);
-  transport.protectedNotice = async (...args) => {
-    writeFileSync(join(s.root, 'README.md'), 'Edited during land\n');
-    return notice(...args);
+  // An edit lands in the folder while the landing reads its saved paths, before the gates.
+  const query = s.exchange.client.query;
+  s.exchange.client.query = (ref, args) => {
+    if (getFunctionName(ref) === 'projectHostedOverlaps:read')
+      writeFileSync(join(s.root, 'README.md'), 'Edited during land\n');
+    return query(ref, args);
   };
   const from = s.calls.length;
   await assert.rejects(

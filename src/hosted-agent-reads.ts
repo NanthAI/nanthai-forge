@@ -31,6 +31,7 @@ import { liveLanesInput } from './hosted-live-lanes.js';
 import { hostedBoardSchemas } from './hosted-board.js';
 import { hostedConversationSchemas } from './coordination-types.js';
 import { shellQuote } from './shell-quote.js';
+import { backgroundSave } from './hosted-save-pending.js';
 const hash = z.string().regex(/^[0-9a-f]{64}$/);
 export const hostedPeersSchema = z
   .object({
@@ -270,7 +271,11 @@ function diffMore(
   };
 }
 /** Immutable manifests and selected blobs live in R2, never in a Convex response. */
-export async function diffHostedSource(transport: HostedAgentTransport, input: unknown) {
+export async function diffHostedSource(
+  transport: HostedAgentTransport,
+  input: unknown,
+  signal?: AbortSignal,
+) {
   const parsed = hostedDiffSchema.safeParse(input);
   invariant(parsed.success, 'BAD_ARGUMENT', 'Invalid hosted diff parameters. Use diff --help.');
   const command = parsed.data;
@@ -279,6 +284,13 @@ export async function diffHostedSource(transport: HostedAgentTransport, input: u
     'BAD_ARGUMENT',
     'summary:true returns path standings without hunks; drop summary or format:"unified".',
   );
+  if (!command.cursor) {
+    const pending = backgroundSave(transport.root);
+    if (pending && (!command.laneId || command.laneId === pending.laneId)) {
+      const { settleDiffSave } = await import('./hosted-agent-wait-local.js');
+      await settleDiffSave(transport, pending.command, signal);
+    }
+  }
   let checkout = command.laneId ? undefined : readHostedLaneCheckout(transport.root);
   const lane = await selectHostedSource(transport, { laneId: command.laneId }, checkout);
   const cursor = command.cursor;

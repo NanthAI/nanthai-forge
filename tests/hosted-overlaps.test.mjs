@@ -106,6 +106,68 @@ const trackChange = (s, lane, paths = [delta('a.txt')], intent = 'My change', ba
     {},
   );
 
+test('behind-main preflight recovers from the hosted Lane’s latest check failure or composition conflict after a new save', async t => {
+  const { s, lane, channel, main } = await setup(t);
+  const projectId = s.projectId;
+  const candidateId = randomUUID();
+  const operationId = randomUUID();
+  s.insert('projectHostedComposeSelections', {
+    projectId,
+    actor: 'owner',
+    operationId,
+    kind: 'inputs',
+    key: lane.id,
+  });
+  const compose = { candidateId, request: { expectedMain: { receiptId: main.receipt.id } } };
+  const composeId = s.insert('projectHostedComposes', {
+    projectId,
+    actor: 'owner',
+    operationId,
+    jobId: randomUUID(),
+    value: JSON.stringify(compose),
+  });
+  const attempt = error => JSON.stringify({ at: lane.at, error });
+  // Only these indexed fields and the terminal evidence are read by preflight.
+  const request = 'recovery-request';
+  s.tables.projectHostedLandingRequests ??= new Map();
+  s.tables.projectHostedLandingRequests.set(request, {
+    _id: request,
+    _creationTime: Date.parse(lane.at),
+    projectId,
+    candidateId,
+    sequence: 1,
+    phase: 'terminal-failed',
+    value: attempt({ code: 'CHECK_FAILED' }),
+  });
+  const read = () =>
+    s
+      .transaction('preflight-advice', overlaps.read, { projectId, laneId: lane.id, paths: true })
+      .then(JSON.parse);
+  assert.equal((await read()).recovery, undefined, 'current main needs no recovery advice');
+  s.patch('projectHostedChannels', channel, {
+    selection: JSON.stringify({
+      ...main,
+      sourceRevision: 1,
+      head: 'f'.repeat(64),
+      receipt: { ...main.receipt, id: 'new-main' },
+    }),
+  });
+  await trackChange(s, lane);
+  const saved = await read();
+  assert.notEqual(saved.savedHead, lane.head);
+  assert.equal(saved.recovery, 'CHECK_FAILED');
+  s.tables.projectHostedLandingRequests.get(request).value = attempt({ code: 'LANDING_CANCELLED' });
+  assert.equal((await read()).recovery, undefined, 'cancellation does not require recovery against main');
+  s.tables.projectHostedLandingRequests.delete(request);
+  s.patch('projectHostedComposes', composeId, {
+    value: JSON.stringify({
+      ...compose,
+      conflictSummary: { paths: ['a.txt'], more: 0 },
+    }),
+  });
+  assert.equal((await read()).recovery, 'COMPOSITION_CONFLICT', 'compose conflict can precede admission');
+});
+
 test('70b38346: the real overlap validator and save-advice path carry laneAfter and deliver the unread note', async t => {
   const { s, lane, exchange, transport } = await setup(t);
   const client = transport(lane);

@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { spawnSync } from 'node:child_process';
-import {
+import fs, {
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -12,6 +12,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runStaticChecks } from '../dist/agent-preflight-static.js';
@@ -113,6 +114,41 @@ test('an inferred (undeclared) check advises on failure; a declared one still re
     'unjudged',
   );
   assert.equal(runStaticChecks(dir, [node('x', fail)], process.env, 10_000)[0].outcome, 'failed');
+});
+
+test('a conventional formatter failure on Forge metadata reports just the advisory', t => {
+  const written = [];
+  const write = fs.writeSync;
+  t.mock.method(fs, 'writeSync', (fd, bytes, ...args) => {
+    if (fd === 2) written.push(String(bytes.subarray(args[0], args[0] + args[1])));
+    return write(fd, bytes, ...args);
+  });
+  syncBuiltinESMExports();
+  t.after(() => {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  });
+  const dir = temp(t);
+  mkdirSync(join(dir, '.forge'));
+  writeFileSync(join(dir, '.forge', 'hosted-lane.json'), '{}');
+  writeFileSync(join(dir, 'changed.ts'), 'export {};');
+  const [result] = runStaticChecks(
+    dir,
+    [
+      node(
+        'format:check',
+        "console.error('.forge/hosted-lane.json: raw formatter details'); process.exit(1);",
+        { source: 'conventional' },
+      ),
+    ],
+    process.env,
+    10_000,
+    { changed: ['changed.ts'] },
+  );
+  assert.equal(result.outcome, 'forge-metadata');
+  assert.equal(result.excerpt, undefined);
+  assert.deepEqual(result.files, ['.forge/hosted-lane.json']);
+  assert.doesNotMatch(written.join(''), /raw formatter details/);
 });
 
 test('a long static command prints while it runs, keeps its tail, and a timeout stops it', t => {

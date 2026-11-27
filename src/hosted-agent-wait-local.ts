@@ -25,6 +25,7 @@ import { sourceWaitSnapshot } from './hosted-agent-source-wait.js';
 import { observeHostedRevert } from './hosted-revert-wait.js';
 import { hostedRecoveryCommand } from './hosted-agent-resolution.js';
 import { BeganAtOlderEpoch } from './hosted-main-pin.js';
+import { operationWait } from './agent-operation-wait.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import { readHostedOverlapAdvice } from './hosted-overlap-client.js';
 import { restackAfterSave } from './hosted-stack-restack.js';
@@ -108,6 +109,50 @@ export function acknowledgedBackgroundSave(root: string, operationId: string): b
     checkoutPathExists(join(directory, 'acknowledged')) &&
     (checkoutPathExists(join(directory, backgroundSaveName)) ||
       checkoutPathExists(join(directory, settledBackgroundSaveName)))
+  );
+}
+
+/** A fresh diff can follow an acknowledged save briefly. A save with unknown
+ * registration or a retryable worker keeps its exact original replay. */
+export async function settleDiffSave(
+  transport: HostedAgentTransport,
+  command: { operationId: string; message: string },
+  signal?: AbortSignal,
+) {
+  const { operationId } = command;
+  const { root } = transport;
+  const replay = (error?: { code?: string; message?: string }) => {
+    const retained = retainedHostedOperation(root, operationId);
+    const parameters = { ...(retained?.command ?? command), operationId };
+    const nextCommand = hostedRecoveryCommand(root, 'save', parameters);
+    return new ForgeError(
+      error?.code ?? 'SAVE_PENDING',
+      `${error?.message ?? 'The earlier save has no submit acknowledgement.'} Replay it with ${nextCommand}, then retry diff.`,
+      undefined,
+      { next: { action: 'save', ...parameters }, command: nextCommand },
+    );
+  };
+  if (!acknowledgedBackgroundSave(root, operationId)) throw replay();
+  const seconds = Math.min(5, Math.max(0, ((transport.waitUntil ?? Infinity) - Date.now()) / 1000));
+  const waited = await observeHostedSave(
+    transport,
+    operationId,
+    seconds,
+    signal,
+    undefined,
+    undefined,
+    'background',
+  );
+  if (waited?.result.successful) return;
+  if (waited?.result.outcome === 'retryable') {
+    throw replay(waited.result.error as { code?: string; message?: string } | undefined);
+  }
+  const wait = operationWait(root, { operationIds: [operationId] });
+  throw new ForgeError(
+    'SAVE_PENDING',
+    `Diff is waiting for save ${operationId}. Settle it with ${wait.command}, then retry diff.`,
+    undefined,
+    { next: wait.next, command: wait.command },
   );
 }
 

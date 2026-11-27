@@ -8,3 +8,9 @@ contract guards early, kills a test file past its per-file limit and names it,
 and leaves no process running after it exits. It fits ranked tests to the run
 ceiling and names deferred coverage in the detailed plan. The healthy path
 adds no calls.
+
+An ordinary disjoint Lane composes on newer main using its saved source. A
+known conflict with main or recovery from a failed check still calls for a sync.
+Foreground landing prints compact changes in phase, hold, order wait or stall
+from its existing feed. A fresh diff in the Lane waits for its pending split save
+before choosing the saved head.

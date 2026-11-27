@@ -32,6 +32,8 @@ import { overlapMainFor } from './projectHostedOverlapMainLog';
 import { landingRequestOriginalDb } from './projectLandingRequestBody';
 import { logIoAttribution } from './ioAttribution';
 import { hasSymbolFacts, overlapLaneChanges, overlapLaneEntries } from './projectHostedOverlapChanges';
+import { lanePreflightRecovery } from './projectBoardPeerLanding';
+import { hasWriteRole } from './projectRole';
 
 /** Path notices were removed (flip 4, Issue 853fcde3); exact trial-merge conflicts replace them. */
 const RETIRED_OVERLAPS = { count: 0, items: [], coverage: 'unavailable' } as const;
@@ -372,12 +374,27 @@ export const read = query({
         : {};
       const changedPaths = paths
         ? {
+            savedHead: lane.head,
             changedPaths: {
               paths: (JSON.parse(focus.changes) as { path: string }[]).map(change => change.path),
               complete: focus.complete,
             },
           }
         : {};
+      const recovery =
+        paths &&
+        main.head !== lane.base.head &&
+        lane.state === 'active' &&
+        !lane.earlyResolution &&
+        (!lane.stack || lane.stack.detached) &&
+        (await hasWriteRole(ctx, project, user.subject))
+          ? await lanePreflightRecovery(ctx, {
+              projectId,
+              laneId,
+              baseReceiptId: lane.base.receiptId,
+              baseSequence,
+            })
+          : undefined;
       const board = boardCursor
         ? await boardDelivery(ctx, {
             projectId,
@@ -441,6 +458,7 @@ export const read = query({
         ...(explicitEvidence ? {} : { unacknowledgedOverlaps: RETIRED_OVERLAPS }),
         ...offered,
         ...changedPaths,
+        ...(recovery ? { recovery } : {}),
         ...evidence,
         ...present,
         ...boardField,

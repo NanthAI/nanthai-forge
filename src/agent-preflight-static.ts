@@ -235,13 +235,32 @@ export function runStaticChecks(
       const started = Date.now();
       const [command, ...args] = check.command as [string, ...string[]];
       const head = mentions(root, known(root), changed);
+      let scanned: Found | undefined;
+      let metadataOnly = false;
       process.stderr.write(`preflight: static ${check.name}…\n`);
       const run = spawnCaptured(
         command,
         args,
         { cwd: root, env: hints ? hints(env, check.name) : env, timeout: timeoutMs },
         false,
-        { ...(scope ? { onText: head.push } : {}) },
+        scope?.changed
+          ? {
+              onText: head.push,
+              echoAfter: run => {
+                scanned = head.end();
+                metadataOnly =
+                  run.status !== 0 &&
+                  run.status !== 127 &&
+                  !run.errorCode &&
+                  !scanned.overflow &&
+                  !scanned.partial &&
+                  !scanned.own.length &&
+                  !scanned.paths.length &&
+                  scanned.forge.length > 0;
+                return !metadataOnly;
+              },
+            }
+          : {},
       );
       const timedOut = run.errorCode === 'ETIMEDOUT';
       const outcome = timedOut ? 'timed-out' : run.status === 0 ? 'passed' : 'failed';
@@ -251,16 +270,27 @@ export function runStaticChecks(
         ms: 0,
         command: check.command,
         ...(check.fix ? { fix: check.fix } : {}),
-        ...(run.status !== 0 ? { excerpt: failureExcerpt(run.tail) } : {}),
+        ...(run.status !== 0 && !metadataOnly ? { excerpt: failureExcerpt(run.tail) } : {}),
       };
-      if (outcome === 'failed' && check.source === 'conventional') {
+      if (outcome === 'failed' && check.source === 'conventional' && !metadataOnly) {
         // Nothing declared this command a gate: report it, never refuse on it.
         result.outcome = 'unjudged';
         result.advisory = INFERRED_ADVICE;
         process.stderr.write(`preflight: ${check.name}: ${INFERRED_ADVICE}\n`);
       } else if (outcome === 'failed' && scope) {
         // The comparison run on the Lane's base gets no change hints: it answers whether base fails too.
-        const verdict = judge(root, check, run, head.end(), scope, baseCopy, env, timeoutMs, known);
+        const verdict = judge(
+          root,
+          check,
+          run,
+          scanned ?? head.end(),
+          metadataOnly,
+          scope,
+          baseCopy,
+          env,
+          timeoutMs,
+          known,
+        );
         Object.assign(result, verdict);
         if (verdict.advisory) process.stderr.write(`preflight: ${check.name}: ${verdict.advisory}\n`);
       }
@@ -322,6 +352,7 @@ function judge(
   check: StaticCheck,
   run: Run,
   head: Found,
+  metadataOnly: boolean,
   scope: StaticScope,
   baseCopy: () => string | null,
   env: NodeJS.ProcessEnv,
@@ -344,7 +375,7 @@ function judge(
   if (head.own.length) return { outcome: 'failed', files: head.own };
   const certain = !head.overflow && !head.partial;
   // Only Forge's own Lane metadata fails (a formatter covering .forge/): never this change's, no base run.
-  if (certain && head.forge.length && !head.paths.length)
+  if (metadataOnly)
     return {
       outcome: 'forge-metadata',
       files: head.forge,

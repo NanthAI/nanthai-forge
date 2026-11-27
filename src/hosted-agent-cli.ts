@@ -25,7 +25,6 @@ import {
   stoppedLandingResubmit,
 } from './hosted-agent-finish-result.js';
 import { orderWaitOf } from './hosted-wait-line.js';
-import { learnFromLanding } from './preflight-learned.js';
 import { operationLine } from './hosted-land-wait.js';
 import {
   AGENT_WAIT_SECONDS,
@@ -640,10 +639,13 @@ async function dispatchHostedAgentCli(
               // A failed landing exits 2, the same as `land` (SM-C M7); landed and superseded stay 0.
               if (landExitsFailed(outcome)) process.exitCode = 2;
               for (const line of landSummary(outcome)) process.stderr.write(`${line}\n`);
-              if (submissions.length === 1) learnFromLanding(root, entry);
               return { ...entry, ...retry };
             })
           : undefined;
+      if (settled?.length === 1) {
+        const { learnFromLanding } = await import('./preflight-learned.js');
+        learnFromLanding(root, settled[0]);
+      }
       return {
         ...response,
         result: {

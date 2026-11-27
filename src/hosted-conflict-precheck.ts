@@ -13,6 +13,7 @@ import { ForgeError } from './errors.js';
 import { conflictFinishOptions, type ConflictFinishOptions } from './hosted-conflict-finish-options.js';
 import { cliVerb } from './agent-verbs.js';
 import type { HostedLaneCheckoutMarker } from './hosted-lane-checkout-marker.js';
+import { baseStateFiles } from './hosted-changed-paths.js';
 
 const pathFor = (root: string) => join(clientCacheRoot(root), 'conflict-paths.json');
 export type ConflictContinuation = {
@@ -142,23 +143,61 @@ export function laneChangeBase(root: string, selection: { laneId: string; base: 
   return merged && merged.base === selection.base.head ? merged.head : selection.base.head;
 }
 
-/** Ordinary Lane composition adds current main. Stack and early-resolution preflight checks the
- * Lane's pinned input, whose parent and exact composed checks are managed by the hosted queue. */
+type MainOverlap = { head?: string | undefined; conflictingPaths: string[]; more: number; coverage: string };
+
+/** Main's matching path observation costs no new read. If main moved after the observation,
+ * compare locally cached manifests when available; otherwise composition decides. */
+function mainTouchesLane(
+  root: string,
+  marker: HostedLaneCheckoutMarker,
+  base: string,
+  main: string,
+  overlap?: MainOverlap,
+) {
+  const current = overlap?.head === main ? overlap : undefined;
+  const overlaps = Boolean(current && (current.conflictingPaths.length || current.more));
+  if (!overlaps && current?.coverage === 'hosted') return false;
+  const baseFiles = baseStateFiles(root, base);
+  const mainFiles = baseFiles && baseStateFiles(root, main);
+  if (!baseFiles || !mainFiles) return overlaps;
+  const old = new Map(baseFiles.map(file => [file.path, file]));
+  const newMain = new Map(mainFiles.map(file => [file.path, file]));
+  const same = (a: (typeof baseFiles)[number] | undefined, b: (typeof baseFiles)[number] | undefined) =>
+    a?.blob === b?.blob && a?.mode === b?.mode;
+  for (const file of marker.state.files) {
+    const before = old.get(file.path);
+    const accepted = newMain.get(file.path);
+    if (!same(file, before) && !same(accepted, before) && !same(file, accepted)) return true;
+    old.delete(file.path);
+  }
+  for (const [path, file] of old) {
+    const accepted = newMain.get(path);
+    if (accepted && !same(accepted, file)) return true;
+  }
+  return false;
+}
+
+/** Ordinary Lane composition adds current main. A conflict or recovery needs a fresh
+ * local baseline. Stacked and early-resolution Lanes keep their own pinned inputs. */
 export function preflightBaseRefusal(
   root: string,
   marker: HostedLaneCheckoutMarker,
   main: string | undefined,
+  overlap: MainOverlap | undefined,
+  recovering: boolean,
 ) {
   const { selection, state } = marker;
+  const base = laneChangeBase(root, selection);
   if (
     !main ||
     selection.earlyResolution ||
     (selection.stack && !selection.stack.detached) ||
-    main === laneChangeBase(root, selection) ||
+    main === base ||
     main === selection.head ||
     state.parents.includes(main)
   )
     return;
+  if (!recovering && !mainTouchesLane(root, marker, base, main, overlap)) return;
   const parameters = { laneId: selection.laneId };
   const command = `nforge agent ${shellQuote(root)} save --sync ${shellQuote(JSON.stringify(parameters))}`;
   return new ForgeError(

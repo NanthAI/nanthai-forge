@@ -19,6 +19,9 @@ const CORE = [
   /^(?:src\/hosted-source-step-merge|convex\/projectConvexPhysicalManifest)\.ts$/,
   /^src\/(?:landing-(?!capsule|accepted-by|message|preview-records)|hosted-landing|hosted-finish|hosted-acceptance|hosted-batch|hosted-compose|hosted-cross-head|hosted-would-conflict|hosted-land-gates|hosted-queue-status|scoped-recheck|check-reuse|queue-|first-check-risk)[^/]*\.ts$/,
   /^src\/hosted-check(?:-evidence|-verdict|-controller|-only-compose)?\.ts$/,
+  // Client admission pins and the waiter that re-drives a stuck Ready settlement.
+  /^src\/(?:hosted-agent-(?:finish(?:-identity)?|submission-wait)|hosted-conflict-precheck)\.ts$/,
+  /^(?:convex\/(?:projectHostedOverlaps|projectBoardPeerLanding)|src\/hosted-overlap-client)\.ts$/,
   /^src\/(?:package-placement(?:-pin|-js)?|js-inbound-(?:imports|specifiers)|hosted-actions-job-(?:plan|client))\.ts$/,
   /^convex\/projectHostedActionsSession\.ts$/,
 ];

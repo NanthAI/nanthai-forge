@@ -9,6 +9,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { landWaitCommand } from '../dist/hosted-land-wait.js';
+import { waitEventLine } from '../dist/hosted-wait-line.js';
 import { hostedAgentCli } from '../dist/hosted-agent-cli.js';
 import { HostedAgentJournal } from '../dist/hosted-agent-journal.js';
 import { observationWaitHooks } from '../dist/hosted-agent-observe.js';
@@ -1300,6 +1301,15 @@ test('a foreground land at budget shows the observed check and resumes the origi
     output.push(String(chunk));
     return true;
   });
+  const live = [];
+  const write = process.stdout.write.bind(process.stdout);
+  t.mock.method(process.stdout, 'write', (chunk, ...args) => {
+    if (String(chunk).startsWith('{"type":"submission"')) {
+      live.push(JSON.parse(String(chunk)));
+      return true;
+    }
+    return write(chunk, ...args);
+  });
   const pending = hostedLandCli(root, { operationId, message: 'Land' }, address, {
     detach: false,
     wait: true,
@@ -1313,6 +1323,7 @@ test('a foreground land at budget shows the observed check and resumes the origi
   await s.update(state.id, 'checking', { timing: { submittedAt: state.at, ciObservedAt: lastProgressAt } });
   await s.deliver();
   await turn();
+  assert.equal(live.at(-1)?.phase, 'checking', 'the foreground prints before the wait exits');
   const { submission } = await s.transport.query('projectHostedFinishObserve:page', {
     operationId,
     nextVersion: 0,
@@ -1518,6 +1529,73 @@ test('a feed update for a replacement attempt does not relabel the pinned observ
   assert.equal(s.counts().reads, 1);
 });
 
+test('feed wait delivers compact phase, hold, order and stall changes before acceptance without extra page reads', async () => {
+  const s = await fixture(true, { reactive: true });
+  const { request, state } = await s.start();
+  const operationId = request.operationId;
+  const pending = s.wait({ operationIds: [operationId], until: 'acceptance' });
+  await turn();
+  await s.deliver();
+  const lines = () =>
+    s.events.filter(event => event.type === 'submission-progress').map(event => waitEventLine(event).line);
+  const ready = { state: 'pending', pendingReason: 'waiting-for-review', cause: null };
+  const held = { ...ready, pendingReason: 'waiting-for-dependency' };
+  const orderWait = randomUUID();
+  const checking = { state: 'pending', pendingReason: 'checking', cause: null };
+  await s.update(state.id, 'checking', { observation: checking });
+  await s.deliver();
+  await turn();
+  const lastProgressAt = hostedLandingProgressAt((await s.f.status(state.id)).request);
+  const stall = landingStall(
+    'checking',
+    'check runner',
+    lastProgressAt,
+    Date.parse(lastProgressAt) + LANDING_STALL_MS,
+  );
+  const row = () =>
+    [...s.f.tables.projectHostedLandingRequests.values()].find(row => row.submissionId === state.id);
+  const park = waitingFor =>
+    s.f.run('feedOrderWait', ctx => ctx.db.patch(row()._id, { orderWait: waitingFor }), {});
+  for (const [phase, data] of [
+    ['checking', { observation: { ...checking, stall } }],
+    ['checking', { observation: { ...checking, stall } }],
+    ['ready', { observation: ready }],
+    ['ready', { observation: held }],
+  ]) {
+    await s.update(state.id, phase, data);
+    await s.deliver();
+    await turn();
+  }
+  await park(orderWait);
+  await s.deliver();
+  await turn();
+  await park(undefined);
+  await s.deliver();
+  await turn();
+  assert.deepEqual(
+    lines().map(line => [line.phase, line.reason, line.waitingFor, line.stall]),
+    [
+      ['checking', 'checking', undefined, undefined],
+      ['checking', 'checking', undefined, stall.message],
+      ['ready', 'waiting-for-review', undefined, undefined],
+      ['ready', 'waiting-for-dependency', undefined, undefined],
+      ['ready', 'waiting-for-dependency', orderWait, undefined],
+      ['ready', 'waiting-for-dependency', undefined, undefined],
+    ],
+  );
+  assert(lines().every(line => line.operationId === operationId && !('cursor' in line)));
+  assert.equal(s.counts().reads, 1, 'only the canonical baseline before acceptance');
+  assert(s.events.every(event => !event.terminal));
+
+  const acceptance = { receiptId: randomUUID(), head: 'a'.repeat(64) };
+  await s.update(state.id, 'landed', { acceptance });
+  await s.record(state, 'landing.landed');
+  await s.deliver();
+  const { result } = await pending;
+  assert.deepEqual(result.submissions[0].submission.acceptance, acceptance);
+  assert.equal(s.counts().reads, 2, 'the terminal event drains the canonical receipt once');
+});
+
 test('six matched landing waits preserve outcomes and measure the live read cost with and without the feed rider', async t => {
   const measures = [];
   const outcomes = ['landed', 'failed', 'cancelled', 'landed', 'failed', 'cancelled'];
@@ -1590,6 +1668,38 @@ test('six matched landing waits preserve outcomes and measure the live read cost
   assert(legacy.calls.every((calls, index) => calls >= rider.calls[index]));
   assert(legacy.observerReadBytes > rider.observerReadBytes);
   assert(rider.evaluations.every((calls, index) => calls >= bare.evaluations[index]));
+});
+
+test('the feed streams hold-code changes and release at the same phase without canonical rereads', async () => {
+  const s = await fixture(true);
+  const { request, state } = await s.start();
+  const pending = s.wait({ operationIds: [request.operationId], until: 'acceptance' });
+  await turn();
+  await s.deliver();
+  for (const code of ['MAIN_RED', 'CI_DOWN', null]) {
+    await s.update(state.id, 'queued', { error: code ? { code, message: 'Synthetic hold' } : null });
+    await s.deliver();
+    await turn();
+  }
+  assert.deepEqual(
+    s.events
+      .filter(event => event.type === 'submission-progress')
+      .map(event => {
+        const line = waitEventLine(event).line;
+        return [line.phase, line.error ?? null];
+      }),
+    [
+      ['queued', 'MAIN_RED'],
+      ['queued', 'CI_DOWN'],
+      ['queued', null],
+    ],
+  );
+  assert.equal(s.counts().reads, 1);
+  await s.update(state.id, 'terminal-failed');
+  await s.record(state, 'landing.failed');
+  await s.deliver();
+  await pending;
+  assert.equal(s.counts().reads, 2);
 });
 
 test('a feed wait ignores unrelated landing rows and still reports newly marked sync advice', async () => {

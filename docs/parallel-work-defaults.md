@@ -495,7 +495,7 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   the main State it merged in as its comparison base. A diagnostic reproduced on that base is
   `pre-existing` and one advisory
   line; a failure only on files Forge writes into the Lane (the root `.forge/` folder and root `node_modules` link) is
-  `forge-metadata` and never refuses, whatever the tool's configuration covers; when it cannot be
+  `forge-metadata` and reports one advisory without the tool's raw diagnostics. When a failure cannot be
   judged (unknown changed paths, no cached base bytes, program not installed) it is `unjudged` and
   advisory. The land reply's `staticAdvisory` holds those lines; the landing check still runs every
   check. A clean run costs nothing extra; only a failure naming no changed file pays one local base

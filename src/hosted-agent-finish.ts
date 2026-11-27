@@ -24,6 +24,7 @@ import { hostedRecoveryCommand, recoverHostedCandidate } from './hosted-agent-re
 import { settleCheckOnlyCompose } from './hosted-check-only-compose.js';
 import {
   inPlaceResolution,
+  laneChangeBase,
   preflightBaseRefusal,
   refuseUnsavedResolution,
 } from './hosted-conflict-precheck.js';
@@ -52,6 +53,7 @@ import {
   type FinishContext,
 } from './hosted-agent-finish-identity.js';
 import { landWaitCommand } from './hosted-land-wait.js';
+import { readHostedOverlapAdvice } from './hosted-overlap-client.js';
 import type { QueueProofDetail } from '../scripts/test-queue-proof.mjs';
 import { LAND_HELD_MS_ENV, markLandStep, noteLandCompose } from './land-timing.js';
 import {
@@ -899,8 +901,18 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
     const proofApplies = () => !command.dependencies.length && !command.after && !command.composeOperationId;
     let usedPreflight = false;
     const retained = command.composeOperationId ?? session.journal.get<string>('finish-compose-operation');
+    let overlap: Parameters<typeof preflightBaseRefusal>[3];
+    let recovering = false;
+    let preflightMain: string | undefined;
+    let refreshed = false;
+    const recoverySave = () =>
+      hostedRecoveryCommand(session.root, 'save', { message: 'Bring the Lane binding up to date' });
+    const mismatchedHead = (head: string | undefined) =>
+      head && head !== selection.head
+        ? stalePinsRefusal(selection, { ...selection, head }, recoverySave())
+        : undefined;
     const checkPreflightBase = (main: string | undefined) =>
-      savedMarker && preflightBaseRefusal(session.root, savedMarker, main);
+      savedMarker && preflightBaseRefusal(session.root, savedMarker, main, overlap, recovering);
     // One check selection read for a flagged proof, reused at submission.
     let standardCheck: Promise<boolean> | undefined;
     const standard = () =>
@@ -920,7 +932,9 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
         });
         return isStandard;
       })());
-    const early = async (found: { queueProof?: QueueProofPreview | undefined; dirty?: boolean }) => {
+    const early: NonNullable<Parameters<NonNullable<HostedAgentSession['finishGates']>>[4]> = async found => {
+      overlap = found.overlap;
+      recovering = Boolean(found.recovering);
       const refusals: CheapRefusal[] = [];
       if (found.dirty)
         refusals.push({
@@ -929,7 +943,8 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
             'Files here changed after this land saved them, so its preflight would test other bytes than it lands. Nothing ran. Replay land --save to save them.',
           recovery: { command: next.land },
         });
-      if (stale) refusals.push(stale);
+      const pins = stale ?? mismatchedHead(found.savedHead);
+      if (pins) refusals.push(pins);
       const proof = found.queueProof;
       // A finding refuses here only against current main and the standard check: one main read,
       // only when the local preview found a gap. Main moved since the preview: compose decides.
@@ -955,6 +970,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
         early,
         main => {
           usedPreflight = true;
+          preflightMain = main;
           // A retained compose pins its source. Let it reconcile before judging a newer main.
           if (retained && session.journal.get(`compose:${retained}`)) return;
           const sync = checkPreflightBase(main);
@@ -965,6 +981,28 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
       if (usedPreflight || (proof && proofApplies())) {
         beforeCompose = async mainHead => {
           // Compose can see a newer main after tests ran, including on a prepare retry.
+          if (
+            usedPreflight &&
+            !refreshed &&
+            savedMarker &&
+            mainHead !== preflightMain &&
+            !selection.earlyResolution &&
+            (!selection.stack || selection.stack.detached)
+          ) {
+            refreshed = true;
+            const read = await readHostedOverlapAdvice(session, selection.laneId, true);
+            const observedHead = read.savedHead ?? read.overlaps?.head;
+            const error = mismatchedHead(observedHead);
+            if (error) throw cheapRefusalError([error])!;
+            if (
+              observedHead === selection.head &&
+              read.behindMain.baseHead === laneChangeBase(session.root, selection) &&
+              read.behindMain.head === mainHead
+            ) {
+              overlap = read.behindMain;
+              recovering ||= Boolean(read.recovery);
+            }
+          }
           const sync = usedPreflight && checkPreflightBase(mainHead);
           if (sync) throw sync;
           // Use the main compose already reads. A finding for a superseded comparison is advisory.

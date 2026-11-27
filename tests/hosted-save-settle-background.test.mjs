@@ -31,6 +31,7 @@ import { digest } from '../dist/hash.js';
 import { policyPreset } from '../dist/autonomy-policy.js';
 import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
 import { hostedAgentCli, sourceWaitHooks } from '../dist/hosted-agent-cli.js';
+import { registerHostedAgentWorkflow } from '../dist/mcp-hosted-agent.js';
 
 const contract = {
   overlapEvidence: false,
@@ -130,6 +131,109 @@ async function setup(t, { fromBase = false, protectedPath = false } = {}) {
   return { s, c, root, entry, exchange, scheduled, overlap, settle, changed, files: state.files.length };
 }
 const count = (calls, name) => calls.filter(value => value === name).length;
+
+for (const mcp of [false, true])
+  test(`diff waits for its checkout’s split save and includes the saved changes (${mcp ? 'MCP' : 'CLI'})`, async t => {
+    const f = await setup(t, { fromBase: true });
+    const address = { url: 'https://fixture.invalid', projectId: f.s.projectId };
+    const before = readHostedLaneCheckout(f.root).selection.head;
+    const saved = await new HostedAgentTransport(f.root, address, f.exchange).dispatch('save', {
+      message: 'Save before diff',
+    });
+    assert.equal(saved.result.status, 'settling');
+    assert.equal(readHostedLaneCheckout(f.root).selection.head, before);
+    const transport = new HostedAgentTransport(f.root, address, f.exchange, () => ({
+      onUpdate(ref, args, update, fail) {
+        void (async () => {
+          assert.equal(getFunctionName(ref), 'projectHostedSaves:progress');
+          assert.equal(args.operationId, saved.operationId);
+          const dispatch = f.scheduled.find(item => item.name === 'projectConvexSource:dispatch');
+          await f.settle(dispatch.args.jobId);
+          update(await f.exchange.client.query(ref, args));
+        })().catch(fail);
+        return () => {};
+      },
+      async close() {},
+    }));
+    let diff;
+    if (mcp) {
+      const tools = new Map();
+      t.after(
+        registerHostedAgentWorkflow(
+          { registerTool: (name, _options, call) => tools.set(name, call) },
+          transport,
+        ),
+      );
+      const reply = await tools.get('forge_review')({ command: { action: 'diff' } });
+      diff = JSON.parse(reply.content[0].text);
+    } else diff = await transport.dispatch('diff', {});
+    assert.equal(diff.unsaved, undefined);
+    assert.notEqual(readHostedLaneCheckout(f.root).selection.head, before);
+    assert.deepEqual(diff.result.items.map(item => item.path).sort(), f.changed);
+  });
+
+test('diff names the original save replay when a split save has no submit acknowledgement', async t => {
+  const f = await setup(t, { fromBase: true });
+  const address = { url: 'https://fixture.invalid', projectId: f.s.projectId };
+  const transport = new HostedAgentTransport(f.root, address, f.exchange);
+  const saved = await transport.dispatch('save', { message: 'Interrupted save' });
+  rmSync(join(clientCacheRoot(f.root), 'saves', saved.operationId, 'acknowledged'));
+  transport.waitUntil = 0;
+  const before = f.c.calls.length;
+  await assert.rejects(transport.dispatch('diff', {}), error => {
+    assert.equal(error.recovery?.next?.action, 'save');
+    assert.equal(error.recovery.next.operationId, saved.operationId);
+    return true;
+  });
+  assert.equal(f.c.calls.length, before);
+});
+
+test('diff reports the retryable source failure and its original save command', async t => {
+  const f = await setup(t, { fromBase: true });
+  const address = { url: 'https://fixture.invalid', projectId: f.s.projectId };
+  const saved = await new HostedAgentTransport(f.root, address, f.exchange).dispatch('save', {
+    message: 'Stalled save',
+  });
+  const retryable = {
+    status: 'retryable',
+    jobId: randomUUID(),
+    source: { status: 'running' },
+    error: { code: 'SOURCE_JOB_STALLED', message: 'Save work stalled.' },
+  };
+  const transport = new HostedAgentTransport(f.root, address, f.exchange, () => ({
+    onUpdate(ref, args, update) {
+      assert.equal(getFunctionName(ref), 'projectHostedSaves:progress');
+      assert.equal(args.operationId, saved.operationId);
+      queueMicrotask(() => update(retryable));
+      return () => {};
+    },
+    async close() {},
+  }));
+  await assert.rejects(transport.dispatch('diff', {}), error => {
+    assert.equal(error.code, 'SOURCE_JOB_STALLED');
+    assert.equal(error.recovery?.next?.action, 'save');
+    assert.equal(error.recovery.next.operationId, saved.operationId);
+    return true;
+  });
+});
+
+test('a cold-base save warns about a captured change to a protected file', async t => {
+  const f = await setup(t, { protectedPath: true });
+  const marker = readHostedLaneCheckout(f.root);
+  rmSync(join(clientCacheRoot(f.root), 'objects', marker.selection.base.head));
+  const address = { url: 'https://fixture.invalid', projectId: f.s.projectId };
+  const out = [];
+  t.mock.method(process.stderr, 'write', line => {
+    out.push(String(line));
+    return true;
+  });
+  const reply = await new HostedAgentTransport(f.root, address, f.exchange).dispatch('save', {
+    message: 'Protected change',
+  });
+  assert.deepEqual(reply.result.protectedPathNotice?.paths, ['netlify.toml']);
+  assert.match(out.join(''), /The owner must approve this landing/);
+  assert.doesNotMatch(out.join(''), /Protected-path coverage is unavailable/);
+});
 
 // Issue 75b4d062: the printed wait follows a background save through registration and settlement.
 for (const budget of [0, 540])

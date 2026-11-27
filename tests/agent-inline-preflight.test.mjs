@@ -65,7 +65,7 @@ async function fixture(t, policy = 'require', reader = common['tests/docs.test.m
   return s;
 }
 
-function acceptMainFile(s) {
+function acceptMainFile(s, path = 'main-only.txt') {
   const previousHead = s.main.head;
   const state = JSON.parse(s.objects.get(previousHead));
   const bytes = Buffer.from('New main source\n');
@@ -75,17 +75,28 @@ function acceptMainFile(s) {
     JSON.stringify({
       ...state,
       parents: [previousHead],
-      files: [...state.files, { path: 'main-only.txt', blob, mode: 'file' }],
+      files: [...state.files.filter(file => file.path !== path), { path, blob, mode: 'file' }],
     }),
   );
   const head = digest(next);
   s.objects.set(head, next);
   s.main.head = head;
   s.main.receipt = { ...s.main.receipt, id: randomUUID(), previousHead };
-  return { path: 'main-only.txt', blob, mode: 'file' };
+  return { path, blob, mode: 'file' };
 }
 
-test('friction f84ba249: an ordinary Lane behind main gets the sync command before local preflight runs', async t => {
+test('an ordinary disjoint Lane lands on the current main while its checkout stays on the saved base', async t => {
+  const s = await fixture(t);
+  const base = s.lane.base.head;
+  acceptMainFile(s);
+  const reply = await land(s);
+  assert.equal(reply.result.submission.phase, 'landed');
+  assert.equal(s.lane.base.head, base);
+  const compose = s.calls.find(call => call.name === 'projectHostedCompose:prepare');
+  assert.equal(JSON.parse(compose.args.request).expectedMain.head, s.main.head);
+});
+
+test('friction f84ba249: a Lane that conflicts with main gets the sync command before local preflight runs', async t => {
   const s = await fixture(
     t,
     'require',
@@ -98,6 +109,7 @@ test('validate the README alongside current main', () => {
 });`,
   );
   const mainFile = acceptMainFile(s);
+  acceptMainFile(s, 'README.md');
   const laneId = s.lane.laneId;
   const recovery = error => {
     assert.equal(error.code, 'WORK_STALE');
@@ -159,16 +171,112 @@ test('validate the README alongside current main', () => {
   assert.equal(preflight.result.receipt.head, s.lane.head);
 });
 
-test('friction f84ba249: a main move after preflight cannot submit against the new base', async t => {
+test('friction f84ba249: recovering from a failed check requires current main even when the paths are disjoint', async t => {
+  const s = await fixture(t);
+  const mutate = s.exchange.client.mutation;
+  s.exchange.client.mutation = async (ref, args) => {
+    const value = await mutate(ref, args);
+    if (getFunctionName(ref) !== 'projectHostedLanding:enqueue') return value;
+    const failed = {
+      ...JSON.parse(value),
+      phase: 'terminal-failed',
+      observation: { state: 'terminal-failed', pendingReason: null, cause: 'check-failed' },
+      error: { code: 'CHECK_FAILED', message: 'The check failed.' },
+    };
+    delete failed.acceptance;
+    s.operations.set(failed.operationId, failed);
+    return JSON.stringify(failed);
+  };
+  assert.equal((await land(s)).result.submission.error.code, 'CHECK_FAILED');
+  const from = s.calls.length;
+  acceptMainFile(s);
+  const query = s.exchange.client.query;
+  s.exchange.client.query = (ref, args) =>
+    getFunctionName(ref) === 'projectHostedOverlaps:read'
+      ? Promise.resolve(
+          JSON.stringify({
+            savedHead: s.lane.head,
+            behindMain: {
+              head: s.main.head,
+              baseHead: s.lane.base.head,
+              coverage: 'hosted',
+              commits: 1,
+              conflictingPaths: [],
+              more: 0,
+            },
+            changedPaths: { paths: ['README.md'], complete: true },
+            recovery: 'CHECK_FAILED',
+          }),
+        )
+      : query(ref, args);
+  await assert.rejects(
+    submitHostedLand(
+      s.root,
+      { message: 'Retry failed check', retry: true, reason: 'other' },
+      s.address,
+      s.transport(),
+    ),
+    error => error.code === 'WORK_STALE' && error.recovery.next.action === 'sync',
+  );
+  assert(!s.calls.slice(from).some(call => call.name === 'projectHostedCompose:prepare'));
+});
+
+test('an explicit retry after a cancelled landing still composes a disjoint Lane on current main', async t => {
+  const s = await fixture(t);
+  const mutate = s.exchange.client.mutation;
+  let cancelled = false;
+  s.exchange.client.mutation = async (ref, args) => {
+    const value = await mutate(ref, args);
+    if (cancelled || getFunctionName(ref) !== 'projectHostedLanding:enqueue') return value;
+    cancelled = true;
+    const submission = {
+      ...JSON.parse(value),
+      phase: 'terminal-failed',
+      observation: { state: 'terminal-failed', pendingReason: null, cause: 'rejected' },
+      error: { code: 'LANDING_CANCELLED', message: 'The landing was cancelled.' },
+    };
+    delete submission.acceptance;
+    s.operations.set(submission.operationId, submission);
+    return JSON.stringify(submission);
+  };
+  assert.equal((await land(s)).result.submission.error.code, 'LANDING_CANCELLED');
+  acceptMainFile(s);
+  const reply = await submitHostedLand(
+    s.root,
+    { message: 'Retry cancelled landing', retry: true, reason: 'other' },
+    s.address,
+    s.transport(),
+  );
+  assert.equal(reply.result.submission.phase, 'landed');
+});
+
+test('friction f84ba249: a conflicting main move after preflight cannot submit against the new base', async t => {
   const s = await fixture(t);
   const query = s.exchange.client.query;
+  let overlapReads = 0;
   s.exchange.client.query = async (ref, args) => {
+    if (getFunctionName(ref) === 'projectHostedOverlaps:read') {
+      overlapReads++;
+      return JSON.stringify({
+        overlaps: { head: s.lane.head },
+        behindMain: {
+          head: s.main.head,
+          baseHead: s.lane.base.head,
+          coverage: 'hosted',
+          commits: s.main.head === s.lane.base.head ? 0 : 1,
+          conflictingPaths: s.main.head === s.lane.base.head ? [] : ['README.md'],
+          more: 0,
+        },
+        changedPaths: { paths: ['README.md'], complete: true },
+      });
+    }
     if (
       getFunctionName(ref) === 'projectHostedChannels:current' &&
       s.main.head === s.lane.base.head &&
       readPreflightReceipt(s.root, s.lane.laneId)?.passed
-    )
-      acceptMainFile(s);
+    ) {
+      acceptMainFile(s, 'README.md');
+    }
     return query(ref, args);
   };
   await assert.rejects(
@@ -177,12 +285,96 @@ test('friction f84ba249: a main move after preflight cannot submit against the n
   );
   assert(readPreflightReceipt(s.root, s.lane.laneId)?.passed);
   assert(!s.calls.some(call => call.name === 'projectHostedCompose:prepare'));
+  assert.equal(overlapReads, 2, 'one initial and one bounded refresh after main moves');
   const from = s.calls.length;
   await assert.rejects(
     submitHostedLand(s.root, { message: 'Retry after main moved' }, s.address, s.transport()),
     error => error.code === 'WORK_STALE' && error.recovery.next.action === 'sync',
   );
   assert(!s.calls.slice(from).some(call => call.name === 'projectHostedComposeSelection:page'));
+});
+
+test('a disjoint or uncovered main move after preflight still goes to hosted composition', async t => {
+  for (const coverage of ['hosted', 'hosted-incomplete']) {
+    const s = await fixture(t);
+    const query = s.exchange.client.query;
+    let overlapReads = 0;
+    s.exchange.client.query = async (ref, args) => {
+      const name = getFunctionName(ref);
+      if (name === 'projectHostedOverlaps:read') {
+        overlapReads++;
+        return JSON.stringify({
+          overlaps: { head: s.lane.head },
+          behindMain: {
+            head: s.main.head,
+            baseHead: s.lane.base.head,
+            coverage,
+            commits: 0,
+            conflictingPaths: [],
+            more: 0,
+          },
+          changedPaths: { paths: ['README.md'], complete: true },
+        });
+      }
+      if (
+        name === 'projectHostedChannels:current' &&
+        s.main.head === s.lane.base.head &&
+        readPreflightReceipt(s.root, s.lane.laneId)?.passed
+      )
+        acceptMainFile(s);
+      return query(ref, args);
+    };
+    const reply = await land(s);
+    assert.equal(reply.result.submission.phase, 'landed');
+    assert.equal(overlapReads, 2);
+    assert.equal(
+      JSON.parse(s.calls.find(call => call.name === 'projectHostedCompose:prepare').args.request).expectedMain
+        .head,
+      s.main.head,
+    );
+  }
+});
+
+test('hosted Lane failure history guards standalone and retried preflight without a local finish receipt', async t => {
+  for (const code of ['CHECK_FAILED', 'COMPOSITION_CONFLICT']) {
+    const s = await fixture(t);
+    // The original attempt failed on another machine. Its failure was never observed by this checkout.
+    acceptMainFile(s);
+    const query = s.exchange.client.query;
+    s.exchange.client.query = async (ref, args) =>
+      getFunctionName(ref) === 'projectHostedOverlaps:read'
+        ? JSON.stringify({
+            overlaps: { head: s.lane.head },
+            behindMain: {
+              head: s.main.head,
+              baseHead: s.lane.base.head,
+              coverage: 'hosted',
+              commits: 1,
+              conflictingPaths: [],
+              more: 0,
+            },
+            changedPaths: { paths: ['README.md'], complete: true },
+            recovery: code,
+          })
+        : query(ref, args);
+    const stale = error => error.code === 'WORK_STALE' && error.recovery.next.action === 'sync';
+    await assert.rejects(s.transport().dispatch('preflight', { run: true }), stale);
+    for (const selection of [
+      { retry: true, reason: 'other' },
+      { laneId: s.lane.laneId, operationId: randomUUID() },
+    ]) {
+      await assert.rejects(
+        submitHostedLand(
+          s.root,
+          { message: 'Recover the hosted failure', ...selection },
+          s.address,
+          s.transport(),
+        ),
+        stale,
+      );
+    }
+    assert.equal(readPreflightReceipt(s.root, s.lane.laneId), null);
+  }
 });
 
 test('friction f84ba249: a saved Lane head from another checkout stops preflight before tests', async t => {
@@ -487,35 +679,39 @@ test('frictions 54584edf, 3b31573b and 081135b9: a pre-submit refusal sends a lo
   assert(!s.calls.some(c => /Compose|Landing/.test(c.name)));
 });
 
-test('protected-path approval is printed before required inline preflight spends a check', async t => {
-  const s = await fixture(t);
+test('a fresh checkout prints only a real protected-path approval before preflight', async t => {
   const { policyPreset } = await import('../dist/autonomy-policy.js');
-  s.caps.protectedPathPolicy = {
-    acceptance: {
-      ...policyPreset('trusted').acceptance,
-      ownerApprovalPaths: [],
-      protectedPaths: ['README.md'],
-    },
-    checkEntries: [],
-  };
-  s.caps.features.push('protected-path-notice');
   const output = [];
   const write = process.stderr.write.bind(process.stderr);
   t.mock.method(process.stderr, 'write', (chunk, ...args) => {
     output.push(String(chunk));
     return write(chunk, ...args);
   });
-  const result = await submitHostedLand(
-    s.root,
-    { operationId: randomUUID(), message: 'Protected document' },
-    s.address,
-    s.transport(),
-  );
-  assert.equal(result.result.submission.phase, 'landed');
-  assert.match(result.result.protectedPathNotice.message, /^The owner must approve this landing/);
-  const notice = output.findIndex(line => line.includes('The owner must approve this landing'));
-  const check = output.findIndex(line => line.includes('preflight plan:'));
-  assert(notice >= 0 && check > notice, 'approval is explained before the preflight run starts');
+  for (const path of ['README.md', 'unrelated.md']) {
+    const s = await fixture(t);
+    s.caps.protectedPathPolicy = {
+      acceptance: {
+        ...policyPreset('trusted').acceptance,
+        ownerApprovalPaths: [],
+        protectedPaths: [path],
+      },
+      checkEntries: [],
+    };
+    s.caps.features.push('protected-path-notice');
+    output.length = 0;
+    const result = await land(s);
+    assert.equal(result.result.submission.phase, 'landed');
+    assert.doesNotMatch(output.join(''), /Protected-path coverage is unavailable/);
+    if (path === 'README.md') {
+      assert.match(result.result.protectedPathNotice.message, /^The owner must approve this landing/);
+      const notice = output.findIndex(line => line.includes('The owner must approve this landing'));
+      const check = output.findIndex(line => line.includes('preflight plan:'));
+      assert(notice >= 0 && check > notice, 'approval is explained before the preflight run starts');
+    } else {
+      assert.equal(result.result.protectedPathNotice, undefined);
+      assert.doesNotMatch(output.join(''), /The owner must approve/);
+    }
+  }
 });
 
 // A project's own formatter, lint command and test inventory, with no Forge-specific command names.
@@ -1369,6 +1565,17 @@ test("incident 060fb653: renaming an unformatted file into the Lane is the chang
 });
 
 test("incident 060fb653: Forge's own Lane metadata failing the formatter never refuses a landing", async t => {
+  const output = [];
+  const write = fs.writeSync;
+  t.mock.method(fs, 'writeSync', (fd, bytes, ...args) => {
+    if (fd === 2) output.push(String(bytes.subarray(args[0], args[0] + args[1])));
+    return write(fd, bytes, ...args);
+  });
+  syncBuiltinESMExports();
+  t.after(() => {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  });
   const s = await treeFixture(t, { 'README.md': 'Before\n' }, { 'README.md': 'After\n' });
   const result = await land(s);
   assert.equal(result.result.submission.phase, 'landed');
@@ -1376,6 +1583,8 @@ test("incident 060fb653: Forge's own Lane metadata failing the formatter never r
   assert.equal(style.outcome, 'forge-metadata');
   assert(style.files.includes('.forge/hosted-lane.json'), 'the checkout marker Forge writes is what failed');
   assert(style.files.every(file => file.startsWith('.forge/')));
+  assert.equal(style.excerpt, undefined, 'only the compact advisory belongs in the receipt');
+  assert.doesNotMatch(output.join(''), /hosted-lane\.json: format error/);
   assert.match(
     result.result.defaults.preflight.staticAdvisory,
     /files Forge writes into the Lane .*not blocking/,

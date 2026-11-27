@@ -128,10 +128,11 @@ test('a 540-file caller on main reads one own bucket for a path and keeps its fu
   const path = { path: 'a.txt' };
   const hook = await readBoth(s, mine.id, path);
   const all = await read(s, mine.id, { ...path, paths: true });
-  const { changedPaths, ...withoutPaths } = all.reply;
+  const { changedPaths, savedHead, ...withoutPaths } = all.reply;
   t.diagnostic(
     `wide caller: hook before ${JSON.stringify(readCost(hook.baseline))} after ${JSON.stringify(readCost(hook))}; with paths ${JSON.stringify(readCost(all))}`,
   );
+  assert.equal(savedHead, rowOf(s, mine.id).head, 'the full paths reply pins the saved head');
   assert.equal(changedPaths.paths.length, 540);
   assert.equal(hook.wire, JSON.stringify(withoutPaths));
   assert(readCost(hook.baseline).bucketBytes > 100_000);

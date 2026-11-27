@@ -509,7 +509,9 @@ async function runAgentCli(
       // it, capability discovery) is on the network, not before it (fea47345 round 3).
       const modules = Promise.all([
         import('./hosted-agent-cli.js'),
-        import('./hosted-land-cli.js'),
+        action === 'finish' && (options.process || client.wait !== undefined)
+          ? import('./hosted-land-cli.js')
+          : undefined,
         import('./hosted-agent-transport.js'),
       ]);
       modules.catch(() => undefined);
@@ -541,11 +543,11 @@ async function runAgentCli(
           );
         if (!(await options.beforeDispatch(stdin === undefined ? undefined : { stdin }))) return;
       }
-      const [{ hostedAgentCli }, { hostedLandCli }, { HostedAgentTransport }] = await modules;
+      const [{ hostedAgentCli }, land, { HostedAgentTransport }] = await modules;
       notice();
       // The installed CLI detaches the submission and waits by default; in-process callers opt in.
-      if (action === 'finish' && (options.process || client.wait !== undefined))
-        return await hostedLandCli(here, command, hosted, {
+      if (land)
+        return await land.hostedLandCli(here, command, hosted, {
           wait: client.wait ?? (options.process ? undefined : false),
           detach: Boolean(options.process),
           ...(client.budget !== undefined ? { timeoutSeconds: client.budget } : {}),

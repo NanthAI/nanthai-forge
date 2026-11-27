@@ -27,8 +27,9 @@ Landings held for approval, dependency, main recovery or check infrastructure
 name the hold in `stage` and include its reason.
 For a single landing, the `wait` and foreground `land --save` budget replies use the
 latest pending phase delivered for the observed attempt by the existing subscription.
-When that progress updates the foreground display, `pendingProgress` carries its
-phase and version alongside the observed submission. The continuation still selects
+Foreground `land --save` emits a compact progress line when the phase, hold, order
+wait or stall changes. A budget reply's `pendingProgress` carries the pending phase
+and version alongside the observed submission. The continuation still selects
 the original operation, and settlement still comes from its canonical landing record.
 `land --save` uses the same 540 s budget for its whole run (submission and wait,
 `--budget` sets another), reports the pending landing in the same way, and exits
@@ -37,7 +38,11 @@ If a hosted `save` replies `settling`, follow its wait command or check its outc
 on the next command in that checkout. Waiting uses the save's progress subscription
 and advances the local Lane binding from a completed receipt. A wait that reaches
 its budget returns `IN_PROGRESS` with the continuation.
-A new `save` or `save --sync` first settles (waits for) a save this checkout left unfinished. A sync whose retained
+A new `save` or `save --sync` first settles this checkout's previous save. A fresh
+`diff` in the CLI or MCP waits up to five seconds for an acknowledged background
+save. If it still runs, the diff names its wait command. An unacknowledged or
+retryable save names the original save replay. A continued diff keeps its
+original source pins. A sync whose retained
 request the server refuses as `WORK_STALE` (no operation began) is rebuilt once from
 current pins; an identical later sync after the Lane moved starts a fresh operation.
 When the rebuild is refused too because only Lane metadata moved elsewhere (acceptance, a pin or a reopen from

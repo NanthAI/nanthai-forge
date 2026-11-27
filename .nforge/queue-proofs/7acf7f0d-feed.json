@@ -1,0 +1,192 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "src/hosted-agent-submission-wait.ts": "4310750cdc01efb833147456c1bab2fd26f7817912120a3a8d4e5bd6630c6fe4"
+  },
+  "replay": {
+    "incident": "7acf7f0d",
+    "test": "feed wait delivers compact phase, hold, order and stall changes before acceptance without extra page reads",
+    "receipt": "eca8a0ba-9758-4ad7-b829-69219f3c982f"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "thread:delegated-task:command%3Amcp%3A628d128b-7d76-4542-92fb-a2a9130503a6%3Adelegate-task%3Ae9086a49-a686-4fbd-bc37-f9357d7f6e60",
+  "review": {
+    "model": "gemini-4-neon",
+    "session": "thread:delegated-task:command%3Amcp%3Acb3d93f2-109b-48a9-8d1d-d88e8c4cd086%3Adelegate-task%3A2fc58618-696b-44c5-b5ce-8b063f26cce8",
+    "receipt": "f0a8f261-bd05-4ac3-9f39-562e0063c929"
+  },
+  "exercised": {
+    "src/hosted-agent-submission-wait.ts": {
+      "executed": [
+        "decode",
+        "observeHostedSubmissions",
+        "observeHostedSubmissionsOnce"
+      ],
+      "digest": "510b1928ab70d6d214a7bc0d1a7d85eaa212fa08de706c5d2762845b6141b0b7",
+      "units": [
+        [
+          "ForgeError",
+          "80782ffe370115376243f742db60843dd45ba6c24c25340d4092b697f7ab8a84"
+        ],
+        [
+          "HostedSubmissionWaitCursor",
+          "718737ac7637bb89be495bfdc006a33c1efe2fae95af1994f2fe955e2661877e"
+        ],
+        [
+          "approvalFields",
+          "0be10ee468fb738f7be6f63788c10dde03a5404ff1a0d6ae3abfe59b29195b2b"
+        ],
+        [
+          "boardConflictEnvelope",
+          "7c0bb44b7a18309c51324219527ec88d8f8ea3421e651d7a0b31213291da47dc"
+        ],
+        [
+          "boardWaker",
+          "5b149dceb3a9f638eefee2f9c026f57ef3fdd6b3ca39c14208d4578b379298c2"
+        ],
+        [
+          "contractSkew",
+          "1fefb0ae3f7fe33566a08163f7e820916ba9be8bd89f3ed1b817bc8980d7f348"
+        ],
+        [
+          "decode",
+          "2f1fc01ef0e41ed692750abf84e60bcf42ed8c2583bb160f5e1c644a329a33fa"
+        ],
+        [
+          "digest",
+          "6b5c226c96fc3fd1c75f186363aa03a82129b684bf16922bf9f2ee670975218d"
+        ],
+        [
+          "eventSchema",
+          "7cc3e8d6ff9b3f8ad29964a985735171897b4e391886813e13f75d0b61feb82f"
+        ],
+        [
+          "feedCommitOrder",
+          "bfa6d63b644fbb85821faed3059c04bb9bf4ca2515cb3bda318c54bbd37ad164"
+        ],
+        [
+          "finishCommandLaneIds",
+          "681a641361eee021b3259cf393fa89d29638625ae93aecddf0b0aa3b89fd757f"
+        ],
+        [
+          "hasLandingCapsule",
+          "986ce0e1c71f8f54c5dc5d00486b9e466a998230ea5337b102530e1df3476828"
+        ],
+        [
+          "hostedActionError",
+          "4567b7362f2fb825b8f175c2de24139a535dc088e646975c9d9dd20efb9db8c4"
+        ],
+        [
+          "hostedFinishSchema",
+          "b89c7f514279ac7405d1155a5da951bd260c720fea9aae817d5c33990976b160"
+        ],
+        [
+          "hostedLandingStateSchema",
+          "bb9d9c47338b607b1870caf1c52490bc292fda728a951a275622289ca4e23abd"
+        ],
+        [
+          "hostedRecoveryCommand",
+          "d34ca194691e72d73ed0de87dc7287a88ab33f74da6396ac236b6fa8294957ef"
+        ],
+        [
+          "hostedRunSubscription",
+          "72e25fe290dcb675e91be82f4be25695b9b967dbd5a729bf8b20718f0a9b33e0"
+        ],
+        [
+          "hostedSubmissionWaitSchema",
+          "ba9b5c75546c90917e5289440a27b8bfa54a518e2d187336a15d391efe0991b4"
+        ],
+        [
+          "invariant",
+          "fb5fbff612c49715a7a83d1db218f54589e8865f9f0bb1b36b1ebb32d1f3051d"
+        ],
+        [
+          "isNetworkPending",
+          "54c20ae3b935ae5e3cfa812315634a518f21d8f1e6e17a82982fd723c7e3f70b"
+        ],
+        [
+          "landingRedriver",
+          "df31d52a70362479d3bbefab7159fc05531bbc150e7b110cbe998f5b62b35725"
+        ],
+        [
+          "makeFunctionReference",
+          "90760cdb0f99f8303180da5ca3bbe536fdac31c89e78b170e62dbf914920e3e4"
+        ],
+        [
+          "markerIdentity",
+          "c05d33cbc08a226c7e426c614f73c0949a80bdae7ca6e9191500a51396d01b72"
+        ],
+        [
+          "observeHostedSubmissions",
+          "c6bf5e7f6d32747bf893750ed6d2cbdb35c542226e55bf2b2f2410e8daac7e5b"
+        ],
+        [
+          "observeHostedSubmissionsOnce",
+          "37e04e195051dfcb2dbe9660f727f222c96a8c38e7e139be92b988989261feba"
+        ],
+        [
+          "observedConflictRecovery",
+          "ffce6528c55dd3a81e34c407991dff4635f688065567d08ae03e5219e6f42615"
+        ],
+        [
+          "pageSchema",
+          "367d9f9521674833e00e7e6a62a9cc25a6b9240075d1011daf076cdef555bf07"
+        ],
+        [
+          "parseHostedOutcome",
+          "6ec0cb04b1541b2a8784bcc5f527bbd439f83cd5bd4b959ebf69a148f875506a"
+        ],
+        [
+          "rememberLandedOperations",
+          "460846a4b78ca55c4d09236c11bdef33174f66df955f525ceae694da73efdf1a"
+        ],
+        [
+          "replyIssuePaths",
+          "4c6841a596f489f81b456c58b1aceece026ff2c7c600ea60d30985614630c434"
+        ],
+        [
+          "replySkewError",
+          "2dc2b1d3885b9c4499b44452d4a9eaf29f96d2378e2b77dacc8a8970e7b561d6"
+        ],
+        [
+          "replySkewSide",
+          "74c0da86ad63e74cc294b3441b58cd2459717fb51e689fbc3999c382320f00e4"
+        ],
+        [
+          "retainedHostedOperation",
+          "926f767ca4b95568789a90c7b3eb6bad9123352a46e9cb8dd0ca7ae817457270"
+        ],
+        [
+          "retryHostedObservation",
+          "a9ce885aa1a735c63cced34477615f251032386aac0720abf7300d251f8e34cd"
+        ],
+        [
+          "safeParseHostedResponse",
+          "360f56729490b72c89e49ee9b48390515350be81c07ca7fd95c5d6443ef7f684"
+        ],
+        [
+          "sourceAuthoritySchema",
+          "8b2dd5e9c9e26ea334bcfde87644b23794883430e2a2009ee8dc768f572b8b63"
+        ],
+        [
+          "stableSubmissionPageSchema",
+          "a30ec7e6c8bfa568f95d8d18d633bc82c672e9e070937fa52f3664c6a082a843"
+        ],
+        [
+          "syncRequiredAdvice",
+          "c6a377c9d228a061b733ca2c16eeb432a8c3090d8d91639354f9ceac63c44fe1"
+        ],
+        [
+          "syncRequiredContinuation",
+          "faff3de629c8e896a414ecd825ec067dd2ee265edd42bc1e2d906a3e9592506e"
+        ],
+        [
+          "z",
+          "0be8b14a719fbad954f3dc9bb19b1716bed3a588afba2e97f0a99e168ee0a700"
+        ]
+      ],
+      "shell": "79c69c982a2e22cd88cb861913889a9e4e8c3212527d82a4d7764de9a86a818c"
+    }
+  }
+}
