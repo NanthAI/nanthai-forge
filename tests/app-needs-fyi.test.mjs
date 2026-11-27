@@ -78,7 +78,7 @@ test('agent conflicts and refusals are FYI rows beside landings and settings, ne
   assert.deepEqual(
     view.rows.map(row => [row.key.split('@')[0], row.area]),
     [
-      ['message:m1', 'code'],
+      ['message:m1', 'messages'],
       ['landing:r1', 'code'],
       ['held:c', 'code'],
       ['held:r', 'code'],
@@ -88,7 +88,7 @@ test('agent conflicts and refusals are FYI rows beside landings and settings, ne
   );
   const conflict = view.rows.find(row => row.key.startsWith('held:c'));
   assert.match(conflict.next, /^sample-one\/quiet-otter updates it from main and lands again/);
-  assert.deepEqual(view.counts, { all: 5, code: 4, outside: 1 });
+  assert.deepEqual(view.counts, { all: 5, code: 3, outside: 1, messages: 1 });
   assert.equal(view.rows.find(row => row.key.startsWith('setting:')).title, 'Settings changed: checks');
 });
 
@@ -265,4 +265,39 @@ test("a held FYI row carries its cause line and a link to that Lane's wait chain
   assert.deepEqual(wait.to, { place: 'lanes', section: 'touching' });
   assert.equal(wait.focusLane, 'c');
   assert.equal(focusHref('/x/touching', 'c'), '/x/touching?lane=c');
+});
+
+test('12ed415f (01.1/06.2, 01.3b): failed-check FYI renders human summary, holder and age without leaking CLI instructions, and Messages filter counts messages', () => {
+  const fyiHeld = needs([
+    held('agent-fix', 'check-failed', minutesAgo(11), {
+      note: 'Fix it in this Lane, save, then run land --save again; do not abandon or re-create the Lane. If it fails without your c',
+    }),
+    held('fresh-fix', 'check-failed', NOW - 5_000, {
+      note: 'Check verify failed: math.test.mjs. Fix it in this Lane, save, then run land --save again.',
+    }),
+  ]).fyi;
+  const view = fyiView(
+    fyiRead({
+      messages: [
+        {
+          id: 'm1',
+          at: minutesAgo(2),
+          actor: 'sample-two',
+          agent: 'amber-fox',
+          text: 'Heads up',
+          laneId: 'c',
+        },
+      ],
+    }),
+    fyiHeld,
+    NOW,
+  );
+  const leaked = view.rows.find(row => row.key.startsWith('held:agent-fix'));
+  assert.equal(leaked.who, 'sample-one/quiet-otter');
+  assert.equal(leaked.fact, 'Failed 11 min ago');
+  assert.doesNotMatch(`${leaked.fact} ${leaked.next ?? ''}`, /land --save|Fix it in this Lane/i);
+  const fresh = view.rows.find(row => row.key.startsWith('held:fresh-fix'));
+  assert.equal(fresh.fact, 'Check verify failed: math.test.mjs · failed just now');
+  assert.doesNotMatch(fresh.fact, /just now ago|land --save|Fix it in this Lane/i);
+  assert.deepEqual(view.counts, { all: 3, code: 2, outside: 0, messages: 1 });
 });

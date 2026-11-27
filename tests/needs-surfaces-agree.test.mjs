@@ -130,7 +130,7 @@ test("9b9057a9: a Lane held for the reader's approval is counted and listed by e
   const said = surfaces(read([held('rev', 'review')]), [mark('rev')]);
   assert.equal(said.badge, 1);
   assert.equal(said.nowRows, 1);
-  assert.match(said.nowHeadline.bold, /^1 thing holds work until you decide\.$/);
+  assert.match(said.nowHeadline.bold, /^1 thing holds work until you decide; waiting 1 h\.$/);
   assert.deepEqual(said.heldPageRows, ['held:rev']);
   assert.equal(said.lineHeld, 1);
   assert.equal(said.mark, 'waiting');
@@ -221,7 +221,7 @@ test('incident replay 9b9057a9: the owner approval and the conflicted Lane in on
     'Needs you lists the approval, with the exact attempt to approve',
   );
   assert.ok(view.now[0].landing?.attemptId, 'the row carries an approve action (decideTarget)');
-  assert.match(said.nowHeadline.bold, /^1 thing holds work until you decide\.$/);
+  assert.match(said.nowHeadline.bold, /^1 thing holds work until you decide; waiting 1 h\.$/);
   const waiting = count.waitingLanes(count.needsYouLanes(input, NOW));
   const feed = {
     lanes: [mark('88671ba0', { fix: true, overlap: true }), mark('af85c71e', { stage: 'ready' })],
@@ -292,7 +292,7 @@ test('incident replay 9b9057a9 (core claim): a protected-path review on a four-L
   assert.deepEqual(decideTarget(view.now[0]), {
     landing: { submissionId: '4a6e7ec2', attemptId: 'attempt-1' },
   });
-  assert.match(model.needsSentence(view).bold, /^1 thing holds work until you decide\.$/);
+  assert.match(model.needsSentence(view).bold, /^1 thing holds work until you decide; waiting 1 h\.$/);
   // The top bar's line and F count every Lane of it as waiting on the reader.
   const waiting = count.waitingLanes(count.needsYouLanes(input, NOW));
   assert.deepEqual([...waiting].sort(), [...ids].sort());

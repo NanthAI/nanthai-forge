@@ -9,7 +9,7 @@
 import type { StateWord } from '../../ds';
 import type { SetupPreferences } from '../start/setup-model';
 import type { NoticeRow, NowRow, ParkedRow, TookOutRow } from './model';
-import { laneTitle, whoOf } from './model';
+import { agoText, laneTitle, whoOf } from './model';
 
 export type FyiState = { clearedAt: number | null; clearedSequence: number | null; dismissed: string[] };
 export type FyiRead = {
@@ -61,7 +61,7 @@ export type FyiRead = {
   messagesMore: boolean;
 };
 
-export type Area = 'code' | 'outside';
+export type Area = 'code' | 'outside' | 'messages';
 /** Lanes > Touching for one Lane (its `?lane=` read by lanes/model.ts LANE_FOCUS), kept here so Now loads none of Lanes. */
 export const focusHref = (touching: string, laneId: string) =>
   `${touching}?${new URLSearchParams({ lane: laneId })}`;
@@ -69,6 +69,7 @@ export type Link = {
   label: string;
   to: { place: string; section?: string; rest?: string; anchor?: string };
   focusLane?: string;
+  checkAttempt?: string;
 };
 export type FyiRow = {
   /** `kind:id@version`: what a dismissal stores. */
@@ -139,8 +140,14 @@ export function startOfDay(now: number) {
   return day.getTime();
 }
 
+function heldFact(row: NowRow, now: number) {
+  if (row.why !== 'check-failed') return row.detail ?? '';
+  const age = agoText(row.since, now);
+  return row.detail ? `${row.detail.replace(/\.$/, '')} · failed ${age}` : `Failed ${age}`;
+}
+
 /** Held Lanes that ask nobody, as FYI rows: the version is why and since, so a new hold shows again. */
-function heldRows(held: readonly NowRow[]): FyiRow[] {
+function heldRows(held: readonly NowRow[], now: number): FyiRow[] {
   return held.map(row => ({
     key: `held:${row.landing?.submissionId ?? row.laneId}@${row.why}.${row.since}`,
     at: row.since,
@@ -150,13 +157,17 @@ function heldRows(held: readonly NowRow[]): FyiRow[] {
     tag: row.tag,
     title: laneTitle(row),
     who: row.who,
-    fact: row.detail ?? '',
+    fact: heldFact(row, now),
     next: row.next,
     currentHold: true,
     links: row.laneId
       ? [
           { label: 'What it waits on', to: { place: 'lanes', section: 'touching' }, focusLane: row.laneId },
-          { label: 'Open the Lane', to: { place: 'lanes', rest: row.laneId } },
+          {
+            label: 'Open the Lane',
+            to: { place: 'lanes', rest: row.laneId },
+            ...(row.why === 'check-failed' && row.attemptId ? { checkAttempt: row.attemptId } : {}),
+          },
         ]
       : [],
   }));
@@ -297,7 +308,7 @@ function readRows(read: FyiRead): FyiRow[] {
     rows.push({
       key: `message:${message.id}@1`,
       at: message.at,
-      area: 'code',
+      area: 'messages',
       event: false,
       word: 'Waiting its turn',
       tag: 'Message',
@@ -323,7 +334,7 @@ export function fyiView(
   const cleared = read.state.clearedAt;
   const from = cleared ?? startOfDay(now);
   const hidden = new Set(read.state.dismissed);
-  const holds = [...heldRows(held), ...currentNoticeRows(notices, parks)];
+  const holds = [...heldRows(held, now), ...currentNoticeRows(notices, parks)];
   const kept = (row: FyiRow) =>
     !hidden.has(row.key) && (row.event ? row.at >= from : cleared === null || row.at > cleared);
   const rows = [
@@ -338,6 +349,7 @@ export function fyiView(
       all: rows.length,
       code: rows.filter(row => row.area === 'code').length,
       outside: rows.filter(row => row.area === 'outside').length,
+      messages: rows.filter(row => row.area === 'messages').length,
     },
   };
 }

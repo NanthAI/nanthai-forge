@@ -8,9 +8,17 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { moduleUrl } from './convex-module.mjs';
 
-const { needsView, needsSentence, whoOf, parkLine, protectedApprovalCopy } = await import(
-  moduleUrl('../web/src/app/needs/model.ts')
-);
+const {
+  agoText,
+  inPageApprovalNext,
+  needsView,
+  needsSentence,
+  standingInProgress,
+  whoOf,
+  parkLine,
+  protectedApprovalCopy,
+  waitingText,
+} = await import(moduleUrl('../web/src/app/needs/model.ts'));
 const countModule = await import(moduleUrl('../web/src/app/needs/count.ts'));
 const { needsCount } = countModule;
 const { decideTarget } = await import(moduleUrl('../web/src/app/needs/decide.ts'));
@@ -74,8 +82,11 @@ test('the shell count is the page count: what waits on a person, never what asks
   assert.equal(view.ahead[0].laneId, 'setting:runner');
   const withApproval = view.now.find(row => row.laneId === 'l2');
   assert.equal(withApproval.approval.laneId, 'l2', 'the Lane request is drawn on its held row, not twice');
-  assert.match(needsSentence(view).bold, /^1 thing holds work until you decide\.$/);
-  assert.match(needsSentence(view).rest, /^1 request asked ahead holds nothing yet\.$/);
+  assert.match(
+    needsSentence(view, 10 + 18 * 60_000).bold,
+    /^1 thing holds work until you decide; waiting 18 min\.$/,
+  );
+  assert.match(needsSentence(view, 10 + 18 * 60_000).rest, /^1 request asked ahead holds nothing yet\.$/);
 });
 
 test('48049998: every hold that waits for the owner has a decision target; a request asked ahead keeps its own head', () => {
@@ -179,7 +190,10 @@ test("Needs you holds only what the reader decides: a person's own stuck Lane is
   );
   assert.equal(view.count, 2);
   assert.deepEqual(needsCount(input), { n: 2, atLeast: false });
-  assert.equal(needsSentence(view).bold, '2 things hold work until you decide.');
+  assert.equal(
+    needsSentence(view, 3 + 25 * 60_000).bold,
+    '2 things hold work until you decide; the longest has waited 25 min.',
+  );
 
   const reader = { ...input, canDecide: false };
   assert.deepEqual(needsView(reader).now, [], 'a review hold waits on the owner, not on a reader');
@@ -232,7 +246,10 @@ test('a count past the read limit reconciles with the rows shown', () => {
   const view = needsView(read(lanes, [], 1, true));
   assert.equal(view.count, 30);
   assert.equal(view.atLeast, true);
-  assert.equal(needsSentence(view).bold, 'At least 30 things hold work until you decide.');
+  assert.equal(
+    needsSentence(view, 45 * 60_000).bold,
+    'At least 30 things hold work until you decide; the longest has waited 45 min.',
+  );
   assert.equal(needsSentence(needsView(read([], []))).bold, 'Nothing needs you.');
 });
 
@@ -338,7 +355,10 @@ test('e1633718: a Lane parked for the reader counts at once; one parked with no 
     'the park names the recorded person, even on a Lane held by an agent',
   );
   assert.equal(late.count, 2);
-  assert.match(needsSentence(late).bold, /^2 things hold work until you decide\.$/);
+  assert.match(
+    needsSentence(late).bold,
+    /^2 things hold work until you decide; the longest has waited 4 h\.$/,
+  );
   assert.deepEqual(needsCount(input, 100 + PARK_UNNAMED_AFTER_MS), { n: 2, atLeast: false });
   const run = needsView(
     { ...input, parked: [parked('p3', { ...named.park, to: 'sample-one/quiet-otter' }, 50)] },
@@ -843,7 +863,10 @@ test('J08: only taken-out offers waiting means nothing is held, and the sentence
   assert.equal(needsSentence(one).bold, 'A change you own was taken out of main.');
   assert.equal(one.notices[0].head, '@sample-two took a change out of main.');
   const mixed = needsView({ ...read([held('l1', 'review', 5)], []), notices: [offer] });
-  assert.equal(needsSentence(mixed).bold, '1 thing holds work until you decide.', 'the offer is not a hold');
+  assert.deepEqual(needsSentence(mixed, 5 + 12 * 60_000), {
+    bold: '2 things need you.',
+    rest: '1 thing holds work until you decide; waiting 12 min.',
+  });
 });
 
 test('J08: Bring it back sends the lifecycle request the CLI sends for a reopen, so the browser adds no second path', async () => {
@@ -885,4 +908,121 @@ test('sealed secrets that wait on the reader (Item 41a0df87) count in the shell 
   );
   assert.equal(needsCount({ ...input, secrets: undefined }).n, 0);
   assert.equal(needsView({ ...input, secrets: 1 }).notices[0].head, '1 secret change waits on you.');
+});
+
+test('12ed415f (01.1/06.2): failed-check notes strip agent repair commands and bare land --save while keeping human summaries', () => {
+  const now = Date.UTC(2026, 10, 27, 1, 30);
+  const view = needsView(
+    read(
+      [
+        held('leaked', 'check-failed', now - 11 * 60_000, {
+          note: 'Fix it in this Lane, save, then run land --save again; do not abandon or re-create the Lane. If it fails without your c',
+        }),
+        held('bare-cmd', 'check-failed', now - 5 * 60_000, {
+          note: 'Run land --save again after updating from main.',
+        }),
+        held('prefixed', 'check-failed', now - 8 * 60_000, {
+          note: 'Check verify failed: math.test.mjs. Fix it in this Lane, save, then run land --save again.',
+        }),
+        held('clipped-marker', 'check-failed', now - 7 * 60_000, {
+          note: 'Check verify failed: browser.test.mjs. Fix it in this La',
+        }),
+      ],
+      [],
+    ),
+    now,
+  );
+  const byId = Object.fromEntries(view.fyi.map(row => [row.laneId, row]));
+  assert.equal(byId.leaked.detail, null, 'truncated agent repair instructions are dropped');
+  assert.equal(byId['bare-cmd'].detail, null, 'bare land --save is rejected');
+  assert.equal(byId.prefixed.detail, 'Check verify failed: math.test.mjs.');
+  assert.equal(byId['clipped-marker'].detail, 'Check verify failed: browser.test.mjs.');
+});
+
+test('12ed415f (01.2a): headline shows the shared count and ages only eligible holds', () => {
+  const now = Date.UTC(2026, 10, 27, 1, 30);
+  const mins = n => now - n * 60_000;
+  const view = needsView(
+    {
+      ...read(
+        [held('older-fyi', 'check-failed', mins(120)), held('review-1', 'review', mins(18))],
+        [
+          request('setting:ahead', 'setting', { at: new Date(mins(90)).toISOString() }),
+          request('setting:blocked', 'setting', {
+            at: new Date(mins(32)).toISOString(),
+            waitUntil: now + 60_000,
+          }),
+        ],
+      ),
+      asks: [
+        {
+          id: 'q1',
+          at: mins(9),
+          actor: 'sample-one',
+          agent: 'amber-fox',
+          text: 'Ship now?',
+          choices: ['Yes', 'No'],
+          laneId: 'review-1',
+        },
+      ],
+      notices: [
+        {
+          kind: 'reverted',
+          id: uuid(99),
+          summary: '',
+          next: null,
+          taken: { laneId: uuid(98), title: 'Old revert', by: 'sample-two', agent: null, at: mins(200) },
+        },
+      ],
+    },
+    now,
+  );
+  assert.deepEqual(needsSentence(view, now), {
+    bold: '4 things need you.',
+    rest: '3 things hold work until you decide; the longest has waited 32 min.',
+  });
+  // Under 1 minute uses "under 1 min", never "just now".
+  const fresh = needsView(read([held('fresh', 'review', now - 10_000)], []), now);
+  assert.equal(needsSentence(fresh, now).bold, '1 thing holds work until you decide; waiting under 1 min.');
+  // Dateless notice-only hold omits wait clause rather than guessing.
+  const secretsOnly = needsView({ ...read([], []), secrets: 2 }, now);
+  assert.equal(needsSentence(secretsOnly, now).bold, '2 things hold work until you decide.');
+});
+
+test('12ed415f (01.2b): standingInProgress uses the shared attention count and singular/plural grammar', () => {
+  assert.equal(standingInProgress(null, null), undefined);
+  assert.equal(standingInProgress(1, { count: 0, countAtLeast: false }), '1 Lane open');
+  assert.equal(standingInProgress(7, { count: 1, countAtLeast: false }), '7 Lanes open, 1 needs you');
+  assert.equal(standingInProgress(7, { count: 3, countAtLeast: false }), '7 Lanes open, 3 need you');
+  assert.equal(standingInProgress(7, { count: 1, countAtLeast: true }), '7 Lanes open, 1+ need you');
+});
+
+test('12ed415f (01.3c, 05.1b): relative time avoids "just now ago" and in-browser approval guidance omits "open the approve link"', () => {
+  const now = Date.UTC(2026, 10, 27, 1, 30);
+  assert.equal(agoText(now - 5_000, now), 'just now');
+  assert.equal(agoText(now - 18 * 60_000, now), '18 min ago');
+  assert.equal(waitingText(now - 5_000, now), 'Waiting under 1 min');
+  assert.equal(waitingText(now - 18 * 60_000, now), 'Waiting 18 min');
+
+  const setting = {
+    kind: 'setting',
+    needsOwner: true,
+    nextStep: 'Open the approve link, then approve or decline the settings change.',
+  };
+  const next = inPageApprovalNext(setting, true);
+  assert.doesNotMatch(next, /approve link/i);
+  assert.match(next, /Approve or decline the settings change below\./);
+  assert.doesNotMatch(inPageApprovalNext(setting, false), /approve link/i);
+  assert.doesNotMatch(
+    inPageApprovalNext(
+      {
+        kind: 'lane',
+        needsOwner: false,
+        nextStep: 'The builder addresses it and asks again; or grant it from the approve link.',
+      },
+      true,
+      true,
+    ),
+    /approve link/i,
+  );
 });

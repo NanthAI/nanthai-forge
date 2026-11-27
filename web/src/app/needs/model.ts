@@ -103,6 +103,8 @@ export type NeedsView = {
   countAtLeast: boolean;
   /** False when the approvals read hit its bound: a missing request is "can't confirm", never "none". */
   approvalsComplete: boolean;
+  /** The timestamp at which this view was classified, used for wait durations in the headline. */
+  at: number;
 };
 
 /** The held word is the one every screen says for this hold (lane-state.ts). */
@@ -243,11 +245,19 @@ const noticeFallback = {
   secrets: 'Sealed secrets wait on you.',
 } as const;
 const RAW_UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
-const AGENT_COMMAND = /\bnforge\b/i;
-/** Text a person reads: a card never shows a raw id or an agent's command (J08). The board note, CLI and agent status
- * keep their exact text; the web words the card itself. */
+const AGENT_COMMAND =
+  /\bnforge\b|\bland\s+--[a-z-]+|\bsave\s+--[a-z-]+|\bFix it in this Lane\b|"retry"\s*:\s*true|\bsupersedeFinish\b/i;
+const REPAIR_SUFFIX = /\b(?:Fix it\b|If it fails without your\b)[\s\S]*$/i;
+/** Text a person reads: a card never shows a raw id or an agent's command (J08, 01.1/06.2). The board note, CLI and
+ * agent status keep their exact text; the web words the card itself. */
 export const readable = (text: string | null | undefined) =>
   text && !RAW_UUID.test(text) && !AGENT_COMMAND.test(text) ? text : null;
+/** Clean person-facing summary from a Lane note: strips trailing agent repair instructions and drops raw ids/commands. */
+function readableNote({ note, why }: HeldLane) {
+  if (!note) return null;
+  const summary = why === 'check-failed' ? note.replace(REPAIR_SUFFIX, '') : note;
+  return readable(summary.replace(/\s+/g, ' ').trim());
+}
 /** "@who took “title” out of main" (an offer to the Lane's owner), or "You took …" for the one who ran it. */
 function takenHead(taken: Taken) {
   const title = readable(taken.title?.replace(/\s+/g, ' ').trim());
@@ -301,7 +311,9 @@ export function needsView(read: NeedsRead, now = Date.now()): NeedsView {
         head: after
           ? `${laneTitle(lane)} waits for ${after} to land.`
           : (waits ? questions : facts)[why](laneTitle(lane)),
-        detail: lane.note || (waits && after ? `Waiting for ${after} to land.` : (cardDetails[why] ?? null)),
+        detail:
+          readableNote(lane) ??
+          (waits && after ? `Waiting for ${after} to land.` : (cardDetails[why] ?? null)),
         who,
         approval,
         landing:
@@ -351,6 +363,7 @@ export function needsView(read: NeedsRead, now = Date.now()): NeedsView {
     atLeast: read.more > 0 || read.parkedMore === true || read.asksMore === true,
     countAtLeast: attention.atLeast,
     approvalsComplete: complete,
+    at: now,
   };
 }
 
@@ -375,13 +388,30 @@ export function aheadRow(request: Approval): AheadRow {
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
 
-/** The page sentence: the answer first, then at most one more clause (DESIGN.md rule 45). */
-export function needsSentence(view: NeedsView): { bold: string; rest: string } {
+/** Earliest timestamp among holds currently waiting on the reader (excludes offers, deploys, FYI and asked ahead). */
+function oldestHoldAt(view: NeedsView): number | null {
+  let oldest = Infinity;
+  const consider = (at: number | undefined) => {
+    if (typeof at === 'number' && Number.isFinite(at) && at < oldest) oldest = at;
+  };
+  for (const row of view.now) consider(row.since);
+  for (const row of view.asks) consider(row.at);
+  for (const row of view.parked) consider(row.since);
+  for (const row of view.blocked) consider(Date.parse(row.at));
+  for (const row of view.notices) {
+    if (!row.taken && row.kind !== 'deploy') consider(row.since);
+  }
+  return Number.isFinite(oldest) ? oldest : null;
+}
+
+/** The page sentence: the answer first (including the longest eligible hold), then at most one more clause (rule 45). */
+export function needsSentence(view: NeedsView, now = view.at): { bold: string; rest: string } {
   // A taken-out change offered to its owner is a choice, not a hold: nothing waits on it (J08).
   const offers = view.notices.filter(notice => notice.taken).length;
   const deploys = view.notices.filter(notice => notice.kind === 'deploy').length;
   const holds = view.count - offers - deploys;
-  const lanes = `${view.countAtLeast ? 'At least ' : ''}${plural(holds, 'thing')}`;
+  const lowerBound = view.countAtLeast ? 'At least ' : '';
+  const needYou = `${lowerBound}${plural(view.count, 'thing')} need you.`;
   const aheadCount = view.ahead.length + (view.askedAhead?.length ?? 0);
   const ahead = aheadCount
     ? `${plural(aheadCount, 'request')} asked ahead ${aheadCount === 1 ? 'holds' : 'hold'} nothing yet.`
@@ -389,11 +419,20 @@ export function needsSentence(view: NeedsView): { bold: string; rest: string } {
   const deploySentence = deploys
     ? `${deploys === 1 ? 'A deploy needs' : `${deploys} deploys need`} someone to look into ${deploys === 1 ? 'it' : 'them'}.`
     : '';
-  if (holds > 0)
-    return {
-      bold: `${lanes} ${holds === 1 ? 'holds' : 'hold'} work until you decide.`,
-      rest: deploySentence || ahead,
-    };
+  if (holds > 0) {
+    const oldest = oldestHoldAt(view);
+    const span = oldest !== null ? waited(oldest, now) : null;
+    const duration = span ? (span === 'just now' ? 'under 1 min' : span) : null;
+    const longest = duration
+      ? holds === 1
+        ? `; waiting ${duration}`
+        : `; the longest has waited ${duration}`
+      : '';
+    const prefix = holds === view.count ? lowerBound : '';
+    const holding = `${prefix}${plural(holds, 'thing')} ${holds === 1 ? 'holds' : 'hold'} work until you decide${longest}.`;
+    return holds === view.count ? { bold: holding, rest: ahead } : { bold: needYou, rest: holding };
+  }
+  if (deploys && offers) return { bold: needYou, rest: deploySentence };
   if (deploySentence) return { bold: deploySentence, rest: ahead };
   if (offers)
     return {
@@ -413,6 +452,19 @@ export function needsSentence(view: NeedsView): { bold: string; rest: string } {
   };
 }
 
+/** The Standing bar's In-progress detail: open Lanes plus the shared Needs you attention count. */
+export function standingInProgress(
+  lanesOpen: number | null,
+  view: Pick<NeedsView, 'count' | 'countAtLeast'> | null,
+) {
+  if (lanesOpen === null) return undefined;
+  const open = `${lanesOpen.toLocaleString()} ${lanesOpen === 1 ? 'Lane' : 'Lanes'} open`;
+  if (!view || view.count <= 0) return open;
+  const count = `${view.count.toLocaleString()}${view.countAtLeast ? '+' : ''}`;
+  const verb = view.count === 1 && !view.countAtLeast ? 'needs' : 'need';
+  return `${open}, ${count} ${verb} you`;
+}
+
 /** "waiting 18 min": how long the hold has lasted, from the time the view was drawn (no timer). */
 export function waited(since: number, now: number) {
   const minutes = Math.max(0, Math.round((now - since) / 60_000));
@@ -421,6 +473,35 @@ export function waited(since: number, now: number) {
   const hours = Math.floor(minutes / 60);
   if (hours < 48) return `${hours} h ${minutes % 60 ? `${minutes % 60} min` : ''}`.trim();
   return `${Math.floor(hours / 24)} d`;
+}
+
+/** "18 min ago", or "just now" under a minute (never "just now ago"). */
+export function agoText(since: number, now: number) {
+  const span = waited(since, now);
+  return span === 'just now' ? 'just now' : `${span} ago`;
+}
+
+/** "Waiting 18 min", or "Waiting under 1 min" under a minute. */
+export function waitingText(since: number, now: number) {
+  const span = waited(since, now);
+  return span === 'just now' ? 'Waiting under 1 min' : `Waiting ${span}`;
+}
+
+/** In-browser guidance for an approval request: never tells a person already in Forge to open the approve link. */
+export function inPageApprovalNext(
+  row: Pick<Approval, 'kind' | 'needsOwner' | 'nextStep' | 'membership' | 'setting'>,
+  canDecide: boolean,
+  onLanePage = false,
+) {
+  if (!row.needsOwner) return row.nextStep.replace(/\s*(?:from|at) the approve link\b/gi, ' below');
+  if (!canDecide) return 'Only the project owner can approve or decline this request.';
+  if (row.membership) return 'Approve or decline the membership change below.';
+  if (row.setting?.origin === 'github-connect') return 'Allow on GitHub or decline below.';
+  if (row.kind === 'setting') return 'Approve or decline the settings change below.';
+  if (row.kind === 'fork') return 'Approve or decline the check run for this pull request below.';
+  return onLanePage
+    ? 'Approve or decline below; approving lets the Lane land.'
+    : 'Review the Lane to approve or decline; approving lets it land.';
 }
 
 /** The Lane page's park sentence (Item e1633718): who it waits on, for how long, and why in the parker's words. */

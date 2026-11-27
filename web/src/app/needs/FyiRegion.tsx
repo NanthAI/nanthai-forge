@@ -4,6 +4,7 @@
 import { useState, type ReactNode } from 'react';
 import { Key, Region, Segment, State, Who } from '../../ds';
 import { A } from '../frames';
+import { checkAttemptHref } from '../check/route';
 import { NeedsCard } from './NeedsCard';
 import { focusHref, fyiSum, sinceText, type Area, type FyiRow, type FyiState, type fyiView } from './fyi';
 import type { Dismiss } from './NeedsMe';
@@ -17,6 +18,7 @@ const FILTERS: { value: 'all' | Area; text: string }[] = [
   { value: 'all', text: 'All' },
   { value: 'code', text: 'Code' },
   { value: 'outside', text: 'Outside the code' },
+  { value: 'messages', text: 'Messages' },
 ];
 
 /** "09:58" today, "Yesterday", or the date: when a row happened, in the reader's time. */
@@ -165,7 +167,11 @@ export function Fyi({
                         <A
                           key={link.label}
                           className="lk"
-                          href={link.focusLane ? focusHref(href(link.to), link.focusLane) : href(link.to)}
+                          href={
+                            link.focusLane
+                              ? focusHref(href(link.to), link.focusLane)
+                              : checkAttemptHref(href(link.to), link.checkAttempt)
+                          }
                         >
                           {link.label}
                         </A>

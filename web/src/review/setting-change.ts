@@ -43,8 +43,11 @@ type ScriptDiff = {
   before: string;
   after: string;
 };
+export type SummaryPart = { text: string; code?: boolean };
 type SettingChangeView = {
   summary: string;
+  /** The same summary split so non-ASCII code-point markers apply only to untrusted command text, never to Forge's own punctuation. */
+  summaryParts: SummaryPart[];
   rows: ChangeRow[];
   scripts: ScriptDiff[];
   /** Fields the request leaves as they are. */
@@ -246,14 +249,17 @@ export function settingChangeView(
   compare: SettingCompare | null | undefined,
 ): SettingChangeView {
   const what = `${origin ? WHAT[origin] : 'Setting'}${compare?.subject ? ` ${compare.subject}` : ''}`;
-  if (!compare || compare.after === null || compare.after === undefined)
+  if (!compare || compare.after === null || compare.after === undefined) {
+    const summary = `${what}: the change could not be compared with the current setting. Open Details to read the request.`;
     return {
-      summary: `${what}: the change could not be compared with the current setting. Open Details to read the request.`,
+      summary,
+      summaryParts: [{ text: summary }],
       rows: [],
       scripts: [],
       same: 0,
       unavailable: true,
     };
+  }
   const before = splitScripts(flatten(compare.before)),
     after = splitScripts(flatten(compare.after));
   const rows: ChangeRow[] = [],
@@ -300,29 +306,80 @@ export function settingChangeView(
     }
     rows.push(row);
   }
-  return { summary: summaryLine(what, rows, scripts), rows, scripts, same, unavailable: false };
+  const summaryParts = summaryLineParts(what, rows, scripts);
+  return {
+    summary: summaryParts.map(part => part.text).join(''),
+    summaryParts,
+    rows,
+    scripts,
+    same,
+    unavailable: false,
+  };
 }
 
 const listed = (items: string[]) =>
   items.length > 2 ? `${items.slice(0, 2).join(', ')} and ${items.length - 2} more` : items.join(' and ');
+function listedParts(items: string[], code: boolean): SummaryPart[] {
+  if (!code) return [{ text: listed(items) }];
+  if (items.length > 2)
+    return [
+      { text: items[0]!, code: true },
+      { text: ', ' },
+      { text: items[1]!, code: true },
+      { text: ` and ${items.length - 2} more` },
+    ];
+  if (items.length === 2)
+    return [{ text: items[0]!, code: true }, { text: ' and ' }, { text: items[1]!, code: true }];
+  return items.length ? [{ text: items[0]!, code: true }] : [];
+}
+function mergeSummaryParts(parts: SummaryPart[]): SummaryPart[] {
+  const out: SummaryPart[] = [];
+  for (const part of parts) {
+    if (!part.text) continue;
+    const prev = out.at(-1);
+    if (prev && Boolean(prev.code) === Boolean(part.code)) prev.text += part.text;
+    else out.push(part.code ? { text: part.text, code: true } : { text: part.text });
+  }
+  return out;
+}
 /** "Check verify: adds Java 17 to actions toolchains, changes environment label; script changed". */
-function summaryLine(what: string, rows: ChangeRow[], scripts: ScriptDiff[]) {
-  const parts = rows.map(row => {
+function summaryLineParts(what: string, rows: ChangeRow[], scripts: ScriptDiff[]): SummaryPart[] {
+  const clauses: SummaryPart[][] = rows.map(row => {
     const field = row.label.charAt(0).toLowerCase() + row.label.slice(1);
     const order = row.reordered ? ' and reorders it' : '';
+    const cmd = Boolean(row.command);
     if (row.added?.length && !row.dropped?.length)
-      return `${row.inserted ? 'inserts' : 'adds'} ${listed(row.added)} ${row.inserted ? 'into' : 'to'} ${field}${order}`;
+      return [
+        { text: `${row.inserted ? 'inserts' : 'adds'} ` },
+        ...listedParts(row.added, cmd),
+        { text: ` ${row.inserted ? 'into' : 'to'} ${field}${order}` },
+      ];
     if (row.dropped?.length && !row.added?.length)
-      return `drops ${listed(row.dropped)} from ${field}${order}`;
-    if (row.reordered && !row.added?.length && !row.dropped?.length) return `reorders ${field}`;
-    if (row.kind === 'added') return `sets ${field} to ${row.after}`;
-    if (row.kind === 'removed') return `clears ${field}`;
-    return `changes ${field}`;
+      return [{ text: 'drops ' }, ...listedParts(row.dropped, cmd), { text: ` from ${field}${order}` }];
+    if (row.reordered && !row.added?.length && !row.dropped?.length) return [{ text: `reorders ${field}` }];
+    if (row.kind === 'added')
+      return cmd
+        ? [{ text: `sets ${field} to ` }, { text: row.after, code: true }]
+        : [{ text: `sets ${field} to ${row.after}` }];
+    if (row.kind === 'removed') return [{ text: `clears ${field}` }];
+    return [{ text: `changes ${field}` }];
   });
-  const shown = parts.length > 3 ? [...parts.slice(0, 3), `${parts.length - 3} more`] : parts;
+  const shown =
+    clauses.length > 3 ? [...clauses.slice(0, 3), [{ text: `${clauses.length - 3} more` }]] : clauses;
   const script = scripts.length
     ? `${scripts.length === 1 ? 'script' : `${scripts.length} scripts`} changed`
     : '';
-  if (!shown.length && !script) return `${what}: no field changes; granting applies the request as sent.`;
-  return `${what}: ${[shown.join(', '), script].filter(Boolean).join('; ')}.`;
+  if (!shown.length && !script)
+    return [{ text: `${what}: no field changes; granting applies the request as sent.` }];
+  const out: SummaryPart[] = [{ text: `${what}: ` }];
+  shown.forEach((clause, index) => {
+    if (index > 0) out.push({ text: ', ' });
+    out.push(...clause);
+  });
+  if (script) {
+    if (shown.length) out.push({ text: '; ' });
+    out.push({ text: script });
+  }
+  out.push({ text: '.' });
+  return mergeSummaryParts(out);
 }

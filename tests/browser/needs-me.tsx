@@ -22,6 +22,7 @@ import { useAttentionClock } from '../../web/src/app/needs/attention-clock';
 import type { FyiRead } from '../../web/src/app/needs/fyi';
 import { stressText } from '../../web/src/ds/reference/stress-text';
 import type { LooseEndsRead } from '../../web/src/app/needs/loose-ends';
+import { SettingChange } from '../../web/src/review/SettingChange';
 
 const params = new URLSearchParams(location.search);
 const stall = params.get('data') === 'stall';
@@ -32,6 +33,7 @@ const first = params.get('data') === 'first' || review;
 const connect = params.get('data') === 'connect';
 const calm = params.get('data') === 'calm' || stall;
 const variant = params.get('data');
+const cards = variant === 'cards';
 const cardHistory = variant === 'card-history';
 const stress = variant === 'stress';
 const worst = stress || variant === 'worst' || variant === 'over';
@@ -544,8 +546,103 @@ const endedAskRead: NeedsRead = {
     },
   ],
 };
-const initialRead: NeedsRead =
-  variant === 'fix-attention'
+// Item 12ed415f: agent-owned failed check with leaked CLI repair copy, multiple decision types, old and new
+// asked-ahead requests, and settings punctuation.
+const cardsRead: NeedsRead = {
+  held: [
+    lane(1, 'review', 18, {
+      title: 'Deploy workflow: update token scope',
+      agent: 'salt-wren',
+      agentClient: 'codex:gpt-example',
+      agentAuthored: true,
+      submissionId: uuid(511),
+      attemptId: uuid(512),
+      reviewCheck: 'ran',
+      url: `/approve?project=synthetic&submission=${uuid(511)}`,
+      note: 'needs owner approval: protected paths .github/workflows/deploy.yml',
+    }),
+    lane(2, 'check-failed', 11, {
+      title: 'Add failing check fixture',
+      actor: 'sample-one',
+      agent: 'amber-fox',
+      note: 'Fix it in this Lane, save, then run land --save again; do not abandon or re-create the Lane. If it fails without your c',
+    }),
+  ],
+  more: 0,
+  moreIsLowerBound: false,
+  approvals: JSON.stringify({
+    requests: [
+      {
+        ...approval('setting:policy', 'Add ops/** to protected paths and switch preset.', 0),
+        kind: 'setting',
+        label: 'Held settings change waits for you',
+        nextStep: 'Open the approve link, then approve or decline the settings change.',
+        setting: { origin: 'policy' },
+      },
+      {
+        ...approval('setting:runner', 'Run 8 checks at once.', 31),
+        kind: 'setting',
+        label: 'Held settings change waits for you',
+        nextStep: 'Open the approve link, then approve or decline the settings change.',
+        setting: { origin: 'runner' },
+      },
+    ],
+    complete: true,
+  }),
+  canDecide: true,
+  asks: [
+    {
+      id: uuid(90),
+      at: ago(9),
+      actor: 'sample-two',
+      agent: 'amber-fox',
+      text: 'Which shard budget should we use?',
+      choices: ['4 shards', '8 shards'],
+      laneId: uuid(3),
+    },
+    {
+      id: uuid(91),
+      at: ago(14),
+      actor: 'sample-two',
+      agent: 'amber-fox',
+      text: 'Tried both parsers',
+      choices: ['Decline'],
+      laneId: uuid(4),
+      handBack: { head: 'b'.repeat(64), left: 'Pick which parser ships', to: 'sample-one' },
+    },
+    {
+      id: uuid(92),
+      at: NOW,
+      actor: 'sample-two',
+      agent: 'amber-fox',
+      text: 'Reuse the cache next time?',
+      choices: ['Reuse', 'Fresh'],
+      laneId: null,
+      planningItemId: uuid(5),
+      ahead: true,
+    },
+  ],
+  parked: [
+    {
+      laneId: uuid(60),
+      intentId: uuid(160),
+      title: 'Docs: queue limits page',
+      actor: 'sample-two',
+      agent: 'brisk-heron',
+      park: {
+        to: 'sample-one',
+        named: true,
+        reason: 'Waits for you to say which limit the page should state.',
+        at: ago(35),
+        by: 'sample-two/brisk-heron',
+      },
+      at: ago(35),
+    },
+  ],
+};
+const initialRead: NeedsRead = cards
+  ? cardsRead
+  : variant === 'fix-attention'
     ? fixAttentionRead
     : variant === 'ended-ask'
       ? endedAskRead
@@ -932,6 +1029,25 @@ function Fixture() {
               copy={async text => void writes.push(['copy', text])}
             />
           ) : null
+        }
+        settingDetail={
+          cards
+            ? laneId =>
+                laneId === 'setting:policy' ? (
+                  <SettingChange
+                    origin="policy"
+                    compare={{
+                      before: { preset: 'strict', acceptance: { protectedPaths: ['ci/**'] } },
+                      after: { preset: 'custom', acceptance: { protectedPaths: ['ci/**', 'ops/**'] } },
+                    }}
+                    change={{
+                      operationId: 'op-policy',
+                      acceptance: { protectedPaths: ['ci/**', 'ops/**'] },
+                      preset: 'custom',
+                    }}
+                  />
+                ) : null
+            : undefined
         }
         now={now}
       />

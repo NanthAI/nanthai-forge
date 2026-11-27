@@ -6,6 +6,12 @@ import type { AppRoute } from '../paths';
 import type { ScreenRoutes } from '../screen-route';
 
 type ProjectRoute = Extract<AppRoute, { frame: 'project' }>;
+export const CHECK_ATTEMPT = 'checkAttempt';
+export const checkAttemptHref = (href: string, attemptId: string | null | undefined) =>
+  attemptId === null || attemptId === undefined
+    ? href
+    : `${href}?${new URLSearchParams({ [CHECK_ATTEMPT]: attemptId })}`;
+
 const CHECK = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/check$/i;
 
 /** The Lane whose landing check this address shows, or null. */

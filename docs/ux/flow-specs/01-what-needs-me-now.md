@@ -20,7 +20,7 @@
 
 **What they want:** To know at once whether anything waits on them.
 
-**What they see:** Needs me, with one sentence at the top that counts the decisions holding work and the longest wait, for example "3 decisions hold 4 Lanes; the longest has waited 18 min" (draft copy). Below it, three sections: Needs you, FYI and Loose ends (folded).
+**What they see:** Needs me opens with the Needs you count. When some decisions hold work, the sentence gives the number of holds and the longest wait. Below it are Needs you, FYI and Loose ends.
 
 **What they do:** Read the sentence.
 
@@ -60,7 +60,7 @@
 
 **What they want:** To know what moved without being asked to act.
 
-**What they see:** FYI, newest first: landings, main breaking, checks redone, CI time thrown away, failed checks an agent is already fixing (with who is on it), settings and access changes, and messages. A few figures for the window since they last cleared it, and filters (All, Code, Outside the code, Messages).
+**What they see:** FYI, newest first: landings, main breaking, checks redone, CI time thrown away, failed checks an agent is already fixing (with who is on it), settings and access changes, and messages. A few figures for the window since they last cleared it, and filters (All, Code, Outside the code, Messages). The filters wrap when the region is narrow.
 
 **What they do:** Scan, dismiss one row, or Clear all.
 

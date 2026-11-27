@@ -276,3 +276,42 @@ test('Details marks the check Forge read from Work when the import was held apar
   assert.ok(!sent.includes('&quot;pinned&quot;'), 'what the agent sent does not include the stored check');
   assert.match(read, /&quot;definition&quot;: &quot;d{64}&quot;/);
 });
+
+test('12ed415f (05.1a): summary keeps Forge separator › plain while still flagging look-alike command text and hidden characters', () => {
+  const policyHtml = renderToStaticMarkup(
+    createElement(SettingChange, {
+      origin: 'policy',
+      compare: {
+        before: { preset: 'strict', acceptance: { protectedPaths: ['ci/**'] } },
+        after: { preset: 'custom', acceptance: { protectedPaths: ['ci/**', 'ops/**'] } },
+      },
+      change: {},
+    }),
+  );
+  const summaryHtml = policyHtml.match(/<p class="sc-sum"[^>]*>([\s\S]*?)<\/p>/)?.[1] ?? '';
+  assert.match(summaryHtml, /acceptance › protected paths/);
+  assert.doesNotMatch(summaryHtml, /U\+203A/, 'Forge separator › is never annotated with a code-point badge');
+  assert.doesNotMatch(summaryHtml, /class="sc-uni"/);
+
+  const sneakyCmdHtml = htmlOf({
+    before: { executable: 'bash', args: ['-c', 'npm test'] },
+    after: { executable: 'b\u0430sh', args: ['-c', 'npm test', 'https://g\u0456thub.com/x'] },
+  });
+  const cmdSummary = sneakyCmdHtml.match(/<p class="sc-sum"[^>]*>([\s\S]*?)<\/p>/)?.[1] ?? '';
+  assert.match(cmdSummary, /U\+0456/, 'non-ASCII look-alike in command summary value stays flagged');
+
+  const hiddenSubjectHtml = renderToStaticMarkup(
+    createElement(SettingChange, {
+      origin: 'policy',
+      compare: {
+        subject: 'prod\u202Epolicy',
+        before: { acceptance: { landingMode: 'strict' } },
+        after: { acceptance: { landingMode: 'fast' } },
+      },
+      change: {},
+    }),
+  );
+  const hiddenSummary = hiddenSubjectHtml.match(/<p class="sc-sum"[^>]*>([\s\S]*?)<\/p>/)?.[1] ?? '';
+  assert.match(hiddenSummary, /U\+202E/, 'hidden bidi override in summary stays marked');
+  assert.doesNotMatch(hiddenSummary, /U\+203A/, 'Forge separator stays plain even beside a hidden marker');
+});

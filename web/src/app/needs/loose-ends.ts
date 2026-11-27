@@ -253,8 +253,10 @@ function laneEvidence(row: LooseRow, key: GroupKey | 'active', now: number) {
     (row.heldBy ? ` · ${row.heldBy}` : '');
   // A row without a save count was written before the counts existed: its landing history is not asserted either.
   const landed = row.landedBefore ? 'landed before' : row.saves === undefined ? '' : 'never landed';
-  if (key === 'checked')
-    return `passed its check ${since(row.passedAt ?? row.at, now)} ago; landing was never asked for`;
+  if (key === 'checked') {
+    const age = since(row.passedAt ?? row.at, now);
+    return `passed its check ${age === 'just now' ? age : `${age} ago`}; landing was never asked for`;
+  }
   if (key === 'stopped')
     return `${
       row.saves === 0

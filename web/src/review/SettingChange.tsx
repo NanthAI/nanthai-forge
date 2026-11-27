@@ -74,7 +74,9 @@ export function SettingChange({
   return (
     <div className="sc">
       <p className="sc-sum" dir="auto">
-        <Shown text={view.summary} code />
+        {view.summaryParts.map((part, index) => (
+          <Shown key={index} text={part.text} code={part.code} />
+        ))}
       </p>
       {view.rows.length ? (
         <dl className="sc-rows">

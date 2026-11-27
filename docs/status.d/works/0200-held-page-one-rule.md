@@ -1,5 +1,6 @@
 Needs me is one page. FYI starts with the first six rows. Show all opens the bounded history and current FYI rows
-in place, newest first, six more at a time. The kind filter and Clear all stay in FYI. One rule
+in place, newest first, six more at a time. All, Code, Outside the code and Messages filter the rows in place.
+The filters wrap in narrow regions, and Clear all stays in FYI. One rule
 (`needs/count.ts`) supplies Needs you, the shell badges, the attention cue and the marks for Lanes that wait on
 the reader. Needs you lists actions the reader can take. Agent-owned holds, parks for an agent, audit reverts
 without a decision for the reader, recent main fixes and recent deploy failures stay in FYI with their facts

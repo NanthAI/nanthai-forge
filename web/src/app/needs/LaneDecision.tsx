@@ -13,7 +13,14 @@ import type { Id } from '../../../../convex/_generated/dataModel';
 import { State } from '../../ds';
 import { decideTarget, useProjectDecide } from './decide';
 import { AheadKeys, DecisionKeys } from './DecisionKeys';
-import { aheadRow, needsView, protectedApprovalCopy, type Approval, type NeedsRead } from './model';
+import {
+  aheadRow,
+  inPageApprovalNext,
+  needsView,
+  protectedApprovalCopy,
+  type Approval,
+  type NeedsRead,
+} from './model';
 
 const needsRead = makeFunctionReference<'query', { projectId: Id<'hostedProjects'> }, NeedsRead>(
   'projectNeedsMe:read',
@@ -103,7 +110,7 @@ export function LaneDecision({
           {ahead.question}
         </p>
         <p className="why" dir="auto">
-          {ahead.label}. {ahead.nextStep}
+          {ahead.label}. {inPageApprovalNext(ahead, true, true)}
         </p>
         {said}
       </section>
@@ -123,7 +130,7 @@ export function LaneDecision({
         </p>
       ) : null}
       <p className="why" dir="auto">
-        {ahead.label}. {ahead.nextStep}
+        {ahead.label}. {inPageApprovalNext(ahead, true, true)}
       </p>
       <div className="btns">
         <AheadKeys row={{ laneId, head }} declined={declined} decide={decide} announce={announce} />

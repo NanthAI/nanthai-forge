@@ -60,7 +60,10 @@ test('a held settings change: no sideways scroll, hidden characters shown, axe c
             const text = await tab.evaluate(() => document.body.innerText);
             assert.ok(!/[‪-‮⁦-⁩​]/.test(text), `no acting hidden character, ${where}`);
             assert.match(text, none ? /\\u202e/ : /U\+202E/, `the override shows, ${where}`);
-            if (!none) assert.match(text, /U\+0430/, `the look-alike letter shows its code point, ${where}`);
+            if (!none) {
+              assert.match(text, /U\+0430/, `the look-alike letter shows its code point, ${where}`);
+              assert.doesNotMatch(text, /U\+203A/, `Forge separator › stays plain, ${where}`);
+            }
             const violations = await tab.evaluate(async () =>
               (
                 await window.axe.run(document, {

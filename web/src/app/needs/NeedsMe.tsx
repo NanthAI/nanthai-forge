@@ -12,8 +12,6 @@
 //   folded region reads nothing.
 // Reads, sent together: projectNeedsMe:read (shared with the shell's count), projectNeedsFyi:read and the planning
 // counts; Loose ends while open. All re-run only on server writes; idle and hidden tabs cost nothing.
-import { RecordedWho } from '../RecordedWho';
-import { declaredModel, recordedIdentity, type WhoProject } from '../who-links';
 import {
   useCallback,
   useEffect,
@@ -28,21 +26,9 @@ import { useMutation, useQuery } from 'convex/react';
 import { makeFunctionReference } from 'convex/server';
 import { api } from '../../../../convex/_generated/api';
 import type { Id } from '../../../../convex/_generated/dataModel';
-import {
-  Band,
-  Dock,
-  Key,
-  Region,
-  Standing,
-  State,
-  Who,
-  useDockLayout,
-  useFold,
-  type DockLayout,
-} from '../../ds';
+import { Band, Dock, Key, Region, Standing, useDockLayout, useFold, type DockLayout } from '../../ds';
 import { Announcer, useAnnounce } from '../../ds/behaviour/announce';
 import { usePageCritical } from '../../ui/page-critical';
-import { A } from '../frames';
 import { hrefFor } from '../paths';
 import { Head, crumbsFor } from '../Place';
 import { progressCells, progressOf, type PlanCountsRead } from '../progress';
@@ -58,8 +44,7 @@ import { jumpToRow } from '../flow/labels';
 import { StationDrawer, type DrawerProps } from '../flow/Drawer';
 import { isDrawerStop, type DrawerStop } from '../flow/drawer-model';
 import { navigate, useSearch } from '../router';
-import { AnswerKeys, HandBackDetails } from '../discussion/ConversationEntry';
-import { answerFailureReason, type Answer, type DismissAsk } from '../discussion/conversation';
+import type { Answer, DismissAsk } from '../discussion/conversation';
 import { useAnswer, useDismissAsk } from '../discussion/useConversation';
 import { DeployStatusLines } from './DeployStatus';
 import type { NoticeLink } from './notice-attention';
@@ -67,18 +52,14 @@ import { focusHref, fyiView, type FyiRead, type FyiState } from './fyi';
 import { Capped, CAP } from './Capped';
 import { fyiDismiss, fyiRead } from './fyi-reads';
 import { Fyi } from './FyiRegion';
-import { NeedsCard } from './NeedsCard';
+import { Ahead, Held, NoticeCard, Parked, Question } from './NeedsCards';
 import { HeldSetting } from './HeldSetting';
-import { TakenKeys } from './TakenKeys';
 import { useTakenActions, type TakenActions } from './taken-actions';
 import { LooseBody } from './LooseFold';
 import {
   needsSentence,
   needsView,
-  protectedApprovalCopy,
-  laneTitle,
-  whoOf,
-  waited,
+  standingInProgress,
   type AheadRow,
   type AskRow,
   type NeedsRead,
@@ -86,8 +67,7 @@ import {
   type NowRow,
   type ParkedRow,
 } from './model';
-import { decideTarget, useProjectDecide, type Decide } from './decide';
-import { AheadKeys, DecisionKeys } from './DecisionKeys';
+import { useProjectDecide, type Decide } from './decide';
 import './needs.css';
 
 type ProjectRoute = PlaceProps['route'];
@@ -408,7 +388,7 @@ export function NeedsMeView({
       receiptHref: id => at({ place: 'code', rest: id }),
       revealHeld,
     });
-  const sentence = view ? needsSentence(view) : null;
+  const sentence = view ? needsSentence(view, drawnAt) : null;
   const lanesOpen = feed ? feed.lanes.length + feed.more : null;
   const deployRequests = view?.notices.filter(row => row.kind === 'deploy') ?? [];
   const waiting = heldRows.length;
@@ -775,10 +755,7 @@ export function NeedsMeView({
       <Standing
         of="app"
         {...progressCells(items, {
-          inProgress:
-            lanesOpen === null
-              ? undefined
-              : `${lanesOpen.toLocaleString()} ${lanesOpen === 1 ? 'Lane' : 'Lanes'} open${view?.now.length || view?.parked.length ? `, ${view.now.length + view.parked.length} need you` : ''}`,
+          inProgress: standingInProgress(lanesOpen, view),
           hrefs: {
             done: at({ place: 'code' }),
             inProgress: at({ place: 'lanes' }),
@@ -797,478 +774,6 @@ export function NeedsMeView({
       {setupPinned && view?.count ? setup : null}
       <Announcer message={message} />
     </div>
-  );
-}
-
-/** "Later": the row folds to one line for this visit. It stays open, still counted, and nobody is told. */
-function Later({ head, onShow }: { head: string; onShow: () => void }) {
-  return (
-    <div className="pf needs-fold needs-later">
-      <span className="ttl" dir="auto">
-        Put off: {head}
-      </span>
-      <Key size="sm" onClick={onShow}>
-        Show
-      </Key>
-    </div>
-  );
-}
-
-function Held({
-  row,
-  project,
-  drawnAt,
-  laneHref,
-  waitsHref,
-  anchor,
-  decide,
-  canDecide,
-  announce,
-}: {
-  row: NowRow;
-  project: WhoProject;
-  drawnAt: number;
-  laneHref: string | null;
-  /** Who is touching what for this Lane (Lanes > Touching, its wait chain): where the cause line leads. */
-  waitsHref: string | null;
-  anchor: string | null;
-  decide: Decide;
-  canDecide: boolean;
-  announce: (text: string, show?: boolean) => void;
-}) {
-  const target = decideTarget(row);
-  const protectedReason = protectedApprovalCopy(row);
-  const laneName = laneTitle(row);
-  const title = protectedReason
-    ? `${laneName} waits for ${canDecide ? 'your' : 'the owner’s'} approval to land.`
-    : laneName;
-  const detail = protectedReason ?? row.detail;
-  const who = recordedIdentity(row.actor, row.agent);
-  const [later, setLater] = useState(false);
-  if (later) return <Later head={row.head} onShow={() => setLater(false)} />;
-  const link =
-    row.why === 'conflict'
-      ? 'See where they cross'
-      : row.why === 'check-failed' || row.why === 'infra'
-        ? 'What failed'
-        : 'Open the Lane';
-  return (
-    <NeedsCard
-      className="dec"
-      tabIndex={-1}
-      id={anchor ? `d-${anchor}` : undefined}
-      data-st={row.word === 'Conflict' ? 'conflict' : undefined}
-      title={title}
-      next={row.next}
-      status={
-        <>
-          <span>Waiting {waited(row.since, drawnAt)}</span>
-          <State word={row.word}>{row.tag}</State>
-        </>
-      }
-      actions={
-        <>
-          {target && canDecide ? (
-            <DecisionKeys
-              laneId={row.laneId}
-              target={target}
-              reviewCheck={row.reviewCheck}
-              decide={decide}
-              announce={announce}
-            />
-          ) : null}
-          {row.url ? (
-            <A className="btn ghost sm" href={row.url}>
-              Open approval
-            </A>
-          ) : null}
-          {waitsHref ? (
-            <A className="btn ghost sm" href={waitsHref}>
-              What it waits on
-            </A>
-          ) : null}
-          {laneHref ? (
-            <A className="btn ghost sm" href={laneHref}>
-              {link}
-            </A>
-          ) : null}
-          <Key kind="ghost" size="sm" onClick={() => setLater(true)}>
-            Later
-          </Key>
-        </>
-      }
-    >
-      <p className="meta why" dir="auto">
-        {who || row.agentAuthored ? (
-          <>
-            <RecordedWho
-              handle={who}
-              agentAuthored={row.agentAuthored}
-              model={declaredModel(row.agentClient)}
-              project={project}
-            />
-            {' · '}
-          </>
-        ) : null}
-        <span className="mono" translate="no">
-          {row.laneId ? 'Lane' : 'Submission'} {row.mark}
-        </span>
-        {row.siblings > 1 ? `, 1 of ${row.siblings} held for this Item` : ''}
-        {detail ? ` · ${detail}` : ''}
-      </p>
-    </NeedsCard>
-  );
-}
-
-/** Work reverted from main, work that needs a fix, or a stopped GitHub mirror (Item 12fde646): a shared-state decision
- * only a person settles. It stays until the state changes, so it has no Later. A revert somebody ran is an offer to
- * the Lane's owner (J08): who took which Lane out and when, with Bring it back and Leave it out; never a raw id or an
- * agent's command, which stay on the board note and in the CLI. */
-function NoticeCard({
-  row,
-  href,
-  taken,
-  announce,
-  drawnAt,
-}: {
-  row: NoticeRow;
-  href: (to: NoticeLink['to']) => string;
-  taken: TakenActions | undefined;
-  announce: (text: string) => void;
-  drawnAt: number;
-}) {
-  const offer = row.taken;
-  const since = offer?.at ?? row.since;
-  const action = row.action;
-  const actionHref = action ? href(action.to) : undefined;
-  return (
-    <NeedsCard
-      className="dec"
-      title={offer ? laneTitle(offer) : row.head}
-      next={offer || row.kind === 'deploy' ? null : row.next}
-      status={
-        <>
-          {since !== undefined ? <span>{waited(since, drawnAt)} ago</span> : null}
-          <State word={offer ? 'Done' : row.word}>{offer ? 'Taken out of main' : row.tag}</State>
-        </>
-      }
-      actions={
-        <>
-          {offer ? (
-            <TakenKeys
-              target={{ laneId: offer.laneId, intentId: row.id }}
-              title={offer.title}
-              actions={taken}
-              announce={announce}
-            />
-          ) : null}
-          {action ? (
-            action.to.anchor ? (
-              <a className="btn ghost sm" href={actionHref}>
-                {action.label}
-              </a>
-            ) : (
-              <A className="btn ghost sm" href={actionHref!}>
-                {action.label}
-              </A>
-            )
-          ) : null}
-          {row.links
-            .filter(link => href(link.to) !== actionHref)
-            .map(link =>
-              link.to.anchor ? (
-                <a key={link.label} className="lk" href={href(link.to)}>
-                  {link.label}
-                </a>
-              ) : (
-                <A key={link.label} className="lk" href={href(link.to)}>
-                  {link.label}
-                </A>
-              ),
-            )}
-        </>
-      }
-    >
-      {offer ? (
-        <p className="meta" dir="auto">
-          {whoOf(offer.by, offer.agent) ?? 'Someone'} took this change out. Its Lane keeps its saved work.
-          Bring it back to fix it and land it again, or leave it out.
-        </p>
-      ) : row.who || (row.kind === 'deploy' && row.next) ? (
-        <p className="meta" dir="auto">
-          {row.who ? <Who handle={row.who} /> : null}
-          {row.who && row.kind === 'deploy' && row.next ? ' · ' : null}
-          {row.kind === 'deploy' ? row.next : null}
-        </p>
-      ) : null}
-    </NeedsCard>
-  );
-}
-
-/** A Lane parked for the reader (Item e1633718): who parked it, why in their words, and how long it has waited. */
-function Parked({
-  row,
-  drawnAt,
-  laneHref,
-  project,
-}: {
-  row: ParkedRow;
-  drawnAt: number;
-  laneHref: string;
-  project: WhoProject;
-}) {
-  const who = recordedIdentity(row.who);
-  const [later, setLater] = useState(false);
-  if (later) return <Later head={row.head} onShow={() => setLater(false)} />;
-  return (
-    <NeedsCard
-      className="dec"
-      title={laneTitle(row)}
-      status={
-        <>
-          <span>
-            {row.park.named ? 'parked' : 'idle'} {waited(row.since, drawnAt)}
-          </span>
-          <State word="Needs you">{row.tag}</State>
-        </>
-      }
-      actions={
-        <>
-          <A className="btn ghost sm" href={laneHref}>
-            Open the Lane
-          </A>
-          <Key kind="ghost" size="sm" onClick={() => setLater(true)}>
-            Later
-          </Key>
-        </>
-      }
-    >
-      <p className="meta" dir="auto">
-        {who ? (
-          <>
-            <RecordedWho handle={who} model={null} project={project} />
-            {' · '}
-          </>
-        ) : null}
-        <span className="mono" translate="no">
-          Lane {row.mark}
-        </span>
-        {row.park.reason ? ` · ${row.park.reason}` : ''}
-      </p>
-    </NeedsCard>
-  );
-}
-
-/** A question with fixed choices for the reader, from a person or an agent with no terminal (12fde646). */
-function Question({
-  row,
-  project,
-  drawnAt,
-  answer,
-  dismissAsk,
-  contextHref,
-  announce,
-}: {
-  row: AskRow;
-  project: WhoProject;
-  drawnAt: number;
-  answer: Answer;
-  dismissAsk?: DismissAsk | undefined;
-  contextHref: string | undefined;
-  announce: (text: string) => void;
-}) {
-  const [later, setLater] = useState(false);
-  const [dismissing, setDismissing] = useState(false);
-  const [dismissError, setDismissError] = useState<string | null>(null);
-  if (later) return <Later head={row.text} onShow={() => setLater(false)} />;
-  const ended = Boolean(row.recipientEnded);
-  const directed = Boolean(row.recipientSession);
-  const onDismiss = async () => {
-    if (!dismissAsk || dismissing) return;
-    setDismissing(true);
-    setDismissError(null);
-    try {
-      await dismissAsk(row);
-      announce('Dismissed.');
-    } catch (error) {
-      setDismissError(answerFailureReason(error));
-    } finally {
-      setDismissing(false);
-    }
-  };
-  return (
-    <NeedsCard
-      className="dec"
-      titleClass="thread-choice"
-      title={row.handBack ? `Hand-back for Lane ${row.laneId?.slice(0, 8) ?? ''}` : row.text}
-      status={
-        <>
-          <span>
-            {row.ahead || directed
-              ? `asked ${waited(row.at, drawnAt)} ago`
-              : `waiting ${waited(row.at, drawnAt)}`}
-          </span>
-          <State word={ended ? 'Stopped' : directed ? 'Waiting its turn' : 'Needs you'}>
-            {ended
-              ? 'Session ended'
-              : directed
-                ? 'For another session'
-                : row.handBack
-                  ? 'Handed back'
-                  : 'Question'}
-          </State>
-        </>
-      }
-      actions={
-        <>
-          {ended && dismissAsk ? (
-            <Key size="sm" disabled={dismissing} onClick={() => void onDismiss()}>
-              Dismiss
-            </Key>
-          ) : null}
-          {contextHref ? (
-            <A className="btn ghost sm" href={contextHref}>
-              Open the thread
-            </A>
-          ) : null}
-          {!ended ? (
-            <Key kind="ghost" size="sm" onClick={() => setLater(true)}>
-              Later
-            </Key>
-          ) : null}
-        </>
-      }
-    >
-      {row.who ? (
-        <p className="meta" dir="auto">
-          <RecordedWho
-            handle={recordedIdentity(row.who)}
-            agentAuthored={!!row.agent}
-            model={null}
-            project={project}
-          />
-        </p>
-      ) : null}
-      {row.handBack ? <HandBackDetails {...row.handBack} tried={row.text} /> : null}
-      {ended ? (
-        <>
-          <p className="why" dir="auto">
-            For {row.to ?? 'another session'} — that session ended.
-          </p>
-          {row.choices.length ? (
-            <p className="t2" dir="auto">
-              {row.choices.join(' · ')}
-            </p>
-          ) : null}
-          {dismissError ? (
-            <p role="alert" className="err">
-              {dismissError}
-            </p>
-          ) : null}
-        </>
-      ) : directed ? (
-        <>
-          <p className="why" dir="auto">
-            For {row.to ?? 'another session'} — waiting on that session.
-          </p>
-          {row.choices.length ? (
-            <p className="t2" dir="auto">
-              {row.choices.join(' · ')}
-            </p>
-          ) : null}
-        </>
-      ) : (
-        <AnswerKeys
-          entry={row}
-          choices={row.choices}
-          answer={answer}
-          onAnswered={choice => announce(`Answered “${choice}”.`)}
-        />
-      )}
-    </NeedsCard>
-  );
-}
-
-function Ahead({
-  row,
-  project,
-  detail,
-  waitsHref = null,
-  drawnAt,
-  decide,
-  canDecide,
-  announce,
-}: {
-  row: AheadRow;
-  project: WhoProject;
-  detail?: (laneId: string) => ReactNode;
-  /** Set only on a request that blocks its Lane's landing (Holding work now): where that Lane's wait chain is. */
-  waitsHref?: string | null;
-  drawnAt: number;
-  decide: Decide;
-  canDecide: boolean;
-  announce: (text: string) => void;
-}) {
-  const asked = Date.parse(row.at);
-  const [open, setOpen] = useState(false);
-  return (
-    <details className="sumdec" onToggle={event => setOpen(event.currentTarget.open)}>
-      <summary>
-        <State word={row.word}>{row.tag}</State>
-        <span className="ttl" dir="auto">
-          {row.question}
-        </span>
-        <span className="meta">
-          asked {Number.isNaN(asked) ? 'at a time not reported' : `${waited(asked, drawnAt)} ago`}
-        </span>
-      </summary>
-      <div className="dec">
-        <div className="dtop">
-          <span>{waitsHref ? 'holds its Lane' : 'holds nothing yet'}</span>
-          {row.who ? (
-            <RecordedWho
-              handle={recordedIdentity(row.who)}
-              agentAuthored={!!row.agent}
-              model={null}
-              project={project}
-            />
-          ) : null}
-        </div>
-        <p className="why" dir="auto">
-          {row.label}. {row.nextStep}
-        </p>
-        {open && detail ? detail(row.laneId) : null}
-        {waitsHref ? (
-          <div className="btns">
-            <A className="btn ghost sm" href={waitsHref}>
-              What it waits on
-            </A>
-          </div>
-        ) : null}
-        {row.needsOwner && canDecide ? (
-          <div className="btns">
-            {row.kind === 'lane' ? (
-              // A Lane request is decided on the Lane's current save, which its page shows (Item 0a99ab23).
-              <A
-                className="btn sm"
-                href={hrefFor({
-                  frame: 'project',
-                  handle: project.handle,
-                  project: project.project,
-                  place: 'lanes',
-                  section: '',
-                  rest: row.laneId,
-                })}
-              >
-                Review the Lane
-              </A>
-            ) : (
-              <AheadKeys row={row} decide={decide} announce={announce} />
-            )}
-          </div>
-        ) : null}
-      </div>
-    </details>
   );
 }
 

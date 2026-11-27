@@ -1080,6 +1080,127 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
       },
     );
 
+    await t.test(
+      '12ed415f: headlines, shared standing count, approval action layout, Messages filter and settings copy at 1440 and 390 in both themes',
+      async t => {
+        for (const viewport of [DESK, PHONE]) {
+          // Single-decision fixture: singular grammar and oldest hold age.
+          const single = await open(t, viewport, 'first', 'dark');
+          assert.match(
+            await single.locator('.head').innerText(),
+            /1 thing holds work until you decide; waiting 6 min\./,
+          );
+          assert.match(
+            await single.getByRole('navigation', { name: 'Where the project stands' }).innerText(),
+            /1 Lane open, 1 needs you/,
+          );
+
+          for (const theme of ['dark', 'light']) {
+            // Multi-decision + agent-owned failed check + old/new requests + settings punctuation.
+            const page = await open(t, viewport, 'cards', theme);
+            const needs = region(page, 'Needs you');
+            const fyi = region(page, 'FYI');
+            assert.match(
+              await page.locator('.head').innerText(),
+              /4 things hold work until you decide; the longest has waited 35 min\./,
+            );
+            assert.match(
+              await page.getByRole('navigation', { name: 'Where the project stands' }).innerText(),
+              /\d+ Lanes open, 4 need you/,
+            );
+            assert.equal(await page.locator('header.top a.needs .cnt').textContent(), '4');
+
+            // Approval action row keeps Later beside Decline without wrapping onto a lone line.
+            const approval = needs.locator('.dec', { hasText: 'Deploy workflow: update token scope' });
+            const approveBtn = approval.getByRole('button', { name: 'Approve and land', exact: true });
+            const declineBtn = approval.getByRole('button', { name: 'Decline', exact: true });
+            const laterBtn = approval.getByRole('button', { name: 'Later', exact: true });
+            const [declineBox, laterBox] = [await declineBtn.boundingBox(), await laterBtn.boundingBox()];
+            assert.ok(declineBox && laterBox, `approval buttons laid out at ${viewport.width}`);
+            assert.ok(
+              Math.abs(declineBox.y - laterBox.y) <= 4,
+              `Later stays on the action row beside Decline at ${viewport.width}: decline.y=${declineBox.y}, later.y=${laterBox.y}`,
+            );
+            await laterBtn.click();
+            await needs.getByRole('button', { name: 'Show', exact: true }).click();
+            await approveBtn.waitFor();
+
+            // Aligned Waiting casing and no "just now ago".
+            const needsText = await needs.innerText();
+            assert.match(needsText, /Waiting 18 min/);
+            assert.match(needsText, /Waiting 9 min/);
+            assert.doesNotMatch(needsText, /\bwaiting \d/);
+            assert.match(needsText, /Asked just now/);
+            assert.match(needsText, /Asked 31 min ago/);
+            assert.doesNotMatch(needsText, /just now ago/i);
+
+            // Expanded asked-ahead setting omits "Open the approve link" and keeps Forge separator › plain.
+            const policyRow = needs.locator('details.sumdec', { hasText: 'Add ops/** to protected paths' });
+            await policyRow.locator('summary').click();
+            await policyRow.locator('.sc-sum').waitFor();
+            const policyText = await policyRow.innerText();
+            assert.match(policyText, /acceptance › protected paths/);
+            assert.doesNotMatch(policyText, /U\+203A/);
+            assert.doesNotMatch(policyText, /Open the approve link/i);
+            assert.match(policyText, /Approve or decline the settings change below\./);
+
+            // Failed-check FYI row shows holder and age, never leaked CLI instructions.
+            const failed = fyi.locator('.fyi-row', { hasText: 'Add failing check fixture' });
+            const failedText = await failed.innerText();
+            assert.match(failedText, /amber-fox/);
+            assert.match(failedText, /Failed 11 min ago/);
+            assert.doesNotMatch(failedText, /land --save|Fix it in this Lane/i);
+
+            // Messages filter isolates message rows.
+            await fyi.getByRole('radio', { name: /^Messages/ }).click();
+            assert.equal(await fyi.locator('.fyi-row').count(), 1);
+            assert.match(await fyi.locator('.fyi-row').first().innerText(), /moved the fixtures/);
+            await fyi.getByRole('radio', { name: /^All/ }).click();
+
+            // Decline opens an editable reason while the settings request is still expanded.
+            await declineBtn.click();
+            const why = approval.getByRole('textbox', { name: /^Why/ });
+            await why.fill('Review the token scope first.');
+
+            // Axe clean and no sideways scroll with both cards expanded.
+            await page.addScriptTag({ path: axePath });
+            await page.evaluate(() =>
+              document
+                .getAnimations()
+                .filter(a => a.effect?.getTiming().iterations !== Infinity)
+                .forEach(a => a.finish()),
+            );
+            const [scroll, inner] = await page.evaluate(() => [
+              document.documentElement.scrollWidth,
+              innerWidth,
+            ]);
+            assert.ok(
+              scroll <= inner,
+              `no sideways scroll at ${viewport.width} ${theme} cards: ${scroll} > ${inner}`,
+            );
+            await page.evaluate(() => scrollTo(0, 0));
+            const violations = await page.evaluate(async () => {
+              const result = await window.axe.run(document, {
+                runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'] },
+              });
+              return result.violations
+                .filter(v => v.id !== 'label-content-name-mismatch')
+                .map(
+                  v =>
+                    `${v.id}: ${v.nodes.map(n => `${n.target.join(' ')} ${JSON.stringify(n.any[0]?.data ?? '')}`).join(', ')}`,
+                );
+            });
+            assert.deepEqual(violations, [], `axe at ${viewport.width} ${theme} cards`);
+            await declineBtn.click();
+            const [write] = await page.evaluate(() => window.writes);
+            assert.equal(write[0], 'decide');
+            assert.equal(write[1].decision, 'decline');
+            assert.equal(write[1].reason, 'Review the token scope first.');
+          }
+        }
+      },
+    );
+
     await t.test('axe and widths: busy and first day, both themes, desk and phone', async t => {
       for (const data of ['busy', 'first', 'connect', 'notices', 'taken', 'ended-ask'])
         for (const viewport of [DESK, PHONE]) {
