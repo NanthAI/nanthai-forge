@@ -19,7 +19,7 @@ type WaitProgress = LandingRecord & {
   observation?: (NonNullable<LandingRecord['observation']> & { stall?: LandingStall | undefined }) | null;
 };
 
-/** Use the existing observation and the same-attempt feed snapshot. Older servers omit feed timing. */
+/** Use the existing observation and the latest feed snapshot for this submission. Older servers omit feed timing. */
 export async function landingWaitProgress(
   recorded: WaitProgress | undefined,
   live: WaitProgress | undefined,
@@ -29,7 +29,7 @@ export async function landingWaitProgress(
   if (recorded?.observation?.state !== 'pending' || !presentation) return undefined;
   const { state, hold } = landingStateOf(presentation, laneId);
   const stage =
-    hold || state === 'waiting-for-runner'
+    hold || state === 'waiting-for-runner' || state === 'waiting-for-order'
       ? state
       : presentation.phase === 'composing'
         ? 'composing'
@@ -67,7 +67,7 @@ export function causeNextStep<T extends { nextStep: string }>(landingState: T, f
   return typeof next === 'string' && next.trim() ? { ...landingState, nextStep: next } : landingState;
 }
 
-/** Present newer progress for the selected attempt without changing the drained landing record. */
+/** Present newer progress for the selected submission without changing the drained landing record. */
 export function pendingLandingPresentation(
   recorded: (LandingRecord & { id: string; operationId: string }) | undefined,
   progress: LandingRecord | undefined,

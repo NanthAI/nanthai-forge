@@ -24,13 +24,16 @@ and the exact `waitCommand`. A recorded 15-minute stall says
 `waitOutcome:"stalled"` and carries the stall details. Both replies report
 unfinished work. The budget expiry uses the observation it already has.
 Landings held for approval, dependency, main recovery or check infrastructure
-name the hold in `stage` and include its reason.
+name the hold in `stage` and include its reason. A ready landing parked behind
+an older submission reports `waiting-for-order` and names the blocker.
 For a single landing, the `wait` and foreground `land --save` budget replies use the
 latest pending phase delivered for the observed attempt by the existing subscription.
 Foreground `land --save` emits a compact progress line when the phase, hold, order
 wait or stall changes. A budget reply's `pendingProgress` carries the pending phase
-and version alongside the observed submission. The continuation still selects
-the original operation, and settlement still comes from its canonical landing record.
+and version alongside the observed submission. A replacement attempt can supply
+that progress while the canonical observation retains its original attempt. The
+continuation still selects the original operation, and settlement comes from
+its canonical landing record.
 `land --save` uses the same 540 s budget for its whole run (submission and wait,
 `--budget` sets another), reports the pending landing in the same way, and exits
 3 with its exact resume command.

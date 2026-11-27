@@ -2,12 +2,12 @@
   "version": 1,
   "kind": "replay",
   "changes": {
-    "src/hosted-agent-submission-wait.ts": "4310750cdc01efb833147456c1bab2fd26f7817912120a3a8d4e5bd6630c6fe4"
+    "src/hosted-agent-submission-wait.ts": "29a6650d25049ccb1241c845c316ea7bd57ef5178dcd7592e8a76e44aaff1600"
   },
   "replay": {
     "incident": "7acf7f0d",
-    "test": "feed wait delivers compact phase, hold, order and stall changes before acceptance without extra page reads",
-    "receipt": "eca8a0ba-9758-4ad7-b829-69219f3c982f"
+    "test": "a bounded wait reports a replacement attempt ready behind an older landing",
+    "receipt": "2602c131-13ae-4516-9ddf-75a125b8c3d9"
   },
   "authorModel": "gpt-6.2-sol",
   "authorSession": "thread:delegated-task:command%3Amcp%3A628d128b-7d76-4542-92fb-a2a9130503a6%3Adelegate-task%3Ae9086a49-a686-4fbd-bc37-f9357d7f6e60",
@@ -23,7 +23,7 @@
         "observeHostedSubmissions",
         "observeHostedSubmissionsOnce"
       ],
-      "digest": "510b1928ab70d6d214a7bc0d1a7d85eaa212fa08de706c5d2762845b6141b0b7",
+      "digest": "75f67504e0c2d48dd159599e0910eaafd50b0928959571ed90f49ebdd9b5f1a4",
       "units": [
         [
           "ForgeError",
@@ -119,7 +119,7 @@
         ],
         [
           "observeHostedSubmissions",
-          "c6bf5e7f6d32747bf893750ed6d2cbdb35c542226e55bf2b2f2410e8daac7e5b"
+          "437e3645427cc4a9084ee819f1cb9f308a17a5c4565113421749d2ff0f167531"
         ],
         [
           "observeHostedSubmissionsOnce",

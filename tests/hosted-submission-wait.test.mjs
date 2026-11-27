@@ -1498,7 +1498,7 @@ test('a pending metadata update keeps the recorded hold reason on the bounded re
   assert.equal(s.counts().reads, 1);
 });
 
-test('a feed update for a replacement attempt does not relabel the pinned observation', async t => {
+test('replacement feed progress keeps the canonical observation pinned', async t => {
   const s = await fixture(true);
   const { request, state } = await s.start();
   let now = 0;
@@ -1525,8 +1525,56 @@ test('a feed update for a replacement attempt does not relabel the pinned observ
   const { result } = await pending;
   assert.equal(result.status, 'timeout');
   assert.equal(result.submissions[0].submission.attemptId, state.attemptId);
-  assert.equal(result.pendingProgress, undefined);
+  assert.equal(result.pendingProgress.attemptId, replacement.id);
+  assert.equal(result.pendingProgress.version, feedPage.waiting[0].version);
   assert.equal(s.counts().reads, 1);
+});
+
+test('a bounded wait reports a replacement attempt ready behind an older landing', async t => {
+  const s = await fixture(true);
+  const { request, state } = await s.start();
+  const { operationId } = request;
+  const blocker = randomUUID();
+  await s.update(state.id, 'checking', {
+    observation: { state: 'pending', pendingReason: 'checking', cause: null },
+  });
+  const { input, wait, expireBudget } = feedBackedCliWait(t, s, operationId);
+  const pending = wait(input);
+  await turn();
+  await s.deliver();
+
+  const original = (await s.f.status(state.id)).attempt;
+  const replacement = {
+    ...original,
+    id: randomUUID(),
+    parentAttemptId: original.id,
+    number: original.number + 1,
+    operations: { check: randomUUID(), accept: randomUUID() },
+  };
+  await s.f.run('replaceStatsLandingAttempt', store.insertLandingAttempt, replacement);
+  await s.update(state.id, 'ready', {
+    attemptId: replacement.id,
+    observation: { state: 'pending', pendingReason: null, cause: null },
+  });
+  const row = [...s.f.tables.projectHostedLandingRequests.values()].find(
+    row => row.submissionId === state.id,
+  );
+  await s.f.run('parkStatsLanding', ctx => ctx.db.patch(row._id, { orderWait: blocker }), {});
+  const [page] = await s.deliver();
+  const beforeBudget = s.f.metrics.calls;
+  expireBudget();
+
+  const { result } = await pending;
+  assert.equal(page.waiting[0].pending.attemptId, replacement.id);
+  assert.equal(result.status, 'IN_PROGRESS');
+  assert.equal(result.phase, 'ready');
+  assert.equal(result.stage, 'waiting-for-order');
+  assert.equal(result.landingState.state, 'waiting-for-order');
+  assert.match(result.landingState.nextStep, new RegExp(blocker));
+  assert.match(result.message, /Still landing \(waiting-for-order\)/);
+  assert.deepEqual(result.next.operationIds, [operationId]);
+  assert.equal(s.counts().reads, 1);
+  assert.equal(s.f.metrics.calls, beforeBudget);
 });
 
 test('feed wait delivers compact phase, hold, order and stall changes before acceptance without extra page reads', async () => {

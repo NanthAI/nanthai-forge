@@ -252,10 +252,9 @@ export async function observeHostedSubmissions(
       ...(localLanes ? { localLanes } : {}),
       result: {
         ...response.result,
-        ...(entry &&
-        progress &&
-        progress.attemptId === entry.submission.attemptId &&
-        progress.version > entry.submission.version
+        // The feed keys progress by submission. A newer attempt can describe where the same
+        // operation is waiting while its canonical receipt and resume cursor stay pinned.
+        ...(entry && progress && progress.version > entry.submission.version
           ? { pendingProgress: progress }
           : {}),
         ...(sync ? syncRequiredContinuation(transport.root, sync.advice!) : {}),
