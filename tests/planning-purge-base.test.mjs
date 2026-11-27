@@ -8,6 +8,7 @@ import { workEventRows } from './work-event-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { convexRowJson } from './convex-args.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { meterWorkIO } from './hosted-read-set.mjs';
 import { recordBytes } from '../dist/work-exchange-records.js';
@@ -66,7 +67,7 @@ async function deletedBase(t, options = {}) {
 }
 const purge = (s, itemId, operationId) =>
   modules.projectPlanningPurge.run._handler(s.ctx, { projectId: s.projectId, itemId, operationId });
-const tables = s => JSON.stringify(Object.fromEntries(Object.entries(s.tables).map(([k, v]) => [k, [...v]])));
+const tables = s => convexRowJson(Object.fromEntries(Object.entries(s.tables).map(([k, v]) => [k, [...v]])));
 
 test('line 2e: a whole Item in the stored base is purged there: no table or stored object keeps its words, the backup selects a scrubbed root, load, rebuild and the hosted read are clean, a kept Item stays, and a same-id rerun changes nothing', async t => {
   const { s, itemId, root } = await deletedBase(t);

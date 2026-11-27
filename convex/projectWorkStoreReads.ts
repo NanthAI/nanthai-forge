@@ -4,7 +4,7 @@
 // their comments) and an Intent's notes and status moves come from the record store instead of the journal index, for the web and agents alike
 // (both read `projectWorkIndex:records` and `:detail`). One head per item and no project-wide row, so a
 // write re-runs only the page that holds it. Rows keep the journal's shape: the whole item or comment
-// (never a payload header), in the journal's append order (the order the heads were created).
+// (never a payload header), in committed birth order. Legacy heads keep their creation order.
 import { journalRecordPage } from './projectJournalRecordPage';
 import type { QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
@@ -108,7 +108,11 @@ export async function storePage(
     const indexed = collection === 'notes' || collection === 'lifecycle';
     rows.push({
       id: indexed ? `${parent}:${(value as { index: number }).index}` : head.key,
-      position: indexed ? (value as { index: number }).index : head._creationTime,
+      position: indexed
+        ? (value as { index: number }).index
+        : head.commitTs === undefined
+          ? head._creationTime
+          : Number(head.commitTs) / 1_000_000,
       value,
       ...(collection === 'planningItems' ? planningHeadTimes(head) : {}),
     });

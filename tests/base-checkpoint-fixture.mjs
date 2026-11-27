@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
+import { convexRowJson } from './convex-args.mjs';
 import { setup } from './hosted-planning-fixture.mjs';
 import { upload, modules as exchangeModules } from './project-exchange-fixture.mjs';
 import { defaultR2Objects } from './default-r2.mjs';
@@ -51,7 +52,7 @@ export const storedWords = (s, words = SECRET) =>
 export const tableWords = (s, words = SECRET) =>
   Object.entries(s.tables).flatMap(([table, rows]) =>
     [...rows.values()]
-      .filter(row => JSON.stringify(row).includes(words))
+      .filter(row => convexRowJson(row).includes(words))
       .map(row => `${table}:${row.collection ?? row.kind ?? ''}:${row.key ?? row.operationId ?? row._id}`),
   );
 

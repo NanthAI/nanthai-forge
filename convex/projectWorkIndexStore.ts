@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-import { pendingCaptures, wakePlanningCaptures } from './projectPlanningCaptureWake';
+import { ensureCaptureWake, oldestPendingCapture } from './projectPlanningCaptureWake';
 import {
   isHistoryCollection,
   splitRecordTable,
@@ -318,8 +318,7 @@ export const publish = internalMutation({
     const previous = project.work.generationId;
     await ctx.db.patch(project._id, { work: { ...project.work, generationId: generation._id } });
     // Unsequenced captures live outside the rebuilt journal. Publication is their durable retry signal.
-    if ((await pendingCaptures(ctx, project._id).take(1)).length)
-      await wakePlanningCaptures(ctx, project._id);
+    await ensureCaptureWake(ctx, await oldestPendingCapture(ctx, project._id));
 
     if (previous && previous !== generation._id)
       await ctx.scheduler.runAfter(0, internal.projectWorkIndexStore.retire, {

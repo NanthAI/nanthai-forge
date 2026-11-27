@@ -3,7 +3,8 @@
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { digest } from '../src/state/hash';
 import { makeFunctionReference } from 'convex/server';
-import type { MutationCtx } from './_generated/server';
+import { v } from 'convex/values';
+import { internalMutation, type MutationCtx } from './server';
 import type { Id } from './_generated/dataModel';
 import { receiptRow, type JournalRunInput } from './projectJournalMaintenance';
 import { cancelPendingTask } from './schedulerCancel';
@@ -16,6 +17,27 @@ export const journalGraceMs = 7 * 86_400_000;
  * later costs nothing, and a burst of writes leaves one scheduled pack, not one per write. */
 export const journalDrainBucketMs = 3_600_000;
 const drainPointer = 'journal-next';
+
+/** Starts without a captured Item still arm their existing journal eligibility out of band. */
+export async function scheduleStartJournalWake(ctx: MutationCtx, input: JournalRunInput, dueAt: number) {
+  if (process.env.FORGE_JOURNAL_SEGMENTS !== '1') return;
+  await ctx.scheduler.runAfter(0, makeFunctionReference<'mutation'>('projectJournalWake:afterStart'), {
+    projectId: input.projectId,
+    operationId: input.operationId,
+    dueAt,
+  });
+}
+
+export const afterStart = internalMutation({
+  args: { projectId: v.id('hostedProjects'), operationId: v.string(), dueAt: v.number() },
+  returns: v.null(),
+  handler: async (ctx, { dueAt, ...input }) => {
+    const project = await ctx.db.get(input.projectId);
+    if (project && !project.removal) await wakeJournal(ctx, input, dueAt);
+    return null;
+  },
+});
+
 export async function wakeJournal(ctx: MutationCtx, input: JournalRunInput, dueAt: number) {
   if (process.env.FORGE_JOURNAL_SEGMENTS !== '1') return;
   const pack = makeFunctionReference<'action'>('projectJournalRun:pack');

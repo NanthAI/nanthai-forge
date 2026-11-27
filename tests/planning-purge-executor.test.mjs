@@ -4,6 +4,7 @@
 // (the work store's Intent versions, lifecycle versions and handoff summaries included), the completeness check before
 // purgedAt, resume after a crash and after an index rebuild, and the row limit.
 import { workEventRows } from './work-event-fixture.mjs';
+import { convexRowJson } from './convex-args.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -89,10 +90,10 @@ function executor(s, crash = Infinity, beforeCall) {
 const secretRows = s =>
   Object.entries(s.tables).flatMap(([table, rows]) =>
     [...rows.values()]
-      .filter(row => JSON.stringify(row).includes(SECRET))
+      .filter(row => convexRowJson(row).includes(SECRET))
       .map(
         row =>
-          `${table}:${row.collection ?? ''}:${row.key ?? row.operationId ?? ''}:${row.generationId ?? ''}:${JSON.stringify(row).slice(0, 160)}`,
+          `${table}:${row.collection ?? ''}:${row.key ?? row.operationId ?? ''}:${row.generationId ?? ''}:${convexRowJson(row).slice(0, 160)}`,
       ),
   );
 

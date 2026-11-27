@@ -2,6 +2,10 @@
 // Copyright 2026 Ferdinando Valsecchi
 import { convexToJson, jsonToConvex } from 'convex/values';
 
+/** Raw Convex rows can contain int64 values. Keep the provider's lossless JSON representation. */
+export const convexRowJson = value =>
+  JSON.stringify(value, (_key, field) => (typeof field === 'bigint' ? convexToJson(field) : field));
+
 const functions = new WeakMap();
 const schemas = new WeakMap();
 const object = value =>

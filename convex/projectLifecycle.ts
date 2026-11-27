@@ -27,6 +27,7 @@ import { projectPurgeWriter } from './projectFinishReadWriter';
 import { dropProjectOrder, restoreProjectOrder } from './accountProjectOrder';
 import { latestLanding } from './projectLatestLanding';
 import { receiptOf, restoreReceipt, undoOpen, type RestoreReceipt } from './projectRestoreReceipt';
+import { ensureCaptureWake, oldestPendingCapture } from './projectPlanningCaptureWake';
 
 const args = { projectId: v.id('hostedProjects'), operationId: v.string(), expectedRevision: v.number() };
 async function schedule(ctx: MutationCtx, project: Doc<'hostedProjects'>) {
@@ -165,6 +166,7 @@ export async function transition(
   if (action === 'restore') {
     // Item eb631a53: a live project may have taken this address while it was removed.
     const restored = (await ctx.db.get(project._id))!;
+    await ensureCaptureWake(ctx, await oldestPendingCapture(ctx, project._id));
     const address = await restoreProjectSlug(ctx, restored);
     if (project.visibility === 'public')
       await queueProjectSnapshots(ctx, { ...restored, slug: address.slug }, true, address.previousSlug);

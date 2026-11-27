@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { setup } from './hosted-planning-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
+import { convexRowJson } from './convex-args.mjs';
 import { meterReads } from './hosted-read-set.mjs';
 import { planningImportId } from '../dist/work-planning-put.js';
 import { importPlanningPut, planningImportPages, planningImportRowSchema } from '../dist/planning-import.js';
@@ -420,7 +421,7 @@ test('1,000 and 2,000 historical Items use ten and twenty bounded apply pages, n
       s.ctx.db[method] = async (...args) => {
         const result = await original(...args);
         writes++;
-        writeBytes += Buffer.byteLength(JSON.stringify(args[1]));
+        writeBytes += Buffer.byteLength(convexRowJson(args[1]));
         return result;
       };
     }

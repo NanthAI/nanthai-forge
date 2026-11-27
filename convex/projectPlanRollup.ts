@@ -18,9 +18,17 @@ import { digest } from '../src/state/hash';
 import { recordHead } from './projectHostedRecords';
 
 import { rollupWake } from './projectPlanRollupWake';
-import { captureWake, settleCaptureWake } from './projectPlanningCaptureWake';
+import {
+  ensureCaptureWake,
+  followCapturePage,
+  handCapturePage,
+  legacyCaptureWake,
+  oldestPendingCapture,
+} from './projectPlanningCaptureWake';
 import { finishWorkRecordWrites } from './projectWorkRecordWriter';
 import { openIntentLane } from './projectHostedOpenLaneEvidence';
+import { pruneExpiredHostedOperations } from './projectHostedOperations';
+import { journalGraceMs, wakeJournal } from './projectJournalWake';
 const result = v.union(
   v.literal('unchanged'),
   v.literal('moved'),
@@ -76,6 +84,8 @@ const rollupArguments = v.object({
   itemId: v.string(),
   cause: v.string(),
   source,
+  captureTicket: v.optional(v.literal(true)),
+  captureTail: v.optional(v.literal(true)),
   path: v.optional(v.array(v.string())),
   remaining: v.optional(v.number()),
   affected: v.optional(v.array(v.string())),
@@ -97,27 +107,46 @@ export const advance = internalMutation({
   args: rollupArguments.fields,
   returns: result,
   handler: async (ctx, args) => {
+    if (args.source === 'capture') {
+      if (args.captureTail) {
+        const project = await ctx.db.get(args.projectId);
+        if (!project || project.removal) return 'blocked' as const;
+        await ensureCaptureWake(ctx, await oldestPendingCapture(ctx, args.projectId));
+        const now = Date.now();
+        await pruneExpiredHostedOperations(ctx, args.projectId, now);
+        await wakeJournal(ctx, { projectId: args.projectId, operationId: args.cause }, now + journalGraceMs);
+        return 'unchanged' as const;
+      }
+      if (args.captureTicket) {
+        // Only the oldest pending Item can drive a page. Other tickets stop before shared Work reads.
+        const first = await oldestPendingCapture(ctx, args.projectId);
+        if (
+          first?.key !== args.itemId ||
+          first.pendingPlanningCapture?.wake !== (await ctx.meta.getRequestMetadata()).scheduledFunctionId
+        )
+          return 'repeated' as const;
+      } else {
+        const legacy = await legacyCaptureWake(ctx, args.projectId);
+        if (!legacy || legacy.envelope !== args.cause) return 'repeated' as const;
+        await ctx.db.delete(legacy._id);
+      }
+    }
     const project = await ctx.db.get(args.projectId);
     const generation = project && !project.removal && (await selectedGeneration(ctx, project));
+    // Publishing the next ready generation rearms any retained captures.
+    if (!project || !generation) return 'blocked' as const;
     if (args.source === 'capture') {
-      const wake = await captureWake(ctx, args.projectId);
-      if (!wake || wake.envelope !== args.cause) return 'repeated' as const;
-      if (!project || !generation) {
-        // Publishing the next ready generation probes for the retained captures.
-        await settleCaptureWake(ctx, wake, false);
-        return 'blocked' as const;
-      }
-      const { itemIds, more } = await sequencePlanningCaptures(ctx, project);
+      const { itemIds, consumed, next } = await sequencePlanningCaptures(ctx, project);
       await finishWorkRecordWrites(ctx);
       for (const itemId of itemIds) {
         // An active Lane already matches its new Item's initial status.
         if (!(await openIntentLane(ctx, args.projectId, itemId)))
           await rollupItem(ctx, { ...args, itemId }, project, generation);
       }
-      await settleCaptureWake(ctx, wake, more);
+      if (next) await handCapturePage(ctx, next);
+      else if (consumed) await followCapturePage(ctx, args.projectId, args.cause);
       return 'unchanged' as const;
     }
-    if (!project || !generation) return 'blocked' as const;
     return rollupItem(ctx, args, project, generation);
   },
 });

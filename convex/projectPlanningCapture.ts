@@ -11,6 +11,7 @@ import { invariant } from '../src/errors';
 import { serverPutWriter } from './planningCommentWriter';
 import { storeVersion } from './projectWorkStore';
 import { recordVersion } from './projectHostedRecords';
+import { scheduleCaptureWake } from './projectPlanningCaptureWake';
 
 type CaptureFields = {
   itemId: string;
@@ -63,13 +64,14 @@ export async function stagePlanningCapture(
   const attributed = creationCommand(fields);
   await serverPutWriter(ctx, attributed);
   const command = planningPutSchema.parse(attributed);
+  const wake = await scheduleCaptureWake(ctx, project._id, fields.itemId);
   const stored = await storeVersion(
     ctx,
     project,
     creationRecord(generation, command, at, project.owner),
     undefined,
     true,
-    { at, command: JSON.stringify(command), state: 'pending' },
+    { at, command: JSON.stringify(command), state: 'pending', wake },
   );
   invariant(stored === 'copied', 'ITEM_CHANGED', 'The captured Item already exists.');
 }

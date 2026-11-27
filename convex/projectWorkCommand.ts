@@ -35,7 +35,12 @@ import { intentAuthority } from './projectContributors';
 import { selectedGeneration, record, recordPartition } from './projectWorkIndexStore';
 import { generationHead } from './projectWorkHead';
 import { verifiedCapture } from './projectPlanningCapture';
-import { capturePageSize, pendingCaptures } from './projectPlanningCaptureWake';
+import {
+  capturePageSize,
+  ensureCaptureWake,
+  oldestPendingCapture,
+  pendingCaptures,
+} from './projectPlanningCaptureWake';
 import { planningWriteContext, type PlanningWriteContext } from './projectWorkCommandContext';
 import { commandKeys, commandProjection, commandAliasRows } from './projectWorkProjection';
 import { appendWork } from './projectWork';
@@ -682,7 +687,13 @@ export async function sequenceCapturesThrough(
     await Promise.all([...new Set(ids)].map(id => recordHead(ctx, project._id, 'issue', id)))
   ).filter(head => head?.pendingPlanningCapture !== undefined);
   if (!heads.length) return false;
-  const through = Math.max(...heads.map(head => head!._creationTime));
+  let through: bigint | number = 0;
+  for (const head of heads) {
+    const commit = head!.commitTs as bigint | undefined;
+    if (commit !== undefined) {
+      if (typeof through === 'number' || commit > through) through = commit;
+    } else if (typeof through === 'number') through = Math.max(through, head!._creationTime);
+  }
   const planning = context ?? (await planningWriteContext(ctx, project));
   for (;;) {
     const page = await pendingCaptures(ctx, project._id, through).take(capturePageSize);
@@ -692,18 +703,19 @@ export async function sequenceCapturesThrough(
   // A targeted operation can also retry a damaged head after its canonical version is repaired.
   for (const head of heads)
     if (head?.pendingPlanningCapture?.state === 'repair') await sequenceCapture(ctx, project, head, planning);
+  await ensureCaptureWake(ctx, await oldestPendingCapture(ctx, project._id));
   return true;
 }
 
 export async function sequencePlanningCaptures(ctx: MutationCtx, project: Doc<'hostedProjects'>) {
-  const heads = await pendingCaptures(ctx, project._id).take(capturePageSize + 1);
+  const heads = await pendingCaptures(ctx, project._id, ctx.meta.getSnapshotTs()).take(capturePageSize + 1);
   const itemIds: string[] = [];
   if (heads.length) {
     const planning = await planningWriteContext(ctx, project);
     for (const head of heads.slice(0, capturePageSize))
       if (await sequenceCapture(ctx, project, head, planning)) itemIds.push(head.key);
   }
-  return { itemIds, more: heads.length > capturePageSize };
+  return { itemIds, consumed: Math.min(heads.length, capturePageSize), next: heads[capturePageSize] ?? null };
 }
 
 export const command = mutation({

@@ -79,7 +79,7 @@ export function trackReadSets(ctx, tables) {
 // on how many rows the fixture created before it.
 const documentBytes = row =>
   JSON.stringify(row, (_, value) =>
-    typeof value === 'number'
+    typeof value === 'number' || typeof value === 'bigint'
       ? 'n'.repeat(6)
       : typeof value === 'string' && /^row-\d+$|^project$/.test(value)
         ? 'i'.repeat(32)

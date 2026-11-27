@@ -12,9 +12,12 @@ const transient = new Set([
   'journalLane',
 ]);
 export function journalSourceRow(row: object) {
-  return Object.fromEntries(
+  const source = Object.fromEntries(
     Object.entries(row).filter(
       ([key]) => !transient.has(key) || (key === 'journalCommand' && 'purged' in row),
     ),
   );
+  // A committed arrival timestamp has nanosecond precision; a JSON number would round it.
+  if (typeof source.commitTs === 'bigint') source.commitTs = source.commitTs.toString();
+  return source;
 }

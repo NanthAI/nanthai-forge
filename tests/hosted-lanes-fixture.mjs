@@ -429,6 +429,7 @@ export function lanesFixture({ legacyWorkRecords = false, commitSchedules = fals
                           fieldValue(row, lower[0]) > lower[1] ||
                           (lower[2] && fieldValue(row, lower[0]) === lower[1])) &&
                         (!upper ||
+                          (fieldValue(row, upper[0]) === undefined && upper[1] !== undefined) ||
                           fieldValue(row, upper[0]) < upper[1] ||
                           (upper[2] && fieldValue(row, upper[0]) === upper[1])),
                     )

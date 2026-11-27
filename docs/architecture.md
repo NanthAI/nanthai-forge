@@ -1446,10 +1446,19 @@ private canonical Item and its Intent and Lane links in that same mutation. Its
 full and short IDs resolve immediately. The existing Plan wake batches pending
 creation commands into the shared Work journal and Plan list and search
 projections. An edit or parent link that arrives first sequences the older
-pending creations before applying its own change. One fenced wake covers a burst
-of starts and publishes up to ten Items per transaction. A continuation handles
-the remaining pages. Publishing a rebuilt Work generation rearms pending
-captures. A lifecycle wake can also sequence its pending Item. The publisher
+pending creations before applying its own change. Each start schedules a ticket
+owned by its captured Item and keeps journal wake receipts and expired receipt
+cleanup outside the start. Only the oldest pending Item's ticket can drive
+publication. A page selects up to ten Items committed by its snapshot and never
+reads sibling task state. Tickets delivered out of order return before reading
+shared Work. A full page hands off its known successor. A short page runs one
+bounded follow-up to recover any later arrivals whose tickets already returned
+and to handle receipt maintenance. Uncaptured starts on deployments with
+journal packing enabled arm journal eligibility after the start commits. The
+canonical Item list and capture queue use commit order. Legacy heads keep their
+creation order. Early edits, restored projects and rebuilt Work generations
+rearm the oldest pending Item when needed. A lifecycle wake can sequence its
+pending Item. The publisher
 verifies the immutable first version and can reconstruct a damaged capture command
 when the version proves its exact result. An unverifiable version retains its
 repair data while later Items continue. Idle calls are zero. Capture is skipped

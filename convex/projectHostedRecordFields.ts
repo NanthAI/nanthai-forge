@@ -124,12 +124,15 @@ export const hostedRecordTables = {
     ),
     /** The Item this Intent or Lane serves. Empty means explicitly independent; absent is unprojected. */
     planningItemId: v.optional(v.string()),
+    /** Issue birth order uses committed arrivals, since creation time can precede another start's commit. */
+    commitTs: v.optional(v.commitTs()),
     /** The frozen creation command waiting for a captured Issue’s journal revision and Plan index. */
     pendingPlanningCapture: v.optional(
       v.object({
         at: v.string(),
         command: v.string(),
         state: v.union(v.literal('pending'), v.literal('repair')),
+        wake: v.optional(v.id('_scheduled_functions')),
       }),
     ),
     /** Work store kinds (issue, comment, lifecycle): the current version as its journal row read, so a
@@ -145,12 +148,16 @@ export const hostedRecordTables = {
       }),
     ),
   })
-    // Creation order within a kind: the Work store's planning list pages in the journal's append order.
-    // index-order: caller: convex/projectWorkStoreReads.ts#storePage; order: creation-time pages of Issue heads.
-    .index('by_project_and_kind', ['projectId', 'kind'])
+    // index-order: caller: convex/projectWorkStoreReads.ts#storePage; order: committed Issue births, with legacy heads in creation order.
+    .index('by_project_and_kind', ['projectId', 'kind', 'commitTs'])
     .index('by_project_and_kind_and_key', ['projectId', 'kind', 'key'])
-    // index-order: caller: convex/projectPlanningCaptureWake.ts#pendingCaptures; order: match canonical Item creation order.
-    .index('by_project_and_kind_and_pending_capture', ['projectId', 'kind', 'pendingPlanningCapture.state'])
+    // index-order: caller: convex/projectPlanningCaptureWake.ts#pendingCaptures; order: drain the committed prefix through a snapshot.
+    .index('by_project_and_kind_and_pending_capture', [
+      'projectId',
+      'kind',
+      'pendingPlanningCapture.state',
+      'commitTs',
+    ])
     .index('by_project_and_kind_and_item', ['projectId', 'kind', 'planningItemId'])
     // index-order: caller: convex/projectHostedDormancy.ts#landedByReceipt; order: receipt discovery selects the newest Candidate by creation time within an Intent.
     .index('by_project_and_kind_and_parent', ['projectId', 'kind', 'parent'])

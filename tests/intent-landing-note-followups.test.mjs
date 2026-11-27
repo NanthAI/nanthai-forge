@@ -8,6 +8,7 @@ import { acceptanceFixture, control } from './hosted-acceptance-fixture.mjs';
 import { batchesFixture, batchPublish, states, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { setup as planningSetup, actions as workActions, pinIntent } from './hosted-planning-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
+import { convexRowJson } from './convex-args.mjs';
 import { policyPreset } from '../dist/autonomy-policy.js';
 import { mergeItems } from '../dist/planning-batch.js';
 import { digest } from '../dist/hash.js';
@@ -671,7 +672,7 @@ test('merged Item discussion and owner export retain hot, legacy and verified ca
       const result = await method(...args);
       const documents = Array.isArray(result) ? result : (result?.page ?? (result ? [result] : []));
       dbDocuments += documents.length;
-      dbReadBytes += documents.reduce((total, row) => total + Buffer.byteLength(JSON.stringify(row)), 0);
+      dbReadBytes += documents.reduce((total, row) => total + Buffer.byteLength(convexRowJson(row)), 0);
       return result;
     };
   s.ctx.db = {

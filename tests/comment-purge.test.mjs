@@ -6,6 +6,7 @@
 // abuse review's purge action runs for a comment (convex/projectCommentPurge.ts).
 import test from 'node:test';
 import { workEventRows } from './work-event-fixture.mjs';
+import { convexRowJson } from './convex-args.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
@@ -42,7 +43,7 @@ const { readHosted } = await import('./hosted-read.mjs');
 const secretRows = s =>
   Object.entries(s.tables).flatMap(([table, rows]) =>
     [...rows.values()]
-      .filter(row => JSON.stringify(row).includes(SECRET))
+      .filter(row => convexRowJson(row).includes(SECRET))
       .map(row => `${table}:${row.collection ?? row.kind ?? ''}:${row.key ?? row.operationId ?? ''}`),
   );
 
@@ -236,7 +237,7 @@ const intentHistoryOnly = s =>
     if (!row.startsWith('projectHostedRecordBodies:')) return true;
     const body = [...s.tables.projectHostedRecordBodies.values()].find(
       item =>
-        JSON.stringify(item).includes(SECRET) &&
+        convexRowJson(item).includes(SECRET) &&
         `projectHostedRecordBodies::${item.operationId ?? ''}` === row,
     );
     return ![...s.tables.projectHostedRecords.values()].some(
@@ -637,7 +638,7 @@ test('an archived comment row: the review schedules the purge, which reads the s
   assert.equal(comments(data, itemId).find(row => row.id === reported.operationId).text, 'Deleted comment');
   // A retried review and a re-run of the action change nothing and reach R2 not at all.
   const tables = () =>
-    JSON.stringify(Object.fromEntries(Object.entries(s.tables).map(([k, v]) => [k, [...v]])));
+    convexRowJson(Object.fromEntries(Object.entries(s.tables).map(([k, v]) => [k, [...v]])));
   const before = tables();
   assert.deepEqual(await reports.review._handler(s.ctx, review), {
     reportId: 'report-1',
@@ -730,7 +731,7 @@ test('index copies a rebuild makes from the whole archived row while its segment
   // What a rebuild that read the archived segment before its rewrite writes: the comment's index records, whole.
   const copies = ['projectPlanningRecords', 'projectWorkRecords', 'projectWorkDataRecords'].flatMap(table =>
     [...(s.tables[table]?.values() ?? [])]
-      .filter(row => JSON.stringify(row).includes(SECRET))
+      .filter(row => convexRowJson(row).includes(SECRET))
       .map(row => [table, structuredClone(row)]),
   );
   assert.ok(copies.length > 0);

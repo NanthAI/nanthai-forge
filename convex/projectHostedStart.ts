@@ -32,7 +32,6 @@ import { openSiblingLanes } from './projectHostedStartPeers';
 import { dormantCutoff } from './projectHostedDormancy';
 import { intentFinished, successorIntentId } from '../src/hosted-intent-chain';
 import { stagePlanningCapture } from './projectPlanningCapture';
-import { wakePlanningCaptures } from './projectPlanningCaptureWake';
 import { selectedGeneration } from './projectWorkIndexStore';
 import { latestItemIntentHead } from './projectItemIntentHeads';
 import { itemIntentPage } from './projectItemIntentPages';
@@ -350,6 +349,7 @@ async function execute(
     projectId,
     actor,
     accountChannel: 'start',
+    ...(action === 'start' ? { pruneReceipts: false as const } : {}),
     beforeWrite: validateStart,
     payload,
     request: {
@@ -416,7 +416,6 @@ async function execute(
       agentClient,
     });
     planningItemId = intentId;
-    await wakePlanningCaptures(ctx, projectId);
   }
   // From the pin on, hosted paths own the Intent's status; the journal copy leaves it (projectWorkStore).
   const pin = action === 'start' ? unpinned : undefined;
@@ -544,6 +543,7 @@ async function execute(
     actor,
     operationId,
     receipt: { attemptId: first.id, at: first.at, outcome: { status: 'completed', result } },
+    ...(action === 'start' ? { journalWake: capture ? ('capture' as const) : ('scheduled' as const) } : {}),
   });
   // A member's start of a planned Item: planning writes are the owner's, so the server moves an open Issue to in
   // progress (projectPlanningStart.ts checks the kind and status), after this start commits. The owner's client does

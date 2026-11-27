@@ -5,7 +5,7 @@ import { chargeAccountChannel } from './accountLimits';
 import { hostedOperationRow } from './projectHostedOperationLookup';
 export { hostedOperationRow } from './projectHostedOperationLookup';
 import { digest } from '../src/state/hash';
-import { wakeJournal, journalGraceMs } from './projectJournalWake';
+import { wakeJournal, journalGraceMs, scheduleStartJournalWake } from './projectJournalWake';
 import { semanticPayload } from '../src/semantic-payload';
 import { requireSourceAuthority, type SourceAuthority } from '../src/hosted-source-authority';
 import type { MutationCtx } from './_generated/server';
@@ -99,6 +99,8 @@ export async function beginHostedOperation<T = void>(
     /** Message-carrying writes (Lane starts and names, save messages): the account limiter and
      * suspend switch, charged with the member budget only for a fresh operation. */
     accountChannel?: 'start' | 'save';
+    /** A Lane start defers project-wide expiry to later Work. */
+    pruneReceipts?: false;
     /** Read-only validation for a fresh (non-replay) operation before charging or inserting. */
     beforeWrite?: () => Promise<T>;
   },
@@ -145,7 +147,7 @@ export async function beginHostedOperation<T = void>(
       ...(metricActorKind ? { metricActorKind } : {}),
       value: canonicalPayload(prepared.operation),
     });
-    await pruneExpiredHostedOperations(ctx, input.projectId, Date.now());
+    if (input.pruneReceipts !== false) await pruneExpiredHostedOperations(ctx, input.projectId, Date.now());
   }
   // Reuse this authorized snapshot within the current transaction.
   return { ...prepared, project, validated };
@@ -157,6 +159,7 @@ export async function finishHostedOperation(
     actor: string;
     operationId: string;
     receipt: HostedTerminalReceipt;
+    journalWake?: 'capture' | 'scheduled';
   },
 ) {
   await activeProject(ctx, input.projectId, input.actor);
@@ -173,7 +176,9 @@ export async function finishHostedOperation(
       value,
       ...(process.env.FORGE_JOURNAL_SEGMENTS === '1' ? { journalReadyAt: dueAt } : {}),
     });
-    await wakeJournal(ctx, { projectId: input.projectId, operationId: `source:${row._id}` }, dueAt);
+    const wake = { projectId: input.projectId, operationId: `source:${row._id}` };
+    if (input.journalWake === 'scheduled') await scheduleStartJournalWake(ctx, wake, dueAt);
+    else if (input.journalWake !== 'capture') await wakeJournal(ctx, wake, dueAt);
     if (operation.terminal?.outcome.status === 'failed')
       await recordFailure(ctx, {
         projectId: input.projectId,

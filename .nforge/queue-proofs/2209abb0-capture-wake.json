@@ -1,0 +1,212 @@
+{
+  "version": 1,
+  "kind": "replay",
+  "changes": {
+    "convex/projectHostedStart.ts": "a338e37ad44f1ebf5dbf3545445b970d3fd6feb69b11c0c5c80035d9ae571f02"
+  },
+  "replay": {
+    "incident": "2209abb0",
+    "test": "incident 2209abb0: scheduling and advancing a capture burst cannot conflict with overlapping starts on project rows",
+    "receipt": "fbb9abf3-2df9-4bce-8335-d9d6a039640a"
+  },
+  "authorModel": "gpt-6.2-sol",
+  "authorSession": "thread:delegated-task:command%3Amcp%3A8d8e27e9-9b23-463d-90f9-fc2e85c22f2e%3Adelegate-task%3A3b1a5d2f-3135-4acf-8815-109ca93dfef2",
+  "review": {
+    "model": "gpt-6.2-sol",
+    "session": "thread:delegated-task:command%3Amcp%3A31526596-e377-4cfd-9949-78fa9549e847%3Adelegate-task%3Ad788e077-10cc-4a08-880b-c5a548921efa",
+    "receipt": "90650d9e-3a4a-478e-b468-49ae345db5ff"
+  },
+  "exercised": {
+    "convex/projectHostedStart.ts": {
+      "executed": [
+        "execute",
+        "start",
+        "startReply"
+      ],
+      "digest": "7e98e80cb14ecaaa1b37cdbf03be96a5d24aa39ec09db4e03895d9997a084673",
+      "units": [
+        [
+          "activeProject",
+          "d18cc6b641cd45a0e474d0afe7700101c46cef8057b70e172637d1e1d30d2be9"
+        ],
+        [
+          "agentHooks",
+          "2ff95c997c8511fb5da266ec9654b7e585186955cc2e55a6c29f649941aec5e4"
+        ],
+        [
+          "args",
+          "6252652c64fb126ebeb52ede9aeadd5f1770291a0fd9e939fe43cdf83df7db10"
+        ],
+        [
+          "beginHostedOperation",
+          "d1957e3c5db8585d728949c5534a9a4f4d14f7603d823f5b890fa99f2e56e40f"
+        ],
+        [
+          "canonicalPayload",
+          "95124f3098690f0b83a3927221e9cee6fc53fe1b0c044ab43a9f934e9effe9bb"
+        ],
+        [
+          "createIntent",
+          "1a678111ca02d344f101776313b8692bbefa80b9ee60e5510e873c8f3182b66c"
+        ],
+        [
+          "digest",
+          "5f605f8606bb3242a28c6a44a95e70e8b39f3555b7f0838c11f4e606795a3e50"
+        ],
+        [
+          "dormantCutoff",
+          "296ec804589946459afa695c6bb59a534dd449afa9b13d16905a842244c33162"
+        ],
+        [
+          "effectivePolicy",
+          "3cdc0ff32407b7603d7a90387ef5e3b5e63f8a4336f55bfdf7f1dac19863e36e"
+        ],
+        [
+          "execute",
+          "71b36fa20c60b02322742963278a159135f75ecfaf89ddf0f07a2d5de55cd69d"
+        ],
+        [
+          "findObject",
+          "24c72de797e426b1cba65ee78a72f180ff603f3d0d03c64c6474e34622c2ba51"
+        ],
+        [
+          "finishHostedOperation",
+          "241d16baeaede23d314192e7e47c686b8dc870c2eba959b1bd25a7c24a3b9048"
+        ],
+        [
+          "fixBrief",
+          "b71d4243929024ab2da554ff4c588168b4a5099fead1f65114dd8f07d4a836e8"
+        ],
+        [
+          "guardSetReply",
+          "d6bd86467299db6101709f09a5054c0a85a5531a9358262218f11cab54888a95"
+        ],
+        [
+          "hostedIntentSchema",
+          "b0684cd4fccc9fdc8e3451327fb96aa527cc6335062ea979fcccce4c7ea249c6"
+        ],
+        [
+          "hostedLaneSchema",
+          "3ae272c97f1db7904a3d8c6e5bcca5843553b538502a2884c781a0ab8ab1a561"
+        ],
+        [
+          "hostedLaneSelectionSchema",
+          "2d897ea0d7dec252e38c34f22e74d990bbf3ed228ad6812a895bfb163d38ae53"
+        ],
+        [
+          "hostedOperationRow",
+          "ee7e2a160495859d4314eb653ae41935074ff132cd68cad10cfdfdf4eab2eb76"
+        ],
+        [
+          "hostedOperationSchema",
+          "a4a0088654440a511e5aaa4e2a3ee4d6be0692ef3e8f63a027c6e4e73a38ca96"
+        ],
+        [
+          "hostedPayloadHash",
+          "dd878479813234bbf14db3ad1ea1b9d68605840ca3eec856231f180ae5455fa5"
+        ],
+        [
+          "hostedStartMain",
+          "b363e9608e562023c7b2963703c2aa02c302faf29032c2afe9c22405b82e1a0a"
+        ],
+        [
+          "hostedStartResultSchema",
+          "445e8bab287d7312c8844d1bf54fd1faef3551a1631e9e06781965ad7a8ae80d"
+        ],
+        [
+          "hostedStartSchema",
+          "e24eb95ab12329ce549a6bffc7238dce923103fa06f0719249649637267a2dee"
+        ],
+        [
+          "intentFinished",
+          "9ab2f2d43119c5852c81dff6fb1b0d901a53552fb5aced344f2fa6389bf14b2e"
+        ],
+        [
+          "invariant",
+          "a25036d770aae805d10bdb41ade261044ed7f7ba6fbbf3ccd57a32c56a3d4c20"
+        ],
+        [
+          "isStored",
+          "b9b9e00074d66f7069753f1558ce5f0991302e5007a6ba7c8b21537e93baf41a"
+        ],
+        [
+          "itemIntentPage",
+          "15b97b75e31a27d4bf9ed9b9923c721ac6ae211e2ff694bd067dba51bbadeab8"
+        ],
+        [
+          "latestItemIntentHead",
+          "65356219b445c5da7ec766c53f3b3e687dd037ea546683b5b1777b64a1d2cfc7"
+        ],
+        [
+          "makeFunctionReference",
+          "90760cdb0f99f8303180da5ca3bbe536fdac31c89e78b170e62dbf914920e3e4"
+        ],
+        [
+          "mutation",
+          "4f17c7855059ce010489b8b943f417aba3333721a20f7872a46abe0eee887bc9"
+        ],
+        [
+          "needsFix",
+          "40850d22ed7c97c14bd1a473a57381d43ac72a4ffb7b8caa109114fce3f0b8e9"
+        ],
+        [
+          "openSiblingLanes",
+          "c7ed98e3626823daad279d828fe80f6433e586913ce74c69b1e30343948f521f"
+        ],
+        [
+          "provenance",
+          "ab67faf16f2e2a489eeb170af2e8486f76fb47fe3431ea350c02b96cf4d1517a"
+        ],
+        [
+          "readHostedRecord",
+          "f8ebe857e46255798f036f3db0acb78682a740661afb1147e12c1163e7ad5ee2"
+        ],
+        [
+          "receiptMutation",
+          "0d15a780771c1520d8b4ead3d37215dbdebdfe3e09ac9203ffe1e865bf9c597b"
+        ],
+        [
+          "recordHead",
+          "475b9c6dbb95c08ce317da362de940ef01974e26d05ba3e3c167ac83d2fc1b0f"
+        ],
+        [
+          "report",
+          "11f51c908ed7b15c3270a2410f7282cdb9c431b81d35e62cdff8695c9d306e0b"
+        ],
+        [
+          "selectedGeneration",
+          "d62db45299833b99e54475d7224b39afc1612a6f8d01371a487a31063ac1fb9b"
+        ],
+        [
+          "sourceAuthorship",
+          "b5de6e815325bf5fb4154279170edf53a906c7b298a74951b96c092b2926be45"
+        ],
+        [
+          "stagePlanningCapture",
+          "89a0d739dad4424a75492c1e69cfde06ce0032e37f1a8b2434f907610e2e21cc"
+        ],
+        [
+          "start",
+          "08179f0dd40dcdf00a2406a6f2be4aa2696ae635e2fc7c739c5d8c7995113160"
+        ],
+        [
+          "startReply",
+          "b9b3f4938dbaeb982096d7e62d0fc1d7ddac3ae8daa7b31f823c9f1d57fb37b7"
+        ],
+        [
+          "successorIntentId",
+          "a957cfcb3d88c3bdd1023a8fbbd842187c75c97302c07244f7a3326548f28d7f"
+        ],
+        [
+          "v",
+          "c9b23930c9b094848cdb5f563a16f0a2f497fc28d7ea9a82afca6bc52741e95f"
+        ],
+        [
+          "writeHostedRecord",
+          "fc8651df82e1fc039dedf06d867148f410393e198d708a05ff5017b7966dfe4f"
+        ]
+      ],
+      "shell": "c1e0e31f7c93f493fd8a10a6ed945263d3e6ffab5d04720b748dd84d8c63ab6a"
+    }
+  }
+}

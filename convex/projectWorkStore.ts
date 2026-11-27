@@ -154,10 +154,12 @@ async function insertVersion(
     bytes: ref.bytes,
   });
   const inline = inlineValue(encoded),
+    commitTs = head ? head.commitTs : record.kind === 'issue' ? ctx.db.vars?.commitTs : undefined,
     pointer = {
       ...identity,
       ...indexed,
       recordId,
+      ...(commitTs === undefined ? {} : { commitTs }),
       ...(inline === undefined ? {} : { value: inline }),
       ...(planningItemId === undefined ? {} : { planningItemId }),
       ...(planningTimes === undefined ? {} : { planningTimes }),

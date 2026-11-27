@@ -3,55 +3,72 @@
 import type { Doc, Id } from './_generated/dataModel';
 import type { MutationCtx, QueryCtx } from './server';
 import { makeFunctionReference } from 'convex/server';
-import { digest } from '../src/state/hash';
 
 const rollupWake = makeFunctionReference<'mutation'>('projectPlanRollup:advance');
-const operationId = 'planning-capture-wake';
 export const capturePageSize = 10;
 
-export function pendingCaptures(ctx: QueryCtx, projectId: Id<'hostedProjects'>, through?: number) {
+/** Undefined commit stamps precede stamped heads. A legacy target can still fence within that prefix. */
+export function pendingCaptures(ctx: QueryCtx, projectId: Id<'hostedProjects'>, through?: bigint | number) {
   return ctx.db.query('projectHostedRecordHeads').withIndex('by_project_and_kind_and_pending_capture', q => {
     const pending = q
       .eq('projectId', projectId)
       .eq('kind', 'issue')
       .eq('pendingPlanningCapture.state', 'pending');
-    return through === undefined ? pending : pending.lte('_creationTime', through);
+    return through === undefined
+      ? pending
+      : typeof through === 'bigint'
+        ? pending.lte('commitTs', through)
+        : pending.eq('commitTs', undefined).lte('_creationTime', through);
   });
 }
 
-export const captureWake = (ctx: QueryCtx, projectId: Id<'hostedProjects'>) =>
+export async function oldestPendingCapture(ctx: QueryCtx, projectId: Id<'hostedProjects'>) {
+  const [head] = await pendingCaptures(ctx, projectId).take(1);
+  return head ?? null;
+}
+
+/** Old deployments queued a random fence in a project journal receipt. Drain that wake on upgrade. */
+export const legacyCaptureWake = (ctx: QueryCtx, projectId: Id<'hostedProjects'>) =>
   ctx.db
     .query('projectJournalReceipts')
-    .withIndex('by_project_and_operation', q => q.eq('projectId', projectId).eq('operationId', operationId))
+    .withIndex('by_project_and_operation', q =>
+      q.eq('projectId', projectId).eq('operationId', 'planning-capture-wake'),
+    )
     .unique();
 
-async function schedule(ctx: MutationCtx, projectId: Id<'hostedProjects'>, key: string) {
-  await ctx.scheduler.runAfter(0, rollupWake, {
+export function scheduleCaptureWake(ctx: MutationCtx, projectId: Id<'hostedProjects'>, itemId: string) {
+  return ctx.scheduler.runAfter(0, rollupWake, {
     projectId,
-    itemId: key,
-    cause: key,
+    itemId,
+    cause: itemId,
     source: 'capture',
+    captureTicket: true,
   });
 }
 
-/** One fenced wake per project burst. The common start only reads the marker. */
-export async function wakePlanningCaptures(ctx: MutationCtx, projectId: Id<'hostedProjects'>) {
-  if (await captureWake(ctx, projectId)) return;
-  const envelope = crypto.randomUUID();
-  await schedule(ctx, projectId, envelope);
-  await ctx.db.insert('projectJournalReceipts', { projectId, operationId, hash: digest(envelope), envelope });
+/** Reconcile arrivals beyond a short page's snapshot outside the publishing transaction. */
+export async function followCapturePage(ctx: MutationCtx, projectId: Id<'hostedProjects'>, cause: string) {
+  await ctx.scheduler.runAfter(0, rollupWake, {
+    projectId,
+    itemId: cause,
+    cause,
+    source: 'capture',
+    captureTail: true,
+  });
 }
 
-export async function settleCaptureWake(
-  ctx: MutationCtx,
-  wake: Doc<'projectJournalReceipts'>,
-  more: boolean,
-) {
-  if (!more) {
-    await ctx.db.delete(wake._id);
-    return;
-  }
-  const envelope = crypto.randomUUID();
-  await schedule(ctx, wake.projectId, envelope);
-  await ctx.db.patch(wake._id, { hash: digest(envelope), envelope });
+export async function handCapturePage(ctx: MutationCtx, head: Doc<'projectHostedRecordHeads'>) {
+  const capture = head.pendingPlanningCapture;
+  if (!capture) return;
+  const wake = await scheduleCaptureWake(ctx, head.projectId, head.key);
+  await ctx.db.patch(head._id, { pendingPlanningCapture: { ...capture, wake } });
+}
+
+/** An out-of-order ticket may already have returned. Hand the drain to the oldest remaining Item. */
+export async function ensureCaptureWake(ctx: MutationCtx, head: Doc<'projectHostedRecordHeads'> | null) {
+  const capture = head?.pendingPlanningCapture;
+  if (!head || capture?.state !== 'pending') return;
+  const scheduled = capture.wake && (await ctx.db.system.get(capture.wake));
+  if (scheduled?.state.kind === 'pending') return;
+  await handCapturePage(ctx, head);
 }

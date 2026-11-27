@@ -8,6 +8,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { convexRowJson } from './convex-args.mjs';
 import { getFunctionName } from 'convex/server';
 import { defaultR2Objects } from './default-r2.mjs';
 import { meterWorkIO } from './hosted-read-set.mjs';
@@ -120,7 +121,7 @@ test('a base comment’s purge scrubs the stored base: the backup selects a new 
   assert.equal(JSON.stringify(read).includes(SECRET), false);
   // A retried review changes nothing.
   const tables = () =>
-    JSON.stringify(Object.fromEntries(Object.entries(s.tables).map(([k, v]) => [k, [...v]])));
+    convexRowJson(Object.fromEntries(Object.entries(s.tables).map(([k, v]) => [k, [...v]])));
   const before = tables();
   await modules.abuseReports.review._handler(s.ctx, review);
   assert.deepEqual(await runScheduled(s), []);
@@ -333,7 +334,7 @@ test('a same-id retry of a finished base purge answers done and changes nothing'
   const [task] = s.scheduled.filter(x => getFunctionName(x.fn) === 'projectCommentPurgeArchive:run');
   assert.deepEqual(await runScheduled(s), ['done']);
   const tables = () =>
-    JSON.stringify(Object.fromEntries(Object.entries(s.tables).map(([k, v]) => [k, [...v]])));
+    convexRowJson(Object.fromEntries(Object.entries(s.tables).map(([k, v]) => [k, [...v]])));
   const before = tables();
   assert.equal(await modules.projectCommentPurgeArchive.run._handler(s.ctx, task.args), 'done');
   assert.equal(tables(), before);

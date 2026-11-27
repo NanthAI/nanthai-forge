@@ -2,6 +2,7 @@
 // Copyright 2026 Ferdinando Valsecchi
 import assert from 'node:assert/strict';
 import { moduleUrl } from './convex-module.mjs';
+import { convexRowJson } from './convex-args.mjs';
 const schema = (await import(moduleUrl('../convex/schema.ts'))).default;
 const field = (row, path) => path.split('.').reduce((v, k) => v?.[k], row);
 const tokens = text => text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
@@ -15,7 +16,7 @@ export function installPlanningSearch(s) {
   const meter = rows => {
     for (const row of rows.filter(Boolean)) {
       reads.db.documents++;
-      reads.db.bytes += Buffer.byteLength(JSON.stringify(row));
+      reads.db.bytes += Buffer.byteLength(convexRowJson(row));
     }
   };
   reads.reset = () => {
@@ -90,7 +91,7 @@ export function installPlanningSearch(s) {
               if (page.length >= numItems || page.length >= maximumRowsRead || bytes >= maximumBytesRead)
                 break;
               page.push(structuredClone(row));
-              bytes += Buffer.byteLength(JSON.stringify(row));
+              bytes += Buffer.byteLength(convexRowJson(row));
             }
             meter(page);
             reads.push({ filters, documents: page.length, bytes });
