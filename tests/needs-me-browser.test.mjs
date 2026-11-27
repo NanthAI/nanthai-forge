@@ -655,6 +655,9 @@ test('Needs me: what waits on you, FYI and loose ends; counts agree; axe and wid
       const needs = region(page, 'Needs you');
       const handBack = needs.locator('.dec', { hasText: 'Tried both clients' });
       assert.match(await handBack.textContent(), /Decide which client ships/);
+      assert.match(await handBack.textContent(), /Client compatibility.*Saves: 2.*Files in saved work: 3/);
+      assert.doesNotMatch(await handBack.textContent(), /b{64}|5d1c7a0e/);
+      assert.equal(await handBack.getByRole('button', { name: 'Take it', exact: true }).count(), 1);
       assert.equal(
         await handBack.getByRole('link', { name: 'Open the thread' }).getAttribute('href'),
         '/sample-one/tidepool/lanes/5d1c7a0e-0000-4000-8000-000000000004/thread',

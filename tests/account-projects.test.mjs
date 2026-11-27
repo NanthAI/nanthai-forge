@@ -302,6 +302,8 @@ test('Home agrees with Needs me for the same viewer, not the live line holds or 
   for (const row of [primary, shared]) {
     const attention = await needsMe._handler(s.ctx, { projectId: row.id });
     assert.deepEqual(row.attention, needsCount(attention));
+    if (row === primary)
+      assert.deepEqual(attention.asks.find(ask => ask.id === 'handback')?.choices, ['Decline']);
     const feed = await liveLine._handler(s.ctx, { projectId: row.id, includeChecks: false });
     assert.deepEqual(row.verdict, flowVerdict(feed.flow));
     assert.equal(row.verdict.red, true);

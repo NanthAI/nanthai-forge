@@ -25,7 +25,10 @@ import { shareQueryRoles } from './projectRole';
 import { finishRow } from './projectHostedFinishWake';
 import { culpritOf } from './projectMainRed';
 import { landingRow } from './projectHostedLandingStore';
-import { openLaneForCoordination, receipt, recipientLabel, session } from './coordinationWrite';
+import { coordinationLanePresence, receipt, recipientLabel, session } from './coordinationWrite';
+import { DECLINE_HAND_BACK, handBackChoices } from '../src/coordination-hand-back';
+import { currentHandBack, handBackLanes, handBackWorkOf } from './coordinationLaneSummary';
+import { laneSession } from './projectLaneHolder';
 import { storedLandingStateSchema } from '../src/hosted-landing';
 import { discardedRunnerSeconds } from '../src/cost-budgets';
 import { report } from './errors';
@@ -83,6 +86,8 @@ export async function messagesTo(
   const rows = [...messages, ...handoffs];
   const readConversation = await canReadConversation(ctx, project, actor, rows);
   const eligible = [];
+  const workForHandBack = handBackLanes(ctx, projectId);
+  const browserSession = handoffs.length ? await laneSession(ctx) : undefined;
   for (const row of rows) {
     const command = row.command;
     if (row.conversation && !readConversation) continue;
@@ -98,8 +103,11 @@ export async function messagesTo(
     const acked = await receipt(ctx, projectId, row.operationId, actor);
     if (acked && (!row.conversation || acked.choice !== undefined)) continue;
     const laneId = row.laneId ?? (command.kind === 'message' ? command.context.laneId : command.laneId);
-    if (laneId && !(await openLaneForCoordination(ctx, projectId, laneId))) continue;
-    eligible.push({ row, command, acked, laneId, handBack });
+    const work = handBack && laneId ? await workForHandBack(laneId) : null;
+    if (command.kind === 'handoff' && handBack && work) {
+      if (!currentHandBack(work, command.head, actor, browserSession)) continue;
+    } else if (laneId && !(await coordinationLanePresence(ctx, projectId, laneId))) continue;
+    eligible.push({ row, command, acked, laneId, handBack, work });
   }
 
   // Resolve one page's sender and recipient labels together, with one indexed read per distinct session.
@@ -112,7 +120,7 @@ export async function messagesTo(
     await Promise.all([...ids].map(async id => [id, await session(ctx, projectId, id)] as const)),
   );
   const out = [];
-  for (const { row, command, acked, laneId, handBack } of eligible) {
+  for (const { row, command, acked, laneId, handBack, work } of eligible) {
     let to: string | undefined;
     let recipientEnded = false;
     if (row.recipientSession) {
@@ -135,14 +143,26 @@ export async function messagesTo(
       agent: sender && sender.kind !== 'person' ? sender.name : null,
       text:
         command.kind === 'handoff' ? command.summary : asks ? command.text : (oneLine(command.text) ?? ''),
-      choices: command.kind === 'message' ? (command.choices ?? []) : ['Decline'],
+      choices:
+        command.kind === 'message'
+          ? (command.choices ?? [])
+          : command.laneId && work
+            ? handBackChoices(row.actor, actor)
+            : [DECLINE_HAND_BACK],
       laneId: laneId ?? null,
       ...(row.planningItemId ? { planningItemId: row.planningItemId } : {}),
       ...(command.kind === 'message' && command.question?.holdsWork === false
         ? { ahead: true as const }
         : {}),
       ...(command.kind === 'handoff' && handBack
-        ? { handBack: { head: command.head, left: handBack.left, to: actor } }
+        ? {
+            handBack: {
+              head: command.head,
+              left: handBack.left,
+              to: actor,
+              savedWork: handBackWorkOf(work, row.handBackSavedAt),
+            },
+          }
         : {}),
       ...(row.recipientSession ? { recipientSession: row.recipientSession } : {}),
       ...(to ? { to } : {}),

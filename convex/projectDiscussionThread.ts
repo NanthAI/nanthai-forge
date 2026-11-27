@@ -6,11 +6,14 @@ import { query } from './cliServer';
 import type { Doc } from './_generated/dataModel';
 import {
   eventByOperation,
-  openLaneForCoordination,
+  coordinationLanePresence,
   receipt,
   recipientLabel,
   session,
 } from './coordinationWrite';
+import { DECLINE_HAND_BACK, handBackChoices } from '../src/coordination-hand-back';
+import { currentHandBack, handBackLanes, handBackWork, handBackWorkOf } from './coordinationLaneSummary';
+import { laneSession } from './projectLaneHolder';
 import { accessibleProject } from './projectAuthority';
 import { hasWriteRole } from './projectRole';
 import { isAgentSlug } from '../src/agent-slug';
@@ -41,7 +44,9 @@ const entry = v.object({
   recipientEnded: v.optional(v.literal(true)),
   mayAnswer: v.optional(v.boolean()),
   head: v.optional(v.string()),
+  savedWork: v.optional(handBackWork),
   left: v.optional(v.string()),
+  superseded: v.optional(v.literal(true)),
   to: v.optional(v.string()),
   answer: v.optional(
     v.object({
@@ -121,16 +126,17 @@ export const read = query({
           // to a Lane stay on that Lane even when the sender also supplied an Intent.
           ...bounds('intentMessage', [projectId, 'message', id, undefined]),
         });
-      const [notes, messages, open, other] = await Promise.all([
+      const [notes, messages, lane, other] = await Promise.all([
         getPage(ctx, {
           table: 'projectBoardMessages',
           index: 'by_project_and_target_and_at',
           ...bounds('note', [projectId, `${scope === 'item' ? 'issue' : 'lane'}:${id}`]),
         }),
         events('message'),
-        scope === 'lane' ? openLaneForCoordination(ctx, projectId, id) : true,
+        scope === 'lane' ? coordinationLanePresence(ctx, projectId, id) : null,
         scope === 'lane' ? events('handoff') : legacyIntentMessages(),
       ] as const);
+      const open = scope === 'item' || lane !== null;
       const roots = [
         ...notes.page.map((row, i) => ({
           source: 'note' as const,
@@ -187,8 +193,14 @@ export const read = query({
           ...(sender ? { lastActivity: sender.lastActivity ?? sender.lastSeen } : {}),
         };
       }
+      const selected = roots.slice(0, limit);
+      const [handBackLane, browserSession] = selected.some(
+        root => root.source === 'handoff' && root.row.command.kind === 'handoff' && root.row.command.handBack,
+      )
+        ? await Promise.all([handBackLanes(ctx, projectId)(id), laneSession(ctx)])
+        : [null, undefined];
       const entries = await Promise.all(
-        roots.slice(0, limit).map(async root => {
+        selected.map(async root => {
           next[root.source] = root.key;
           const { at } = root.row;
           if (root.source === 'note') {
@@ -220,15 +232,33 @@ export const read = query({
           const mayAnswer = open && row.recipientActor === user.subject && !row.recipientSession;
           if (command.kind === 'handoff') {
             const answer = command.handBack ? await answerOf(row) : undefined;
+            const current =
+              command.handBack &&
+              (handBackLane && command.laneId
+                ? currentHandBack(handBackLane, command.head, user.subject, browserSession)
+                : open);
             return {
               ...base,
               type: command.handBack ? ('hand-back' as const) : ('handoff' as const),
-              head: command.head,
+              ...(command.handBack
+                ? {
+                    savedWork: handBackWorkOf(handBackLane, row.handBackSavedAt),
+                    ...(row.recipientActor
+                      ? {
+                          choices:
+                            command.laneId && handBackLane
+                              ? handBackChoices(row.actor, row.recipientActor)
+                              : [DECLINE_HAND_BACK],
+                        }
+                      : {}),
+                  }
+                : { head: command.head }),
               text: command.summary,
               left: command.handBack?.left ?? '',
               ...(row.recipientActor ? { to: row.recipientActor } : {}),
               ...(answer ? { answer } : {}),
-              mayAnswer: Boolean(command.handBack && mayAnswer && !answer),
+              ...(command.handBack && !current && !answer ? { superseded: true as const } : {}),
+              mayAnswer: Boolean(current && mayAnswer && !answer),
             };
           }
           const choices = command.choices ?? [];

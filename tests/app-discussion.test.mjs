@@ -240,7 +240,9 @@ test('Lane and Item threads pin an open ask ahead of history and retain the answ
   assert.match(recorded, /Resume this Lane\./);
 });
 
-test('a hand-back in the thread keeps the saved pin and explains who carries it', () => {
+test('a hand-back names the saved work and offers the addressed person Take or Decline', () => {
+  const savedHead = 'b'.repeat(64);
+  const saveTime = '2026-11-17T16:00:00.000Z';
   const html = render({
     title: 'Thread',
     comments: [],
@@ -253,8 +255,10 @@ test('a hand-back in the thread keeps the saved pin and explains who carries it'
           actor: 'sample-one',
           text: 'Tried old client',
           left: 'Check user decision',
-          head: 'b'.repeat(64),
+          head: savedHead,
+          savedWork: { title: 'Client compatibility', saves: 2, files: 3, lastSaveAt: Date.parse(saveTime) },
           to: 'sample-two',
+          choices: ['Take it', 'Decline'],
           mayAnswer: true,
         },
       ],
@@ -262,8 +266,15 @@ test('a hand-back in the thread keeps the saved pin and explains who carries it'
       answer: async () => {},
     },
   });
-  for (const value of ['Tried old client', 'Check user decision', 'b'.repeat(64), 'sample-two', 'Decline'])
-    assert(html.includes(value));
+  assert.match(html, /Tried old client/);
+  assert.match(html, /Check user decision/);
+  assert.match(html, /Client compatibility/);
+  assert.match(html, /Saves: 2 · Files in saved work: 3/);
+  assert(html.includes(`dateTime="${saveTime}"`) || html.includes(`datetime="${saveTime}"`));
+  assert.match(html, /@sample-two/);
+  assert.match(html, /<button[^>]*><span dir="auto">Take it<\/span><\/button>/);
+  assert.match(html, /<button[^>]*><span dir="auto">Decline<\/span><\/button>/);
+  assert(!html.includes(savedHead));
 });
 
 test('files show by name where no reader is wired, and Attach is offered only where files can be sent', () => {

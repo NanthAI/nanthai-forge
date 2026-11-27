@@ -20,6 +20,7 @@ import { SafeMarkdown } from '../../ds/markdown';
 import { Attachments, sizeLabel, type ReadAttachment } from './Attachments';
 import { ATTACHMENT_LIMITS } from '../../../../src/discussion-attachment-limits';
 import { AttachmentProblem, attachmentRefusal } from './attachment-io';
+import { COORDINATION_LIMITS } from '../../../../src/coordination-types';
 import { readReview, ReviewFindings } from './ReviewFindings';
 import { CommentFilters, useCommentFilters } from './CommentFilters';
 import {
@@ -272,7 +273,7 @@ function DiscussionContent({
             {...report}
             {...(readAttachment ? { readAttachment } : {})}
             {...(onReact ? { onReact } : {})}
-            {...(canWrite && onPost && !thread.root.system && !thread.root.conversation
+            {...(title !== 'Thread' && canWrite && onPost && !thread.root.system && !thread.root.conversation
               ? { onReply: () => setReplying(thread.root.id) }
               : {})}
           />
@@ -301,7 +302,9 @@ function DiscussionContent({
           ) : null}
         </div>
       ))}
-      {canWrite && onPost ? <Composer attachable={Boolean(readAttachment)} onPost={onPost} /> : null}
+      {canWrite && onPost ? (
+        <Composer message={title === 'Thread'} attachable={Boolean(readAttachment)} onPost={onPost} />
+      ) : null}
       {itemPage ? (
         <div className="pager">
           <span className="n">
@@ -466,17 +469,20 @@ function Comment({
 
 function Composer({
   reply = false,
+  message = false,
   attachable = false,
   onPost,
   onCancel,
 }: {
   reply?: boolean;
+  message?: boolean;
   /** Offers Attach: only where the comment is a planning comment that can carry files. */
   attachable?: boolean;
   onPost: (input: PostInput) => Promise<void>;
   onCancel?: () => void;
 }) {
   const id = useId();
+  const label = message ? 'Message' : reply ? 'Reply' : 'Comment';
   const box = useRef<HTMLTextAreaElement>(null);
   const [text, setText] = useState('');
   const [decision, setDecision] = useState(false);
@@ -516,7 +522,7 @@ function Composer({
   return (
     <form className={`cmt compose${reply ? ' re' : ''}`} onSubmit={submit}>
       <label className="sr" htmlFor={id}>
-        {reply ? 'Reply' : 'Comment'}
+        {label}
       </label>
       <textarea
         ref={box}
@@ -525,9 +531,16 @@ function Composer({
         name="comment"
         rows={2}
         autoComplete="off"
-        maxLength={MAX_COMMENT_CHARACTERS}
+        maxLength={message ? COORDINATION_LIMITS.text : MAX_COMMENT_CHARACTERS}
+        readOnly={message && state === 'sending'}
         autoFocus={reply}
-        placeholder={reply ? 'Reply…' : 'Comment, or record evidence. Markdown works…'}
+        placeholder={
+          message
+            ? 'Message on this Lane…'
+            : reply
+              ? 'Reply…'
+              : 'Comment, or record evidence. Markdown works…'
+        }
         value={text}
         onChange={event => setText(event.target.value)}
         onKeyDown={event => {
@@ -538,7 +551,7 @@ function Composer({
       />
       <div className="btns">
         <Key size="sm" type="submit" disabled={!text.trim() || state === 'sending'} keys="⌘↵">
-          {state === 'sending' ? 'Sending…' : reply ? 'Reply' : 'Comment'}
+          {state === 'sending' ? 'Sending…' : message ? 'Post message' : label}
         </Key>
         {onCancel ? (
           <Key size="sm" kind="ghost" onClick={onCancel}>
@@ -561,7 +574,7 @@ function Composer({
             </Key>
           </>
         ) : null}
-        {reply ? null : (
+        {reply || message ? null : (
           <label className="t2 decide">
             <input type="checkbox" checked={decision} onChange={event => setDecision(event.target.checked)} />
             This is a decision: keep it in the body, with today’s date

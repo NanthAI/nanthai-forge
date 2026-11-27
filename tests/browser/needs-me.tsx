@@ -398,9 +398,14 @@ const conversationRead: NeedsRead = {
       actor: 'sample-two',
       agent: 'amber-fox',
       text: 'Tried both clients',
-      choices: ['Decline'],
+      choices: ['Take it', 'Decline'],
       laneId: uuid(4),
-      handBack: { head: 'b'.repeat(64), left: 'Decide which client ships', to: 'sample-one' },
+      handBack: {
+        head: 'b'.repeat(64),
+        left: 'Decide which client ships',
+        to: 'sample-one',
+        savedWork: { title: 'Client compatibility', saves: 2, files: 3 },
+      },
     },
     {
       id: uuid(72),

@@ -253,6 +253,7 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
       await page.getByRole('link', { name: 'Who is touching what', exact: true }).click();
       // Df1f2d46: a pair names its Items in its fold; opened, it links each of its Lanes by its mark.
       await page.locator('.cx-pair', { hasText: title }).first().click();
+      assert.equal(await page.getByRole('button', { name: /^Land .* first$/ }).count(), 0);
       await page.locator('.cx-open').getByRole('link', { name: '7a2b4c6d', exact: true }).first().click();
       await page.getByRole('link', { name: `Item: ${itemLabel}`, exact: true }).waitFor();
       assert.equal(await page.evaluate(() => location.pathname), openedFromLanes);
@@ -297,6 +298,67 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
         await page.getByRole('region', { name: 'The change' }).waitFor();
       }
     });
+
+    await t.test(
+      'the Lane Thread composer is for writers, and a failed send retains the draft for one retry',
+      async t => {
+        const path = '/sample-owner/tide-pool/lanes/7a2b4c6d-8e9f-4a1b-8c3d-5e6f7a8b9c0d/thread';
+        const writer = await open(t, PHONE, 'routes', path);
+        const thread = writer.getByRole('region', { name: 'Thread', exact: true });
+        const draft = thread.getByRole('textbox', { name: 'Message', exact: true });
+        const post = thread.getByRole('button', { name: 'Post message' });
+        await draft.fill('Updated the compatibility tests.');
+        await post.click();
+        await thread.getByRole('alert').filter({ hasText: 'Your text is still here' }).waitFor();
+        assert.equal(await draft.inputValue(), 'Updated the compatibility tests.');
+        await post.click();
+        const sent = thread.locator('article').getByText('Updated the compatibility tests.', { exact: true });
+        await sent.waitFor();
+        assert.equal(await sent.count(), 1);
+        assert.equal(await draft.inputValue(), '');
+
+        const reader = await open(t, PHONE, 'routes&s=thread-reader', path);
+        const readOnly = reader.getByRole('region', { name: 'Thread', exact: true });
+        await readOnly.getByText('No messages yet.').waitFor();
+        assert.equal(await readOnly.getByRole('textbox', { name: 'Message', exact: true }).count(), 0);
+        assert.equal(await readOnly.getByRole('button', { name: 'Post message' }).count(), 0);
+      },
+    );
+
+    await t.test(
+      'hand-backs show choices for the addressed person, save facts and the retained answer',
+      async t => {
+        const path = '/sample-owner/tide-pool/lanes/7a2b4c6d-8e9f-4a1b-8c3d-5e6f7a8b9c0d/thread';
+        const page = await open(t, PHONE, 'routes&s=thread-hand-back', path);
+        const thread = page.getByRole('region', { name: 'Thread', exact: true });
+        const byText = text => thread.locator('article').filter({ hasText: text });
+        const same = byText('Checked the parser');
+        const other = byText('Read the compatibility notes');
+        const unaddressed = byText('Checked the fixture');
+        await same.getByRole('button', { name: 'Hand to an agent', exact: true }).waitFor();
+        assert.deepEqual(await same.locator('.btns button').allTextContents(), [
+          'Hand to an agent',
+          'Take it yourself',
+          'Set it aside',
+        ]);
+        assert.deepEqual(await other.locator('.btns button').allTextContents(), ['Take it', 'Decline']);
+        assert.equal(await unaddressed.locator('.btns button').count(), 0);
+        assert.match(
+          await same.textContent(),
+          /Stream parser: handle split UTF-8.*Saves: 2.*Files in saved work: 3/,
+        );
+        assert.equal(await same.locator('time[datetime="2026-11-24T00:00:00.000Z"]').count(), 1);
+        assert.match(await other.textContent(), /Last save recorded: not reported/);
+        assert.doesNotMatch(await same.textContent(), /7a2b4c6d|[a-f0-9]{64}/);
+        await other.getByRole('button', { name: 'Decline', exact: true }).click();
+        await other.getByText('Answer:', { exact: true }).waitFor();
+        assert.equal(await other.getByRole('button', { name: 'Decline', exact: true }).count(), 0);
+        await same.getByRole('button', { name: 'Hand to an agent', exact: true }).click();
+        await same.getByRole('button', { name: 'Give this to your agent', exact: true }).waitFor();
+        await same.locator('summary', { hasText: 'Resume prompt' }).click();
+        await same.getByText(/Open the saved Lane with nforge/).waitFor();
+      },
+    );
 
     async function checkHistoryThemes(page, viewport, scenario) {
       await page.emulateMedia({ reducedMotion: 'reduce' });

@@ -4,7 +4,7 @@ import type { Id } from '../../../../convex/_generated/dataModel';
 import { A } from '../frames';
 import { hrefFor, type AppRoute } from '../paths';
 import { Discussion } from './Discussion';
-import { useAnswer, useConversation } from './useConversation';
+import { useAnswer, useConversation, usePostLaneMessage } from './useConversation';
 
 export default function LaneDiscussion({
   projectId,
@@ -19,6 +19,7 @@ export default function LaneDiscussion({
 }) {
   const conversation = useConversation(projectId, 'lane', laneId);
   const answer = useAnswer(projectId);
+  const post = usePostLaneMessage(projectId, laneId);
   return (
     <>
       {intentId ? (
@@ -36,7 +37,8 @@ export default function LaneDiscussion({
         comments={[]}
         project={route}
         reportProjectId={projectId}
-        canWrite={false}
+        canWrite={conversation.canWrite}
+        onPost={post}
         conversation={{ ...conversation, answer }}
       />
     </>

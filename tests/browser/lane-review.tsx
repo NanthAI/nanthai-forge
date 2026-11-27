@@ -98,6 +98,48 @@ const client = {
     const name = getFunctionName(ref as never);
     calls.push(name);
     (window as unknown as { __calls: string[] }).__calls = calls;
+    if (name === 'projectCoordination:publish') {
+      const input = args as unknown as {
+        operationId: string;
+        command: { kind: string; text: string; messageId?: string; choice?: string };
+      };
+      const thread = reads.get('projectDiscussionThread:read') as {
+        entries: { id: string; at: number; type: string; actor: string; text: string }[];
+      };
+      if (input.command.kind === 'ack') {
+        const resumePrompt = 'Open the saved Lane with nforge agent ROOT start --open.';
+        reads.set('projectDiscussionThread:read', {
+          ...thread,
+          entries: thread.entries.map(row =>
+            row.id === input.command.messageId
+              ? {
+                  ...row,
+                  mayAnswer: false,
+                  answer: { choice: input.command.choice, text: input.command.text, resumePrompt },
+                }
+              : row,
+          ),
+        });
+        for (const update of listeners.get('projectDiscussionThread:read') ?? []) update();
+        return { ...input, resumePrompt };
+      }
+      const alreadyPosted = sentMessages.has(input.operationId);
+      sentMessages.set(input.operationId, {
+        id: input.operationId,
+        at: 3,
+        type: 'note',
+        actor: 'sample-owner',
+        text: input.command.text,
+      });
+      // The first response was lost after the write. The live thread catches up on retry.
+      if (!alreadyPosted) throw Error('Connection lost');
+      reads.set('projectDiscussionThread:read', {
+        ...thread,
+        entries: [...sentMessages.values(), ...thread.entries],
+      });
+      for (const update of listeners.get('projectDiscussionThread:read') ?? []) update();
+      return input;
+    }
     if (name === 'projectHostedUndo:returnToSave') return history.return(args.projectId, args.request);
     if (name === 'projectWorkCommand:command') {
       const writes = JSON.parse(sessionStorage.getItem('fixture.noteWrites') ?? '[]') as unknown[];
@@ -181,6 +223,7 @@ const historyRevert = historyRevertFixture(LANE);
 const INTENT = '2a3f12de-8371-4310-a004-f9cae1ef291c';
 const TITLE = scenario === 'uuid-title' ? INTENT : 'Stream parser: handle split UTF-8';
 const reads = new Map<string, unknown>();
+const sentMessages = new Map<string, { id: string; at: number; type: string; actor: string; text: string }>();
 const BASE = 'b'.repeat(64);
 const AHEAD_HEAD = 'a1'.repeat(32);
 const HEAD = 'c3'.repeat(32);
@@ -543,21 +586,61 @@ void reply().then(data => {
         }),
       );
     reads.set('projectDiscussionThread:read', {
-      canRead: true,
+      canRead: scenario !== 'thread-reader',
       before: null,
-      entries: [
-        { id: 'legacy-board', at: 2, type: 'note', actor: 'sample-owner', text: 'Legacy board note' },
-        {
-          id: 'new-question',
-          at: 1,
-          type: 'question',
-          actor: 'sample-two',
-          agent: 'salt-wren',
-          text: 'Which client should land first?',
-          choices: ['Old client', 'New client'],
-          mayAnswer: true,
-        },
-      ],
+      entries:
+        scenario === 'thread-reader'
+          ? []
+          : scenario === 'thread-hand-back'
+            ? [
+                {
+                  id: 'same-person',
+                  at: 2,
+                  actor: 'sample-owner',
+                  type: 'hand-back',
+                  text: 'Checked the parser',
+                  left: 'Finish the save',
+                  to: 'sample-owner',
+                  savedWork: { title: TITLE, saves: 2, files: 3, lastSaveAt: Date.UTC(2026, 10, 24) },
+                  choices: ['Hand to an agent', 'Take it yourself', 'Set it aside'],
+                  mayAnswer: true,
+                },
+                {
+                  id: 'another-person',
+                  at: 1,
+                  actor: 'sample-two',
+                  type: 'hand-back',
+                  text: 'Read the compatibility notes',
+                  left: 'Choose an endpoint',
+                  to: 'sample-owner',
+                  choices: ['Take it', 'Decline'],
+                  mayAnswer: true,
+                },
+                {
+                  id: 'someone-else',
+                  at: 0,
+                  actor: 'sample-two',
+                  type: 'hand-back',
+                  text: 'Checked the fixture',
+                  left: 'Review the fixture',
+                  to: 'sample-two',
+                  choices: ['Hand to an agent', 'Take it yourself', 'Set it aside'],
+                  mayAnswer: false,
+                },
+              ]
+            : [
+                { id: 'legacy-board', at: 2, type: 'note', actor: 'sample-owner', text: 'Legacy board note' },
+                {
+                  id: 'new-question',
+                  at: 1,
+                  type: 'question',
+                  actor: 'sample-two',
+                  agent: 'salt-wren',
+                  text: 'Which client should land first?',
+                  choices: ['Old client', 'New client'],
+                  mayAnswer: true,
+                },
+              ],
     });
     reads.set(
       'projectHostedLiveLanes:list',

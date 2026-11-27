@@ -7,6 +7,7 @@
 // it adds the open approval requests, and the Lanes parked for the reader (Item e1633718: one index range on the parked
 // Lanes' routing rows, plus each one's slim presence row). No paths, source, activity or check output; idle costs nothing.
 import { v } from 'convex/values';
+import { handBackWork } from './coordinationLaneSummary';
 import { query } from './cliServer';
 import type { QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
@@ -220,7 +221,14 @@ export const needsMeResult = v.object({
         laneId: v.union(v.string(), v.null()),
         planningItemId: v.optional(v.string()),
         ahead: v.optional(v.literal(true)),
-        handBack: v.optional(v.object({ head: v.string(), left: v.string(), to: v.string() })),
+        handBack: v.optional(
+          v.object({
+            head: v.string(),
+            left: v.string(),
+            to: v.string(),
+            savedWork: v.optional(handBackWork),
+          }),
+        ),
         recipientSession: v.optional(v.string()),
         to: v.optional(v.string()),
         recipientEnded: v.optional(v.literal(true)),

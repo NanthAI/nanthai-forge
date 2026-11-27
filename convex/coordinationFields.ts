@@ -137,6 +137,7 @@ export const eventFields = {
   laneId: v.optional(v.string()),
   planningItemId: v.optional(v.string()),
   resumePrompt: v.optional(v.string()),
+  handBackSavedAt: v.optional(v.number()),
   conversation: v.optional(v.literal(true)),
 };
 /** First acknowledgement of a message or handoff by one participant. */

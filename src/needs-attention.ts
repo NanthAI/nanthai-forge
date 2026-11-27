@@ -88,7 +88,12 @@ export type Ask = {
   laneId: string | null;
   planningItemId?: string;
   ahead?: true;
-  handBack?: { head: string; left: string; to: string };
+  handBack?: {
+    head: string;
+    left: string;
+    to: string;
+    savedWork?: { title?: string; saves?: number; files?: number; lastSaveAt?: number };
+  };
   recipientSession?: string;
   to?: string;
   recipientEnded?: true;

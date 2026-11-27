@@ -340,7 +340,7 @@ export function Question({
     <NeedsCard
       className="dec"
       titleClass="thread-choice"
-      title={row.handBack ? `Hand-back for Lane ${row.laneId?.slice(0, 8) ?? ''}` : row.text}
+      title={row.handBack ? (row.handBack.savedWork?.title ?? 'Lane handed back') : row.text}
       status={
         <>
           <span>
@@ -387,7 +387,14 @@ export function Question({
           />
         </p>
       ) : null}
-      {row.handBack ? <HandBackDetails {...row.handBack} tried={row.text} /> : null}
+      {row.handBack ? (
+        <HandBackDetails
+          savedWork={row.handBack.savedWork}
+          left={row.handBack.left}
+          to={row.handBack.to}
+          tried={row.text}
+        />
+      ) : null}
       {ended ? (
         <>
           <p className="why" dir="auto">
@@ -420,7 +427,8 @@ export function Question({
           entry={row}
           choices={row.choices}
           answer={answer}
-          onAnswered={choice => announce(`Answered “${choice}”.`)}
+          handBack={Boolean(row.handBack)}
+          onAnswered={announce}
         />
       )}
     </NeedsCard>

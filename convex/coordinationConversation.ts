@@ -295,5 +295,18 @@ export async function handBack(
       overlap: { holderChanged: true, agent: null },
     });
   }
-  return { laneId: lane.id, intentId: lane.intentId, recipientActor, conversation: true as const };
+  const latest = await ctx.db
+    .query('projectHostedRecords')
+    .withIndex('by_project_and_kind_and_parent', q =>
+      q.eq('projectId', project._id).eq('kind', 'save').eq('parent', lane.id),
+    )
+    .order('desc')
+    .first();
+  return {
+    laneId: lane.id,
+    intentId: lane.intentId,
+    recipientActor,
+    conversation: true as const,
+    ...(latest ? { handBackSavedAt: latest._creationTime } : {}),
+  };
 }

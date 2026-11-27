@@ -65,12 +65,32 @@ export function useConversation(projectId: Id<'hostedProjects'>, scope: 'lane' |
   const entries = new Map(pages.flatMap(page => page.entries).map(row => [row.id, row]));
   return {
     entries: [...entries.values()],
+    canWrite: first?.canRead === true,
     loading: !first && !error,
     readFailed: Boolean(error),
     loadingMore,
     failed,
     loadEarlier,
   };
+}
+
+export function usePostLaneMessage(projectId: Id<'hostedProjects'>, laneId: string) {
+  const publish = useMutation(api.projectCoordination.publish);
+  const attempt = useRef<{ text: string; operationId: string }>(undefined);
+  return useCallback(
+    async ({ text }: { text: string }) => {
+      const body = text.trim();
+      const operationId = attempt.current?.text === body ? attempt.current.operationId : crypto.randomUUID();
+      attempt.current = { text: body, operationId };
+      await publish({
+        projectId,
+        operationId,
+        command: { kind: 'message', text: body, context: { laneId } },
+      });
+      attempt.current = undefined;
+    },
+    [projectId, laneId, publish],
+  );
 }
 
 /** A failed or unknown send can be retried without recording a second decision. */
@@ -83,12 +103,13 @@ export function useAnswer(projectId: Id<'hostedProjects'>): Answer {
       const operationId =
         last?.choice === choice && last.reason === reason ? last.operationId : crypto.randomUUID();
       attempts.current.set(id, { choice, reason, operationId });
-      await publish({
+      const result = await publish({
         projectId,
         operationId,
         command: { kind: 'ack', messageId: id, choice, text: reason },
       });
       attempts.current.delete(id);
+      return result.resumePrompt;
     },
     [projectId, publish],
   );

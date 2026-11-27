@@ -14,8 +14,11 @@ nforge agent ROOT hand-back '{"laneId":"LANE_UUID","to":"@owner","head":"SAVED_H
   decision asked ahead. Tell your user in your app after you send a question to a person or a hand-back.
 - Hand-back names the Lane's person or the project owner. Save any drafts you want
   included first, then pass the exact saved head. Forge releases the holder and
-  retains the Lane and saves. A recipient can decline with the `Decline` choice
-  to send the decision back to the sender's inbox.
+  retains the Lane and saves. In Needs you and the Lane Thread, a hand-back to
+  your own account offers Hand to an agent, Take it yourself and Set it aside.
+  Hand to an agent records the choice and copies the resume prompt. Set it aside
+  retains the saves and the Lane can be reopened. A hand-back to another person
+  offers Take it and Decline. Decline sends the decision back to the sender's inbox.
 - MCP uses `forge_task` with `command.action` of `ask` or `hand-back` and the same
   fields. Supply an `operationId` to reconcile an unknown outcome with the same
   request. Each send uses one Convex mutation. It adds zero idle or landing calls.

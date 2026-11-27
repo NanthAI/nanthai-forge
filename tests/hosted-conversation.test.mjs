@@ -8,12 +8,14 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
-import { lifecycleFixture, code } from './hosted-lane-lifecycle-fixture.mjs';
+import { lifecycleFixture, records, code } from './hosted-lane-lifecycle-fixture.mjs';
 import { agentFixture } from './hosted-agent-fixture.mjs';
 import { hostedAgentCli } from '../dist/hosted-agent-cli.js';
 import { validateHostedCliCommand } from '../dist/hosted-cli-validation.js';
 import { registerHostedAgentWorkflow } from '../dist/mcp-hosted-agent.js';
 import { dispatchCoordination } from '../dist/coordination-client.js';
+import { policyPreset } from '../dist/autonomy-policy.js';
+import { digest } from '../dist/state/hash.js';
 import { sessionAgentIdentity } from '../dist/agent-slug-session.js';
 import { HOSTED_WORK_INDEX_FORMAT } from '../dist/work-hosted-summary.js';
 
@@ -142,6 +144,26 @@ test('a Lane question keeps its exact choice and prompt after the asking CLI exi
   assert.deepEqual((await f.coord('writer', { action: 'inbox' })).items, [{ ...retained, acked: true }]);
   assert.deepEqual(await f.read(laneId), f.lane);
   assert.equal(f.scheduled.length, 0);
+});
+
+test('a writer can post a Lane Thread message once; a reader cannot post or read it', async t => {
+  const f = await fixture(t);
+  f.insert('projectReaders', { projectId: f.projectId, reader: 'reader' });
+  const readThread = actor =>
+    f.invoke(actor, 'projectDiscussionThread:read', { scope: 'lane', id: f.lane.id });
+  const input = {
+    operationId: randomUUID(),
+    command: { kind: 'message', text: 'Updated the compatibility tests.', context: { laneId: f.lane.id } },
+  };
+  await assert.rejects(f.invoke('reader', 'projectCoordination:publish', input), code('PROJECT_UNAVAILABLE'));
+  assert.equal(f.tables.projectCoordinationEvents.size, 0);
+  const posted = await f.invoke('writer', 'projectCoordination:publish', input);
+  assert.deepEqual(await f.invoke('writer', 'projectCoordination:publish', input), posted);
+  assert.deepEqual(
+    (await readThread('owner')).entries.map(row => [row.id, row.type, row.text]),
+    [[input.operationId, 'note', input.command.text]],
+  );
+  assert.deepEqual(await readThread('reader'), { canRead: false, entries: [], before: null });
 });
 
 test('one Item feed retains questions and answers independent of the number of unrelated events', async t => {
@@ -323,7 +345,12 @@ test('MCP hand-back releases the current holder with one write call and keeps th
   const waiting = (await needsYou()).asks.find(row => row.id === input.operationId);
   assert.equal(waiting.handBack.head, f.lane.head);
   assert.equal(waiting.handBack.left, 'Choose an endpoint');
-  assert.deepEqual(waiting.choices, ['Decline']);
+  const handBack = (
+    await f.invoke('owner', 'projectDiscussionThread:read', { scope: 'lane', id: f.lane.id })
+  ).entries.find(row => row.id === input.operationId);
+  assert.equal(handBack.head, undefined, 'the Thread does not expose the hand-back head as display evidence');
+  assert.deepEqual(handBack.savedWork, waiting.handBack.savedWork);
+  assert.deepEqual(waiting.choices, ['Take it', 'Decline']);
   await f.coord('owner', {
     action: 'ack',
     messageId: input.operationId,
@@ -360,6 +387,186 @@ test('the project owner can hand a Lane back to its author and receives a declin
   const lane = await f.read(f.lane.id);
   assert.equal(lane.actor, f.lane.actor, 'the author record remains provenance');
   assert.equal(lane.holder, undefined);
+});
+
+test('only the addressed person can choose a hand-back action and a retry records it once', async t => {
+  const f = await fixture(t);
+  const openHandBack = async (lane, to) => {
+    const operationId = randomUUID();
+    await f.invoke('owner', 'projectCoordination:publish', {
+      operationId,
+      command: {
+        kind: 'handoff',
+        to,
+        summary: 'Checked the parser',
+        head: lane.head,
+        laneId: lane.id,
+        handBack: { left: 'Finish the save' },
+      },
+    });
+    return operationId;
+  };
+  const thread = (actor, lane) =>
+    f.invoke(actor, 'projectDiscussionThread:read', { scope: 'lane', id: lane.id });
+  const own = await f.addLane({ actor: 'owner' });
+  const savedAt = '2026-11-26T16:42:00.000Z';
+  await f.lifeRun('seedSave', records.writeHostedRecord, {
+    ...f.auth,
+    expectedVersion: null,
+    record: {
+      kind: 'save',
+      id: randomUUID(),
+      operationId: randomUUID(),
+      at: savedAt,
+      version: 0,
+      actor: 'owner',
+      laneId: own.id,
+      head: own.head,
+      expectedHead: own.head,
+      sourceVersion: own.sourceVersion,
+      expectedSourceVersion: own.sourceVersion,
+      changes: { sha256: 'a'.repeat(64), size: 2 },
+    },
+  });
+  const ownBack = await openHandBack(own, 'owner');
+  const samePerson = (await thread('owner', own)).entries.find(row => row.id === ownBack);
+  assert.deepEqual(samePerson.choices, ['Hand to an agent', 'Take it yourself', 'Set it aside']);
+  const saveRecord = [...f.tables.projectHostedRecords.values()].find(
+    row => row.kind === 'save' && row.parent === own.id,
+  );
+  assert.equal(samePerson.savedWork.lastSaveAt, saveRecord._creationTime);
+  const needs = (await f.invoke('owner', 'projectNeedsMe:read', {})).asks.find(row => row.id === ownBack);
+  assert.deepEqual(needs.choices, samePerson.choices);
+  assert.deepEqual(needs.handBack.savedWork, samePerson.savedWork);
+  const overlap = [...f.tables.projectHostedOverlapLanes.values()].find(row => row.laneId === own.id);
+  const { _id, _creationTime, ...unrelatedLane } = overlap;
+  const scales = [];
+  for (const lanes of [50, 100]) {
+    while (f.tables.projectHostedOverlapLanes.size < lanes)
+      f.insert('projectHostedOverlapLanes', { ...unrelatedLane, laneId: randomUUID() });
+    const started = performance.now();
+    const page = await f.invoke('owner', 'projectNeedsMe:read', {});
+    assert.deepEqual(
+      page.asks.find(row => row.id === ownBack),
+      needs,
+    );
+    const { documents, ranges, readBytes, writes } = f.counts.at(-1);
+    scales.push({ documents, ranges, readBytes, writes });
+    t.diagnostic(
+      JSON.stringify({
+        openLanes: lanes,
+        ...scales.at(-1),
+        elapsedMs: performance.now() - started,
+        peakRssKiB: process.resourceUsage().maxRSS,
+      }),
+    );
+  }
+  assert.deepEqual(scales[0], scales[1]);
+  const otherBack = await openHandBack(f.lane, 'writer');
+  const otherPerson = (await thread('writer', f.lane)).entries.find(row => row.id === otherBack);
+  assert.deepEqual(otherPerson.choices, ['Take it', 'Decline']);
+  assert.equal((await thread('owner', f.lane)).entries[0].mayAnswer, false);
+  await assert.rejects(
+    f.coord('writer', {
+      action: 'ack',
+      messageId: otherBack,
+      choice: 'Set it aside',
+    }),
+    code('BAD_ARGUMENT'),
+  );
+  await assert.rejects(
+    f.coord('writer', {
+      action: 'ack',
+      messageId: ownBack,
+      choice: 'Hand to an agent',
+    }),
+    code('BAD_ARGUMENT'),
+  );
+  const answer = {
+    operationId: randomUUID(),
+    command: { kind: 'ack', messageId: ownBack, choice: 'Hand to an agent', text: '' },
+  };
+  const recorded = await f.invoke('owner', 'projectCoordination:publish', answer);
+  assert.match(recorded.resumePrompt, /nforge agent ROOT start --open/);
+  assert(recorded.resumePrompt.includes(own.id));
+  assert.deepEqual(await f.invoke('owner', 'projectCoordination:publish', answer), recorded);
+  assert.equal((await thread('owner', own)).entries[0].answer.choice, 'Hand to an agent');
+  assert.deepEqual(await f.read(own.id), own);
+});
+
+test('taking a hand-back claims the saved Lane in the browser; setting it aside keeps its saves', async t => {
+  const f = await fixture(t);
+  f.patch('hostedProjects', f.projectId, {
+    autonomyPolicy: { ...policyPreset('trusted'), accessIdentities: { laneHolders: true } },
+  });
+  const browserSession = randomUUID();
+  f.decorateContext(ctx => {
+    const identity = ctx.auth.getUserIdentity;
+    ctx.auth.getUserIdentity = async () => {
+      const user = await identity();
+      return user?.subject === 'owner' ? { ...user, forgeAuthSession: browserSession } : user;
+    };
+  });
+  const send = async (lane, choice) => {
+    const messageId = randomUUID();
+    await f.invoke('owner', 'projectCoordination:publish', {
+      operationId: messageId,
+      command: {
+        kind: 'handoff',
+        to: 'owner',
+        summary: 'Reviewed the changes',
+        head: lane.head,
+        laneId: lane.id,
+        handBack: { left: 'Finish review' },
+      },
+    });
+    return {
+      operationId: randomUUID(),
+      command: { kind: 'ack', messageId, choice, text: '' },
+    };
+  };
+  const apply = answer => f.invoke('owner', 'projectCoordination:publish', answer);
+  const owned = await f.addLane({ actor: 'owner' });
+  const take = await send(owned, 'Take it yourself');
+  await apply(take);
+  await apply(take);
+  const held = await f.read(owned.id);
+  assert.equal(held.holder.sessionId, digest(`forge-browser:${browserSession}`));
+  assert.equal(held.holder.change.operationId, take.operationId);
+  assert.equal(held.version, owned.version + 1);
+  assert.equal(held.head, owned.head);
+  assert.equal(held.sourceVersion, owned.sourceVersion);
+
+  const changed = await f.addLane({ actor: 'owner' });
+  const pending = await send(changed, 'Take it yourself');
+  await f.changeLane(changed.id, {
+    holder: {
+      actor: 'owner',
+      sessionId: 'a'.repeat(64),
+      since: 100,
+      lastSeen: 100,
+    },
+  });
+  await assert.rejects(apply(pending), code('WORK_STALE'));
+  assert.equal((await f.read(changed.id)).holder.sessionId, 'a'.repeat(64));
+  const stale = (await f.invoke('owner', 'projectDiscussionThread:read', { scope: 'lane', id: changed.id }))
+    .entries[0];
+  assert.equal(stale.superseded, true);
+  assert.equal(stale.mayAnswer, false);
+  const needs = await f.invoke('owner', 'projectNeedsMe:read', {});
+  assert(!needs.asks.some(row => row.id === pending.command.messageId));
+
+  const setAside = await f.addLane({ actor: 'owner' });
+  const close = await send(setAside, 'Set it aside');
+  const recorded = await apply(close);
+  await apply(close);
+  assert.equal(recorded.resumePrompt, 'The person set this Lane aside. Its saves are kept.');
+  const closed = await f.read(setAside.id);
+  assert.equal(closed.state, 'abandoned');
+  assert.equal(closed.version, setAside.version + 1);
+  assert.equal(closed.head, setAside.head);
+  assert.equal(closed.sourceVersion, setAside.sourceVersion);
+  assert.equal(f.plan(close).status, 'applied');
 });
 
 test('public Activity and read-only roles cannot read questions, answers or hand-back content', async t => {

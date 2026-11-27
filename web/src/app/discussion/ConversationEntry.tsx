@@ -2,6 +2,7 @@
 // Copyright 2026 Ferdinando Valsecchi
 import { useState } from 'react';
 import { Key } from '../../ds';
+import { DECLINE_HAND_BACK, HAND_TO_AGENT } from '../../../../src/coordination-hand-back';
 import { COORDINATION_LIMITS } from '../../../../src/coordination-types';
 import './conversation.css';
 import { RecordedWho } from '../RecordedWho';
@@ -12,12 +13,14 @@ const time = (at: number) =>
   new Date(at).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' });
 
 export function HandBackDetails({
-  head,
+  savedWork,
+  showTitle = false,
   left,
   tried,
   to,
 }: {
-  head: string;
+  savedWork?: ThreadEntry['savedWork'];
+  showTitle?: boolean;
   left: string;
   tried: string;
   to?: string;
@@ -29,13 +32,15 @@ export function HandBackDetails({
       <dt>Left to do</dt>
       <dd dir="auto">{left || 'Not reported'}</dd>
       <dt>Where the work is</dt>
-      <dd>
-        {head ? (
-          <>
-            Saved head <code>{head}</code>
-          </>
+      <dd dir="auto">
+        {showTitle && savedWork?.title ? <bdi>{savedWork.title} · </bdi> : null}
+        Saves: {savedWork?.saves?.toLocaleString() ?? 'not reported'} · Files in saved work:{' '}
+        {savedWork?.files?.toLocaleString() ?? 'not reported'}
+        {' · '}Last save recorded:{' '}
+        {savedWork?.lastSaveAt === undefined ? (
+          'not reported'
         ) : (
-          'Not reported'
+          <time dateTime={new Date(savedWork.lastSaveAt).toISOString()}>{time(savedWork.lastSaveAt)}</time>
         )}
       </dd>
       <dt>Handed to</dt>
@@ -48,12 +53,14 @@ export function AnswerKeys({
   entry,
   choices,
   answer,
+  handBack = false,
   onAnswered,
 }: {
   entry: { id: string };
   choices: string[];
   answer: Answer;
-  onAnswered?: (choice: string) => void;
+  handBack?: boolean;
+  onAnswered?: (message: string) => void;
 }) {
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
@@ -64,17 +71,27 @@ export function AnswerKeys({
     setBusy(true);
     setFailed(null);
     try {
-      await answer(entry, choice, reason.trim());
-      setAnswered(choice);
-      onAnswered?.(choice);
+      const prompt = await answer(entry, choice, reason.trim());
+      let message = `Answered “${choice}”.`;
+      if (handBack && choice === HAND_TO_AGENT) {
+        try {
+          if (!prompt) throw Error('Resume prompt missing');
+          await navigator.clipboard.writeText(prompt);
+          message = 'Resume prompt copied.';
+        } catch {
+          message = 'Answer saved. Open the Thread to copy the resume prompt.';
+        }
+      }
+      setAnswered(message);
+      onAnswered?.(message);
     } catch (error) {
-      setFailed(answerFailureReason(error));
+      setFailed(answerFailureReason(error, handBack));
     } finally {
       setBusy(false);
     }
   };
   return answered ? (
-    <p role="status">Answered “{answered}”.</p>
+    <p role="status">{answered}</p>
   ) : (
     <>
       <label className="thread-reason">
@@ -114,7 +131,9 @@ export function ConversationEntry({
   const saved = row.answer;
   const [copy, setCopy] = useState<'copied' | 'failed'>();
   const sender = saved?.agent ?? 'the asker';
-  const choice = row.type === 'hand-back' ? ['Decline'] : (row.choices ?? []);
+  const choices = row.choices ?? (row.type === 'hand-back' ? ['Decline'] : []);
+  const handToAgent = row.type === 'hand-back' && saved?.choice === HAND_TO_AGENT;
+  const canCopyPrompt = row.type !== 'hand-back' || handToAgent || saved?.choice === DECLINE_HAND_BACK;
   if (row.withdrawnAt !== undefined) return <p>Withdrawn {time(row.withdrawnAt)}.</p>;
   return (
     <>
@@ -131,12 +150,14 @@ export function ConversationEntry({
         </p>
       ) : (
         <HandBackDetails
-          head={row.head ?? ''}
+          savedWork={row.savedWork}
+          showTitle
           left={row.left ?? ''}
           tried={row.text}
           {...(row.to ? { to: row.to } : {})}
         />
       )}
+      {row.superseded ? <p className="t2">The Lane changed after this hand-back.</p> : null}
       {saved ? (
         <div className="thread-answer">
           <p>
@@ -151,12 +172,14 @@ export function ConversationEntry({
               Seen by {sender} at {time(saved.seenAt)}.
             </p>
           ) : saved.resumePrompt ? (
+            <p className="t2">
+              {saved.lastActivity === undefined
+                ? 'The asker has yet to acknowledge this answer.'
+                : `The answer is waiting for ${sender}. Last recorded activity ${time(saved.lastActivity)}.`}
+            </p>
+          ) : null}
+          {saved.resumePrompt && canCopyPrompt && (handToAgent || saved.seenAt === undefined) ? (
             <>
-              <p className="t2">
-                {saved.lastActivity === undefined
-                  ? 'The asker has yet to acknowledge this answer.'
-                  : `The answer is waiting for ${sender}. Last recorded activity ${time(saved.lastActivity)}.`}
-              </p>
               <Key
                 size="sm"
                 onClick={async () => {
@@ -184,8 +207,8 @@ export function ConversationEntry({
             </>
           ) : null}
         </div>
-      ) : row.mayAnswer && !row.recipientEnded && answer ? (
-        <AnswerKeys entry={row} choices={choice} answer={answer} />
+      ) : row.mayAnswer && !row.recipientEnded && answer && choices.length ? (
+        <AnswerKeys entry={row} choices={choices} answer={answer} handBack={row.type === 'hand-back'} />
       ) : row.type === 'question' ? (
         <>
           {row.recipientEnded ? (
@@ -198,7 +221,7 @@ export function ConversationEntry({
             </p>
           ) : null}
           <p className="t2" dir="auto">
-            {choice.join(' · ')}
+            {choices.join(' · ')}
           </p>
         </>
       ) : null}

@@ -7,7 +7,7 @@ import { errorCode } from '../session';
 
 export type ThreadPage = FunctionReturnType<typeof api.projectDiscussionThread.read>;
 export type ThreadEntry = ThreadPage['entries'][number];
-export type Answer = (entry: { id: string }, choice: string, reason?: string) => Promise<void>;
+export type Answer = (entry: { id: string }, choice: string, reason?: string) => Promise<string | void>;
 export type DismissAsk = (entry: { id: string }) => Promise<void>;
 
 const ANSWER_ERRORS: Record<string, string> = {
@@ -25,9 +25,13 @@ const ANSWER_ERRORS: Record<string, string> = {
 };
 
 /** Map a refused coordination ack's structured error code to plain words (never raw server wording). */
-export function answerFailureReason(error: unknown): string {
+export function answerFailureReason(error: unknown, handBack = false): string {
   const raw = convexErrorData(error)?.code;
   const code = errorCode(error) ?? (typeof raw === 'string' ? raw : undefined);
+  if (handBack && code === 'WORK_STALE')
+    return 'This Lane changed after the hand-back. Open the Lane to see its current holder and saves.';
+  if (handBack && code === 'LANE_PINNED')
+    return 'The project owner pinned this Lane. Its saves are still available.';
   if (code)
     return Object.hasOwn(ANSWER_ERRORS, code)
       ? ANSWER_ERRORS[code]!
