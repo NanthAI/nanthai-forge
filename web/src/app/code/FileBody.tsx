@@ -11,10 +11,9 @@ import { requestHighlight } from '../../highlight-client';
 import type { SourceToken } from '../../source-highlight';
 import type { MarkdownSource } from './MarkdownFile';
 import type { Source } from './use-source';
-import { plural, selectedLine } from './code-words';
+import { isMarkdown, plural, selectedLine } from './code-words';
 
 const MarkdownFile = lazy(() => import('./MarkdownFile'));
-const isMarkdown = (path: string) => /\.(md|markdown|mdown)$/i.test(path);
 
 function subscribeLine(update: () => void) {
   addEventListener('hashchange', update);

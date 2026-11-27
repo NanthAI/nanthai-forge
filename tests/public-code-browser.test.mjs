@@ -58,7 +58,14 @@ const srcDir = {
   total: 1,
   next: null,
 };
-const page = text => ({ kind: 'text', text, offset: 0, nextOffset: null, totalCharacters: text.length });
+const page = text => ({
+  kind: 'text',
+  text,
+  size: Buffer.byteLength(text),
+  offset: 0,
+  nextOffset: null,
+  totalCharacters: text.length,
+});
 const readme = {
   available: true,
   path: 'README.md',
@@ -315,7 +322,9 @@ test('public code screens signed out: browse, read, history, nothing reaches Con
   await tree.getByRole('button', { name: /src/ }).click();
   await tree.getByRole('link', { name: 'index.ts' }).click();
   await home.waitForURL('**/ada/atlas/code/files/src/index.ts');
-  await home.getByRole('region', { name: 'File' }).getByText('export const atlas = 1;').waitFor();
+  const file = home.getByRole('region', { name: 'File', exact: true });
+  await file.getByText('export const atlas = 1;').waitFor();
+  await file.getByText('1 line, 24 bytes, TypeScript, at main', { exact: true }).waitFor();
   const touching = home.getByRole('region', { name: 'In this file' });
   await touching.getByRole('link', { name: /Index: rebuild without downtime/ }).waitFor();
   await touching.getByRole('status').getByText('Looked through 52 landings.').waitFor();

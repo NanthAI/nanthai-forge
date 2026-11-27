@@ -16,9 +16,16 @@ import { publicReadUrl } from '../../public/read';
 
 export type ProjectId = Id<'hostedProjects'>;
 export type { CodeHistoryRow, CodeDir, CodeChange };
-/** A text page of one file (16,000 characters), or a binary file's size. */
+/** A text page of one file (16,000 characters), or a binary file. Size is the complete file's byte count. */
 export type FilePage =
-  | { kind: 'text'; text: string; offset: number; nextOffset: number | null; totalCharacters: number }
+  | {
+      kind: 'text';
+      text: string;
+      size: number;
+      offset: number;
+      nextOffset: number | null;
+      totalCharacters: number;
+    }
   | { kind: 'binary'; size: number };
 export type CodeFile =
   | {

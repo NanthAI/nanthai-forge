@@ -25,6 +25,7 @@ const axe = createRequire(import.meta.url).resolve('axe-core/axe.min.js');
 const shots = process.env.FORGE_CODE_HISTORY_SHOTS;
 const base = '/ada/atlas/code';
 const PATH = 'src/parser/stream-parser.ts';
+const SOURCE = 'export class StreamParser {}\n// café\n';
 const OTHER = 'src/lines.ts';
 const LONG =
   'packages/a-very-deeply-nested-workspace/src/generated/schemas/deployment-configuration.schema.generated.d.ts';
@@ -112,9 +113,9 @@ async function fixture(out) {
         if (args.want === 'changes') return JSON.stringify({ state: args.state, changes: [{ path: P, status: 'modified' }], total: 1 });
         const dir = (path, names) => ({ path, entries: names.map(([name, kind]) => ({ name, path: (path ? path + '/' : '') + name, kind })), total: names.length, next: null });
         const dirs = [dir('', [['src', 'dir']]), dir('src', [['parser', 'dir'], ['lines.ts', 'file']]), dir('src/parser', [['stream-parser.ts', 'file']])];
-        const text = 'export class StreamParser {}\\n';
+        const text = ${JSON.stringify(SOURCE)};
         if (!args.path) return JSON.stringify({ state: HEAD, files: 2, kind: 'dir', dirs });
-        return JSON.stringify({ state: HEAD, files: 2, kind: 'file', dirs, file: { available: true, path: args.path, blob: 'c'.repeat(64), mode: 'file', page: { kind: 'text', text, offset: 0, nextOffset: null, totalCharacters: text.length } } });
+        return JSON.stringify({ state: HEAD, files: 2, kind: 'file', dirs, file: { available: true, path: args.path, blob: 'c'.repeat(64), mode: 'file', page: { kind: 'text', text, size: ${Buffer.byteLength(SOURCE)}, offset: 0, nextOffset: null, totalCharacters: text.length } } });
       },
       mutation: () => Promise.reject(new Error('no writes here')),
       logger: { warn: noop, log: noop, error: noop, logVerbose: noop },
@@ -221,6 +222,10 @@ test('What landed narrowed to one file: bounded steps, kept rows, exact address,
   await tree.getByRole('button', { name: 'Find', exact: true }).click();
   await tree.getByRole('link', { name: PATH }).click();
   await at(ordinary, `${base}/files/${PATH}`);
+  const file = ordinary.getByRole('region', { name: 'File', exact: true });
+  await file
+    .getByText(`2 lines, ${Buffer.byteLength(SOURCE)} bytes, TypeScript, at main`, { exact: true })
+    .waitFor();
   const context = ordinary.getByRole('region', { name: 'In this file' });
   await context.getByRole('link', { name: 'Tidy the parser' }).waitFor();
   const lineReads = () =>

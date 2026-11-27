@@ -45,6 +45,8 @@ export function selectedLine(hash: string): number | null {
   return match ? Number(match[1]) : null;
 }
 
+export const isMarkdown = (path: string) => /\.(md|markdown|mdown)$/i.test(path);
+
 /** The landings-read window that holds one receipt: from just before its acceptance time to a minute after (the row
  * is written in the same transaction). Derived from the receipt, never from the clock. */
 export function receiptWindow(iso: string): { from: string; to: string } | null {

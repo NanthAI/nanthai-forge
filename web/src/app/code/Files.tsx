@@ -10,6 +10,7 @@ import { useSearch } from '../router';
 import { RegionBoundary, type CodeProps } from './CodePlace';
 import { pinnedState, plural, short } from './code-words';
 import { FileBody, useCodeLine } from './FileBody';
+import { FileHeading } from './FileHeading';
 import { Changing, SavedMark, useChanging } from './Changing';
 import { FindFile } from './FindFile';
 import { LineHistory } from './LineHistory';
@@ -40,14 +41,15 @@ export function Files(props: CodeProps) {
       : `at State ${short(pinned)}`;
   const href = (to: string) =>
     `${hrefFor({ ...route, rest: to })}${pinned ? `?at=${pinned}${receiptId ? `&receipt=${encodeURIComponent(receiptId)}` : ''}` : ''}`;
-  const lines = source.file?.pages.length
-    ? source.file.pages
+  const file = source.file?.state === state && source.file.path === path ? source.file : null;
+  const lines = file?.pages.length
+    ? file.pages
         .map(p => p.text)
         .join('')
         .replace(/\n$/, '')
         .split('\n').length
     : null;
-  const done = source.file?.pages.at(-1)?.nextOffset === null;
+  const done = file?.pages.at(-1)?.nextOffset === null;
   const sentence =
     mainHead === null && !pinned ? (
       'This project has no main yet. Its files appear here after the first landing.'
@@ -82,7 +84,7 @@ export function Files(props: CodeProps) {
   const before = landing ? landing.sequence + 1 : null;
   const touched = Boolean(state && knownFile && (!pinned || (!history.loading && !exact.loading)));
   const fileHistory = useFileHistory(projectId, touched ? path : null, before, state);
-  const head = source.file?.state === state && source.file.path === path ? source.file.head : null;
+  const head = file?.head ?? null;
   return (
     <>
       <Head trail={crumbsFor(route, projectName)} sentence={sentence}>
@@ -124,15 +126,7 @@ export function Files(props: CodeProps) {
         </section>
         <section className={`pane${isFile ? '' : ' off'}`} aria-label="File">
           <div className="ph plain">
-            <h2 className="mono cut path-cut" style={{ fontWeight: 'var(--w-medium)' }} title={path}>
-              {isFile ? path.split('/').at(-1) : path || 'Choose a file'}
-            </h2>
-            {isFile && lines !== null ? (
-              <span className="hint">
-                {plural(lines, 'line')}
-                {done ? '' : ' so far'}, {where}
-              </span>
-            ) : null}
+            <FileHeading path={path} isFile={isFile} head={head} lines={lines} done={done} where={where} />
             {isFile ? (
               <A
                 className="lk hide-dt"

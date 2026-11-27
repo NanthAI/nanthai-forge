@@ -41,6 +41,8 @@
   .file-finder .inp { flex: 1 1 8ch; min-width: 0; width: 100%; }
   .saved-path-mark { width: var(--s-2); height: var(--s-2); flex: none; background: var(--active); }
   .code-f .quiet p { overflow-wrap: anywhere; }
+  .file-heading { flex: 1; min-width: 0; padding-block: var(--s-1); }
+  .file-heading .hint { white-space: normal; overflow-wrap: anywhere; }
   .tree ul { list-style: none; margin: 0; padding: 0; }
   .tree a, .tree button.dir { display: flex; align-items: center; gap: var(--s-2); width: 100%; height: var(--ctl-h); padding: 0 var(--s-3) 0 calc(14px + var(--d, 0) * 14px); color: var(--text-2); font-size: var(--t-small); min-width: 0; text-align: left; background: transparent; border: 0; border-radius: 0; }
   .tree button.dir { color: var(--text); font-weight: var(--w-strong); }
