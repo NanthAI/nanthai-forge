@@ -21,7 +21,13 @@ import {
   planningInitiativeCountsFeature,
   planningWaitingFeature,
 } from '../dist/hosted-contract-features.js';
-import { diffDoneWhen, bodyDiffSummary, parseAuditInstant } from '../dist/planning-audit.js';
+import {
+  diffDoneWhen,
+  bodyDiffSummary,
+  parseAuditInstant,
+  diffPlanningVersion,
+  visibleAuditSummary,
+} from '../dist/planning-audit.js';
 import { cliReplyLines } from '../dist/cli-reply-lines.js';
 import { isAgentSlug } from '../dist/agent-slug.js';
 import { agentAuthorship } from '../dist/agent-turn-work.js';
@@ -166,6 +172,63 @@ test('pure audit diff helpers handle Done-when ticks, bounded body excerpts and 
   assert.ok(Number.isFinite(parseAuditInstant('2026-11-22')));
   assert.ok(Number.isNaN(parseAuditInstant('2026-02-30')));
   assert.ok(Number.isNaN(parseAuditInstant('2026-11-22T25:00:00Z')));
+
+  // Item 96085563 (10.3b): Item History uses visible Item/Initiative and status wording, and translates cached legacy rows.
+  const base = {
+    id: randomUUID(),
+    kind: 'issue',
+    title: 'Walkthrough target',
+    body: '',
+    status: 'proposed',
+    version: 1,
+    previousVersion: 0,
+    operationId: randomUUID(),
+    request: 'a'.repeat(64),
+    at: '2026-11-22T00:00:00.000Z',
+    provenance: 'user-declared-local',
+    intentIds: [],
+  };
+  assert.equal(diffPlanningVersion(null, base).summary, 'created Item (Proposed): Walkthrough target');
+  assert.equal(
+    diffPlanningVersion(null, { ...base, kind: 'initiative', status: 'open' }).summary,
+    'created Initiative (Planned): Walkthrough target',
+  );
+  assert.equal(
+    diffPlanningVersion(base, { ...base, version: 2, previousVersion: 1, status: 'open' }).summary,
+    'status Proposed -> Planned',
+  );
+  assert.equal(
+    diffPlanningVersion(
+      { ...base, version: 2, status: 'open' },
+      { ...base, version: 3, previousVersion: 2, status: 'closed', reason: 'Shipped' },
+    ).summary,
+    'closed (Planned -> Done): Shipped',
+  );
+  assert.equal(
+    diffPlanningVersion(null, { ...base, version: 4, previousVersion: 3, status: 'open' }).summary,
+    'version 4 (Planned; previous version unavailable)',
+  );
+  assert.equal(visibleAuditSummary('created issue (open): Fix parser'), 'created Item (Planned): Fix parser');
+  assert.equal(visibleAuditSummary('created issue (proposed)'), 'created Item (Proposed)');
+  assert.equal(visibleAuditSummary('created initiative (open): P7'), 'created Initiative (Planned): P7');
+  assert.equal(
+    visibleAuditSummary('status proposed -> open; edited title'),
+    'status Proposed -> Planned; edited title',
+  );
+  assert.equal(
+    visibleAuditSummary('closed (in-progress -> closed): Done'),
+    'closed (In progress -> Done): Done',
+  );
+  assert.equal(
+    visibleAuditSummary('version 3 (open; previous version unavailable)'),
+    'version 3 (Planned; previous version unavailable)',
+  );
+  assert.equal(visibleAuditSummary('cleared waitingOn'), 'cleared waiting on');
+  assert.equal(
+    visibleAuditSummary('created Item (Planned): Fix parser'),
+    'created Item (Planned): Fix parser',
+    'already-visible summaries stay unchanged',
+  );
 });
 
 test('Item audit timeline records who, when and what changed across versions, comments, Lanes and landings with exact paging', async t => {

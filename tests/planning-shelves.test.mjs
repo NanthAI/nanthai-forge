@@ -165,9 +165,48 @@ test('hosted: delete applies once under replay, leaves the plan, lists in Delete
   const page = await settled.settledPage(s.ctx, s.projectId, 'deleted', { cursor: null, numItems: 50 });
   const listed = page.page.map(value => JSON.parse(value));
   assert.deepEqual(
-    listed.map(row => [row.id, row.status, row.was]),
-    [[item.itemId, 'deleted', 'proposed']],
+    listed.map(row => [row.id, row.status, row.was, Boolean(row.at), row.by]),
+    [[item.itemId, 'deleted', 'proposed', true, 'owner']],
   );
+  // Through the public page query, `by` maps through publicPeople to the owner's Forge handle.
+  s.tables.forgeAccounts.set('acct-owner', {
+    _id: 'acct-owner',
+    _creationTime: 1,
+    owner: 'owner',
+    handle: 'ada',
+  });
+  const mapped = (
+    await settled.page._handler(s.ctx, {
+      projectId: s.projectId,
+      status: 'deleted',
+      paginationOpts: { cursor: null, numItems: 50 },
+    })
+  ).page.map(value => JSON.parse(value));
+  assert.equal(mapped[0].by, 'ada', 'Deleted shelf exposes public handle of deleting actor');
+  assert.ok(mapped[0].at, 'Deleted shelf preserves deletion timestamp from planningSearch');
+  // Pre-cutover Deleted search roots that omitted `at` and `agent` recover both from the canonical header.
+  const searchRow = [...s.tables.projectPlanningRecords.values()].find(
+    row => row.collection === 'planningSearch' && row.key === item.itemId,
+  );
+  const legacyValue = JSON.parse(searchRow.value);
+  delete legacyValue.at;
+  delete legacyValue.agent;
+  await s.ctx.db.patch(searchRow._id, { value: JSON.stringify(legacyValue) });
+  const itemRow = [...s.tables.projectWorkDataRecords.values()].find(
+    row => row.collection === 'planningItems' && row.key === item.itemId,
+  );
+  await s.ctx.db.patch(itemRow._id, {
+    value: JSON.stringify({ ...JSON.parse(itemRow.value), agent: 'amber-fox' }),
+  });
+  const recovered = (
+    await settled.page._handler(s.ctx, {
+      projectId: s.projectId,
+      status: 'deleted',
+      paginationOpts: { cursor: null, numItems: 50 },
+    })
+  ).page.map(value => JSON.parse(value));
+  assert.equal(recovered[0].by, 'ada/amber-fox', 'legacy shelf root recovers deleting agent handle');
+  assert.ok(recovered[0].at, 'legacy shelf root recovers recorded deletion timestamp');
   assert.equal(
     (await settled.settledPage(s.ctx, s.projectId, 'archived', { cursor: null, numItems: 50 })).page.length,
     0,
@@ -206,8 +245,9 @@ test('an archived or deleted Item opened by its link reads as its shelf with the
   // Review 9cc310fc finding 2: the Item page offered Archive and Delete, never Unarchive or Restore.
   const id = randomUUID();
   const root = fields => JSON.stringify({ id, kind: 'issue', title: 'Old parser', version: 4, ...fields });
-  const row = shelvedRowOf(root({ status: 'deleted', was: 'closed' }), id);
+  const row = shelvedRowOf(root({ status: 'deleted', was: 'closed', by: 'ada/amber-fox' }), id);
   assert.equal(row.status, 'deleted');
+  assert.equal(row.by, 'ada/amber-fox');
   assert.deepEqual(unshelve(row), {
     action: 'put-planning-item',
     itemId: id,
@@ -289,4 +329,68 @@ test('an Item whose Initiative was archived or deleted shows under No Initiative
   ]);
   // When some Initiatives were not read, a missing one may just be unread: no mark.
   assert.equal(lines({ rows: JSON.stringify(rows), more: true, settled: [], canEdit: true })[1][1], false);
+});
+
+test('Deleted shelf page and handoff connection read stay bounded at 50 and 100 Deleted rows (Item 96085563 scale)', async t => {
+  const { meterReads } = await import('./hosted-read-set.mjs');
+  const connections = await import(moduleUrl('../convex/agentConnections.ts'));
+  const s = await setup(t);
+  s.tables.forgeAccounts.set('acct-owner', {
+    _id: 'acct-owner',
+    _creationTime: 1,
+    owner: 'owner',
+    handle: 'ada',
+    connectedApps: ['codex'],
+  });
+  const call = (writes, operationId = randomUUID()) =>
+    batch.apply._handler(s.ctx, { projectId: s.projectId, operationId, writes: JSON.stringify(writes) });
+  const seed = async count => {
+    for (let i = 0; i < count; i++) {
+      const created = s.item({ title: `Deleted item ${i}`, status: 'open' });
+      await s.send(created);
+      await call(shelve([{ id: created.itemId, version: 1 }], 'deleted'));
+    }
+  };
+  const measure = async label => {
+    const meter = meterReads(s.ctx);
+    const start = performance.now();
+    let reply;
+    const cost = await meter.cost(async () => {
+      reply = await settled.page._handler(s.ctx, {
+        projectId: s.projectId,
+        status: 'deleted',
+        paginationOpts: { cursor: null, numItems: 50 },
+      });
+    });
+    meter.restore();
+    const replyBytes = Buffer.byteLength(JSON.stringify(reply));
+    t.diagnostic(
+      `${label}: ${JSON.stringify({ ...cost, rows: reply.page.length, replyBytes, ms: +(performance.now() - start).toFixed(1), peakKiB: process.resourceUsage().maxRSS })}`,
+    );
+    return { cost, reply, replyBytes };
+  };
+  await seed(50);
+  const at50 = await measure('deleted-page-50');
+  assert.equal(at50.reply.page.length, 50);
+  assert.equal(at50.reply.isDone, true);
+  await seed(50);
+  const at100 = await measure('deleted-page-100');
+  assert.equal(at100.reply.page.length, 50, 'doubled shelf still returns one bounded page of 50');
+  assert.equal(at100.reply.isDone, false);
+  assert.equal(
+    at100.cost.documents,
+    at50.cost.documents,
+    'document reads stay O(page), independent of total shelf size',
+  );
+  assert.ok(at100.cost.bytes < 64 * 1024, `bounded DB read bytes (${at100.cost.bytes})`);
+
+  const connMeter = meterReads(s.ctx);
+  let apps;
+  const connCost = await connMeter.cost(async () => {
+    apps = await connections.read._handler(s.ctx, {});
+  });
+  connMeter.restore();
+  t.diagnostic(`agent-connections-read: ${JSON.stringify(connCost)}`);
+  assert.deepEqual(apps, ['codex']);
+  assert.equal(connCost.documents, 1, 'handoff connection read is one indexed account read');
 });

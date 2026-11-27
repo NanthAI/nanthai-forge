@@ -10,11 +10,10 @@ import { useState } from 'react';
 import type { PlanRow, StoredStatus } from '../../../../src/planning-model';
 import { itemStatusLabel, itemStatus } from '../../../../src/planning-model';
 import type { BatchPut } from '../../../../src/planning-batch';
-import { Band, Key } from '../../ds';
+import { Band, Key, Who } from '../../ds';
 import { A } from '../frames';
 import type { PlaceProps } from '../screens';
 import type { RunBatch, BatchOutcome } from './batch';
-import { COLS } from './rows';
 
 export type Shelf = 'archived' | 'deleted';
 export const shelfWords: Record<Shelf, { list: string; send: string; back: string; done: string }> = {
@@ -55,6 +54,7 @@ export function shelvedRowOf(value: string | null, id: string): PlanRow | null {
       ...(typeof item.version === 'number' ? { version: item.version } : {}),
       ...(item.was ? { was: item.was } : {}),
       ...(typeof item.at === 'string' ? { at: item.at } : {}),
+      ...(typeof item.by === 'string' && item.by ? { by: item.by } : {}),
     };
   } catch {
     return null;
@@ -105,49 +105,54 @@ export function ShelfList({
       ) : null}
       {rows.length ? (
         <div role="list" aria-label={`${words.list} Items`}>
-          {rows.map(row => (
-            <div
-              role="listitem"
-              key={row.id}
-              className="row"
-              style={{ gridTemplateColumns: COLS.replace('2.2em ', '') }}
-            >
-              <span className="name">
-                <A className="lk" href={at({ rest: row.id })} dir="auto">
-                  {row.title}
-                </A>
-              </span>
-              <span className="t3">
-                {words.done.toLowerCase()} {day(row.at)}
-                {row.was ? `, was ${itemStatusLabel[itemStatus[row.was]]}` : ''}
-              </span>
-              <span className="t3">
-                {shelf === 'deleted' && row.purgeAt !== undefined ? (
-                  <time dateTime={new Date(row.purgeAt).toISOString()}>
-                    Purges from{' '}
-                    {new Date(row.purgeAt).toLocaleDateString(undefined, {
-                      day: 'numeric',
-                      month: 'short',
-                      year: 'numeric',
-                      timeZone: 'UTC',
-                    })}
-                  </time>
-                ) : null}
-              </span>
-              <span>
-                {run ? (
-                  <Key size="sm" onClick={() => void back(row)} disabled={busy}>
-                    {words.back}
-                  </Key>
-                ) : null}
-                {onPurge && row.version !== undefined ? (
-                  <Key size="sm" kind="danger" onClick={() => onPurge(row)} disabled={busy}>
-                    Delete forever
-                  </Key>
-                ) : null}
-              </span>
-            </div>
-          ))}
+          {rows.map(row => {
+            const when = day(row.at);
+            return (
+              <div role="listitem" key={row.id} className="row plan-shelf-row">
+                <div className="plan-shelf-main">
+                  <A className="lk ttl" href={at({ rest: row.id })} dir="auto">
+                    {row.title}
+                  </A>
+                  <div className="meta plan-shelf-meta">
+                    <span className="plan-shelf-detail">
+                      {words.done.toLowerCase()}
+                      {when ? ` ${when}` : ''}
+                      {row.by ? (
+                        <>
+                          {' '}
+                          by <Who handle={row.by} />
+                        </>
+                      ) : null}
+                      {row.was ? `, was ${itemStatusLabel[itemStatus[row.was]]}` : ''}
+                    </span>
+                    {shelf === 'deleted' && row.purgeAt !== undefined ? (
+                      <time dateTime={new Date(row.purgeAt).toISOString()}>
+                        Purges from{' '}
+                        {new Date(row.purgeAt).toLocaleDateString(undefined, {
+                          day: 'numeric',
+                          month: 'short',
+                          year: 'numeric',
+                          timeZone: 'UTC',
+                        })}
+                      </time>
+                    ) : null}
+                  </div>
+                </div>
+                <div className="plan-shelf-actions">
+                  {run ? (
+                    <Key size="sm" onClick={() => void back(row)} disabled={busy}>
+                      {words.back}
+                    </Key>
+                  ) : null}
+                  {onPurge && row.version !== undefined ? (
+                    <Key size="sm" kind="danger" onClick={() => onPurge(row)} disabled={busy}>
+                      Delete forever
+                    </Key>
+                  ) : null}
+                </div>
+              </div>
+            );
+          })}
         </div>
       ) : (
         <div className="quietline">Nothing is {words.done.toLowerCase()}.</div>

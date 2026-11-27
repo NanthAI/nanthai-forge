@@ -3,7 +3,7 @@
 // Pure: also runs in the Convex non-Node runtime. No I/O.
 // Diffs and summaries for Item audit trails (Item 1d51c91f).
 import { AGENT_CLIENT } from './agent-slug.js';
-import { doneWhenCounts } from './planning-model.js';
+import { doneWhenCounts, itemStatus, itemStatusLabel, type StoredStatus } from './planning-model.js';
 import { isShelved, type PlanningItem } from './work-planning-types.js';
 
 const MAX_TEXT = 200;
@@ -293,6 +293,30 @@ function classifyStatusTransition(before: string, after: string): Exclude<Status
 }
 
 const stripAt = (value: string) => value.replace(/^@/, '');
+const auditKindLabel = (kind: PlanningItem['kind']) => (kind === 'initiative' ? 'Initiative' : 'Item');
+const auditStatusLabel = (status: string) =>
+  Object.hasOwn(itemStatus, status) ? itemStatusLabel[itemStatus[status as StoredStatus]] : status;
+
+/** Translate stored Item/status words in cached legacy audit summaries into the visible planning vocabulary. */
+export function visibleAuditSummary(summary: string): string {
+  const created = /^created (issue|initiative) \(([^)]+)\)(.*)$/.exec(summary);
+  if (created)
+    return `created ${auditKindLabel(created[1] as PlanningItem['kind'])} (${auditStatusLabel(created[2]!)})${created[3]!}`;
+  const snapshot = /^version (\d+) \(([^;]+); previous version unavailable\)$/.exec(summary);
+  if (snapshot)
+    return `version ${snapshot[1]} (${auditStatusLabel(snapshot[2]!)}; previous version unavailable)`;
+  return summary
+    .split('; ')
+    .map(part => {
+      const bare = /^status ([a-z-]+) -> ([a-z-]+)(.*)$/.exec(part);
+      if (bare) return `status ${auditStatusLabel(bare[1]!)} -> ${auditStatusLabel(bare[2]!)}${bare[3]!}`;
+      const named = /^([a-z]+) \(([a-z-]+) -> ([a-z-]+)\)(.*)$/.exec(part);
+      if (named)
+        return `${named[1]} (${auditStatusLabel(named[2]!)} -> ${auditStatusLabel(named[3]!)})${named[4]!}`;
+      return part.replace(/^(cleared|set|changed) waitingOn\b/, '$1 waiting on');
+    })
+    .join('; ');
+}
 
 /** Compute structured audit changes and a concise human summary between adjacent PlanningItem versions. */
 export function diffPlanningVersion(
@@ -329,7 +353,7 @@ export function diffPlanningVersion(
     return {
       changes: [change],
       transition: 'created',
-      summary: `created ${next.kind} (${next.status})${next.title ? `: ${clip(next.title, 80)}` : ''}`,
+      summary: `created ${auditKindLabel(next.kind)} (${auditStatusLabel(next.status)})${next.title ? `: ${clip(next.title, 80)}` : ''}`,
     };
   }
   if (!prev || prev.version !== next.version - 1) {
@@ -343,7 +367,7 @@ export function diffPlanningVersion(
           ...(next.reason ? { reason: clip(next.reason, MAX_TEXT) } : {}),
         },
       ],
-      summary: `version ${next.version} (${next.status}; previous version unavailable)`,
+      summary: `version ${next.version} (${auditStatusLabel(next.status)}; previous version unavailable)`,
     };
   }
   const changes: AuditChange[] = [];
@@ -359,10 +383,12 @@ export function diffPlanningVersion(
       ...(next.reason ? { reason: clip(next.reason, MAX_TEXT) } : {}),
       ...(next.was ? { was: next.was } : {}),
     });
+    const beforeLabel = auditStatusLabel(prev.status);
+    const afterLabel = auditStatusLabel(next.status);
     const label =
       transition === 'status'
-        ? `status ${prev.status} -> ${next.status}`
-        : `${transition} (${prev.status} -> ${next.status})`;
+        ? `status ${beforeLabel} -> ${afterLabel}`
+        : `${transition} (${beforeLabel} -> ${afterLabel})`;
     parts.push(next.reason ? `${label}: ${clip(next.reason, 80)}` : label);
   } else if (next.reason && next.reason !== prev.reason) {
     changes.push({ kind: 'reason', reason: clip(next.reason, MAX_TEXT) });
@@ -398,8 +424,8 @@ export function diffPlanningVersion(
     changes.push({ kind: 'waiting-on', action, before: waitBefore, after: waitAfter });
     parts.push(
       action === 'cleared'
-        ? 'cleared waitingOn'
-        : `${action} waitingOn (${waitAfter!.kind}: ${clip(waitAfter!.reason, 60)})`,
+        ? 'cleared waiting on'
+        : `${action} waiting on (${waitAfter!.kind}: ${clip(waitAfter!.reason, 60)})`,
     );
   }
   if ((prev.initiativeId ?? null) !== (next.initiativeId ?? null)) {

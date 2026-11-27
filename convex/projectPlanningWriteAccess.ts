@@ -15,6 +15,16 @@ const newInitiative = new Set([...bodyPut, 'kind', 'title', 'status']);
 const capture = new Set([...newInitiative, 'initiativeId', 'type', 'parentId']);
 const itemLinks = new Set([...bodyPut, 'parentId', 'relations', 'order', 'initiativeId']);
 const creationUndo = new Set([...bodyPut, 'status', 'reason']);
+const planProposed = new Set([
+  'action',
+  'operationId',
+  'itemId',
+  'expectedVersion',
+  'status',
+  'statusPin',
+  'agent',
+  'agentClient',
+]);
 
 export const memberCreationUndo = (command: Extract<PlanningWrite, { action: 'put-planning-item' }>) =>
   command.expectedVersion === 1 &&
@@ -22,6 +32,12 @@ export const memberCreationUndo = (command: Extract<PlanningWrite, { action: 'pu
   command.reason === 'Undone' &&
   command.body === undefined &&
   Object.keys(command).every(key => creationUndo.has(key));
+
+export const memberPlanProposed = (command: Extract<PlanningWrite, { action: 'put-planning-item' }>) =>
+  command.expectedVersion > 0 &&
+  command.status === 'open' &&
+  command.statusPin === null &&
+  Object.keys(command).every(key => planProposed.has(key));
 
 /** The enclosing Work mutation has already checked the current write role and device scope. Keep every other
  * planning operation owner-only, including versions restore (title + body), close, shelf moves and purge. */
@@ -43,7 +59,7 @@ export function memberPlanningWrite(command: PlanningWrite, tick: boolean, proje
         : command.kind === 'initiative' && Object.keys(command).every(key => newInitiative.has(key)))
     );
   if (Object.keys(command).every(key => bodyPut.has(key))) return typeof command.body === 'string';
-  if (!tick && memberCreationUndo(command)) return true;
+  if (!tick && (memberCreationUndo(command) || memberPlanProposed(command))) return true;
   return (
     !tick &&
     command.body === undefined &&

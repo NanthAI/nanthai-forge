@@ -19,6 +19,12 @@
   .ip-moved .ip-line { color: var(--text-3); }
   .ip-reserve { min-height: calc(12 * 1.55 * var(--t-body)); }
   .ip-side .kv { grid-template-columns: 96px minmax(0, 1fr); }
+  .ip-status { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-1) var(--s-2); }
+  .ip-status > .ip-status-pin { flex-basis: 100%; }
+  .ip-handoff { display: grid; gap: var(--s-3); }
+  .ip-connect { display: grid; gap: var(--s-2); padding-top: var(--s-2); border-top: var(--rule) solid var(--line); }
+  .ip-setup-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s-2); }
+  .ip-quick { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-1); }
   .ip-edit { display: grid; gap: var(--s-2); padding: var(--s-3) var(--gut-head) var(--s-4); min-width: 0; }
   .ip-edit-text textarea.inp { min-height: 180px; font-family: var(--font-mono); max-width: var(--m-wide); }
   .ip-acts { display: flex; flex-wrap: wrap; gap: var(--s-1); align-items: center; }

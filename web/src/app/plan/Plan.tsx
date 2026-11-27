@@ -17,11 +17,11 @@ import { useAction, useConvex, useMutation } from 'convex/react';
 import { makeFunctionReference, type PaginationResult } from 'convex/server';
 import { api } from '../../../../convex/_generated/api';
 import type { Id } from '../../../../convex/_generated/dataModel';
-import { Band, Key, Menu, Region, Sheet, Standing } from '../../ds';
+import { Band, Key, Menu, Region, Standing } from '../../ds';
 import { Announcer, useAnnounce } from '../../ds/behaviour/announce';
 import { isLive, itemStatus, itemStatusLabel } from '../../../../src/planning-model';
 import type { PlanRow } from '../../../../src/planning-model';
-import { planningBatchLimit } from '../../../../src/planning-batch';
+import { changeEach, planningBatchLimit, type BatchFields } from '../../../../src/planning-batch';
 import { useSafePaginatedQuery, useSafeQuery } from '../../safe-query';
 import { usePageCritical } from '../../ui/page-critical';
 import { A } from '../frames';
@@ -29,7 +29,7 @@ import { hrefFor } from '../paths';
 import { Head, crumbsFor } from '../Place';
 import { progressCells, progressOf, type PlanCountsRead } from '../progress';
 import { navigate, useSearch } from '../router';
-import { CopyKey } from '../start/parts';
+import type { AgentApp } from '../start/agent-apps';
 import type { PlaceProps } from '../screens';
 import {
   readComments,
@@ -63,7 +63,17 @@ import type { BatchPut, BatchWrite } from '../../../../src/planning-batch';
 import { hostedError, hostedErrorCode } from '../../snapshot';
 import { itemPut } from './hierarchy';
 import { dropWrites, type DropMove } from './plan-drop';
-import { BulkBar, SplitSheet, UndoToast, outcomeWords, type Reads } from './Bulk';
+import {
+  BulkBar,
+  CloseSheet,
+  SplitSheet,
+  UndoToast,
+  outcomeWords,
+  statusMenuItems,
+  type Go,
+  type Reads,
+} from './Bulk';
+import { HandoffSheet } from './HandoffSheet';
 import {
   matches,
   movedInitiativeRank,
@@ -240,6 +250,10 @@ function PlanScreen({ route, projectId, projectName, feed, viewerHandle, needsRe
     initiativeId => client.query(api.projectInitiativeWork.read, { projectId, initiativeId }),
     [client, projectId],
   );
+  const readConnectedApps = useCallback<() => Promise<readonly AgentApp[]>>(
+    () => client.query(api.agentConnections.read, {}),
+    [client],
+  );
   const put: Put = (command, operationId = crypto.randomUUID()) => {
     return mutate({
       projectId,
@@ -288,6 +302,7 @@ function PlanScreen({ route, projectId, projectName, feed, viewerHandle, needsRe
       readItemWork={readItemWork}
       readItemHistory={readItemHistory}
       readInitiativeWork={readInitiativeWork}
+      readConnectedApps={readConnectedApps}
       query={query}
       go={go}
       viewer={viewerHandle}
@@ -338,6 +353,7 @@ export function PlanScreenView({
   readItemWork,
   readItemHistory,
   readInitiativeWork,
+  readConnectedApps,
   query = readQuery(new URLSearchParams()),
   go = () => undefined,
   viewer,
@@ -375,6 +391,7 @@ export function PlanScreenView({
   readItemWork?: ReadItemWork | undefined;
   readItemHistory?: ReadItemHistory | undefined;
   readInitiativeWork?: ReadInitiativeWork | undefined;
+  readConnectedApps?: (() => Promise<readonly AgentApp[]>) | undefined;
   query?: PlanQuery;
   go?: (patch: Partial<PlanQuery>) => void;
   viewer?: string | undefined;
@@ -503,6 +520,30 @@ export function PlanScreenView({
       setError(`Forge could not change ${row.title}; nothing changed.`);
     }
   };
+  const changeItemStatus = async (row: PlanRow, fields: BatchFields) => {
+    if (!run) return;
+    setError('');
+    try {
+      const outcome = await run(changeEach([row], fields));
+      const text = outcomeWords(outcome, byId);
+      setToast({ outcome, words: text });
+      announce(text);
+    } catch (failure) {
+      setError(
+        (failure instanceof Error && hostedError(failure)) ||
+          `Forge could not change ${row.title}; nothing changed.`,
+      );
+    }
+  };
+  const closeItem: Go = async (writes, extra, options) => {
+    if (!run) return null;
+    setError('');
+    const outcome = await run(writes, options);
+    const text = [outcomeWords(outcome, byId), extra].filter(Boolean).join(' ');
+    setToast({ outcome, words: text });
+    announce(text);
+    return outcome;
+  };
   const lookedUpShelf =
     linkedItem && linkedItem !== 'loading' && isShelf(linkedItem.status) ? linkedItem : null;
   const shelfRow = lookedUpShelf ?? shelvedItem;
@@ -562,6 +603,10 @@ export function PlanScreenView({
         readItemText={readItemText}
         readItemWork={readItemWork}
         readItemHistory={readItemHistory}
+        readConnectedApps={readConnectedApps}
+        canEdit={whole?.canEdit}
+        onStatus={whole?.canEdit && run ? changeItemStatus : undefined}
+        onClose={whole?.canEdit && run ? closeItem : undefined}
         onSplit={whole?.canEdit && reads && run ? () => setSplit(true) : undefined}
         onVersions={projectId && itemRow ? pair => setVersions({ itemId: itemRow.id, pair }) : undefined}
         edit={
@@ -1256,6 +1301,10 @@ function ItemPage({
   readItemText,
   readItemWork,
   readItemHistory,
+  readConnectedApps,
+  canEdit,
+  onStatus,
+  onClose,
   onSplit,
   onVersions,
   edit,
@@ -1282,6 +1331,10 @@ function ItemPage({
   readItemText?: ReadItem | undefined;
   readItemWork?: ReadItemWork | undefined;
   readItemHistory?: ReadItemHistory | undefined;
+  readConnectedApps?: (() => Promise<readonly AgentApp[]>) | undefined;
+  canEdit?: boolean | undefined;
+  onStatus?: ((row: PlanRow, fields: BatchFields) => Promise<void>) | undefined;
+  onClose?: Go | undefined;
   onSplit?: (() => void) | undefined;
   onVersions?: ((pair?: readonly [number, number | undefined]) => void) | undefined;
   edit?: import('./item-edit').EditItemPorts | undefined;
@@ -1336,8 +1389,23 @@ function ItemPage({
   const line = group?.lines.find(entry => entry.row.id === row?.id);
   const initiative = row?.initiativeId ? view?.byId.get(row.initiativeId) : undefined;
   const [handOff, setHandOff] = useState(false);
+  const [plannedKey, setPlannedKey] = useState<string | null>(null);
+  const [planning, setPlanning] = useState(false);
+  const [localError, setLocalError] = useState('');
+  const [closingRow, setClosingRow] = useState<PlanRow | null>(null);
+  const [closingBusy, setClosingBusy] = useState(false);
+  const [closeError, setCloseError] = useState('');
+  const planAttempt = useRef<{ key: string; operationId: string } | null>(null);
+  const currentStatus = row ? statusOf(row) : null;
+  const rowVersionKey = row ? `${row.id}:${row.version ?? 0}` : null;
+  const needsPlanFirst = Boolean(row && currentStatus === 'proposed' && plannedKey !== rowVersionKey);
   const itemToHandOff =
-    edit && row?.kind === 'issue' && statusOf(row) === 'planned' && isPlanningUuid(row.id) ? row : null;
+    edit &&
+    row?.kind === 'issue' &&
+    (currentStatus === 'planned' || currentStatus === 'proposed') &&
+    isPlanningUuid(row.id)
+      ? row
+      : null;
   const handoffPrompt = itemToHandOff
     ? [
         `Work on this Forge Item: ${new URL(at({ rest: itemToHandOff.id }), location.origin).href}`,
@@ -1348,14 +1416,91 @@ function ItemPage({
         'Use the returned Lane folder. If the Item has no Done-when lines, propose them before editing.',
       ].join('\n')
     : null;
+  const projectUrl = new URL(
+    hrefFor({
+      frame: 'project',
+      handle: route.handle,
+      project: route.project,
+      place: 'needs',
+      section: '',
+      rest: '',
+    }).replace(/\/needs$/, ''),
+    location.origin,
+  ).href;
+  const openHandOff = async () => {
+    if (!itemToHandOff || planning) return;
+    if (!needsPlanFirst) {
+      setHandOff(true);
+      return;
+    }
+    if (!edit) return;
+    setPlanning(true);
+    setLocalError('');
+    const key = `${itemToHandOff.id}:${itemToHandOff.version ?? 0}`;
+    if (planAttempt.current?.key !== key) planAttempt.current = { key, operationId: crypto.randomUUID() };
+    try {
+      const outcome = await edit.run(
+        [
+          {
+            action: 'put-planning-item',
+            itemId: itemToHandOff.id,
+            expectedVersion: itemToHandOff.version ?? 0,
+            status: 'open',
+            statusPin: null,
+          },
+        ],
+        { operationId: planAttempt.current.operationId },
+      );
+      const refused = outcome.results.find(result => result.outcome === 'refused');
+      if (refused) {
+        setLocalError(refused.message ?? 'This Item changed before it could be planned. Try again.');
+        return;
+      }
+      planAttempt.current = null;
+      setPlannedKey(key);
+      setHandOff(true);
+      edit.undo(canEdit ? outcome : { ...outcome, undo: [] }, `Planned “${itemToHandOff.title}”.`);
+    } catch (failure) {
+      setLocalError(
+        (failure instanceof Error && hostedError(failure)) || 'Forge could not plan this Item. Try again.',
+      );
+    } finally {
+      setPlanning(false);
+    }
+  };
+  const closeGo: Go = async (writes, extra, options) => {
+    if (!onClose) return null;
+    setClosingBusy(true);
+    setCloseError('');
+    try {
+      return await onClose(writes, extra, options);
+    } catch (failure) {
+      setCloseError(
+        (failure instanceof Error && hostedError(failure)) || 'Forge could not confirm the close.',
+      );
+      return null;
+    } finally {
+      setClosingBusy(false);
+    }
+  };
+  const openIssue = Boolean(row && row.kind === 'issue' && isLive(row));
   const facts: [string, ReactNode][] = row
     ? [
         [
           'Status',
-          <div key="s">
+          <div key="s" className="ip-status">
             <Status row={row} />
-            {full && full.version === row.version ? (
-              <FollowWork key={full.version} item={full} put={followWork} />
+            {openIssue && onStatus ? (
+              <Menu
+                label="Status"
+                className="btn sm"
+                items={statusMenuItems(fields => void onStatus(row, fields), { current: row.status })}
+              />
+            ) : null}
+            {full && full.version === row.version && full.statusPin ? (
+              <div className="ip-status-pin">
+                <FollowWork key={full.version} item={full} put={followWork} />
+              </div>
             ) : null}
           </div>,
         ],
@@ -1402,8 +1547,13 @@ function ItemPage({
         }
       >
         {itemToHandOff ? (
-          <Key kind="primary" size="sm" onClick={() => setHandOff(true)}>
-            Hand to an agent
+          <Key kind="primary" size="sm" disabled={planning} onClick={() => void openHandOff()}>
+            {planning ? 'Planning…' : needsPlanFirst ? 'Plan and hand to an agent' : 'Hand to an agent'}
+          </Key>
+        ) : null}
+        {openIssue && onClose && row ? (
+          <Key size="sm" onClick={() => setClosingRow(row)}>
+            Close
           </Key>
         ) : null}
         {row && onVersions ? (
@@ -1441,28 +1591,34 @@ function ItemPage({
           </Menu>
         ) : null}
       </Head>
-      {error ? (
+      {error || localError ? (
         <div className="pf" role="alert">
-          {error}
+          {localError || error}
         </div>
       ) : null}
       {handoffPrompt ? (
-        <Sheet
-          title="Hand to an agent"
+        <HandoffSheet
           open={handOff}
           onOpenChange={setHandOff}
-          footer={<CopyKey text={handoffPrompt} label="Copy prompt" kind="primary" />}
-        >
-          <p>Paste the prompt into your agent to start work on this Item.</p>
-          <details>
-            <summary className="btn ghost">
-              Show prompt <span className="tw" aria-hidden="true" />
-            </summary>
-            <pre className="cmd mono" translate="no">
-              {handoffPrompt}
-            </pre>
-          </details>
-        </Sheet>
+          prompt={handoffPrompt}
+          projectUrl={projectUrl}
+          readConnectedApps={readConnectedApps}
+        />
+      ) : null}
+      {closingRow && onClose ? (
+        <CloseSheet
+          open
+          onOpenChange={open => {
+            if (!open) {
+              setClosingRow(null);
+              setCloseError('');
+            }
+          }}
+          rows={[closingRow]}
+          go={closeGo}
+          busy={closingBusy}
+          error={closeError}
+        />
       ) : null}
       {purgeDialog}
       {announcement}

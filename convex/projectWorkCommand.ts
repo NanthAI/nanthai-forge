@@ -25,7 +25,12 @@ import { clearAuditVersions } from './projectPlanningAuditWindow';
 import { planningTarget } from '../src/work-planning-unified';
 import { wakePlanWrite } from './projectPlanRollupWake';
 import { publicActorLabel } from './publicPeople';
-import { memberCreationUndo, memberPlanningTarget, memberPlanningWrite } from './projectPlanningWriteAccess';
+import {
+  memberCreationUndo,
+  memberPlanProposed,
+  memberPlanningTarget,
+  memberPlanningWrite,
+} from './projectPlanningWriteAccess';
 import { intentAuthority } from './projectContributors';
 import { selectedGeneration, record, recordPartition } from './projectWorkIndexStore';
 import { generationHead } from './projectWorkHead';
@@ -310,8 +315,9 @@ export async function executeCommand(
       (!target || (target.intent && target.historyId === command.itemId)) &&
         memberPlanningTarget(current) &&
         (command.action !== 'put-planning-item' ||
-          !memberCreationUndo(command) ||
-          (current?.parentId && current.author === user.subject && !target?.intent?.base)),
+          ((!memberCreationUndo(command) ||
+            (current?.parentId && current.author === user.subject && !target?.intent?.base)) &&
+            (!memberPlanProposed(command) || current?.status === 'proposed'))),
       'PROJECT_UNAVAILABLE',
       'Select an existing Item that is not archived or deleted.',
     );

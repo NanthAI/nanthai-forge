@@ -2,6 +2,7 @@
 // Copyright 2026 Ferdinando Valsecchi
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { Avatar, Count, Glyph, Key, Region, Row, State, Who, useFold, type StateWord } from '../../ds';
+import { visibleAuditSummary } from '../../../../src/planning-audit';
 import { age } from '../../ui/status';
 import { A } from '../frames';
 import { Unchecked } from '../Unchecked';
@@ -319,7 +320,7 @@ function ItemHistory({
         }
         draw={event => (
           <Row key={`${event.kind}:${event.id}`} cols="minmax(0, 1fr) auto">
-            <div dir="auto">{event.summary}</div>
+            <div dir="auto">{visibleAuditSummary(event.summary)}</div>
             <div className="meta">
               <WorkTime at={event.at} />
             </div>
@@ -577,6 +578,7 @@ export function ItemWork({
                     · Last save <WorkTime at={lane.lastSaveAt} />
                   </>
                 ) : null}
+                {' · '}
                 <A
                   className="lk"
                   style={{ textDecoration: 'underline' }}

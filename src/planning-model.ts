@@ -141,9 +141,10 @@ export type PlanRow = {
   doneWhen?: readonly [number, number] | null;
   /** At least one linked Lane is still open for work. */
   inLane?: boolean;
-  /** Archived and Deleted rows only (Item 4c9e961e): the status it left, and when this version was written. */
+  /** Archived and Deleted rows only (Item 4c9e961e): the status it left, when it moved, and who moved it. */
   was?: StoredStatus;
   at?: string;
+  by?: string;
   purgeAt?: number;
 };
 

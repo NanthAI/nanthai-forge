@@ -19,6 +19,7 @@ import { invariant } from '../src/errors';
 import { itemDeadlines } from './projectItemRetentionStore';
 import { planningRootsWithPrefix } from './projectHostedPlanning';
 import { isPlanningPrefix, isPlanningUuid } from '../src/planning-id';
+import { agentActor } from '../src/agent-slug';
 import { commandPayloadRows, commandValues } from './projectWorkCommandRows';
 
 /** Rows per page: about 55 KB of root values on the dogfood board. */
@@ -79,13 +80,29 @@ export async function settledPage(
           initiativeId,
         )
       : undefined;
+  const shelf = status === 'archived' || status === 'deleted';
   const rows: string[] = [];
   for (const root of result.page) {
     try {
       const value = JSON.parse(root.value);
       if (value.purged) continue;
-      const row = planViewRow(value, root.position, status === 'archived' || status === 'deleted');
+      const row = planViewRow(value, root.position, shelf);
       if (row) {
+        let agent = typeof value.agent === 'string' ? value.agent : undefined;
+        // Pre-cutover shelved search roots omitted `at` and `agent`; recover them from the canonical header once per row.
+        if (shelf && !row.at) {
+          const canonical = await record(ctx, generationId, 'planningItems', row.id);
+          if (canonical) {
+            try {
+              const header = JSON.parse(canonical.value) as { at?: unknown; agent?: unknown };
+              if (typeof header.at === 'string' && header.at) row.at = header.at;
+              if (!agent && typeof header.agent === 'string' && header.agent) agent = header.agent;
+            } catch {
+              /* Keep the search row as read when the canonical header is unreadable. */
+            }
+          }
+        }
+        if (shelf && !row.by) row.by = agentActor(project.owner, agent);
         const deadline = deadlines?.get(row.id);
         if (deadline !== undefined) row.purgeAt = deadline;
         rows.push(JSON.stringify(row));
@@ -148,7 +165,10 @@ export const item = query({
       await commandPayloadRows(rows, keys =>
         Promise.all(keys.map(({ collection, key }) => record(ctx, partition, collection, key))),
       );
-      const row = planViewRow(commandValues(rows, 'planningItems')[0], root.position, true);
+      const item = commandValues(rows, 'planningItems')[0];
+      const row = item ? planViewRow(item, root.position, true) : null;
+      if (row && !row.by)
+        row.by = agentActor(project.owner, typeof item?.agent === 'string' ? item.agent : undefined);
       return { id: root.key, row: row ? JSON.stringify(row) : null };
     } catch (error) {
       return report(error);

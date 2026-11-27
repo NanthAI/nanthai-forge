@@ -482,3 +482,85 @@ test('CLI tick positions agree with evidence after moved rows and ignore fenced 
   assert.equal(ticked.body, body.replace('[ ] Test it', '[x] Test it'));
   assert(isPlanningTick(body, ticked.body, planningLineEvidence(2, 'Test it')));
 });
+
+test('a writer can plan a Proposed Item without pinning status, but cannot change other statuses or Initiatives (Item 96085563)', async t => {
+  const s = await project(t);
+  const proposed = { ...s.capture(), status: 'proposed' };
+  const inProgress = { ...s.capture(), status: 'in-progress' };
+  const closed = { ...s.capture(), status: 'closed' };
+  const proposedInitiative = {
+    ...s.capture(),
+    kind: 'initiative',
+    title: 'Proposed Init',
+    status: 'proposed',
+  };
+  for (const row of [proposed, inProgress, closed, proposedInitiative]) await s.send(row);
+
+  // Readers cannot plan a Proposed Item.
+  s.caller('reader');
+  await assert.rejects(
+    s.batch([
+      {
+        action: 'put-planning-item',
+        itemId: proposed.itemId,
+        expectedVersion: 1,
+        status: 'open',
+        statusPin: null,
+      },
+    ]),
+    unavailable,
+  );
+
+  // Writers can plan a Proposed Item (with replay safety and explicit statusPin: null), and cannot pin or change other statuses.
+  s.caller('writer');
+  await assert.rejects(
+    s.batch([{ action: 'put-planning-item', itemId: proposed.itemId, expectedVersion: 1, status: 'open' }]),
+    unavailable,
+    'omitting statusPin is the owner-only status override form',
+  );
+  const planOp = randomUUID();
+  const planWrite = [
+    {
+      action: 'put-planning-item',
+      itemId: proposed.itemId,
+      expectedVersion: 1,
+      status: 'open',
+      statusPin: null,
+    },
+  ];
+  assert.equal((await s.batch(planWrite, planOp)).results[0].outcome, 'applied');
+  assert.equal((await s.batch(planWrite, planOp)).results[0].outcome, 'replayed');
+  for (const forbidden of [
+    {
+      action: 'put-planning-item',
+      itemId: inProgress.itemId,
+      expectedVersion: 1,
+      status: 'open',
+      statusPin: null,
+    },
+    {
+      action: 'put-planning-item',
+      itemId: closed.itemId,
+      expectedVersion: 1,
+      status: 'open',
+      statusPin: null,
+    },
+    {
+      action: 'put-planning-item',
+      itemId: proposedInitiative.itemId,
+      expectedVersion: 1,
+      status: 'open',
+      statusPin: null,
+    },
+    { action: 'put-planning-item', itemId: proposed.itemId, expectedVersion: 2, status: 'closed' },
+    { action: 'put-planning-item', itemId: proposed.itemId, expectedVersion: 2, status: 'in-progress' },
+    { action: 'put-planning-item', itemId: proposed.itemId, expectedVersion: 2, status: 'proposed' },
+  ])
+    await assert.rejects(s.batch([forbidden]), unavailable);
+
+  s.caller('owner');
+  const planned = await s.latest(proposed.itemId);
+  assert.equal(planned.status, 'open');
+  assert.equal(planned.version, 2);
+  assert.equal(planned.statusPin, undefined, 'planning a Proposed Item leaves it following work');
+});

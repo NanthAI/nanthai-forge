@@ -86,5 +86,6 @@ export function planViewRow(value: Record<string, unknown>, position: number, sh
     ...(doneWhen ? { doneWhen } : {}),
     ...(shelved && text(value.was) ? { was: text(value.was) as PlanRow['was'] } : {}),
     ...(shelved && text(value.at) ? { at: text(value.at) } : {}),
+    ...(shelved && text(value.by) ? { by: text(value.by) } : {}),
   };
 }

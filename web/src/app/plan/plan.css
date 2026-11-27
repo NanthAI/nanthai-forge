@@ -109,6 +109,12 @@
   .plan-ini .plan-about { padding: 0 var(--gut) var(--s-3); white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--t-small); }
   .plan-ini .plan-ini-close { display: flex; flex-wrap: wrap; gap: var(--s-2) var(--s-3); align-items: center; padding: var(--s-2) var(--gut); border-bottom: var(--rule) solid var(--line); font-size: var(--t-small); }
   .plan .plan-next { display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-2); align-items: center; padding: var(--s-2) var(--gut); border-top: var(--rule) solid var(--line); font-size: var(--t-small); }
+  .plan .plan-shelf-row { grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--s-2) var(--s-3); }
+  .plan .plan-shelf-main { min-width: 0; display: grid; gap: 2px; }
+  .plan .plan-shelf-main .ttl { font-weight: var(--w-strong); overflow-wrap: anywhere; }
+  .plan .plan-shelf-meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-1) var(--s-3); color: var(--text-3); }
+  .plan .plan-shelf-detail { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0 var(--s-1); }
+  .plan .plan-shelf-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--s-2); }
   .plan-capture { display: grid; gap: var(--s-3); }
   .plan-capture label { display: grid; gap: var(--s-1); font-size: var(--t-small); color: var(--text-2); }
   .plan-capture textarea { resize: vertical; min-height: 4.5em; }
@@ -220,6 +226,8 @@
     .plan .plan-gh { flex-wrap: wrap; row-gap: 2px; }
     .plan .plan-gh .plan-gn { flex: 1 1 0; }
     .plan-ini .plan-ini-body { grid-template-columns: minmax(0, 1fr); }
+    .plan .plan-shelf-row { grid-template-columns: minmax(0, 1fr); align-items: start; }
+    .plan .plan-shelf-actions { justify-content: flex-start; }
     .plan .plan-gsp { width: 34px; }
   }
 }

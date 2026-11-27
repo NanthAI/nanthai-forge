@@ -3,7 +3,7 @@
 // The bulk bar (Item 65b0e706, DESIGN.md rules 6, 7 and 18): only the ticked rows change, each action is one batch
 // call with per-Item results, and the reply's one Undo waits in a toast for 10 seconds. A row someone else changed
 // meanwhile is refused by its version and named; their change stays.
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Key, Menu, Sheet } from '../../ds';
 import {
   batchSentence,
@@ -17,7 +17,7 @@ import {
   type BatchFields,
   type BatchWrite,
 } from '../../../../src/planning-batch';
-import { defaultItemTypes, type PlanRow } from '../../../../src/planning-model';
+import { defaultItemTypes, type PlanRow, type StoredStatus } from '../../../../src/planning-model';
 import { hostedError, hostedErrorCode } from '../../snapshot';
 import type { BatchOptions, BatchOutcome, FullItem, InitiativeDetails, ItemComment, RunBatch } from './batch';
 import type { ReadWorkers } from './workers';
@@ -69,6 +69,42 @@ export function outcomeWords(outcome: BatchOutcome, byId: ReadonlyMap<string, Pl
   ]
     .filter(Boolean)
     .join(' ');
+}
+
+/** Shared status menu entries for both the bulk bar and the open Item page. */
+export function statusMenuItems(
+  onChange: (fields: BatchFields) => void,
+  options?: { current?: StoredStatus | undefined; reason?: string | undefined },
+) {
+  const current = options?.current;
+  const reason = options?.reason;
+  return [
+    {
+      id: 'proposed',
+      label: 'Proposed',
+      disabled: current === 'proposed',
+      onAction: () => onChange({ status: 'proposed' }),
+    },
+    {
+      id: 'open',
+      label: 'Planned',
+      disabled: current === 'open',
+      onAction: () => onChange({ status: 'open' }),
+    },
+    {
+      id: 'in-progress',
+      label: 'In progress',
+      disabled: current === 'in-progress',
+      onAction: () => onChange({ status: 'in-progress' }),
+    },
+    'separator' as const,
+    {
+      id: 'abandoned',
+      label: 'Won’t do',
+      disabled: current === 'abandoned',
+      onAction: () => onChange({ status: 'abandoned', reason: reason ?? 'Won’t do' }),
+    },
+  ];
 }
 
 export function BulkBar({
@@ -183,17 +219,7 @@ export function BulkBar({
       />
       <Menu
         label="Status"
-        items={[
-          { id: 'proposed', label: 'Proposed', onAction: () => void change({ status: 'proposed' }) },
-          { id: 'open', label: 'Planned', onAction: () => void change({ status: 'open' }) },
-          { id: 'in-progress', label: 'In progress', onAction: () => void change({ status: 'in-progress' }) },
-          'separator' as const,
-          {
-            id: 'abandoned',
-            label: 'Won’t do',
-            onAction: () => void change({ status: 'abandoned', reason: reason.reason ?? 'Won’t do' }),
-          },
-        ]}
+        items={statusMenuItems(fields => void change(fields), { reason: reason.reason })}
       />
       <Menu
         label="Assign"
@@ -285,11 +311,17 @@ export function BulkBar({
   );
 }
 
-type Go = (writes: BatchWrite[], words?: string, options?: BatchOptions) => Promise<BatchOutcome | null>;
+export type Go = (
+  writes: BatchWrite[],
+  words?: string,
+  options?: BatchOptions,
+) => Promise<BatchOutcome | null>;
 
-/** Close many with one note: names what had Done-when lines open, closes anyway in one press with the standard
- * reason, and offers (never forces) one follow-up Item for what stayed open. */
-function CloseSheet({
+const closeQuickReasons = ['Not needed', 'Done elsewhere'] as const;
+
+/** Close one or many Items with one note: names what had Done-when lines open, closes anyway in one press with the
+ * standard reason (or a quick reason), and offers (never forces) one follow-up Item for what stayed open. */
+export function CloseSheet({
   open,
   onOpenChange,
   rows,
@@ -304,6 +336,7 @@ function CloseSheet({
   busy: boolean;
   error: string;
 }) {
+  const formId = useId();
   const [note, setNote] = useState('');
   const [left, setLeft] = useState<PlanRow[] | null>(null);
   const attempt = useRef<{ payload: string; operationId: string } | null>(null);
@@ -347,16 +380,18 @@ function CloseSheet({
     setLeft(null);
     onOpenChange(false);
   };
+  const single = rows.length === 1;
   return (
     <Sheet
       open={open}
       onOpenChange={next => {
-        if (!next) setLeft(null);
+        if (!next) {
+          setLeft(null);
+          setNote('');
+        }
         onOpenChange(next);
       }}
-      title={
-        left ? 'Closed' : `Close ${rows.length.toLocaleString()} ${rows.length === 1 ? 'Item' : 'Items'}`
-      }
+      title={left ? 'Closed' : single ? 'Close Item' : `Close ${rows.length.toLocaleString()} Items`}
       footer={
         left ? (
           <>
@@ -368,7 +403,7 @@ function CloseSheet({
         ) : (
           <>
             <Key onClick={() => onOpenChange(false)}>Cancel</Key>
-            <Key kind="primary" type="submit" form="plan-close-many" disabled={busy}>
+            <Key kind="primary" type="submit" form={formId} disabled={busy}>
               {withOpen.length && !note.trim() ? 'Close anyway' : 'Close'}
             </Key>
           </>
@@ -381,10 +416,20 @@ function CloseSheet({
           lines still open: {names(left)}. A follow-up Item can carry them; nothing else is needed.
         </p>
       ) : (
-        <form id="plan-close-many" className="plan-capture" onSubmit={event => void submit(event)}>
+        <form id={formId} className="plan-capture" onSubmit={event => void submit(event)}>
           {error ? <p role="alert">{error}</p> : null}
+          {withOpen.length ? (
+            <div className="ip-quick">
+              <span className="meta">Quick reasons:</span>
+              {closeQuickReasons.map(reason => (
+                <Key key={reason} size="sm" type="button" onClick={() => setNote(reason)}>
+                  {reason}
+                </Key>
+              ))}
+            </div>
+          ) : null}
           <label>
-            <span>One note for all of them (optional)</span>
+            <span>{single ? 'Note (optional)' : 'One note for all of them (optional)'}</span>
             <textarea
               className="inp"
               rows={3}
@@ -395,8 +440,8 @@ function CloseSheet({
           </label>
           {withOpen.length ? (
             <p className="t2">
-              {names(withOpen)} {withOpen.length === 1 ? 'has' : 'have'} Done-when lines open. Without a note
-              they close with the reason “{closeAnywayReason}”.
+              {names(withOpen)} {withOpen.length === 1 ? 'has' : 'have'} Done-when lines open. Without a note{' '}
+              {withOpen.length === 1 ? 'it closes' : 'they close'} with the reason “{closeAnywayReason}”.
             </p>
           ) : null}
         </form>

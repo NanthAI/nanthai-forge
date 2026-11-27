@@ -3,7 +3,7 @@
 import { getDocumentSize } from 'convex/values';
 import { digest } from './state/hash.js';
 import type { IndexEntry } from './work-hosted-index.js';
-import type { PlanningItem } from './work-planning-types.js';
+import { isShelved, type PlanningItem } from './work-planning-types.js';
 
 /** Done-when lines are the body's Markdown task lines ("- [ ]", "- [x]"): [ticked, total], or null when none. */
 export const planningTaskLine = /^([ \t]*(?:[-*+]|\d+[.)])[ \t]+\[)([ xX~])(\][ \t]+)(.*?)(\r?)$/;
@@ -216,6 +216,7 @@ export function planningSearchEntry(item: PlanningItem, position: number): Index
       ...(item.body.length > 400 ? { bodyTruncated: true } : {}),
       hasDoneWhen: /done\s+when\s*:/i.test(item.body),
       ...planningModelRow(item),
+      ...(isShelved(item.status) ? { at: item.at, ...(item.agent ? { agent: item.agent } : {}) } : {}),
       ...doneWhenField(item),
       ...(due ? { dueCheck: due } : {}),
     }),

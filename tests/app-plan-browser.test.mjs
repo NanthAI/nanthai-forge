@@ -120,7 +120,8 @@ const read = {
   more: exactCounts || partialCounts,
   liveMore: exactCounts || partialCounts,
   settled: emptyPlan ? [] : [{ initiativeId: launch.id, ...launchProgress }, { initiativeId: docs.id, done: partialCounts ? 2 : 0, dropped: 0, atLeast: partialCounts }, { initiativeId: big.id, ...bigSettled }],
-  canEdit: !boardFlags.has('reader'),
+  canEdit: !boardFlags.has('reader') && !boardFlags.has('writer'),
+  ...(boardFlags.has('writer') ? { canWriteItems: true } : {}),
 };
 const settledRows = [item(20, { title: 'Old reader removed', status: 'closed', initiativeId: launch.id,
   ...(boardFlags.has('hierarchy-worst') ? { parentId: uuid(52), initiativeId: uuid(4) } : {}) }), item(21, { title: 'Ship a second parser', status: 'abandoned' })];
@@ -128,10 +129,13 @@ const deferred = boardFlags.has('deferred-relation');
 const duplicateSource = item(802, { title: 'Deferred duplicate', version: 8, relations: [{ kind: 'duplicate-of', id: uuid(10) }] });
 const extraLink = { kind: 'related', id: uuid(11) };
 const settled = { rows: settledRows, more: false, loading: false, failed: false, loadMore() {} };
-// Archive and Deleted (Item 4c9e961e): each row says when it went and the status it left.
+// Archive and Deleted (Item 4c9e961e, 96085563): each row says when it went, who moved it and the status it left.
 const shelfRows = {
-  archived: [item(30, { title: 'Browser bundle size budget', status: 'archived', was: 'proposed', at: '2026-10-02T09:00:00.000Z', version: 4 })],
-  deleted: [item(31, { title: 'Benchmark against the v1 parser', status: 'deleted', was: 'in-progress', at: '2026-11-01T09:00:00.000Z', purgeAt: Date.parse('2026-12-01T09:00:00.000Z'), version: 3 })],
+  archived: [item(30, { title: 'Browser bundle size budget', status: 'archived', was: 'proposed', at: '2026-10-02T09:00:00.000Z', by: 'example-builder', version: 4 })],
+  deleted: [
+    item(31, { title: 'Benchmark against the v1 parser', status: 'deleted', was: 'in-progress', at: '2026-11-01T09:00:00.000Z', by: 'example-builder', purgeAt: Date.parse('2026-12-01T09:00:00.000Z'), version: 3 }),
+    item(32, { title: 'Legacy deleted row without a recorded date should still read cleanly on a phone', status: 'deleted', was: 'open', by: 'example-builder/amber-fox', purgeAt: Date.parse('2026-12-05T09:00:00.000Z'), version: 2 }),
+  ],
 };
 const linkedOpen = rows.find(row => row.id === uuid(10)) ?? checklistRows[0];
 const linkedDeleted = shelfRows.deleted[0];
@@ -272,10 +276,20 @@ const planNeeds = emptyPlan ? undefined : { held: [{ laneId: uuid(204), intentId
   approvals: '{"requests":[]}', canDecide: true };
 function Fixture() {
   const search = useSearch();
+  const [liveRows, setLiveRows] = React.useState(() => JSON.parse(read.rows));
   const rest = decodeURIComponent(location.pathname.split('/plan/')[1] ?? '');
   const route = { frame: 'project', handle: 'example-builder', project: 'synthetic', place: 'plan', section: '', rest };
   const query = readQuery(search);
   const go = patch => navigate(location.pathname + writeQuery({ ...query, ...patch }), { replace: true });
+  const runFixture = async (writes, options) => {
+    const result = await run(writes, options);
+    if (boardFlags.has('item-actions') && options?.close) {
+      const closed = new Set(writes.map(write => write.itemId));
+      setLiveRows(current => current.map(row => closed.has(row.id) ? { ...row, status: 'closed', version: (row.version || 0) + 1 } : row));
+    }
+    return result;
+  };
+  const liveRead = boardFlags.has('item-actions') ? { ...read, rows: JSON.stringify(liveRows) } : read;
   // The shell receives the same Needs you count as the page read (window.heldFeed, set before load).
   const feed = window.heldFeed ? { lanes: [{ laneId: uuid(90), stage: 'ready', held: true, overlap: false, changedAt: 1 }], more: 0, moreIsLowerBound: false, main: null } : undefined;
   return <ProjectFrame route={route} projectId="synthetic" name="Synthetic project" feed={feed}
@@ -284,16 +298,17 @@ function Fixture() {
     <React.Suspense fallback={<h1>Loading</h1>}>{window.livePlan ?
       <ConvexProvider client={linkBackend.client}><LivePlan route={route} projectId="synthetic"
         projectName="Synthetic project" viewerHandle="example-builder" /></ConvexProvider> :
-      <PlanScreenView route={route} projectId={rest === uuid(16) || boardFlags.has('handoff-in-progress') || deferred || boardFlags.has('hierarchy-worst') ? undefined : "synthetic"} projectName="Synthetic project" feed={planFeed}
+      <PlanScreenView route={route} projectId={rest === uuid(16) || boardFlags.has('handoff-in-progress') || boardFlags.has('item-actions') || deferred || boardFlags.has('hierarchy-worst') ? undefined : "synthetic"} projectName="Synthetic project" feed={planFeed}
       progress={boardFlags.has('no-counts') ? null : boardFlags.has('loading-plan') ? undefined : progress} needs={planNeeds}
-      read={boardFlags.has('loading-plan') ? undefined : read} stale={boardFlags.has('stale-plan')}
-      put={put} run={run} purge={purge} reads={reads} query={query} go={go} viewer="example-builder"
+      read={boardFlags.has('loading-plan') ? undefined : liveRead} stale={boardFlags.has('stale-plan')}
+      put={put} run={runFixture} purge={purge} reads={reads} query={query} go={go} viewer="example-builder"
       readItemWork={deferred ? async () => JSON.stringify({ role: true, lanes: [], total: 0, nextCursor: null, related: [{ kind: 'Duplicated by', id: duplicateSource.id, title: duplicateSource.title }] }) : undefined}
       readItemText={deferred ? async (id, full) => {
         if (!full || id !== duplicateSource.id) return null;
         return window.calls.length ? { ...duplicateSource, version: 9, relations: [...duplicateSource.relations, extraLink] } : duplicateSource;
       } : undefined}
       readInitiativeWork={window.readItemWork ? initiativeId => window.readItemWork({initiativeId}) : undefined}
+      readConnectedApps={boardFlags.has('no-apps') ? async () => [] : boardFlags.has('codex-connected') ? async () => ['codex'] : undefined}
       linkedItem={boardFlags.has('hierarchy-worst') ? settledRows.find(row => row.id === rest) ?? null : null}
       closed={query.scope === 'open' && !rest ? undefined : settled}
       shelved={shelfRows[query.scope] ? { ...settled, rows: shelfRows[query.scope] } : undefined}
@@ -1739,20 +1754,89 @@ test('plan views and bulk bar: real components keep the view in the address and 
     }
   });
 
-  // Archive and Deleted (Item 4c9e961e): a shelved row comes back to the status it left in one batch write with Undo,
-  // and the Item page sends an Item to Deleted the same way.
+  // Item 96085563 (02.1b, 02.3): a writer plans a Proposed Item and opens the handoff sheet with connection help in one press.
+  for (const [width, theme, query] of [
+    [1440, 'dark', '?writer&no-apps&item-actions'],
+    [390, 'light', '?writer&no-apps&item-actions'],
+  ])
+    await t.test(`Proposed Item plan-and-handoff with app connection help at ${width} ${theme}`, async () => {
+      const id = '00000000-0000-4000-8000-000000000013';
+      const { page, errors, context } = await open(width, theme, `/${id}${query}`);
+      const button = page.getByRole('button', { name: 'Plan and hand to an agent', exact: true });
+      await button.waitFor();
+      // Writers cannot use owner-only Status override or Close actions.
+      assert.equal(await page.getByRole('button', { name: 'Close', exact: true }).count(), 0);
+      assert.equal(await page.getByRole('button', { name: 'Status', exact: true }).count(), 0);
+      await button.click();
+      const sheet = page.getByRole('dialog', { name: 'Hand to an agent', exact: true });
+      await sheet.waitFor();
+      assert.deepEqual(await page.evaluate(() => window.calls.at(-1)), [
+        { action: 'put-planning-item', itemId: id, expectedVersion: 2, status: 'open', statusPin: null },
+      ]);
+      await sheet.getByText(/No agent app connected yet/).waitFor();
+      await sheet.getByRole('button', { name: 'Codex', exact: true }).click();
+      await sheet.getByText('nforge connect codex').waitFor();
+      await sheet.getByRole('button', { name: /First time on this machine/ }).click();
+      await sheet.getByText(/Install the command line/).waitFor();
+      await check(page, `proposed handoff ${width} ${theme}`);
+      assert.deepEqual(errors, []);
+      await context.close();
+    });
+
+  // Item 96085563 (10.2a): open Item exposes Status override and Close with existing checklist semantics.
+  for (const [width, theme] of [
+    [1440, 'light'],
+    [390, 'dark'],
+  ])
+    await t.test(`open Item page Status action and Close checklist flow at ${width} ${theme}`, async () => {
+      const id = '00000000-0000-4000-8000-000000000010';
+      const { page, errors, context } = await open(width, theme, `/${id}?item-actions`);
+      const statusBtn = page.getByRole('button', { name: 'Status', exact: true });
+      await statusBtn.waitFor();
+      await statusBtn.click();
+      assert.equal(
+        await page.getByRole('menuitem', { name: 'Planned', exact: true }).getAttribute('aria-disabled'),
+        'true',
+      );
+      await page.getByRole('menuitem', { name: 'In progress', exact: true }).click();
+      await page.locator('.toasts').waitFor();
+      assert.deepEqual(await page.evaluate(() => window.calls.at(-1)), [
+        { action: 'put-planning-item', itemId: id, expectedVersion: 2, status: 'in-progress' },
+      ]);
+      await page.getByRole('button', { name: 'Close', exact: true }).click();
+      const sheet = page.getByRole('dialog', { name: 'Close Item', exact: true });
+      await sheet.waitFor();
+      assert.match(await sheet.textContent(), /has Done-when lines open/);
+      assert.equal(await sheet.getByRole('button', { name: 'Close anyway', exact: true }).count(), 1);
+      await sheet.getByRole('button', { name: 'Not needed', exact: true }).click();
+      await sheet.getByRole('button', { name: 'Close', exact: true }).click();
+      // Even after the live row transitions to Done, the follow-up dialog stays open under its new title.
+      const closedSheet = page.getByRole('dialog', { name: 'Closed', exact: true });
+      await closedSheet.getByRole('button', { name: 'Add one follow-up Item', exact: true }).waitFor();
+      await check(page, `item close follow-up ${width} ${theme}`);
+      await closedSheet.getByRole('button', { name: 'No follow-up', exact: true }).click();
+      await closedSheet.waitFor({ state: 'hidden' });
+      assert.deepEqual(errors, []);
+      await context.close();
+    });
+
+  // Archive and Deleted (Item 4c9e961e, 96085563 10.3a): shows deleting actor, omits blank dates, keeps title width on phone.
   {
     const { page, errors, context } = await open(1440, 'dark', '?scope=deleted');
     const list = page.getByRole('list', { name: 'Deleted Items' });
     assert.match(
       await list.textContent(),
-      /Benchmark against the v1 parser.*deleted 1 nov.*was In progress/i,
+      /Benchmark against the v1 parser.*deleted 1 nov.*by.*example-builder.*was In progress/i,
     );
-    const date = list.locator('time');
+    const second = list.getByRole('listitem').nth(1);
+    const secondText = await second.textContent();
+    assert.match(secondText, /deleted by.*amber-fox.*was Planned/i);
+    assert.doesNotMatch(secondText, /deleted\s+,/, 'no dangling blank date when at is missing');
+    const date = list.locator('time').first();
     assert.equal(await date.textContent(), 'Purges from 1 Dec 2026');
     assert.equal(await date.getAttribute('datetime'), '2026-12-01T09:00:00.000Z');
     const before = await page.evaluate(() => window.calls.length);
-    await list.getByRole('button', { name: 'Restore' }).click();
+    await list.getByRole('button', { name: 'Restore' }).first().click();
     await page.waitForFunction(n => window.calls.length === n + 1, before);
     assert.deepEqual(await page.evaluate(() => window.calls.at(-1)), [
       {
@@ -1766,6 +1850,18 @@ test('plan views and bulk bar: real components keep the view in the address and 
     assert.deepEqual(errors, []);
     await context.close();
   }
+  for (const theme of ['dark', 'light'])
+    await t.test(`phone-width Deleted shelf shows actor without squeezing titles (${theme})`, async () => {
+      const { page, errors, context } = await open(390, theme, '?scope=deleted');
+      const list = page.getByRole('list', { name: 'Deleted Items' });
+      const title = list.getByRole('link', { name: /Legacy deleted row without a recorded date/ });
+      await title.waitFor();
+      const box = await title.boundingBox();
+      assert.ok(box && box.width >= 240, `Deleted title keeps readable phone width (was ${box?.width})`);
+      await check(page, `deleted phone ${theme}`);
+      assert.deepEqual(errors, []);
+      await context.close();
+    });
   {
     // The fixture has no Convex client, so this Item page is drawn without a project id (no comment reads).
     const tidy = '00000000-0000-4000-8000-000000000016';
@@ -1934,7 +2030,15 @@ test('plan views and bulk bar: real components keep the view in the address and 
           assert.equal(calls.at(-1).limit, 7);
           const relations = page.getByRole('region', { name: 'Relations', exact: true });
           assert.equal(await lanes.first().textContent(), 'Synthetic outcome');
-          assert.match(await lanes.first().locator('..').textContent(), /cobalt-fox.*1 save.*Last save/);
+          assert.match(
+            await lanes.first().locator('..').textContent(),
+            /cobalt-fox.*1 save · Last save .* · Thread/,
+          );
+          assert.doesNotMatch(
+            await work.textContent(),
+            /\d+ saves?Thread/,
+            'saves and Thread stay visibly separated',
+          );
           assert.equal(await work.getByText('2 files changed', { exact: true }).count(), 1);
           assert.equal(await work.getByText('Passed', { exact: true }).count(), 1);
           assert.equal(
