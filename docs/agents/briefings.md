@@ -110,6 +110,11 @@ If a command waits for approval and nobody can answer, cancel it and use the rou
    builders are forbidden unless the owner explicitly says so. `--spend` prints
    today's and the month's spend per provider. A core queue change still takes the fresh-context session
    review recorded in its [queue proof](#attaching-queue-proof); the script does not qualify for that.
+   Until Forge goes live, at least through the end of Phase 8, the owner and our agents
+   are the only users. For findings about migration, upgrade, in-flight or other-user
+   state, use read-only checks or counts to find affected users, running agents and
+   live data. Mark a finding not applicable only when the evidence shows no impact.
+   Record that evidence on the Item. If unsure, ask the lead, who asks the owner.
    The reviewer prompt must include the AGENTS.md safety line verbatim.
    Copy the full line starting with “Never print environment values or
    secrets” from [AGENTS.md](../../AGENTS.md#hard-rules). Check the benchmark hold before each submission.

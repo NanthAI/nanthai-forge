@@ -187,6 +187,12 @@ review before the next dry round. Major architecture decisions also need a
 critical review of alternatives, including improving our own baseline; name pivot
 cost and diminishing returns. A passing test does not authorize a policy change.
 
+Until Forge goes live, at least through the end of Phase 8, the owner and our agents
+are the only users. For migration, upgrade, in-flight or other-user state concerns,
+check live users, running agents and affected data with read-only evidence. Skip the
+work only when the check shows no impact and record the evidence on the Item. Bring
+uncertain cases to the owner.
+
 Before reporting a landing, match the receipt and operation id to that builder's
 Lane and verify its files on accepted main (a named symbol or file, not a receipt alone). A completed patch or a passing check
 is not a landing. If `convex/` changed, also verify the deployment workflow is green
