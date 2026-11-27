@@ -233,7 +233,12 @@ test('the Lane title comes from its Intent even with UUID-only overlap metadata,
   t.diagnostic(
     `view with a title: ${meter.documents} documents, ${meter.ranges} ranges, ${meter.readBytes} bytes`,
   );
-  assert(meter.documents <= 12, `reads ${meter.documents} documents`);
+  const composeReads = meter.readDocumentsByTable.projectHostedComposeSelections ?? 0;
+  assert(composeReads <= 1, 'the direct Lane performs one Candidate selection lookup');
+  assert(
+    meter.documents - composeReads <= 12,
+    `reads ${meter.documents} documents, including ${composeReads} for the selection`,
+  );
 
   const header = [...s.tables.projectHostedRecords.values()].find(
     row => row.kind === 'intent' && row.key === saved.intentId,
@@ -296,6 +301,201 @@ test('a row written for another head is not shown as this save; pages are bounde
   const stale = await read();
   assert.equal(stale.files.current, false);
   assert.deepEqual(stale.files.items, []);
+});
+
+test('an approval link shows its pinned Candidate summary and never substitutes another Lane’s Candidate', async t => {
+  const { s, saved, read, write } = await lane([]);
+  const { projectId } = s;
+  const candidateId = randomUUID();
+  const submission = randomUUID();
+  const attemptId = randomUUID();
+  const operationId = randomUUID();
+  const composeOperationId = randomUUID();
+  const head = digest('composed separately from the Lane');
+  const base = { head: digest('main advanced'), receiptId: 'main-1' };
+  const itemId = randomUUID();
+  await write(
+    {
+      kind: 'intent',
+      id: saved.intentId,
+      version: 0,
+      at: saved.at,
+      outcome: 'Review the submitted change',
+      constraints: '',
+      creatorAccountId: 'owner',
+      assigneeAccountIds: [],
+      base: saved.base,
+      status: 'active',
+    },
+    undefined,
+    null,
+    itemId,
+  );
+  await write({
+    kind: 'candidate',
+    id: candidateId,
+    version: 0,
+    at: saved.at,
+    intentId: saved.intentId,
+    base,
+    inputs: { sha256: digest('inputs'), size: 10 },
+    dependencies: { sha256: digest('dependencies'), size: 10 },
+    algorithm: 'native@fixture',
+    result: { status: 'clean', head },
+  });
+  const state = {
+    schema: 1,
+    id: submission,
+    projectId,
+    operationId,
+    actor: 'owner',
+    at: saved.at,
+    attemptId,
+    firstAttemptId: attemptId,
+    sequence: 1,
+    version: 1,
+    phase: 'ready',
+    observation: { state: 'pending', pendingReason: 'waiting-for-review', cause: null },
+    error: null,
+    request: {
+      operationId,
+      authorityEpoch: 1,
+      candidateId,
+      expectedHead: head,
+      expectedMain: base,
+      channel: 'main',
+      agent: true,
+      check: null,
+      message: 'Split input safely',
+      notVerified: ['Device runner'],
+      finish: { composeOperationId, after: null },
+    },
+  };
+  const landing = s.insert('projectHostedLandingRequests', {
+    projectId,
+    candidateId,
+    channel: 'main',
+    submissionId: submission,
+    operationId,
+    actor: 'owner',
+    attemptId,
+    sequence: 1,
+    runnable: false,
+    phase: 'ready',
+    runId: null,
+    value: JSON.stringify(state),
+  });
+  const wrong = await read({ submission });
+  assert.equal(wrong.candidate, undefined);
+  assert.equal(wrong.candidateUnavailable, true);
+  s.insert('projectHostedComposeSelections', {
+    projectId,
+    actor: 'owner',
+    operationId: composeOperationId,
+    kind: 'inputs',
+    key: saved.id,
+    head: saved.head,
+  });
+  const exact = await read({ submission });
+  assert.equal(exact.lane.head, saved.head);
+  assert.deepEqual(exact.candidate, {
+    candidateId,
+    base: base.head,
+    head,
+    files: null,
+    summary: 'Split input safely',
+    notVerified: ['Device runner'],
+    check: 'not-run',
+  });
+  const meter = s.counts.at(-1);
+  t.diagnostic(`Candidate review: ${meter.documents} documents, ${meter.readBytes} bytes`);
+  // One exact landing and compose selection plus the access-checked Candidate Work record.
+  assert(meter.documents <= 20);
+  assert(meter.readBytes < 64 * 1024);
+  assert.equal(meter.writes, 0);
+  assert(!meter.touched.includes('projectObjects'));
+  s.insert('projectHostedComposes', {
+    projectId,
+    actor: 'owner',
+    jobId: randomUUID(),
+    operationId: composeOperationId,
+    value: JSON.stringify({ candidateId }),
+  });
+  s.insert('projectContributors', { projectId, contributor: 'writer' });
+  s.insert('projectReaders', { projectId, reader: 'reader' });
+  const direct = await read({}, 'writer');
+  assert.equal(
+    direct.candidate.head,
+    head,
+    'the Lane selects its live Candidate without the frame feed or a link',
+  );
+  assert.equal(direct.noteItemId, itemId);
+  assert.equal((await read({}, 'reader')).noteItemId, undefined);
+
+  const { lineReviewText } = await import(moduleUrl('../src/candidate-line-note.ts'));
+  const { memberPlanningWrite, requireCandidateLineNote } = await import(
+    moduleUrl('../convex/projectPlanningWriteAccess.ts')
+  );
+  const work = await import(moduleUrl('../convex/projectWorkCommand.ts'));
+  const pin = {
+    candidateId,
+    laneId: saved.id,
+    base: base.head,
+    head,
+    path: 'src/exact.ts',
+    side: 'head',
+    blob: digest('file'),
+    line: 1,
+    changed: true,
+  };
+  const command = {
+    action: 'comment-planning-item',
+    operationId: randomUUID(),
+    itemId,
+    text: lineReviewText(pin, 'Check this case.'),
+    authorLabel: '',
+  };
+  assert.equal(memberPlanningWrite(command, false), true);
+  assert.equal(memberPlanningWrite({ ...command, text: 'An ordinary comment' }, false), false);
+  assert.equal(memberPlanningWrite({ ...command, decision: true }, false), false);
+  const authorize = command =>
+    s.transaction(
+      'writerNote',
+      {
+        _handler: ctx => requireCandidateLineNote(ctx, { projectId, actor: 'writer' }, command),
+      },
+      {},
+      'writer',
+    );
+  await authorize(command);
+  await assert.rejects(
+    authorize({ ...command, itemId: randomUUID() }),
+    error => error.code === 'PROJECT_UNAVAILABLE',
+  );
+  await assert.rejects(
+    authorize({ ...command, text: lineReviewText({ ...pin, head: saved.head }, 'Wrong head') }),
+    error => error.code === 'PROJECT_UNAVAILABLE',
+  );
+  await assert.rejects(
+    s.transaction(
+      'readerNote',
+      work.command,
+      {
+        projectId,
+        operationId: command.operationId,
+        command: JSON.stringify(command),
+      },
+      'reader',
+    ),
+    error => error.data?.code === 'PROJECT_UNAVAILABLE',
+  );
+
+  s.patch('projectHostedLandingRequests', landing, {
+    value: JSON.stringify({ ...state, request: { ...state.request, expectedHead: saved.head } }),
+  });
+  const mismatched = await read({ submission });
+  assert.equal(mismatched.candidate, undefined);
+  assert.equal(mismatched.candidateUnavailable, true);
 });
 
 test('a landed Lane names its own time to main and stops, from its receipt and landing row only', async t => {

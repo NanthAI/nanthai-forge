@@ -27,6 +27,18 @@
   .lr-file > .tick:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
   .lr-tools { display: flex; gap: var(--s-2) var(--s-3); align-items: center; flex-wrap: wrap; padding: var(--s-2) var(--gut); border-bottom: var(--rule) solid var(--line); }
   .lr-tools .right { margin-left: auto; }
+  .lr-facts .who { min-width: 0; }
+  .lr-facts .who .a-run { flex-shrink: 1; }
+  .lr-candidate-facts { border-bottom: var(--rule) solid var(--line); }
+  .lr-candidate-facts ul { margin: 0; padding-inline-start: var(--s-4); }
+  .lr-line-note { padding: 0; border: 0; background: transparent; color: var(--accent); font: inherit; min-width: 100%; text-align: end; cursor: pointer; }
+  .lr-line-note:disabled { color: inherit; cursor: default; }
+  .lr-line-note[aria-expanded='true'] { background: var(--accent-bg); }
+  .lr-note { inline-size: min(var(--m-prose), 100%); padding-inline: var(--gut); }
+  .lr-note form, .lr-note label { display: grid; gap: var(--s-2); }
+  .lr-note textarea { min-width: 0; min-height: var(--s-16); resize: vertical; }
+  .lr-note-keys { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+  @media (pointer: coarse) { .lr-line-note { min-height: 40px; } }
   .lr-purge { display: grid; gap: var(--s-3); padding: var(--s-3) var(--gut); }
   .lr-purge label { display: grid; gap: var(--s-1); }
   .lr-more { width: 100%; justify-content: flex-start; border-radius: 0; border-bottom: var(--rule) solid var(--line); }

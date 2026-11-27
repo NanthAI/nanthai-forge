@@ -84,6 +84,17 @@ export type Reply = {
   request?: Approval & { state: string; decision?: { reason?: string } };
   /** The viewer owns the project: a file row offers the saved-bytes purge (Item 9d3c407d). */
   owner?: boolean;
+  noteItemId?: string;
+  candidateUnavailable?: true;
+  candidate?: {
+    candidateId: string;
+    base: string;
+    head: string;
+    files: { sha256: string; size: number } | null;
+    summary: string | null;
+    notVerified: string[] | null;
+    check: string | null;
+  };
   supervised: boolean;
   protectedRules: number;
   files: {

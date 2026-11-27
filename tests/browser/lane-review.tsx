@@ -71,6 +71,9 @@ const parserMine = parserMain
   .replace('  emit(text);', '  if (text) emit(text);\n  carry.reset();');
 
 const calls: string[] = [];
+let fallbackComparison:
+  | { base: string; state: string; changes: Reply['files']['items']; total: number }
+  | undefined;
 const listeners = new Map<string, Set<() => void>>();
 const client = {
   query: async (ref: unknown, { cursor }: { cursor: string | null }) => {
@@ -80,6 +83,10 @@ const client = {
   action: async (ref: unknown, args: { projectId: string; request: string }) => {
     if (getFunctionName(ref as never) === 'projectHostedUndoArchive:returnToSave')
       return history.return(args.projectId, args.request, true);
+    if (getFunctionName(ref as never) === 'projectCodeBrowse:read' && fallbackComparison) {
+      (window as unknown as { __candidateComparison: unknown }).__candidateComparison = args;
+      return JSON.stringify(fallbackComparison);
+    }
     throw new Error('Unexpected fixture action');
   },
   mutation: async (ref: unknown, args: { digests: string[]; projectId: string; request: string }) => {
@@ -87,6 +94,13 @@ const client = {
     calls.push(name);
     (window as unknown as { __calls: string[] }).__calls = calls;
     if (name === 'projectHostedUndo:returnToSave') return history.return(args.projectId, args.request);
+    if (name === 'projectWorkCommand:command') {
+      const writes = JSON.parse(sessionStorage.getItem('fixture.noteWrites') ?? '[]') as unknown[];
+      writes.push(args);
+      sessionStorage.setItem('fixture.noteWrites', JSON.stringify(writes));
+      if (writes.length === 1) throw new Error('Synthetic lost reply');
+      return {};
+    }
     if (
       name === 'projectHostedApprovals:decide' ||
       name === 'projectHostedAcceptance:approve' ||
@@ -225,29 +239,76 @@ async function reply(): Promise<Reply> {
     flaggedAt: '2026-11-22T12:00:00.000Z',
     files: [{ path: 'package.json', mine: [[2, 2]], theirs: [[2, 2]] }],
   };
+  const wideByline = scenario.startsWith('candidate') || scenario === 'landed-wide-facts';
+  const landed = scenario === 'landed' || scenario === 'landed-wide-facts';
+  const candidateHead = 'd4'.repeat(32);
+  const candidateBase = 'd3'.repeat(32);
+  const exactFiles: Reply['files']['items'] = scenario.startsWith('candidate')
+    ? [
+        {
+          path: 'src/exact-result.ts',
+          status: 'modified',
+          before: await blob('export const amount = 1;\n'),
+          after: await blob('export const amount = 2;\n'),
+        },
+      ]
+    : [];
+  if (scenario.startsWith('candidate-large'))
+    fallbackComparison = {
+      base: candidateBase,
+      state: candidateHead,
+      changes: exactFiles,
+      total: scenario.endsWith('-double') ? 2568 : 1284,
+    };
+  const candidateFiles = exactFiles.length
+    ? await blob(
+        JSON.stringify({
+          base: candidateBase,
+          head: candidateHead,
+          files: exactFiles,
+        }),
+      )
+    : null;
   return {
+    ...(candidateFiles
+      ? {
+          candidate: {
+            candidateId: '12345678-1234-4234-8234-123456789abc',
+            head: candidateHead,
+            base: candidateBase,
+            files: {
+              sha256: candidateFiles.blob,
+              size: fallbackComparison ? 2 * 1024 * 1024 : sizes.get(candidateFiles.blob)!,
+            },
+            summary: 'Keep partial input until the next read.',
+            notVerified: ['Split input on the device runner'],
+            check: 'passed',
+          },
+          ...(scenario !== 'candidate-reader' ? { noteItemId: ITEM } : {}),
+        }
+      : {}),
     lane: {
       laneId: LANE,
       intentId: scenario === 'legacy-id' ? ITEM : INTENT,
       ...(scenario === 'legacy-id' ? {} : { itemId: ITEM }),
       goal: scenario === 'unavailable' ? null : scenario === 'legacy-id' ? ITEM : TITLE,
-      actor: 'sample-owner',
-      agent: 'amber-fox',
-      agentClient: 'codex:gpt-example',
-      state: scenario === 'abandoned' ? 'abandoned' : scenario === 'landed' ? 'completed' : 'active',
+      // A long *valid* public byline, so the identity filter doesn't render “not reported”.
+      actor: wideByline ? 'w'.repeat(39) : 'sample-owner',
+      agent: wideByline ? 'patient-albatross' : 'amber-fox',
+      agentClient: wideByline ? 'codex:' + 'model-'.repeat(10) + 'wide' : 'codex:gpt-example',
+      state: scenario === 'abandoned' ? 'abandoned' : landed ? 'completed' : 'active',
       head: HEAD,
       base: { head: BASE },
       ...(saveFailure ? { saveFailure } : {}),
       // A landed Lane carries its own time to main and stops (Item a61d3c91).
-      landed:
-        scenario === 'landed'
-          ? {
-              receiptId: '7c6b5a49-3827-4160-9e8d-1a2b3c4d5e6f',
-              commit: 'c4'.repeat(32),
-              at: new Date(Date.now() - 3 * 60_000).toISOString(),
-              timing: { toMain: 477, queue: 42, check: 430, land: 5 },
-            }
-          : null,
+      landed: landed
+        ? {
+            receiptId: '7c6b5a49-3827-4160-9e8d-1a2b3c4d5e6f',
+            commit: 'c4'.repeat(32),
+            at: new Date(Date.now() - 3 * 60_000).toISOString(),
+            timing: { toMain: 477, queue: 42, check: 430, land: 5 },
+          }
+        : null,
       ...(scenario === 'parked'
         ? {
             park: {

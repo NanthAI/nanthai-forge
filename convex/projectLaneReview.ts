@@ -8,7 +8,7 @@
 // lookup as Lanes, at a fixed cost per view. File continuations skip it.
 import { v } from 'convex/values';
 import { projectQuery as query } from './cliServer';
-import { accessibleProject } from './projectAuthority';
+import { accessibleProject, readProjectRole } from './projectAuthority';
 import { readHostedIntentLabel, readHostedRecord } from './projectHostedRecords';
 import { laneConflicts } from './projectHostedConflicts';
 import { isAgentSlug } from '../src/agent-slug';
@@ -22,6 +22,7 @@ import { saveFailureForViewer } from './projectHostedSaveStore';
 import { approvalRow, approvalView } from './projectHostedApprovalStore';
 import { deriveApproval } from '../src/approval-state';
 import { overlapLaneChanges, overlapLaneEntries } from './projectHostedOverlapChanges';
+import { laneReviewCandidate } from './projectLaneReviewCandidate';
 
 /** The owner's open decision on a Lane's own request: asked, declined while it still holds the Lane (the owner may
  * approve instead), or granted and not yet landed (shown, nothing to decide). A settings key is never a Lane; a fork run is decided once. The Needs me request shape. */
@@ -51,9 +52,14 @@ const PEERS = 8;
 const ORIGIN_PEERS = 3;
 
 export const read = query({
-  args: { projectId: v.id('hostedProjects'), laneId: v.string(), offset: v.optional(v.number()) },
+  args: {
+    projectId: v.id('hostedProjects'),
+    laneId: v.string(),
+    offset: v.optional(v.number()),
+    submission: v.optional(v.string()),
+  },
   returns: v.string(),
-  handler: async (ctx, { projectId, laneId, offset = 0 }) => {
+  handler: async (ctx, { projectId, laneId, offset = 0, submission }) => {
     try {
       invariant(Number.isSafeInteger(offset) && offset >= 0, 'BAD_ARGUMENT', 'Choose a valid page.');
       const user = await ctx.auth.getUserIdentity();
@@ -140,8 +146,21 @@ export const read = query({
         }),
       );
       const timing = row?.landed ? await landedTiming(ctx, projectId, row.landed.receiptId) : null;
-      const intent = await intentRead;
-      const request = ownerRequest(await askedRead, laneId);
+      const [intent, candidate, approval] = await Promise.all([
+        intentRead,
+        offset === 0 && (submission || (lane.state === 'active' && !row?.landed && lane.sourceVersion > 0))
+          ? laneReviewCandidate(ctx, {
+              projectId,
+              actor: user.subject,
+              laneId,
+              intentId: lane.intentId,
+              submission,
+            })
+          : null,
+        askedRead,
+      ]);
+      const request = ownerRequest(approval, laneId);
+      const role = candidate && intent?.itemId ? await readProjectRole(ctx, project, user.subject) : null;
       const run = isAgentSlug(lane.agentRun) ? lane.agentRun : null;
       const savedBy = current ? row.savedBy : undefined;
       // Before the save's author was projected, a holder change or a legacy owner override
@@ -188,6 +207,9 @@ export const read = query({
             : {}),
         },
         ...(request ? { request } : {}),
+        ...(candidate ? { candidate } : {}),
+        ...(submission && !candidate ? { candidateUnavailable: true } : {}),
+        ...(role === 'owner' || role === 'write' ? { noteItemId: intent?.itemId } : {}),
         // The owner may purge a leaked file's saved bytes from its row (Item 9d3c407d).
         ...(project.owner === user.subject ? { owner: true } : {}),
         supervised: policy.acceptance.mode === 'review',

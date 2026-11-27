@@ -63,6 +63,39 @@ test('a reviewer batch and a reasoned reply retain exact source evidence through
   );
 });
 
+test('a Candidate line note retains the selected side, immutable blob and unchanged-line classification', async () => {
+  const { lineReviewText } = await import(moduleUrl('../src/candidate-line-note.ts'));
+  const exact = {
+    candidateId: randomUUID(),
+    laneId: review.laneId,
+    base: review.base,
+    head: review.head,
+    path: 'src/example.ts',
+    side: 'base',
+    blob: 'f'.repeat(64),
+    line: 42,
+    changed: false,
+  };
+  const parsed = readReview(lineReviewText(exact, '  This assumption predates the change.  '));
+  assert.equal(parsed.candidateId, exact.candidateId);
+  assert.equal(parsed.laneId, exact.laneId);
+  assert.equal(parsed.base, exact.base);
+  assert.equal(parsed.head, exact.head);
+  assert.deepEqual(parsed.findings, [
+    {
+      id: 'R1',
+      severity: 'should',
+      path: exact.path,
+      side: 'base',
+      blob: exact.blob,
+      line: 42,
+      claim: 'This assumption predates the change.',
+      origin: 'pre-existing',
+      outcome: 'open',
+    },
+  ]);
+});
+
 test('findings draw the complete count, evidence side and origin, outcome and reason as inert text', () => {
   const hostile = structuredClone(review);
   hostile.findings[0].claim = '<img src=x onerror=alert(1)> [run](javascript:alert(2))';

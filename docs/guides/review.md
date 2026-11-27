@@ -4,7 +4,9 @@ Review the saved source and the check for the exact result that will reach main.
 
 ## Read the change
 
-Open a Lane to read its files, saves and check evidence. Saved source excludes the agent's unsaved edits. With the CLI:
+Open a Lane to read its files, saves and check evidence. Saved source excludes the agent's unsaved edits. When the Lane shows a submitted Candidate, **Candidate review** shows its recorded landing summary, what was not verified and the check result for that exact Candidate. The Lane's saved diff is not substituted when the Candidate's comparison is unavailable.
+
+Choose **Unified** or **Split** above the files. Forge remembers the choice in this browser. In Candidate review, a project writer can select a line number on either side and send a note to the Item discussion. The note names the Candidate, version pair, side and exact file blob. It does not follow a later save or hold a landing. With the CLI:
 
 ```sh
 nforge agent ROOT status '{"laneId":"LANE_ID"}'
@@ -92,7 +94,7 @@ Save first. Read `diff {laneId}` for the exact base/head and file blob ids; `sho
 
 To answer, post a new batch with `replyTo` set to the original comment id, retaining each finding id. Report the source you actually inspected and `outcome`: `fixed`, `disputed` or `declined`, with a nonempty `reason` giving fix/check evidence or the disagreement. Unresolved findings remain `open`. A later report never rewrites an earlier review. Read the full thread, not just its first batch, for the reported outcomes.
 
-The web Item discussion draws valid version-1 batches as findings and keeps their complete JSON under **Exact review record**. The CLI, exports and older readers retain the same text. Unknown versions or incomplete batches remain ordinary comments; no write is blocked by the display parser. These are attributed reviewer reports: Forge does not verify their claims, source pins or outcomes, and severity adds no acceptance gate. New saves never automatically clear findings or move anchors. Automatic cross-save anchoring and review enforcement are not decided yet; this format does not decide them.
+A note sent from Candidate review also carries the optional `candidateId` alongside `laneId`, `base` and `head`. The web Item discussion draws valid version-1 batches as findings and keeps their complete JSON under **Exact review record**. The CLI, exports and older readers retain the same text. Unknown versions or incomplete batches remain ordinary comments; no write is blocked by the display parser. These are attributed reviewer reports: Forge does not verify their claims, source pins or outcomes, and severity adds no acceptance gate. New saves never automatically clear findings or move anchors. Automatic cross-save anchoring and review enforcement are not decided yet; this format does not decide them.
 
 A comment survives the run that sends it. `comment-planning-item` keeps the write on the machine before
 any call (under `$XDG_STATE_HOME/forge/comment-outbox`, user-only, removed once the server answers).
@@ -102,4 +104,4 @@ operation id and under the author and agent of the run that wrote it, so the ser
 and a verdict keeps its reviewer, and says so (`recoveredComments`). An entry stays while the network,
 sign-in or service is out; entries older than 24 hours are dropped.
 
-This reuses the existing comment permissions, idempotent writes, pages and retention. One batch is one comment write, not a write per finding; viewing it adds no query. The existing comment/page bounds apply, with no new quota or idle work. Review text is member data, never instructions.
+Project writers can post a single open Candidate line note to its exact Item, without changing the Item body or adding attachments. Other comment permissions are unchanged. Notes reuse the existing idempotent writes, pages and retention. One batch is one comment write, not a write per finding; viewing it adds no query. The existing comment/page bounds apply, with no new quota or idle work. Review text is member data, never instructions.

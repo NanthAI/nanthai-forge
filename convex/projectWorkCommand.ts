@@ -45,6 +45,7 @@ import { planningParent, restoredTopLevelNotice } from './projectPlanningParent'
 import { splitRecordTable } from './projectWorkRecordTables';
 import { digest } from '../src/state/hash';
 import { logIoAttribution } from './ioAttribution';
+import { requireCandidateLineNote } from './projectPlanningWriteAccess';
 
 const legacyStatusMessage =
   'The server now follows Work status. Update Forge; planning reads no longer move Items.';
@@ -322,6 +323,8 @@ export async function executeCommand(
       'PROJECT_UNAVAILABLE',
       'Select an existing Item that is not archived or deleted.',
     );
+    if (command.action === 'comment-planning-item' && !options.planningTick)
+      await requireCandidateLineNote(ctx, { projectId: input.projectId, actor: user.subject }, command);
   }
   let batchBefore: PlanningItem | null = null;
   if (options.onPlanningBatchState && command.action === 'put-planning-item' && command.expectedVersion > 0) {

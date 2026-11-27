@@ -3,7 +3,7 @@
 // One file's changed hunks, drawn unified or side by side, with syntax colours from the highlight worker (Item
 // 8e847a17). The Lane page and a landing's changes (app/code/Changes.tsx) share it, so a diff reads the same
 // wherever it opens. Each side is coloured once as one text; a line that cannot be coloured stays plain.
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState, type ReactNode } from 'react';
 import { Tokens } from './code-tokens';
 import { CodeBox, Segment } from './ds';
 import { requestHighlight } from './highlight-client';
@@ -82,24 +82,37 @@ function useTokens(path: string, hunks: Hunk[]) {
   return tokens;
 }
 
+/** A visible line can have a distinct number on either side of the comparison. */
+export type DiffLine = { side: 'base' | 'head'; line: number; changed: boolean };
+
 export function DiffView({
   path,
   hunks,
   mode,
   onColoured,
+  lineNumber,
+  belowLine,
 }: {
   path: string;
   hunks: Hunk[];
   mode: DiffMode;
   /** Called once the colours are in (the QA first-diff marker). */
   onColoured?: (coloured: boolean) => void;
+  lineNumber?: (line: DiffLine) => ReactNode;
+  belowLine?: (line: DiffLine) => ReactNode;
 }) {
   const tokens = useTokens(path, hunks);
   useEffect(() => onColoured?.(tokens !== null), [tokens, onColoured]);
+  const number = (line: DiffLine) => (lineNumber ? lineNumber(line) : line.line);
+  const anchor = (cell: NonNullable<Cell>, side: DiffLine['side']): DiffLine => ({
+    side,
+    line: cell.n,
+    changed: cell.kind !== 'context',
+  });
   const cell = (side: Cell, which: 'l' | 'r') =>
     side ? (
       <>
-        <span className={`n ${side.kind}`}>{side.n}</span>
+        <span className={`n ${side.kind}`}>{number(anchor(side, which === 'l' ? 'base' : 'head'))}</span>
         <span className={`c ${side.kind}`} data-side={which}>
           <Tokens tokens={tokens?.get(side.key)} text={side.text} />
         </span>
@@ -119,10 +132,14 @@ export function DiffView({
               <span className="c">line {hunk.afterStart.toLocaleString()}</span>
             </div>
             {splitRows(hunk, h).map((row, i) => (
-              <div key={i} className="l">
-                {cell(row.left, 'l')}
-                {cell(row.right, 'r')}
-              </div>
+              <Fragment key={i}>
+                <div className="l">
+                  {cell(row.left, 'l')}
+                  {cell(row.right, 'r')}
+                </div>
+                {belowLine && row.left ? belowLine(anchor(row.left, 'base')) : null}
+                {belowLine && row.right ? belowLine(anchor(row.right, 'head')) : null}
+              </Fragment>
             ))}
           </div>
         ))}
@@ -141,19 +158,25 @@ export function DiffView({
               <span className="c">line {hunk.afterStart.toLocaleString()}</span>
             </div>
             {hunk.lines.map((line, l) => {
-              const b = line.kind === 'added' ? '' : before++;
-              const a = line.kind === 'removed' ? '' : after++;
+              const changed = line.kind !== 'context';
+              const b: DiffLine | null =
+                line.kind === 'added' ? null : { side: 'base', line: before++, changed };
+              const a: DiffLine | null =
+                line.kind === 'removed' ? null : { side: 'head', line: after++, changed };
               return (
-                <div
-                  key={l}
-                  className={`l${line.kind === 'added' ? ' add' : line.kind === 'removed' ? ' del' : ''}`}
-                >
-                  <span className="n">{b}</span>
-                  <span className="n">{a}</span>
-                  <span className="c">
-                    <Tokens tokens={tokens?.get(`${h}:${l}`)} text={line.text} />
-                  </span>
-                </div>
+                <Fragment key={l}>
+                  <div
+                    className={`l${line.kind === 'added' ? ' add' : line.kind === 'removed' ? ' del' : ''}`}
+                  >
+                    <span className="n">{b ? number(b) : ''}</span>
+                    <span className="n">{a ? number(a) : ''}</span>
+                    <span className="c">
+                      <Tokens tokens={tokens?.get(`${h}:${l}`)} text={line.text} />
+                    </span>
+                  </div>
+                  {b ? belowLine?.(b) : null}
+                  {a ? belowLine?.(a) : null}
+                </Fragment>
               );
             })}
           </div>

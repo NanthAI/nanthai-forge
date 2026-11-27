@@ -922,6 +922,124 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
         );
       }
     });
+    await t.test('Candidate notes keep their exact line and retry identity in both layouts', async t => {
+      for (const viewport of [DESK, PHONE]) {
+        const page = await open(t, viewport, 's=candidate&frame');
+        const change = page.getByRole('region', { name: 'The change', exact: true });
+        await change.getByRole('heading', { name: 'Candidate review' }).waitFor();
+        for (const fact of [
+          'Keep partial input until the next read.',
+          'Split input on the device runner',
+          'Check passed',
+        ])
+          await change.getByText(fact).waitFor();
+        const file = change
+          .locator('details.file')
+          .filter({ hasText: 'src/exact-result.ts' })
+          .locator('summary');
+        await file.click();
+        const unified = page.getByRole('region', { name: 'Changes to src/exact-result.ts', exact: true });
+        await unified.getByRole('button', { name: 'Add note: Before line 1', exact: true }).press('Enter');
+        const draft = page.getByRole('textbox', { name: 'Note on before line 1' });
+        const claim = 'The previous value matters here.';
+        await draft.fill(claim);
+        const layout = change.getByRole('radiogroup', { name: 'Diff layout' });
+        const split = layout.getByRole('radio', { name: 'Split', exact: true });
+        assert.equal(
+          await layout.getByRole('radio', { name: 'Unified' }).getAttribute('aria-checked'),
+          'true',
+        );
+        await split.click();
+        await page.getByRole('region', { name: 'Changes to src/exact-result.ts, side by side' }).waitFor();
+        assert.equal(await draft.inputValue(), claim, 'changing layout preserves the note and side');
+        await fitsBothThemes(page, viewport);
+        const send = page.getByRole('button', { name: 'Send note' });
+        await send.click();
+        await page.getByRole('alert').filter({ hasText: 'Forge did not confirm the note' }).waitFor();
+        assert.equal(await draft.inputValue(), claim);
+        await page.reload();
+        await split.waitFor();
+        assert.equal(await split.getAttribute('aria-checked'), 'true');
+        await file.click();
+        await page.getByRole('button', { name: 'Add note: Before line 1', exact: true }).click();
+        await draft.fill(claim);
+        await send.click();
+        await page.getByRole('link', { name: 'Note sent to the Item discussion' }).waitFor();
+        const [first, retry] = await page.evaluate(() =>
+          JSON.parse(sessionStorage.getItem('fixture.noteWrites')),
+        );
+        assert.deepEqual(retry, first, 'a lost reply reuses the write operation even after reload');
+        const command = JSON.parse(first.command);
+        const record = JSON.parse(command.text);
+        assert.equal(command.itemId, '9e8d7c6b-5a49-4382-9170-6f5e4d3c2b1a');
+        assert.equal(record.candidateId, '12345678-1234-4234-8234-123456789abc');
+        assert.equal(record.base, 'd3'.repeat(32));
+        assert.equal(record.head, 'd4'.repeat(32));
+        const { createHash } = await import('node:crypto');
+        assert.deepEqual(record.findings[0], {
+          id: 'R1',
+          severity: 'should',
+          path: 'src/exact-result.ts',
+          side: 'base',
+          blob: createHash('sha256').update('export const amount = 1;\n').digest('hex'),
+          line: 1,
+          claim,
+          origin: 'changed',
+          outcome: 'open',
+        });
+      }
+    });
+
+    async function fitsBothThemes(page, viewport) {
+      for (const theme of ['dark', 'light']) {
+        await page.evaluate(value => {
+          document.documentElement.dataset.theme = value;
+        }, theme);
+        const fits = await page
+          .locator('.lr-facts .who')
+          .filter({ hasText: 'patient-albatross' })
+          .evaluate(
+            who =>
+              document.documentElement.scrollWidth <= innerWidth &&
+              who.getBoundingClientRect().right <= innerWidth &&
+              who.scrollWidth <= who.clientWidth,
+          );
+        assert.equal(fits, true, `${viewport.width} ${theme}`);
+      }
+    }
+
+    await t.test('an oversized Candidate listing opens a bounded exact comparison first', async t => {
+      for (const [scenario, total] of [
+        ['candidate-large', '1,284'],
+        ['candidate-large-double', '2,568'],
+      ]) {
+        const page = await open(t, DESK, `s=${scenario}&frame`);
+        const file = page.locator('details.file summary').filter({ hasText: 'src/exact-result.ts' });
+        await file.waitFor();
+        await page.getByText(`Showing 1 file of ${total}.`).waitFor();
+        assert.deepEqual(await page.evaluate(() => window.__candidateComparison), {
+          projectId: 'p1',
+          state: 'd4'.repeat(32),
+          base: 'd3'.repeat(32),
+          want: 'changes',
+        });
+        assert.equal(await calls(page), 0, 'the oversized listing was not downloaded');
+        await file.click();
+        await page.getByRole('button', { name: 'Add note: After line 1', exact: true }).waitFor();
+      }
+    });
+
+    await t.test('readers cannot open a note composer and landed Facts fit long attribution', async t => {
+      const reader = await open(t, PHONE, 's=candidate-reader&frame');
+      await reader.locator('details.file summary').filter({ hasText: 'src/exact-result.ts' }).click();
+      await reader.getByRole('region', { name: 'Changes to src/exact-result.ts', exact: true }).waitFor();
+      assert.equal(await reader.getByRole('button', { name: /^Add note:/ }).count(), 0);
+      for (const viewport of [DESK, PHONE]) {
+        const page = await open(t, viewport, 's=landed-wide-facts&frame');
+        await page.getByRole('heading', { name: 'Facts', exact: true }).waitFor();
+        await fitsBothThemes(page, viewport);
+      }
+    });
   } finally {
     await browser.close();
     rmSync(out, { recursive: true, force: true });

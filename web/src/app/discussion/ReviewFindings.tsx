@@ -22,12 +22,17 @@ type Review = {
   laneId: string;
   base: string;
   head: string;
+  candidateId?: string;
   findings: Finding[];
 };
 const object = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value);
 const textValue = (value: unknown): value is string => typeof value === 'string' && !!value.trim();
 const hash = (value: unknown) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
+const uuid = (value: unknown) =>
+  typeof value === 'string' &&
+  /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(value);
+
 const oneOf = (value: unknown, values: string[]) => typeof value === 'string' && values.includes(value);
 
 /** Unknown versions, incomplete evidence and ordinary comments retain their original text presentation. No write
@@ -44,8 +49,8 @@ export function readReview(text: string): Review | null {
     !object(value) ||
     value.kind !== 'forge-review' ||
     value.version !== 1 ||
-    typeof value.laneId !== 'string' ||
-    !/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(value.laneId) ||
+    !uuid(value.laneId) ||
+    (value.candidateId !== undefined && !uuid(value.candidateId)) ||
     !hash(value.base) ||
     !hash(value.head) ||
     !Array.isArray(value.findings)

@@ -22,7 +22,7 @@ import type { Id } from '../../../../convex/_generated/dataModel';
 import { isPlanningUuid } from '../../../../src/planning-id';
 import { reviewGroupLabels, reviewGroups, type ReviewGroup } from '../../../../src/review-order';
 import { Avatar, Band, CodeBox, Key, State } from '../../ds';
-import { DiffView } from '../../diff-view';
+import { DiffModeToggle, useDiffMode, type DiffMode } from '../../diff-view';
 import { A } from '../frames';
 import { RecordedWho } from '../RecordedWho';
 import { declaredModel, recordedIdentity } from '../who-links';
@@ -31,7 +31,9 @@ import { hrefFor, type AppRoute } from '../paths';
 import { crumbsFor, Head } from '../Place';
 import { SaveFailureNotice } from '../SaveFailureNotice';
 import type { PlaceProps } from '../screens';
-import { readExact, readFileBody, type FileBody, type Hunk } from './file-diff';
+import { readExact, readFileBody, type FileBody } from './file-diff';
+import { ReviewDiff, type NoteDestination } from './ReviewDiff';
+import { useCandidateFiles } from './candidate-files';
 import { lineOrigin, type LineOrigin, type Origin } from './line-origin';
 import { readMark, useReadTicks, type ReadState } from './read-ticks';
 import {
@@ -53,7 +55,6 @@ import { conflictNote, heldWhyState, laneState } from '../lane-state';
 import { LaneDecision, useHeldView } from '../needs/LaneDecision';
 import { holdLine, parkLine } from '../needs/model';
 import { uniqueBy } from '../../ui/unique';
-import { usePageCritical } from '../../ui/page-critical';
 import { CopyKey } from '../start/parts';
 import { PurgeFile } from './PurgeFile';
 import { LaneSaveLoading } from './LaneSaveLoading';
@@ -130,7 +131,13 @@ class Boundary extends Component<
 
 function Review({ route, projectId, projectName, feed }: Props) {
   const laneId = route.rest.split('/')[0]!;
-  const text = useQuery(api.projectLaneReview.read, { projectId, laneId });
+  const changes = route.rest === laneId;
+  const submission = changes ? new URLSearchParams(location.search).get('submission') : null;
+  const text = useQuery(api.projectLaneReview.read, {
+    projectId,
+    laneId,
+    ...(submission ? { submission } : {}),
+  });
   const reply = useMemo(() => (text ? (JSON.parse(text) as Reply) : undefined), [text]);
   const [extra, setExtra] = useState<{ head: string; items: ReviewFile[] }>();
   const [nextPage, setNextPage] = useState<{ head: string; offset: number }>();
@@ -231,9 +238,30 @@ export function ReviewPage({
   const thread = route.rest.endsWith('/thread');
   const history = route.rest.endsWith('/history');
   const laneHref = hrefFor({ ...route, rest: lane.laneId });
-  const entries = useMemo(() => entriesOf(reply, files), [reply, files]);
+  const candidate = reply.candidate;
+  const needsListing =
+    candidate &&
+    (!reply.files.current ||
+      !reply.files.complete ||
+      candidate.head !== lane.head ||
+      candidate.base !== lane.base.head);
+  const exact = useCandidateFiles(projectId, needsListing ? candidate : null);
+  const [more, setMore] = useState<{ id: string; limit: number }>();
+  const limit = candidate && more?.id === candidate.candidateId ? more.limit : 400;
+  const entries = useMemo(() => {
+    if (reply.candidateUnavailable) return [];
+    if (needsListing) return entriesOf({ ...reply, conflicts: [] }, exact.files?.slice(0, limit) ?? []);
+    return entriesOf(reply, files);
+  }, [reply, files, needsListing, exact.files, limit]);
+  const total = needsListing ? exact.total : reply.files.total;
+  const orderedPage = needsListing
+    ? entries.length < (exact.files?.length ?? 0)
+      ? entries.length
+      : null
+    : nextOffset;
   const ticks = useReadTicks(lane.laneId);
   const [order, setOrder] = useState<'eyes' | 'path'>('eyes');
+  const [mode, setMode] = useDiffMode();
   const [cli, setCli] = useState(false);
   const stop = laneStop(reply, feed);
   // Review is over once the Lane lands or is set aside (c2388099): no read marks, no "Needs eyes first" order.
@@ -256,20 +284,40 @@ export function ReviewPage({
   // Older review replies can still contain the UUID stored in the overlap row.
   const goal = lane.goal && (lane.itemId || !isPlanningUuid(lane.goal)) ? lane.goal : null;
   const itemLabel = goal ? `${goal} · ${short(itemId)}` : `${short(itemId)} · title unavailable`;
-  const nothing = !reply.files.total && lane.head === lane.base.head;
-  const situation = lane.landed
-    ? `On main since ${clock(lane.landed.at)}. ${plural(reply.files.total, 'file')} changed.`
-    : lane.state === 'abandoned'
-      ? 'Set aside. Its saves are kept.'
-      : nothing
-        ? 'Started. Nothing saved yet.'
-        : !reply.files.current
-          ? 'Saved. The changed files of this save are not recorded yet.'
-          : `${isHeld ? `${holdLine(heldView?.view, lane.laneId, Date.now())} ` : ''}${
-              eyes
-                ? `${eyes.toLocaleString()} of ${nextOffset === null ? '' : 'the first '}${plural(entries.length, 'file')} need your eyes.`
-                : `${nextOffset === null ? '' : 'The first '}${plural(entries.length, 'file')}, none with an overlap or a protected path.`
-            }`;
+  const nothing = !candidate && !reply.files.total && lane.head === lane.base.head;
+  const note: NoteDestination | null =
+    candidate && reply.noteItemId
+      ? {
+          candidateId: candidate.candidateId,
+          base: candidate.base,
+          head: candidate.head,
+          laneId: lane.laneId,
+          itemId: reply.noteItemId,
+          href: hrefFor({ ...route, place: 'plan', section: '', rest: reply.noteItemId }) + '#discussion',
+        }
+      : null;
+  const situation =
+    reply.candidateUnavailable || (needsListing && !exact.files && !exact.loading)
+      ? 'The exact Candidate changes are unavailable.'
+      : exact.loading
+        ? 'Reading the exact Candidate changes…'
+        : candidate && total === 0
+          ? 'This Candidate changes no files.'
+          : lane.landed
+            ? `On main since ${clock(lane.landed.at)}. ${plural(reply.files.total, 'file')} changed.`
+            : lane.state === 'abandoned'
+              ? 'Set aside. Its saves are kept.'
+              : nothing
+                ? 'Started. Nothing saved yet.'
+                : !candidate && !reply.files.current
+                  ? 'Saved. The changed files of this save are not recorded yet.'
+                  : `${isHeld ? `${holdLine(heldView?.view, lane.laneId, Date.now())} ` : ''}${
+                      eyes
+                        ? `${eyes.toLocaleString()} of ${orderedPage === null ? '' : 'the first '}${plural(entries.length, 'file')} ${eyes === 1 ? 'needs' : 'need'} your eyes.`
+                        : needsListing
+                          ? `${plural(total, 'file')} changed in this Candidate.`
+                          : `${orderedPage === null ? '' : 'The first '}${plural(entries.length, 'file')}, none with an overlap or a protected path.`
+                    }`;
   const command = `nforge agent . diff ${q({ laneId: lane.laneId, summary: true })}`;
   return (
     <>
@@ -281,7 +329,7 @@ export function ReviewPage({
           </>
         }
       >
-        {thread || history || nothing || !reply.files.current || closed ? null : (
+        {thread || history || !entries.length || closed ? null : (
           <div className="seg" role="group" aria-label="Order">
             <button type="button" aria-pressed={order === 'eyes'} onClick={() => setOrder('eyes')}>
               Needs eyes first
@@ -393,31 +441,72 @@ export function ReviewPage({
       ) : (
         <div className="panes lane-p">
           <section className="pane" aria-label="The change">
+            {candidate ? <CandidateFacts candidate={candidate} /> : null}
             <div className="ph plain">
               <h2>Changed files</h2>
-              <span className="cnt">{reply.files.total.toLocaleString()}</span>
-              {entries.length && !closed ? (
+              <span className="cnt">{total.toLocaleString()}</span>
+              {entries.length && !closed && !needsListing ? (
                 <span className="hint" style={{ marginLeft: 'auto' }}>
                   {readCount.toLocaleString()} of {plural(entries.length, 'file')} read
                 </span>
               ) : null}
             </div>
-            <Files
-              reply={reply}
-              entries={entries}
-              order={closed ? 'path' : order}
-              projectId={projectId}
-              route={route}
-              ticks={closed ? null : ticks}
-              nothing={nothing}
-            />
-            {loader ??
-              (nextOffset !== null ? (
-                <button type="button" className="quietline btn ghost lr-more" onClick={onMore}>
-                  Show the next {plural(Math.min(400, reply.files.total - nextOffset), 'file')}
+            {entries.length ? (
+              <div className="lr-tools">
+                <DiffModeToggle mode={mode} onChange={setMode} />
+              </div>
+            ) : null}
+            {reply.candidateUnavailable || (needsListing && !exact.files) ? (
+              <p className="quietline" aria-busy={exact.loading || undefined}>
+                {exact.loading
+                  ? 'Reading the exact Candidate changes…'
+                  : 'Could not read the exact Candidate changes.'}
+                {!exact.loading && exact.retry ? (
+                  <Key size="sm" onClick={exact.retry}>
+                    Retry
+                  </Key>
+                ) : null}
+              </p>
+            ) : (
+              <Files
+                reply={reply}
+                entries={entries}
+                order={closed ? 'path' : order}
+                projectId={projectId}
+                route={route}
+                ticks={closed || needsListing ? null : ticks}
+                nothing={nothing}
+                mode={mode}
+                note={note}
+                candidateListing={Boolean(needsListing)}
+              />
+            )}
+            {(!needsListing ? loader : null) ??
+              (orderedPage !== null && !reply.candidateUnavailable ? (
+                <button
+                  type="button"
+                  className="quietline btn ghost lr-more"
+                  onClick={
+                    needsListing ? () => setMore({ id: candidate.candidateId, limit: limit + 400 }) : onMore
+                  }
+                >
+                  Show the next {plural(Math.min(400, total - orderedPage), 'file')}
                 </button>
               ) : null)}
-            {reply.files.current && !reply.files.complete ? (
+            {needsListing && exact.files && exact.files.length < total ? (
+              <p className="quietline">
+                Showing {plural(exact.files.length, 'file')} of {total.toLocaleString()}.{' '}
+                <A
+                  className="lk"
+                  href={
+                    hrefFor({ ...route, place: 'code', section: 'files', rest: '' }) + `?at=${candidate.head}`
+                  }
+                >
+                  Browse the Candidate in Code
+                </A>
+              </p>
+            ) : null}
+            {!candidate && reply.files.current && !reply.files.complete ? (
               <p className="quietline">
                 More files changed than this save recorded. Read the whole change with <code>{command}</code>.
               </p>
@@ -489,6 +578,9 @@ function Files({
   route,
   ticks,
   nothing,
+  mode,
+  note,
+  candidateListing,
 }: {
   reply: Reply;
   entries: Entry[];
@@ -498,11 +590,14 @@ function Files({
   /** Null once review is over: no read marks and no "changed since you read". */
   ticks: Ticks | null;
   nothing: boolean;
+  mode: DiffMode;
+  note: NoteDestination | null;
+  candidateListing: boolean;
 }) {
   const [shown, setShown] = useState<Partial<Record<string, number>>>({});
   if (nothing)
     return <p className="quietline">Nothing saved yet. The changes appear here after the first save.</p>;
-  if (!reply.files.current)
+  if (!candidateListing && !reply.files.current)
     return (
       <p className="quietline">
         Read this save with <code>{`nforge agent . diff ${q({ laneId: reply.lane.laneId })}`}</code>, or open{' '}
@@ -514,7 +609,17 @@ function Files({
     );
   const state = (entry: Entry) => ticks?.state(entry.path, readMark(entry.file.after)) ?? 'unread';
   const row = (entry: Entry) => (
-    <FileRow key={entry.path} entry={entry} reply={reply} projectId={projectId} route={route} ticks={ticks} />
+    <FileRow
+      key={JSON.stringify([entry.path, entry.file.before, entry.file.after, note?.candidateId])}
+      entry={entry}
+      reply={reply}
+      projectId={projectId}
+      route={route}
+      ticks={ticks}
+      mode={mode}
+      note={note}
+      candidateListing={candidateListing}
+    />
   );
   const band = (key: string, title: string, hint: string, list: Entry[], needs = false) => {
     if (!list.length) return null;
@@ -567,12 +672,18 @@ function FileRow({
   projectId,
   route,
   ticks,
+  mode,
+  note,
+  candidateListing,
 }: {
   entry: Entry;
   reply: Reply;
   projectId: Id<'hostedProjects'>;
   route: ProjectRoute;
   ticks: Ticks | null;
+  mode: DiffMode;
+  note: NoteDestination | null;
+  candidateListing: boolean;
 }) {
   const client = useConvex();
   const { file } = entry;
@@ -583,9 +694,10 @@ function FileRow({
   const [view, setView] = useState<'changes' | 'origin'>('changes');
   const [purging, setPurging] = useState(false);
   const [purged, setPurged] = useState(false);
-  const origin = originInputs(reply, file);
+  const origin = candidateListing ? null : originInputs(reply, file);
   // Owner only, on a Lane not yet on main, for bytes the Lane wrote (Item 9d3c407d); the server checks again.
   const purgeable =
+    !reply.candidate &&
     Boolean(reply.owner) &&
     !reply.lane.landed &&
     (file.after?.mode === 'file' || file.after?.mode === 'executable');
@@ -674,7 +786,15 @@ function FileRow({
                 {...origin}
               />
             ) : (
-              <Body body={body} file={file} route={route} laneId={reply.lane.laneId} />
+              <Body
+                body={body}
+                file={file}
+                route={route}
+                laneId={reply.lane.laneId}
+                projectId={projectId}
+                mode={mode}
+                note={note}
+              />
             )}
           </>
         ) : null}
@@ -707,11 +827,17 @@ function Body({
   file,
   route,
   laneId,
+  projectId,
+  mode,
+  note,
 }: {
   body: FileBody | 'loading' | 'failed' | null;
   file: ReviewFile;
   route: ProjectRoute;
   laneId: string;
+  projectId: Id<'hostedProjects'>;
+  mode: DiffMode;
+  note: NoteDestination | null;
 }) {
   const one = `nforge agent . diff ${q({ laneId, paths: [file.path] })}`;
   const onMain =
@@ -754,32 +880,16 @@ function Body({
         Same lines. The file mode changed from {file.before?.mode ?? 'none'} to {file.after?.mode ?? 'none'}.
       </p>
     );
-  return <DiffBox path={file.path} hunks={body.hunks} rough={!!body.rough} encoding={body.encoding} />;
-}
-
-function DiffBox({
-  path,
-  hunks,
-  rough,
-  encoding,
-}: {
-  path: string;
-  hunks: Hunk[];
-  rough: boolean;
-  encoding?: 'not-utf-8' | undefined;
-}) {
-  const [coloured, setColoured] = useState(false);
-  usePageCritical('Lane first diff', { sourceDiff: coloured && hunks.length > 0 });
   return (
-    <>
-      {rough || encoding ? (
-        <p className="pad t2" style={{ paddingBlock: 'var(--s-2)' }}>
-          {rough ? 'Shown as one replaced block: the exact alignment was over the compare budget. ' : ''}
-          {encoding ? 'Not UTF-8: bytes that are not text are shown escaped.' : ''}
-        </p>
-      ) : null}
-      <DiffView path={path} hunks={hunks} mode="unified" onColoured={setColoured} />
-    </>
+    <ReviewDiff
+      file={file}
+      hunks={body.hunks}
+      rough={!!body.rough}
+      encoding={body.encoding}
+      mode={mode}
+      projectId={projectId}
+      note={note}
+    />
   );
 }
 
@@ -918,6 +1028,55 @@ function OriginView({
   );
 }
 
+function CandidateFacts({ candidate }: { candidate: NonNullable<Reply['candidate']> }) {
+  const check = candidate.check;
+  return (
+    <div className="lr-candidate-facts">
+      <div className="ph plain">
+        <h2>Candidate review</h2>
+      </div>
+      <dl className="kv">
+        <dt>Summary</dt>
+        <dd dir="auto">{candidate.summary ?? 'Not reported'}</dd>
+        <dt>Not verified</dt>
+        <dd>
+          {candidate.notVerified === null ? (
+            'Not reported'
+          ) : candidate.notVerified.length ? (
+            <ul>
+              {candidate.notVerified.map((entry, index) => (
+                <li key={index} dir="auto">
+                  {entry}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            'None reported'
+          )}
+        </dd>
+        <dt>Check</dt>
+        <dd>
+          {check === 'passed' ? (
+            <State word="Landed">Check passed</State>
+          ) : check === 'failed' ? (
+            <State word="Check failed" />
+          ) : check === 'running' ? (
+            <State word="Checking" />
+          ) : check === 'queued' ? (
+            <State word="Waiting its turn" />
+          ) : check === 'cancelled' ? (
+            <State word="Set aside">Check stopped</State>
+          ) : check === 'not-run' ? (
+            <State word="Set aside">Not run</State>
+          ) : (
+            'No result recorded'
+          )}
+        </dd>
+      </dl>
+    </div>
+  );
+}
+
 function Side({
   reply,
   entries,
@@ -964,7 +1123,7 @@ function Side({
       <div className="ph plain" style={{ borderTop: 'var(--rule) solid var(--line)' }}>
         <h2>Facts</h2>
       </div>
-      <dl className="kv">
+      <dl className="kv lr-facts">
         <dt>By</dt>
         <dd>
           <RecordedWho
@@ -972,6 +1131,7 @@ function Side({
             agentAuthored={lane.agentAuthored}
             model={declaredModel(lane.agentClient)}
             project={route}
+            layout="line"
           />
         </dd>
         <dt>For</dt>
@@ -982,7 +1142,8 @@ function Side({
         </dd>
         <dt>Pinned</dt>
         <dd>
-          save <code>{short(lane.head)}</code> on main <code>{short(lane.base.head)}</code>
+          {reply.candidate ? 'Candidate' : 'Save'} <code>{short(reply.candidate?.head ?? lane.head)}</code> on
+          main <code>{short(reply.candidate?.base ?? lane.base.head)}</code>
         </dd>
         <dt>Overlaps</dt>
         <dd>
