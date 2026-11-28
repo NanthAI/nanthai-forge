@@ -72,7 +72,8 @@
   .flow-recent > b, .flow-recent > .nr { display: block; padding: var(--s-2) var(--gut); }
   .flow-recent ol { margin: 0; padding: 0; list-style: none; }
   .flow-recent a { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-1) var(--s-3); min-block-size: var(--row-h, 40px); border-top: var(--rule) solid var(--line); padding: var(--s-1) var(--gut); color: var(--text); }
-  .flow-recent a > span:first-child { flex: 1 1 14ch; min-inline-size: 0; overflow-wrap: anywhere; }
+  .flow-recent-title { flex: 1 1 14ch; }
+  .flow-recent .flow-recent-id { color: var(--text-2); font-size: var(--t-meta); white-space: nowrap; }
   .flow-recent time { color: var(--text-2); }
 
   /* the five figures, then one line for checks */

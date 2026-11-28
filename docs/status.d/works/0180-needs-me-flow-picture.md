@@ -22,9 +22,10 @@
   enter or leave the count at its known deadline in the browser without a request. Home and Flow use the latest
   recorded main-audit verdict rather than the check on a Candidate. Without a verdict they distinguish no
   configured check from health not reported.
-- Flow links up to five recent receipts to Code History. A retained revert is marked separately from a
-  landing taken out of main. A manual revert leaves its receipt link in the live-line summary even when
-  its Needs you notice clears. The audit recovery count still covers main-audit recoveries only.
+- Flow links up to five recent receipts to Code History, with their landing IDs and the titles available
+  in the existing live-line and FYI responses. A retained revert is marked separately from a landing taken out of main.
+  A manual revert leaves its receipt link in the live-line summary even when its Needs you notice clears.
+  The audit recovery count still covers main-audit recoveries only.
 
 - The Lane yard, Lane review, History, Needs you and Item discussion use the same public byline. It links the handle and agent run when the viewer may see them. The Yard names the latest save. Lane review names the save that published the pinned head. Held reviews, History and discussion use the recorded submission, receipt or comment.
 - The agent run page shows the latest [local Forge hook state](../../agents/hooks.md#hook-state-on-an-agent-run) reported on a Lane start or save, with the report time. Older clients leave it unreported.

@@ -120,6 +120,15 @@ test('Needs me Flow picture: one source, the home layout, widths, tags and worst
         const recent = page.getByRole('navigation', { name: 'Recent landings' });
         const reversal = recent.getByRole('link', { name: /Undo the parser change.*Revert/ });
         const original = recent.getByRole('link', { name: /Change the parser.*Taken out of main/ });
+        assert.equal(await reversal.getByText('#32224', { exact: true }).isVisible(), true);
+        const title = reversal.getByText(/^Undo the parser change/);
+        const fit = await title.evaluate(node => {
+          const { textOverflow, whiteSpace } = getComputedStyle(node);
+          return { textOverflow, whiteSpace, clipped: node.scrollWidth > node.clientWidth };
+        });
+        assert.equal(fit.whiteSpace, 'nowrap');
+        assert.equal(fit.textOverflow, 'ellipsis');
+        if (width === 390) assert.equal(fit.clipped, true);
         assert.match(await reversal.getAttribute('href'), /^\/sample-one\/tidepool\/code\/[^/]+$/);
         assert.notEqual(await original.getAttribute('href'), await reversal.getAttribute('href'));
         assert.match(

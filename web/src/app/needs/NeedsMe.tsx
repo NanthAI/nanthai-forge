@@ -415,6 +415,7 @@ export function NeedsMeView({
           error={feedError}
           readAt={feedReadAt}
           mainCheckedAt={fyi?.mainCheckedAt}
+          fyiLandings={fyi?.landings}
           deployStatus={<DeployStatusLines status={read?.deployStatus} route={route} seen={seeDeploy} />}
           stop={stop}
           onOpen={showStation}

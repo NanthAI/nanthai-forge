@@ -2,7 +2,7 @@
 // Copyright 2026 Ferdinando Valsecchi
 // "On the way to main" on Needs me (Item 85f456c1, the approved home mock): the Flow picture, the day's five figures and
 // one line for checks, in one region. It replaces "Moving without you". Everything comes from the line feed the shell
-// already subscribes to and the Needs you rows the page already reads: no read of its own, no timer. Below desk width the
+// already subscribes to and the Needs you and FYI rows the page already reads: no read of its own, no timer. Below desk width the
 // picture is the stops as flat rows.
 import { useId, type ReactNode } from 'react';
 import { FlowMotion } from './motion';
@@ -14,6 +14,7 @@ import { SizedPicture, type PictureFacts } from './Picture';
 import { Tag } from './labels';
 import { FlowChecks, FlowLegend } from './Checks';
 import type { ConflictNote } from '../lane-state';
+import type { FyiRead } from '../needs/fyi';
 import {
   clock,
   duration,
@@ -44,6 +45,7 @@ export function FlowRegion({
   error,
   readAt,
   mainCheckedAt,
+  fyiLandings,
   deployStatus,
   stop,
   onOpen,
@@ -61,6 +63,7 @@ export function FlowRegion({
   error?: boolean;
   readAt?: number;
   mainCheckedAt?: number | undefined;
+  fyiLandings?: FyiRead['landings'] | undefined;
   deployStatus?: ReactNode;
   stop: DrawerStop | null;
   onOpen: (stop: DrawerStop) => void;
@@ -288,7 +291,12 @@ export function FlowRegion({
               )}
             </A>
           </nav>
-          <RecentLandings rows={feed.recentLandings} history={hrefs.code} drawnAt={drawnAt} />
+          <RecentLandings
+            rows={feed.recentLandings}
+            fyiLandings={fyiLandings}
+            history={hrefs.code}
+            drawnAt={drawnAt}
+          />
           <FlowChecks
             checks={feed.checks}
             day={day}

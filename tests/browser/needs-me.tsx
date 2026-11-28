@@ -202,6 +202,8 @@ const landing = (n: number, title: string, minutes: number, extra = {}) => ({
   laneId: uuid(300 + n),
   ...extra,
 });
+const manualRevertTitle =
+  'Undo the parser change so readers can open documents saved across mixed UTF-8 chunks again';
 const fyi: FyiRead = first
   ? {
       owner: true,
@@ -220,6 +222,9 @@ const fyi: FyiRead = first
       owner: true,
       state: { clearedAt: null, clearedSequence: null, dismissed: [] },
       landings: [
+        ...(variant === 'manual-revert'
+          ? [landing(32224, manualRevertTitle, 20, { receiptId: uuid(902) })]
+          : []),
         landing(4, 'Types: narrow ReadResult', 62),
         landing(3, 'Adapter: abort on timeout', 89),
         landing(2, 'Stream parser: flush on close', 133, { redone: true, thrown: 240 }),
@@ -814,14 +819,14 @@ const fixtureFeed: LineFeed = {
         recentLandings: [
           {
             receiptId: uuid(902),
-            sequence: 2,
+            sequence: 32224,
             at: new Date(ago(20)).toISOString(),
-            title: 'Undo the parser change',
+            title: null,
             revert: true,
           },
           {
             receiptId: uuid(901),
-            sequence: 1,
+            sequence: 32223,
             at: new Date(ago(42)).toISOString(),
             title: 'Change the parser',
             takenOut: true,
