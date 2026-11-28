@@ -133,7 +133,9 @@ export async function settleDiffSave(
     );
   };
   if (!acknowledgedBackgroundSave(root, operationId)) throw replay();
-  const seconds = Math.min(5, Math.max(0, ((transport.waitUntil ?? Infinity) - Date.now()) / 1000));
+  // Keep the same subscription through ordinary concurrent saves. An explicit
+  // caller deadline still wins, and the original operation remains resumable.
+  const seconds = Math.min(30, Math.max(0, ((transport.waitUntil ?? Infinity) - Date.now()) / 1000));
   const waited = await observeHostedSave(
     transport,
     operationId,

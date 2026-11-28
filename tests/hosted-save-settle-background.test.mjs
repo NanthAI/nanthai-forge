@@ -188,6 +188,35 @@ test('diff names the original save replay when a split save has no submit acknow
   assert.equal(f.c.calls.length, before);
 });
 
+test('diff still follows the original split save when settlement takes six seconds (P7 a12/a13)', async t => {
+  const f = await setup(t, { fromBase: true });
+  const address = { url: 'https://fixture.invalid', projectId: f.s.projectId };
+  const saved = await new HostedAgentTransport(f.root, address, f.exchange).dispatch('save', {
+    message: 'Save while other jobs settle',
+  });
+  assert.equal(saved.result.status, 'settling');
+  let subscriptions = 0;
+  const transport = new HostedAgentTransport(f.root, address, f.exchange, () => ({
+    onUpdate(ref, args, update, fail) {
+      subscriptions++;
+      assert.equal(args.operationId, saved.operationId);
+      // Advance the existing subscription's deadline without sleeping or adding reads.
+      t.mock.timers.tick(6000);
+      void (async () => {
+        const dispatch = f.scheduled.find(item => item.name === 'projectConvexSource:dispatch');
+        await f.settle(dispatch.args.jobId);
+        update(await f.exchange.client.query(ref, args));
+      })().catch(fail);
+      return () => {};
+    },
+    async close() {},
+  }));
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const diff = await transport.dispatch('diff', {});
+  assert.deepEqual(diff.result.items.map(item => item.path).sort(), f.changed);
+  assert.equal(subscriptions, 1);
+});
+
 test('diff reports the retryable source failure and its original save command', async t => {
   const f = await setup(t, { fromBase: true });
   const address = { url: 'https://fixture.invalid', projectId: f.s.projectId };

@@ -11,6 +11,7 @@ import { moduleUrl } from './convex-module.mjs';
 import { lifecycleFixture, records, code } from './hosted-lane-lifecycle-fixture.mjs';
 import { agentFixture } from './hosted-agent-fixture.mjs';
 import { hostedAgentCli } from '../dist/hosted-agent-cli.js';
+import { hostedAgentHelp } from '../dist/hosted-agent-help.js';
 import { validateHostedCliCommand } from '../dist/hosted-cli-validation.js';
 import { registerHostedAgentWorkflow } from '../dist/mcp-hosted-agent.js';
 import { dispatchCoordination } from '../dist/coordination-client.js';
@@ -58,6 +59,31 @@ async function fixture(t) {
   const cli = (action, body) => hostedAgentCli(s.root, action, body, s.address, transport);
   return { ...f, lane, cli, transport, coord, invoke, requests };
 }
+
+test('a Lane agent can send the questions and hand-back examples from the project root', async t => {
+  const f = await fixture(t);
+  f.transport.agentSession = 'fixture-agent-session';
+  f.insert('accountHandles', { owner: 'owner', handle: 'fixture-owner' });
+  for (const [action, kind] of [
+    ['ask', 'question'],
+    ['hand-back', 'hand-back'],
+  ]) {
+    const example = /^Example: nforge agent ROOT [a-z-]+ '(.*)'$/m.exec(hostedAgentHelp(action));
+    assert(example, action);
+    const command = JSON.parse(
+      example[1]
+        .replace('LANE_ID', f.lane.id)
+        .replace('SAVED_HEAD', f.lane.head)
+        .replace('OWNER_HANDLE', 'fixture-owner'),
+    );
+    const sent = await f.cli(action, command);
+    assert.equal(sent.result.kind, kind);
+  }
+  const lane = await f.read(f.lane.id);
+  assert.equal(lane.head, f.lane.head);
+  assert.equal(lane.holder, undefined);
+  assert.equal(f.requests.length, 2, 'one existing mutation per command');
+});
 
 test('a Lane question keeps its exact choice and prompt after the asking CLI exits', async t => {
   const f = await fixture(t);

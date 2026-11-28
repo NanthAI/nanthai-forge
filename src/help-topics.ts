@@ -118,7 +118,7 @@ SECRET_FOUND: a save (or land --save) held a credential and stored nothing. Remo
   },
   review: {
     title: 'Reading source and changes',
-    text: `- diff {laneId?,paths?,byteBudget?,summary?,cursor?} compares pinned base to saved head; format:"unified" returns a patch -p1 unified diff (e.g. nforge agent . diff '{"format":"unified"}' to feed a reviewer); summary:true returns per changed path status plus main equal|absent|different (no hunks). byteBudget (reply bytes, default 48000) below 1024 reads as 1024. nextCursor continues the same pair.
+    text: `- diff {laneId?,path?,paths?,byteBudget?,summary?,cursor?} compares pinned base to saved head. Use path for one file or paths for a list. format:"unified" returns a patch -p1 unified diff (e.g. nforge agent . diff '{"format":"unified"}' to feed a reviewer); summary:true returns per changed path status plus main equal|absent|different (no hunks). byteBudget (reply bytes, default 48000) below 1024 reads as 1024. nextCursor continues the same pair.
 - show {state?|candidateId?|laneId?|channel:"main"|at:"base"|"main",path} reads exact bytes; at:"base" is this Lane's pinned base, at:"main" is current main.
 - Saved Lane bytes exclude unsaved edits; show and diff never substitute another revision.
 - peers {laneId?,path?,detail?} reads saved overlap evidence (help overlap).
@@ -140,8 +140,8 @@ SECRET_FOUND: a save (or land --save) held a credential and stored nothing. Remo
   },
   board: {
     title: 'Questions and hand-back',
-    text: `ask {to,text,choices,laneId?,planningItemId?,holdsWork?} records a shared decision on one Lane or Item (never both) with two or three distinct choices. to accepts a member @handle, an active agent handle (handle/slug) or an open Lane/session UUID. Omit the target inside its Lane. Set holdsWork:false when asking ahead.
-- hand-back {to:"@handle",head,tried,left,laneId?} hands a saved Lane back to its person or the project owner. It releases the holder and keeps the exact saved head. Tell your user in your app when you send either command.
+    text: `ask {to,text,choices,laneId?,planningItemId?,holdsWork?} records a decision on one Lane or Item with two or three distinct choices. to accepts a member @handle, an active agent handle (handle/slug) or an open Lane/session UUID. Use OWNER_HANDLE for the project owner's handle. In a Lane, omit its id. holdsWork:false asks ahead.
+- hand-back {to:"@handle",head,tried,left,laneId?} hands a saved Lane back to its person or the project owner. Confirm the save and read result.head from status {laneId} for SAVED_HEAD. It releases the holder and keeps that head. Tell your user in your app when you send either command.
 - Retain operationId and replay the same parameters after an unknown reply. Answer with coordination ack {messageId,choice,text?} or forge_ack. Read retained answers and their resume prompts with coordination inbox or forge_inbox all:true.
 - board {id?,laneId?,all?} reads retained notes for this Lane, its Issue and the project in one query.
 - board --resolve {id,text?} withdraws a note that no longer applies; it stops arriving, and board {id} still shows it resolved.

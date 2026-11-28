@@ -59,7 +59,9 @@ MCP `forge_review` exposes hosted `show`, `diff`, `peers` and `queue`.
   select the project explicitly. `path` filters the result. Detail shows up to
   50 items or shared paths, with five by default. Count and coverage disclose
   omissions. Unsaved edits remain unavailable.
-- `diff {laneId,paths?,byteBudget?,format?,cursor?}` pins base/saved-head R2 States.
+- `diff {laneId,path?,paths?,byteBudget?,format?,cursor?}` pins base/saved-head R2 States.
+  Use `path` for one file or `paths` for a list. A fresh diff in the same checkout
+  follows an acknowledged save for up to 30 seconds before returning its original wait command.
   Defaults: 48,000 hunk payload bytes plus path metadata, 50 paths/page. `format:"unified"`
   returns a standard unified diff in `result.diff` (`--- a/path`, `+++ b/path`, `@@` hunks,
   `\ No newline at end of file`, renames as delete + add, and a one-line `Binary files differ`

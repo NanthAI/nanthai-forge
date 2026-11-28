@@ -107,6 +107,8 @@ export const DIFF_MIN_BYTE_BUDGET = 1024;
 export const hostedDiffSchema = z
   .object({
     laneId: z.uuid().optional(),
+    /** One repository-relative file, equivalent to a one-entry paths array. */
+    path: z.string().refine(safeRelative).optional(),
     paths: z.array(z.string().refine(safeRelative)).optional(),
     /** Reply bytes for this page. Below 1024 (the smallest page, which still fits one path entry)
      * reads as 1024, so a small paths-only budget works instead of failing (ad80e037). */
@@ -278,7 +280,13 @@ export async function diffHostedSource(
 ) {
   const parsed = hostedDiffSchema.safeParse(input);
   invariant(parsed.success, 'BAD_ARGUMENT', 'Invalid hosted diff parameters. Use diff --help.');
-  const command = parsed.data;
+  const { path, ...options } = parsed.data;
+  invariant(
+    path === undefined || options.paths === undefined,
+    'BAD_ARGUMENT',
+    'Use path for one file or paths for a list of files.',
+  );
+  const command = { ...options, paths: path === undefined ? options.paths : [path] };
   invariant(
     !(command.summary && command.format === 'unified'),
     'BAD_ARGUMENT',

@@ -4,6 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { hostedAgentCommandSchemas } from '../dist/hosted-agent-contract.js';
+import { validateHostedCliCommand } from '../dist/hosted-cli-validation.js';
 import {
   allHelpTopics,
   hostedAgentHelp,
@@ -144,6 +145,19 @@ test('core maintenance help distinguishes submission cancellation, Lane withdraw
   assert.match(revert, /"target":\{"kind":"receipt","receiptId":"RECEIPT_ID"\}/);
 });
 
+test('the first question and hand-back examples work after substituting checkout pins', () => {
+  const laneId = randomUUID();
+  for (const action of ['ask', 'hand-back']) {
+    const example = /^Example: nforge agent ROOT [a-z-]+ '(.*)'$/m.exec(hostedAgentHelp(action));
+    assert(example, action);
+    const parameters = JSON.parse(
+      example[1].replace('LANE_ID', laneId).replace('SAVED_HEAD', 'a'.repeat(64)),
+    );
+    validateHostedCliCommand('/repo', action, parameters);
+    assert.equal(parameters.laneId, laneId, 'example runs from the project root');
+  }
+});
+
 test('standalone preflight and land --save help both name the local browser opt-out', async t => {
   const s = agentFixture(t);
   for (const form of [['preflight'], ['land', '--save']])
@@ -166,7 +180,7 @@ test('hosted coordination entry points retain supported reads and their coverage
   const text = helpTopicText('review') + helpTopicText('overlap');
   assert.match(hostedAgentHelp(), /help TOPIC/);
   assert.match(text, /peers \{laneId\?,path\?,detail\?\}/);
-  assert.match(text, /diff \{laneId\?,paths\?,byteBudget\?,summary\?,cursor\?\}/);
+  assert.match(text, /diff \{laneId\?,path\?,paths\?,byteBudget\?,summary\?,cursor\?\}/);
   assert.match(text, /receipts carry behindMain/);
   assert.doesNotMatch(text, /unacknowledgedOverlaps/);
   assert.match(text, /excludes unsaved peer edits/);

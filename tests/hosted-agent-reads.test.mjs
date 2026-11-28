@@ -11,6 +11,7 @@ import { digest } from '../dist/hash.js';
 import { showHostedSource } from '../dist/mcp-hosted-source.js';
 import { hostedShowCli } from '../dist/hosted-show-cli.js';
 import { hostedAgentCli } from '../dist/hosted-agent-cli.js';
+import { validateHostedCliCommand } from '../dist/hosted-cli-validation.js';
 import { registerHostedAgentWorkflow } from '../dist/mcp-hosted-agent.js';
 import { getFunctionName } from 'convex/server';
 function fixture(t, count = 3) {
@@ -42,6 +43,31 @@ function fixture(t, count = 3) {
   f.candidate.result.head = f.lane.head;
   return f;
 }
+
+test('a single diff path selects one saved file through CLI validation and MCP (P7 a13)', async t => {
+  const f = fixture(t);
+  const transport = f.transport();
+  const path = 'src/00001.ts';
+  const input = { laneId: f.lane.laneId, path };
+  validateHostedCliCommand(f.root, 'diff', input);
+  const cli = await hostedAgentCli(f.root, 'diff', input, f.address, transport);
+  assert.deepEqual(
+    cli.result.items.map(item => item.path),
+    [path],
+  );
+  const tools = new Map();
+  t.after(
+    registerHostedAgentWorkflow({ registerTool: (name, _options, call) => tools.set(name, call) }, transport),
+  );
+  const mcp = await tools.get('forge_review')({ command: { action: 'diff', ...input } });
+  assert.deepEqual(
+    JSON.parse(mcp.content[0].text).result.items.map(item => item.path),
+    [path],
+  );
+  await assert.rejects(transport.dispatch('diff', { ...input, paths: ['src/00002.ts'] }), {
+    code: 'BAD_ARGUMENT',
+  });
+});
 for (const count of [3000, 29000])
   test(`${count}-file hosted CLI diff is pinned, bounded and page-batched`, async t => {
     const f = fixture(t, count),

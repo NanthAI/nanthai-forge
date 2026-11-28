@@ -158,17 +158,32 @@ const placeholder = (field: string, schema: Record<string, unknown> | undefined)
           : Array.isArray(schema?.enum)
             ? schema.enum[0]
             : '…';
+const actionExamples: Partial<Record<string, Record<string, unknown>>> = {
+  start: { outcome: 'Improve the README', model: 'unknown' },
+  tests: { runId: 'RUN_ID' },
+  revert: { target: { kind: 'receipt', receiptId: 'RECEIPT_ID' } },
+  diff: { laneId: 'LANE_ID', path: 'src/example.ts' },
+  ask: {
+    laneId: 'LANE_ID',
+    to: '@OWNER_HANDLE',
+    text: 'Which API should the client use?',
+    choices: ['Keep v1', 'Use v2'],
+  },
+  'hand-back': {
+    laneId: 'LANE_ID',
+    to: '@OWNER_HANDLE',
+    head: 'SAVED_HEAD',
+    tried: 'Ran the compatibility check',
+    left: 'Decide which client to ship',
+  },
+};
+
 function helpExample(entry: (typeof hostedAgentHelpEntries)[number]) {
   const properties = (entry.schema.properties ?? {}) as Record<string, Record<string, unknown>>;
   const required = (entry.schema.required ?? []) as string[];
   const example =
-    entry.action === 'start'
-      ? { outcome: 'Improve the README', model: 'unknown' }
-      : entry.action === 'tests'
-        ? { runId: 'RUN_ID' }
-        : entry.action === 'revert'
-          ? { target: { kind: 'receipt', receiptId: 'RECEIPT_ID' } }
-          : Object.fromEntries(required.map(field => [field, placeholder(field, properties[field])]));
+    actionExamples[entry.action] ??
+    Object.fromEntries(required.map(field => [field, placeholder(field, properties[field])]));
   const command = entry.command.startsWith('x ')
     ? `nforge x ROOT ${entry.command.slice(2)}`
     : `nforge agent ROOT ${entry.command}`;

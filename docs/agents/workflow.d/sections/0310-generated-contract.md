@@ -52,7 +52,7 @@
 | `records` | `collection, parentId?, status?, id?, version?, cursor?` |
 | `log` | `runId, tail?, stream?, shard?, attempt?, laneId?` |
 | `lanes` | `planningItemId?, id?, itemId?, intentId?, state?, cursor?, limit?, intents?, view?` |
-| `diff` | `laneId?, paths?, byteBudget?, summary?, from?, format?, cursor?` |
+| `diff` | `laneId?, path?, paths?, byteBudget?, summary?, from?, format?, cursor?` |
 | `peers` | `laneId?, path?, detail?` |
 | `queue` | `limit?, laneId?, submissionId?, beforeAttempt?, attemptId?, afterLaneId?, batchId?` |
 | `landings` | `from?, to?, receiptId?, message?, submissionId?, limit?, kind?, cursor?` |
