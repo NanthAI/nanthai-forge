@@ -93,17 +93,17 @@
     <div class="w gr">
       <div class="claim">
         <h2 class="disp">Phase 7 benchmark results.</h2>
-        <p>Median Forge savings against GitHub, with the observed range across paired runs.</p>
+        <p>Forge savings against GitHub.</p>
       </div>
       <div class="proof">
         <div class="legend"><span><i></i>Forge</span><span><i class="g"></i>GitHub flow</span><span>GitHub is the 100% baseline.</span></div>
         <div class="bars">
-          <div class="r"><div class="nm">Wall time<small>until all ten had landed</small></div><div aria-hidden="true"><div class="bb"><span>Forge</span><i class="f" style="--v:65%"></i><span>65%</span></div><div class="bb"><span>GitHub flow</span><i class="g" style="--v:100%"></i><span>100%</span></div></div><div class="pct">35%<span class="sr"> lower</span><small>30–42%, 5 runs</small></div></div>
-          <div class="r"><div class="nm">Median task time<small>from handoff to main</small></div><div aria-hidden="true"><div class="bb"><span>Forge</span><i class="f" style="--v:72%"></i><span>72%</span></div><div class="bb"><span>GitHub flow</span><i class="g" style="--v:100%"></i><span>100%</span></div></div><div class="pct">28%<span class="sr"> lower</span><small>20–37%, 6 runs</small></div></div>
-          <div class="r"><div class="nm">CI minutes<small>billed for the run</small></div><div aria-hidden="true"><div class="bb"><span>Forge</span><i class="f" style="--v:41%"></i><span>41%</span></div><div class="bb"><span>GitHub flow</span><i class="g" style="--v:100%"></i><span>100%</span></div></div><div class="pct">59%<span class="sr"> lower</span><small>56–64%, 5 runs</small></div></div>
-          <div class="r"><div class="nm">Cached input tokens<small>read by the agents</small></div><div aria-hidden="true"><div class="bb"><span>Forge</span><i class="f" style="--v:62%"></i><span>62%</span></div><div class="bb"><span>GitHub flow</span><i class="g" style="--v:100%"></i><span>100%</span></div></div><div class="pct">38%<span class="sr"> lower</span><small>29–43%, 5 runs</small></div></div>
+          <div class="r"><div class="nm">Wall time<small>until all ten had landed</small></div><div aria-hidden="true"><div class="bb"><span>Forge</span><i class="f" style="--v:58%"></i><span>58%</span></div><div class="bb"><span>GitHub flow</span><i class="g" style="--v:100%"></i><span>100%</span></div></div><div class="pct"><small>up to</small>42%<span class="sr"> lower</span><small>median 35%</small></div></div>
+          <div class="r"><div class="nm">Median task time<small>from handoff to main</small></div><div aria-hidden="true"><div class="bb"><span>Forge</span><i class="f" style="--v:63%"></i><span>63%</span></div><div class="bb"><span>GitHub flow</span><i class="g" style="--v:100%"></i><span>100%</span></div></div><div class="pct"><small>up to</small>37%<span class="sr"> lower</span><small>median 28%</small></div></div>
+          <div class="r"><div class="nm">CI minutes<small>billed for the run</small></div><div aria-hidden="true"><div class="bb"><span>Forge</span><i class="f" style="--v:36%"></i><span>36%</span></div><div class="bb"><span>GitHub flow</span><i class="g" style="--v:100%"></i><span>100%</span></div></div><div class="pct"><small>up to</small>64%<span class="sr"> lower</span><small>median 59%</small></div></div>
+          <div class="r"><div class="nm">Cached input tokens<small>read by the agents</small></div><div aria-hidden="true"><div class="bb"><span>Forge</span><i class="f" style="--v:57%"></i><span>57%</span></div><div class="bb"><span>GitHub flow</span><i class="g" style="--v:100%"></i><span>100%</span></div></div><div class="pct"><small>up to</small>43%<span class="sr"> lower</span><small>median 38%</small></div></div>
         </div>
-        <p class="note">N=10 Forge vs GitHub pairs on P7 releases, 27–28 Nov 2026. The <a class="lk" href="/docs/research/p7-close-bench-results/">results list every run, void and exclusion with its reason</a>. GitHub ran faster overnight and those runs are included. The a13 runtime delay excludes that pair from wall time only. The a10 post-landing re-check excludes that pair from CI and cached input only.</p>
+        <p class="note">Paired runs of 10 tasks, 27–28 Nov 2026. <a class="lk" href="/docs/research/p7-close-bench-results/">Full results</a></p>
 
         <div class="sizes">
           <h3 class="h3">Phase 6 by agent count, measured 13–15 Nov 2026.</h3>

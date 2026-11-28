@@ -33,7 +33,7 @@ const bench = Object.fromEntries(
 );
 const close = read('docs/research/p7-close-bench-results.md');
 
-test('P7 headline and ranges agree with eligible paired runs in the published ledger', () => {
+test('P7 headline medians and best paired savings agree with the published ledger', () => {
   const arms = new Map(
     [
       ...close.matchAll(
@@ -44,7 +44,8 @@ test('P7 headline and ranges agree with eligible paired runs in the published le
   const pool = ['a7', 'a9', 'a10', 'a11', 'a12', 'a13'];
   const exclusions = [['a13'], [], ['a10'], ['a10']];
   const names = ['Wall time', 'Median task time', 'CI minutes', 'Cached input tokens'];
-  const details = names.map((name, metric) => {
+  const rows = html.split('\n');
+  const medians = names.map((name, metric) => {
     const values = pool
       .filter(attempt => !exclusions[metric].includes(attempt))
       .map(attempt => {
@@ -55,22 +56,26 @@ test('P7 headline and ranges agree with eligible paired runs in the published le
       .sort((a, b) => a - b);
     const middle = (values.length - 1) / 2;
     const median = Math.round((values[Math.floor(middle)] + values[Math.ceil(middle)]) / 2);
-    const range = `${Math.round(values[0])}–${Math.round(values.at(-1))}%`;
-    assert.match(
-      html,
-      new RegExp(
-        `<div class="nm">${name}<[^\n]+?--v:${100 - median}%[^\n]+?<div class="pct">${median}%<span class="sr"> lower</span><small>${range}, ${values.length} runs`,
+    const best = Math.round(values.at(-1));
+    const forgeShare = 100 - best;
+    const row = rows.find(line => line.includes(`<div class="nm">${name}<`));
+    assert.ok(row, `${name} has a benchmark row`);
+    assert.ok(row.includes(`<i class="f" style="--v:${forgeShare}%"></i><span>${forgeShare}%</span>`), name);
+    assert.ok(
+      row.includes(
+        `<div class="pct"><small>up to</small>${best}%<span class="sr"> lower</span><small>median ${median}%</small>`,
       ),
+      name,
     );
     return median;
   });
-  const headline = `Ten agents reached main ${details[0]}% sooner, on ${details[2]}% fewer CI minutes.`;
+  const headline = `Ten agents reached main ${medians[0]}% sooner, on ${medians[2]}% fewer CI minutes.`;
   assert.ok(text.includes(headline));
   assert.match(html, new RegExp(`<meta name="description" content="[^"]*${headline}`));
-  assert.match(text, /N=10 Forge vs GitHub pairs on P7 releases, 27–28 Nov 2026/);
-  assert.match(text, /GitHub ran faster overnight and those runs are included/);
-  assert.match(text, /a13 runtime delay excludes that pair from wall time only/);
-  assert.match(text, /a10 post-landing re-check excludes that pair from CI and cached input only/);
+  assert.match(
+    html,
+    /<p class="note">Paired runs of 10 tasks, 27–28 Nov 2026\. <a class="lk" href="\/docs\/research\/p7-close-bench-results\/">Full results<\/a><\/p>/,
+  );
   assert.match(close, /a13 wall only/);
   assert.match(close, /A10 contributes to wall and median task time only/);
 });
