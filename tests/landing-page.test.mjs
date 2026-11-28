@@ -18,44 +18,68 @@ const text = html
   .replace(/\s+/g, ' ')
   .replace(/ ([.,;:])/g, '$1');
 const pct = (forge, github) => `${Math.round((1 - forge / github) * 100)}%`;
-const minSec = s => `${Math.floor(Math.round(s) / 60)} min ${Math.round(s) % 60} s`;
 const mmss = s => `${Math.floor(Math.round(s) / 60)}:${String(Math.round(s) % 60).padStart(2, '0')}`;
 
 // The headline table of the P6 exit report: N, arm, source, cells, TTM, TTM excl. flags, wall, CI min, cached input, …
 const bench = Object.fromEntries(
   [
     ...read('docs/research/p6-exit-bench-results.md').matchAll(
-      /^\| (\d+) \| (forge|github) \| (?:tuned|rerun) \| 3 \| ([\d.]+) \| [\d.]+ \| ([\d.]+) \| (\d+) \| (\d+) \| \d+ \| (\d+) \|$/gm,
+      /^\| (\d+) \| (forge|github) \| (?:tuned|rerun) \| 3 \| ([\d.]+) \| [\d.]+ \| ([\d.]+) \| (\d+) \| (\d+) \| \d+ \| \d+ \|$/gm,
     ),
-  ].map(([, n, arm, ttm, wall, ci, cached, recovery]) => [
+  ].map(([, n, arm, ttm, wall, ci, cached]) => [
     `${arm}${n}`,
-    { ttm: +ttm, wall: +wall, ci: +ci, cached: +cached, recovery: +recovery },
+    { ttm: +ttm, wall: +wall, ci: +ci, cached: +cached },
   ]),
 );
-const release = read('docs/research/p6-release-validation.md');
+const close = read('docs/research/p7-close-bench-results.md');
 
-test('every headline figure is derived from the published P6 exit report', () => {
+test('P7 headline and ranges agree with eligible paired runs in the published ledger', () => {
+  const arms = new Map(
+    [
+      ...close.matchAll(
+        /^\| (forge|github)-n10-r1-(a\d+)-\d+T\d+ \| .*? \| .*? \| .*? \| 10 \| ([\d.]+) \| ([\d.]+) \| (\d+) \| ([\d.]+) \| .*? \| Valid scored \|/gm,
+      ),
+    ].map(([, arm, attempt, ...metrics]) => [`${arm}/${attempt}`, metrics.map(Number)]),
+  );
+  const pool = ['a7', 'a9', 'a10', 'a11', 'a12', 'a13'];
+  const exclusions = [['a13'], [], ['a10'], ['a10']];
+  const names = ['Wall time', 'Median task time', 'CI minutes', 'Cached input tokens'];
+  const details = names.map((name, metric) => {
+    const values = pool
+      .filter(attempt => !exclusions[metric].includes(attempt))
+      .map(attempt => {
+        const forge = arms.get(`forge/${attempt}`)[metric];
+        const github = arms.get(`github/${attempt}`)[metric];
+        return (1 - forge / github) * 100;
+      })
+      .sort((a, b) => a - b);
+    const middle = (values.length - 1) / 2;
+    const median = Math.round((values[Math.floor(middle)] + values[Math.ceil(middle)]) / 2);
+    const range = `${Math.round(values[0])}–${Math.round(values.at(-1))}%`;
+    assert.match(
+      html,
+      new RegExp(
+        `<div class="nm">${name}<[^\n]+?--v:${100 - median}%[^\n]+?<div class="pct">${median}%<span class="sr"> lower</span><small>${range}, ${values.length} runs`,
+      ),
+    );
+    return median;
+  });
+  const headline = `Ten agents reached main ${details[0]}% sooner, on ${details[2]}% fewer CI minutes.`;
+  assert.ok(text.includes(headline));
+  assert.match(html, new RegExp(`<meta name="description" content="[^"]*${headline}`));
+  assert.match(text, /N=10 Forge vs GitHub pairs on P7 releases, 27–28 Nov 2026/);
+  assert.match(text, /GitHub ran faster overnight and those runs are included/);
+  assert.match(text, /a13 runtime delay excludes that pair from wall time only/);
+  assert.match(text, /a10 post-landing re-check excludes that pair from CI and cached input only/);
+  assert.match(close, /a13 wall only/);
+  assert.match(close, /A10 contributes to wall and median task time only/);
+});
+
+test('the dated P6 race preserves the original timings', () => {
   assert.equal(Object.keys(bench).length, 8, 'the report headline table has both arms at N=1, 3, 5 and 10');
   const f = bench.forge10,
     g = bench.github10;
-  assert.match(text, new RegExp(`main ${pct(f.ttm, g.ttm)} sooner, on ${pct(f.ci, g.ci)} fewer CI minutes`));
-  assert.match(
-    html,
-    new RegExp(
-      `<meta name="description" content="[^"]*${pct(f.ttm, g.ttm)} sooner on ${pct(f.ci, g.ci)} fewer CI minutes`,
-    ),
-  );
-  assert.match(text, new RegExp(`in ${minSec(f.ttm)} instead of ${minSec(g.ttm)}`));
-  assert.match(text, new RegExp(`billed ${f.ci} CI minutes on Forge and ${g.ci} through the GitHub flow`));
-  assert.match(
-    text,
-    new RegExp(
-      `read ${(f.cached / 1e6).toFixed(1)} million cached input tokens instead of ${(g.cached / 1e6).toFixed(1)} million`,
-    ),
-  );
-  const earlier = g.wall - f.wall;
-  assert.match(text, new RegExp(`Forge finished ${minSec(earlier)} earlier`));
-  // The race replays the same four times, to scale.
+  assert.match(text, /The Phase 6 benchmark replay\. The Phase 6 N=10 rerun was measured 14–15 Nov 2026/);
   for (const at of [f.ttm, f.wall, g.ttm, g.wall]) assert.ok(html.includes(`data-at="${at}"`), String(at));
   for (const [s, x] of [
     [f.ttm, ((f.ttm / g.wall) * 100).toFixed(2)],
@@ -68,22 +92,10 @@ test('every headline figure is derived from the published P6 exit report', () =>
     css.includes(`clip-path: inset(0 ${(100 - (f.wall / g.wall) * 100).toFixed(2)}% 0 0)`),
     'the Forge run ends at its wall time',
   );
-  // Bars: the four ten-agent comparisons and their reductions.
-  for (const [forge, github] of [
-    [f.ci, g.ci],
-    [f.cached, g.cached],
-    [f.ttm, g.ttm],
-    [f.wall, g.wall],
-  ])
-    assert.match(
-      html,
-      new RegExp(
-        `--v:${+((forge / github) * 100).toFixed(1)}%[\\s\\S]{0,400}?<div class="pct">${pct(forge, github)}<`,
-      ),
-    );
 });
 
-test('the per-size charts and table match the report at 1, 3, 5 and 10 agents', () => {
+test('the dated P6 per-size charts and table match the report at 1, 3, 5 and 10 agents', () => {
+  assert.match(text, /Phase 6 by agent count, measured 13–15 Nov 2026/);
   const rows = [
     ...html.matchAll(
       /<tr><td>(\d+)<\/td><td>(\d+)<\/td><td>(\d+)<\/td><td>(\d+) s<\/td><td>(\d+) s<\/td><td>([\d.]+) M<\/td><td>([\d.]+) M<\/td><\/tr>/g,
@@ -131,18 +143,12 @@ test('the per-size charts and table match the report at 1, 3, 5 and 10 agents', 
   }
 });
 
-test('the limits section states the caveats the reports carry', () => {
-  assert.match(
-    text,
-    new RegExp(`its agents took ${bench.forge10.recovery} recovery turns against ${bench.github10.recovery}`),
-  );
-  assert.match(release, /\| Time to main\/task, median s \| 375\.362 \| 474\.429 \|/);
-  assert.match(release, /\| CI jobs \| 9 \| 29 \|/);
-  assert.match(release, /\| Strict correctness, of ten \| 6 \| 7 \|/);
-  assert.match(text, /375 s against 474 s to main, and 6 of ten tasks strictly right against 7/);
-  assert.match(text, /9 CI jobs against 29 on the release run/);
-  assert.match(text, /not a pass of the exit bar/);
-  assert.match(html, /docs\/research\/p6-exit-bench-results\/">Method, raw runs and every table/);
+test('the limits section names the workload, CI gate miss and separate overlap run', () => {
+  assert.match(text, /six paired runs on one workload/);
+  assert.match(text, /29 CI minutes\. The target for those runs was 27 minutes/);
+  assert.doesNotMatch(text, /9 CI jobs against 29 on the release run/);
+  assert.match(text, /separate Phase 7 overlap run/);
+  assert.match(html, /docs\/research\/p7-close-bench-results\/">Method, raw runs and every table/);
 });
 
 test('every link on the page has a real destination', () => {
@@ -173,7 +179,7 @@ test('every link on the page has a real destination', () => {
   }
   for (const [label, href] of [
     ['Docs', '/docs/'],
-    ['Benchmark method', '/docs/research/p6-exit-bench-results/'],
+    ['Benchmark method', '/docs/research/p7-close-bench-results/'],
     ['Development status', '/docs/status/'],
     ['Security', '/docs/security/'],
     ['Source', 'https://github.com/NanthAI/nanthai-forge'],

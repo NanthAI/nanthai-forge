@@ -78,9 +78,11 @@ The list below shows Forge's shipped defaults. A project can turn off affected-t
 ## Measured evidence
 
 <!-- agent-measurements:start -->
+Phase 7 close (27–28 Nov 2026). Ten agents reached main 35% sooner, on 59% fewer CI minutes. Median Forge savings across paired runs were 35% wall time (30–42%, 5 runs), 28% median task time (20–37%, 6 runs), 59% CI minutes (56–64%, 5 runs) and 38% cached input tokens (29–43%, 5 runs). GitHub ran faster overnight and those runs are included. The Phase 7 results record every run, void and exclusion with its reason.
+
 B1.5d (2026-11-04), ten real-agent tasks: the published summary reports time to main per task of 324 / 496 s at N=1, 386 / 597 s at N=3, 352 / 512 s at N=5, and 350 / 460 s at N=10 (Forge / Git + GitHub). The leads were 35%, 35%, 31% and 24%. CI billed minutes were 331 / 910. Wall-to-all-landed favored GitHub at N=3 and N=10; the N=5 unpaired time ranges overlap. Strict correctness totals matched. This is not a universal speed or token-saving promise.
 
-P6 exit: the descriptive real-agent report retains three reps per arm/N, using tuned results for N=1/3/5 and the early-resolve v2 rerun for N=10. Observed median task time to main is 338.472 / 500.097 s, 377.131 / 538.131 s, 353.583 / 527.077 s and 359.633 / 565.508 s respectively (Forge / GitHub). V2 N=10 median wall is 762.705 / 1181.678 s and billed CI is 24 / 69 min. GitHub ran slower in v2; earlier GitHub medians and every supplied void remain visible. Task flags, incomplete cost coverage, raw N=10 strict medians of 6 / 7 and recovery turns of 13 / 7 prevent an exit-bar pass. These are descriptive observations, not a completed Phase 6 qualification. The older E3 failing-burst result favored GitHub (189 s versus Forge 989 s); its G8 rerun is not published.
+Historical Phase 6 exit results (measured 13–15 Nov 2026) retain three reps per arm and agent count. N=1/3/5 use the tuned series, and N=10 uses a separately registered rerun. The report retains task flags, strict correctness and recovery turns alongside the timing and cost figures.
 <!-- agent-measurements:end -->
 
 [Baseline and limitations](../../docs/research/p6-baseline.md); figures describe those workloads, not a guarantee.

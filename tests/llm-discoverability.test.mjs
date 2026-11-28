@@ -282,7 +282,7 @@ test('the public prompt explains first and both LLM files and the skill share th
   }
 });
 
-test('agent discovery teaches current contract verbs and shares measured B1.5d/P6 evidence', () => {
+test('agent discovery shares the P7 benchmark and labels the historical evidence', () => {
   const llms = llmDocuments(root)[0].source;
   const skill = read('skills/forge-agent/SKILL.md');
   const why = read('docs/why-forge.md');
@@ -297,10 +297,10 @@ test('agent discovery teaches current contract verbs and shares measured B1.5d/P
   for (const text of [llms, skill]) {
     assert.match(text, /B1\.5d[\s\S]*324 \/ 496 s/);
     assert.match(text, /331 \/ 910/);
-    assert.match(text, /P6 exit:[\s\S]*descriptive real-agent report/);
-    assert.match(text, /762\.705 \/ 1181\.678 s/);
-    assert.match(text, /24 \/ 69 min/);
-    assert.match(text, /prevent an exit-bar pass/);
+    assert.match(text, /Phase 7 close \(27–28 Nov 2026\)/);
+    assert.match(text, /Ten agents reached main 35% sooner, on 59% fewer CI minutes/);
+    assert.match(text, /GitHub ran faster overnight and those runs are included/);
+    assert.match(text, /Historical Phase 6 exit results \(measured 13–15 Nov 2026\)/);
     assert.doesNotMatch(text, /Let `finish`|contributors propose and cannot write|R3\) is pending/);
   }
   assert.match(llms, /Lifecycle verbs: `start`, `save`, `land`/);

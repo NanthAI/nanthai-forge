@@ -7,7 +7,7 @@
 <meta name="theme-color" content="#0b0e13" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" content="#f4f6f9" media="(prefers-color-scheme: light)">
 <title>Forge: source control built for coding agents</title>
-<meta name="description" content="Forge is source control for many coding agents on one codebase. In its published benchmark, ten agents reached main 36% sooner on 65% fewer CI minutes than through a GitHub flow. Open development; not yet a public service.">
+<meta name="description" content="Forge is source control for many coding agents on one codebase. Ten agents reached main 35% sooner, on 59% fewer CI minutes. Phase 7 benchmark against GitHub. Forge is in open development before public launch.">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Forge by NanthAi">
 <meta property="og:title" content="Forge: source control built for coding agents">
@@ -25,9 +25,8 @@
 <body>
 <a class="skip" href="#main">Skip to content</a>
 <!--
-  Every figure on this page is from the published P6 exit benchmark, docs/research/p6-exit-bench-results.md
-  (medians of three runs per arm; N=10 from the "rerun" series, N=1, 3 and 5 from the "tuned" series), and the
-  release run in docs/research/p6-release-validation.md. tests/landing-page.test.mjs checks them against those files.
+  Headline and savings are from docs/research/p7-close-bench-results.md. The dated Phase 6 race and per-size charts
+  use docs/research/p6-exit-bench-results.md. tests/landing-page.test.mjs checks figures against both reports.
   The terminal lines and Lane titles are illustrations: command names are real, result wording is shortened.
 -->
 <main id="main">
@@ -35,14 +34,14 @@
     <canvas aria-hidden="true"></canvas>
     <header class="top w" data-crisp="36">
       <a class="brand" href="/" aria-label="Forge home"><svg viewBox="0 0 64 64" aria-hidden="true"><path class="stem" d="M8 6H20V40.5H8Z"/><path class="stem" d="M8 40H20V58H14L8 52Z"/><path class="arm" d="M8 6H34.6V18H8ZM34 6H58L52 18H34Z"/><rect class="xT" x="8" y="6" width="12" height="12"/><path class="arm" d="M8 28H30.6V40H8ZM30 28H48L42 40H30Z"/><rect class="xL" x="8" y="28" width="12" height="12"/><circle class="sp" cx="54" cy="12" r="2.6"/></svg><span translate="no">Forge</span></a>
-      <nav aria-label="Site"><a class="wide" href="#speed">Benchmark</a><a class="wide" href="#why">How it works</a><a class="wide" href="#pricing">Pricing</a><a class="wide" href="/docs/">Docs</a></nav>
+      <nav aria-label="Site"><a class="wide" href="#cost">Benchmark</a><a class="wide" href="#why">How it works</a><a class="wide" href="#pricing">Pricing</a><a class="wide" href="/docs/">Docs</a></nav>
       <a class="in" href="/signin">Sign in</a>
     </header>
 
     <div class="w lead" data-crisp>
       <h1 class="disp" id="h1"><span>Git was built for people.</span> <span>Forge is built for agents.</span></h1>
       <div class="row">
-        <p class="sub">Source control for many coding agents on one codebase. In our benchmark ten agents reached main <b>36% sooner</b>, on <b>65% fewer CI minutes</b>, than through a GitHub flow.</p>
+        <p class="sub">Source control for many coding agents on one codebase. Ten agents reached main <b>35% sooner</b>, on <b>59% fewer CI minutes</b>. Measured against GitHub in the Phase 7 benchmark.</p>
         <div class="go">
           <button class="key" type="button" data-copy><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><rect x="7" y="7" width="10" height="10"/><path d="M13 7V3H3v10h4"/></svg><span data-label>Give this to your agent</span></button>
           <p class="fine">Copies a short prompt. Your agent reads one public file and tells you what would change in your repository before it sets anything up. <a class="lk" href="/new/import">Or import a repository yourself</a>.</p>
@@ -90,50 +89,25 @@
     </div>
   </section>
 
-  <section class="sec" id="speed" data-live>
-    <div class="w gr">
-      <div class="claim">
-        <h2 class="disp">Same agents, same tasks. Done seven minutes sooner.</h2>
-        <p>Ten agents took ten real tasks on one repository, once through Forge and once through a GitHub flow. The median task reached main in <b>6 min 0 s</b> instead of 9 min 26 s, and the last one landed while the other run still had work open.</p>
-        <p class="note">Medians of three runs each way. <a class="lk" href="#limits">What this does not show</a></p>
-      </div>
-      <div class="proof">
-        <div class="race" data-race>
-          <div class="clock"><span class="num" data-clock>19:42</span><small>since the ten tasks were handed out, replayed at 120 times speed</small></div>
-          <div class="rl">
-            <b>Forge <em data-fs>all ten on main</em></b>
-            <div class="trk"><i class="run" data-run="f"></i><i class="mk on" style="--x:30.43%" data-at="359.633"></i><i class="mk last on" style="--x:64.54%" data-at="762.705"></i></div>
-            <div class="mkl"><span class="on" style="--x:30.43%" data-at="359.633"><b>6:00</b>median<u> task on main</u></span><span class="on" style="--x:64.54%" data-at="762.705"><b>12:43</b>all ten<u> on main</u></span></div>
-          </div>
-          <div class="rl gh">
-            <b>GitHub flow <em data-gs>all ten on main</em></b>
-            <div class="trk"><i class="run" data-run="g"></i><i class="mk on" style="--x:47.86%" data-at="565.508"></i><i class="mk last on" style="--x:100%" data-at="1181.678"></i></div>
-            <div class="mkl"><span class="on" style="--x:47.86%" data-at="565.508"><b>9:26</b>median<u> task on main</u></span><span class="r on" style="--x:100%" data-at="1181.678"><b>19:42</b>all ten<u> on main</u></span></div>
-          </div>
-          <p class="readout" data-readout aria-hidden="true">Forge finished 6 min 59 s earlier. <span>The same ten tasks, the same agents, the same CI.</span></p>
-          <p class="sr">Forge: median task on main at 6 minutes 0 seconds, all ten on main at 12 minutes 43 seconds. GitHub flow: median at 9 minutes 26 seconds, all ten at 19 minutes 42 seconds.</p>
-        </div>
-      </div>
-    </div>
-  </section>
-
   <section class="sec wide" id="cost" data-live>
     <div class="w gr">
       <div class="claim">
-        <h2 class="disp">About a third of the CI minutes. Half the cached input.</h2>
-        <p>The same ten tasks billed <b>24 CI minutes</b> on Forge and 69 through the GitHub flow. The agents read 19.1 million cached input tokens instead of 37.6 million.</p>
+        <h2 class="disp">Phase 7 benchmark results.</h2>
+        <p>Median Forge savings against GitHub, with the observed range across paired runs.</p>
       </div>
       <div class="proof">
-        <div class="legend"><span><i></i>Forge</span><span><i class="g"></i>GitHub flow</span><span>Ten agents at once. Shorter is better.</span></div>
+        <div class="legend"><span><i></i>Forge</span><span><i class="g"></i>GitHub flow</span><span>GitHub is the 100% baseline.</span></div>
         <div class="bars">
-          <div class="r"><div class="nm">CI minutes<small>billed for the run</small></div><div><div class="bb"><span>Forge</span><i class="f" style="--v:34.8%"></i><span>24 min</span></div><div class="bb"><span>GitHub flow</span><i class="g" style="--v:100%"></i><span>69 min</span></div></div><div class="pct">65%<small>lower</small></div></div>
-          <div class="r"><div class="nm">Cached input tokens<small>read by the agents</small></div><div><div class="bb"><span>Forge</span><i class="f" style="--v:51%"></i><span>19.1 M</span></div><div class="bb"><span>GitHub flow</span><i class="g" style="--v:100%"></i><span>37.6 M</span></div></div><div class="pct">49%<small>lower</small></div></div>
-          <div class="r"><div class="nm">Time to main<small>median task, handed out to landed</small></div><div><div class="bb"><span>Forge</span><i class="f" style="--v:63.6%"></i><span>6:00</span></div><div class="bb"><span>GitHub flow</span><i class="g" style="--v:100%"></i><span>9:26</span></div></div><div class="pct">36%<small>lower</small></div></div>
-          <div class="r"><div class="nm">Wall time<small>until all ten had landed</small></div><div><div class="bb"><span>Forge</span><i class="f" style="--v:64.5%"></i><span>12:43</span></div><div class="bb"><span>GitHub flow</span><i class="g" style="--v:100%"></i><span>19:42</span></div></div><div class="pct">35%<small>lower</small></div></div>
+          <div class="r"><div class="nm">Wall time<small>until all ten had landed</small></div><div aria-hidden="true"><div class="bb"><span>Forge</span><i class="f" style="--v:65%"></i><span>65%</span></div><div class="bb"><span>GitHub flow</span><i class="g" style="--v:100%"></i><span>100%</span></div></div><div class="pct">35%<span class="sr"> lower</span><small>30–42%, 5 runs</small></div></div>
+          <div class="r"><div class="nm">Median task time<small>from handoff to main</small></div><div aria-hidden="true"><div class="bb"><span>Forge</span><i class="f" style="--v:72%"></i><span>72%</span></div><div class="bb"><span>GitHub flow</span><i class="g" style="--v:100%"></i><span>100%</span></div></div><div class="pct">28%<span class="sr"> lower</span><small>20–37%, 6 runs</small></div></div>
+          <div class="r"><div class="nm">CI minutes<small>billed for the run</small></div><div aria-hidden="true"><div class="bb"><span>Forge</span><i class="f" style="--v:41%"></i><span>41%</span></div><div class="bb"><span>GitHub flow</span><i class="g" style="--v:100%"></i><span>100%</span></div></div><div class="pct">59%<span class="sr"> lower</span><small>56–64%, 5 runs</small></div></div>
+          <div class="r"><div class="nm">Cached input tokens<small>read by the agents</small></div><div aria-hidden="true"><div class="bb"><span>Forge</span><i class="f" style="--v:62%"></i><span>62%</span></div><div class="bb"><span>GitHub flow</span><i class="g" style="--v:100%"></i><span>100%</span></div></div><div class="pct">38%<span class="sr"> lower</span><small>29–43%, 5 runs</small></div></div>
         </div>
+        <p class="note">N=10 Forge vs GitHub pairs on P7 releases, 27–28 Nov 2026. The <a class="lk" href="/docs/research/p7-close-bench-results/">results list every run, void and exclusion with its reason</a>. GitHub ran faster overnight and those runs are included. The a13 runtime delay excludes that pair from wall time only. The a10 post-landing re-check excludes that pair from CI and cached input only.</p>
 
         <div class="sizes">
-          <h3 class="h3">The gap is there with one agent, and it holds at ten.</h3>
+          <h3 class="h3">Phase 6 by agent count, measured 13–15 Nov 2026.</h3>
+          <p class="note">The ten-agent results use a separate rerun. The <a class="lk" href="/docs/research/p6-exit-bench-results/">Phase 6 report</a> covers strict correctness, recovery turns and task flags.</p>
           <div class="multi">
             <div class="chart"><h4>CI minutes</h4><small>billed for the ten tasks</small>
               <div class="cols">
@@ -174,6 +148,33 @@
     </div>
   </section>
 
+  <section class="sec" id="speed" data-live>
+    <div class="w gr">
+      <div class="claim">
+        <h2 class="disp">The Phase 6 benchmark replay.</h2>
+        <p>The Phase 6 N=10 rerun was measured 14–15 Nov 2026. Ten agents took ten real tasks on one repository through Forge and through a GitHub flow.</p>
+        <p class="note">Medians of three runs each way. <a class="lk" href="/docs/research/p6-exit-bench-results/">Phase 6 results and limitations</a></p>
+      </div>
+      <div class="proof">
+        <div class="race" data-race>
+          <div class="clock"><span class="num" data-clock>19:42</span><small>since the ten tasks were handed out, replayed at 120 times speed</small></div>
+          <div class="rl">
+            <b>Forge <em data-fs>all ten on main</em></b>
+            <div class="trk"><i class="run" data-run="f"></i><i class="mk on" style="--x:30.43%" data-at="359.633"></i><i class="mk last on" style="--x:64.54%" data-at="762.705"></i></div>
+            <div class="mkl"><span class="on" style="--x:30.43%" data-at="359.633"><b>6:00</b>median<u> task on main</u></span><span class="on" style="--x:64.54%" data-at="762.705"><b>12:43</b>all ten<u> on main</u></span></div>
+          </div>
+          <div class="rl gh">
+            <b>GitHub flow <em data-gs>all ten on main</em></b>
+            <div class="trk"><i class="run" data-run="g"></i><i class="mk on" style="--x:47.86%" data-at="565.508"></i><i class="mk last on" style="--x:100%" data-at="1181.678"></i></div>
+            <div class="mkl"><span class="on" style="--x:47.86%" data-at="565.508"><b>9:26</b>median<u> task on main</u></span><span class="r on" style="--x:100%" data-at="1181.678"><b>19:42</b>all ten<u> on main</u></span></div>
+          </div>
+          <p class="readout" data-readout aria-hidden="true">Forge finished 6 min 59 s earlier. <span>The same ten tasks, the same agents, the same CI.</span></p>
+          <p class="sr">Forge: median task on main at 6 minutes 0 seconds, all ten on main at 12 minutes 43 seconds. GitHub flow: median at 9 minutes 26 seconds, all ten at 19 minutes 42 seconds.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <section class="sec wide" id="why" data-live>
     <div class="w gr">
       <div class="claim">
@@ -187,7 +188,7 @@
         </div>
         <ol class="why">
           <li><h3 class="h3">Overlap is reported while the agents are still working.</h3><p>Every save is compared with the other Lanes. Two agents that touch the same lines both hear it then, not after CI has run.</p></li>
-          <li><h3 class="h3">One check, on the exact result.</h3><p>Forge runs your CI on the change as it will sit on main, on top of everything landing before it. What passed is what main becomes.</p><p class="fig">9 CI jobs against 29 on the release run.</p></li>
+          <li><h3 class="h3">One check, on the exact result.</h3><p>Forge runs your CI on the change as it will sit on main, on top of everything landing before it. What passed is what main becomes.</p></li>
           <li><h3 class="h3">A queue, not a pile of pull requests.</h3><p>Finished work lands in order. The next Lane is checked on top of the one before it, so nobody rebases to find out where main is.</p></li>
         </ol>
       </div>
@@ -242,13 +243,11 @@
         <div id="limits">
           <h3 class="h3">What the benchmark does not show</h3>
           <ul class="limits">
-            <li><b>One repository, three runs per setting.</b> Too few to claim the same result on yours.</li>
-            <li><b>Two series.</b> The ten-agent figures come from a later series than those for 1, 3 and 5 agents.</li>
-            <li><b>Forge was worse on one measure.</b> With ten agents its agents took 13 recovery turns against 7.</li>
-            <li><b>The release build was closer.</b> One later run: 375 s against 474 s to main, and 6 of ten tasks strictly right against 7.</li>
-            <li><b>Outcomes, not causes.</b> The report describes what happened. It does not measure how much each design choice contributes, and it is not a pass of the exit bar it was run for.</li>
+            <li><b>One repository.</b> The Phase 7 results describe six paired runs on one workload. Your repository may see different results.</li>
+            <li><b>Run-to-run variation.</b> Both final-release Forge runs billed 29 CI minutes. The target for those runs was 27 minutes.</li>
+            <li><b>Overlap.</b> The report includes a separate Phase 7 overlap run where eight tasks edit the same files.</li>
           </ul>
-          <p class="note"><a class="lk" href="/docs/research/p6-exit-bench-results/">Method, raw runs and every table</a></p>
+          <p class="note"><a class="lk" href="/docs/research/p7-close-bench-results/">Method, raw runs and every table</a></p>
         </div>
       </div>
       <div class="proof">
@@ -279,6 +278,6 @@ Then tell me, in five lines: what Forge would change about how you and other age
   </section>
 </main>
 
-<footer class="ft"><div class="w"><span translate="no">Forge by NanthAi</span><a href="/docs/">Docs</a><a href="/docs/research/p6-exit-bench-results/">Benchmark method</a><a href="/docs/status/">Development status</a><a href="/docs/security/">Security</a><a href="https://github.com/NanthAI/nanthai-forge">Source</a><a href="https://github.com/NanthAI/nanthai-forge/blob/main/LICENSE.md">AGPL-3.0</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/llms.txt" translate="no">/llms.txt</a><a href="/_forge/build.json" data-build-version translate="no">Build</a></div></footer>
+<footer class="ft"><div class="w"><span translate="no">Forge by NanthAi</span><a href="/docs/">Docs</a><a href="/docs/research/p7-close-bench-results/">Benchmark method</a><a href="/docs/status/">Development status</a><a href="/docs/security/">Security</a><a href="https://github.com/NanthAI/nanthai-forge">Source</a><a href="https://github.com/NanthAI/nanthai-forge/blob/main/LICENSE.md">AGPL-3.0</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/llms.txt" translate="no">/llms.txt</a><a href="/_forge/build.json" data-build-version translate="no">Build</a></div></footer>
 </body>
 </html>
