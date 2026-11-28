@@ -26,6 +26,10 @@
           "rows": 0,
           "bytes": 0
         },
+        "projectJournalArchiveState": {
+          "rows": 0,
+          "bytes": 0
+        },
         "projectLiveLineSummary": {
           "rows": 1,
           "bytes": 934
@@ -55,6 +59,10 @@
         "projectJournalControls": {
           "rows": 8,
           "bytes": 4772
+        },
+        "projectJournalArchiveState": {
+          "rows": 1,
+          "bytes": 280
         },
         "projectLiveLineSummary": {
           "rows": 1,
@@ -120,6 +128,10 @@
           "rows": 0,
           "bytes": 0
         },
+        "projectJournalArchiveState": {
+          "rows": 0,
+          "bytes": 0
+        },
         "projectLiveLineSummary": {
           "rows": 1,
           "bytes": 934
@@ -149,6 +161,10 @@
         "projectJournalControls": {
           "rows": 8,
           "bytes": 4783
+        },
+        "projectJournalArchiveState": {
+          "rows": 1,
+          "bytes": 280
         },
         "projectLiveLineSummary": {
           "rows": 1,

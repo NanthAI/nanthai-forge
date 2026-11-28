@@ -167,7 +167,6 @@ async function fixture(t, { inline = false, lane = false, issue = false, shared 
       journalRevision: 1,
       ...(receipts ? { journalRecordReceipts: true } : {}),
     });
-    store.journalProject(f.ctx, await f.ctx.db.get(auth.projectId));
     if (receipts)
       await f.ctx.db.patch(first._id, {
         inline: undefined,
@@ -444,7 +443,6 @@ test('archived inline record values hydrate while the empty provenance body rema
 test('a narrow finish projection cannot hide an existing journal; cold markers change when a public writer loses their role', async t => {
   const h = await fixture(t);
   await h.relocate();
-  store.journalProject(h.ctx, { _id: h.auth.projectId, owner: 'owner', visibility: 'private' });
   assert(await store.journalRecord(h.ctx, h.auth.projectId, 'job', h.old.id, 0));
   await h.ctx.db.patch(h.auth.projectId, { visibility: 'public' });
   h.actor('reader');
@@ -513,7 +511,8 @@ test('Lane metrics retain superseded version facts without R2 or full old bodies
   await h.relocate();
   await h.query();
   const { journalLaneMetricsPage } = await import(moduleUrl('../convex/projectJournalLaneMetrics.ts'));
-  const page = await journalLaneMetricsPage(h.ctx, h.auth.projectId, 0, Date.now() + 1000, null);
+  const project = await h.ctx.db.get(h.auth.projectId);
+  const page = await journalLaneMetricsPage(h.ctx, h.auth.projectId, 0, Date.now() + 1000, null, project);
   assert.deepEqual(
     page.page.map(row => row.version),
     [1, 0],
@@ -727,7 +726,14 @@ test('compact version receipts preserve exact reads, source pins and complete me
   assert.equal(store.journalLaneSourcePins(row).head, h.old.head);
   const { journalLaneMetricsPage } = await import(moduleUrl('../convex/projectJournalLaneMetrics.ts'));
   const gets = h.gets.length,
-    page = await journalLaneMetricsPage(h.ctx, h.auth.projectId, 0, Date.now() + 1000, null, true);
+    page = await journalLaneMetricsPage(
+      h.ctx,
+      h.auth.projectId,
+      0,
+      Date.now() + 1000,
+      null,
+      await h.ctx.db.get(h.auth.projectId),
+    );
   assert.deepEqual(
     page.page.map(row => row.version),
     [1, 0],
@@ -762,9 +768,16 @@ test('a compact header resolves its exact private segment by content pin without
   assert(!JSON.stringify(JSON.parse(await h.read())).includes('journal-segments'));
   const { journalLaneMetricsPage } = await import(moduleUrl('../convex/projectJournalLaneMetrics.ts'));
   assert.deepEqual(
-    (await journalLaneMetricsPage(h.ctx, h.auth.projectId, 0, Date.now() + 1000, null, true)).page.map(
-      row => row.version,
-    ),
+    (
+      await journalLaneMetricsPage(
+        h.ctx,
+        h.auth.projectId,
+        0,
+        Date.now() + 1000,
+        null,
+        await h.ctx.db.get(h.auth.projectId),
+      )
+    ).page.map(row => row.version),
     [1, 0],
   );
 });

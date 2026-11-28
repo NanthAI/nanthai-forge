@@ -9,6 +9,7 @@
 // same operation id, also after an index rebuild (the index steps work on the selected generation, and `finish`
 // refuses when the generation the check read is no longer selected).
 import { v } from 'convex/values';
+import { journalState } from './projectJournalState';
 import { internalAction, internalMutation, internalQuery } from './server';
 import type { ActionCtx, MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
@@ -85,7 +86,10 @@ export const status = internalQuery({
   handler: async (ctx, { projectId, operationId }) => {
     const project = await ctx.db.get(projectId);
     const purge = itemPurge(project, operationId);
-    return purge && project?.journalRevision && purge.purgedAt === undefined && !purge.segmentSweep
+    return purge &&
+      purge.purgedAt === undefined &&
+      !purge.segmentSweep &&
+      (await journalState(ctx, projectId, project)).revision
       ? { ...purge, segmentSweep: { after: null, done: false } }
       : (purge ?? null);
   },
@@ -207,7 +211,7 @@ export const begin = internalMutation({
       startedAt: Date.now(),
       // The stored base is scrubbed in the walk (convex/projectPlanningPurgeWalk.ts); the purge is open until then.
       ...(input.selection.base ? { baseScrub: { backupId: project.work!.backupId, done: false } } : {}),
-      ...(project.journalRevision || journalEnabled()
+      ...(journalEnabled() || (await journalState(ctx, input.projectId, project)).revision
         ? {
             segmentSweep: {
               after: null,
@@ -284,7 +288,7 @@ export const finish = internalMutation({
     if (purge.purgedAt !== undefined) return purge.purgedAt;
     const project = (await ctx.db.get(input.projectId))!;
     invariant(
-      !project.journalRevision || purge.segmentSweep?.done,
+      purge.segmentSweep?.done || !(await journalState(ctx, input.projectId, project)).revision,
       'WORK_STALE',
       'The journal segment sweep has not finished. Run the purge again to resume.',
     );

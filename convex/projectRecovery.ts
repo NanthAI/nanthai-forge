@@ -14,6 +14,7 @@ import { invariant } from '../src/errors';
 import { backupManifestDigest } from '../src/work-backup-root';
 import { report } from './errors';
 import { capsuleRecoveryRevision } from './projectLandingCapsuleRecovery';
+import { journalState } from './projectJournalState';
 
 const scope = { projectId: v.id('hostedProjects'), operationId: v.string() };
 export async function recoveryOwned(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>) {
@@ -40,8 +41,9 @@ export async function recoverySelection(ctx: QueryCtx | MutationCtx, original: D
   const capsuleRevision = await capsuleRecoveryRevision(ctx, project._id);
   // Reuse the recovery revision pin. Only the actual archive revision enables physical paging or requires
   // a capsule-capable client.
-  const journalRevision = (project.journalRevision ?? 0) + (project.planningPurgeRevision ?? 0);
-  return recoverySelectionSchema.parse({
+  const archiveRevision = (await journalState(ctx, project._id, project)).revision;
+  const journalRevision = archiveRevision + (project.planningPurgeRevision ?? 0);
+  const selection = recoverySelectionSchema.parse({
     projectId: project._id,
     ownerId: project.key,
     backupId: backup._id,
@@ -60,6 +62,7 @@ export async function recoverySelection(ctx: QueryCtx | MutationCtx, original: D
         ? 'complete'
         : 'unknown',
   });
+  return { selection, archiveRevision };
 }
 const find = (ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>, operationId: string) =>
   ctx.db
@@ -77,9 +80,11 @@ export const prepare = query({
         old = serverRecoveryAuthority({ binding: project })
           ? null
           : await find(ctx, input.projectId, input.operationId);
-      const selection = old ? null : await recoverySelection(ctx, project);
+      const current = old ? null : await recoverySelection(ctx, project);
       invariant(
-        !selection || (!selection.capsuleRevision && !project.journalRevision) || input.capsuleProtocol === 1,
+        !current ||
+          (!current.selection.capsuleRevision && !current.archiveRevision) ||
+          input.capsuleProtocol === 1,
         'CLI_UPGRADE_REQUIRED',
         'This recovery includes landing capsules. Run nforge update and retry.',
       );
@@ -92,7 +97,7 @@ export const prepare = query({
             }
           : {
               authority: sourceAuthority(project),
-              selection,
+              selection: current?.selection ?? null,
               receipt: null,
             },
       );

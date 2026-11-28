@@ -25,16 +25,6 @@ export const journalLaneSourcePins = (row: Doc<'projectHostedRecords'>) =>
         lifecycleVersion: row.journalLane.lifecycleVersion,
       }
     : laneSourcePins.get(row);
-const configured = new WeakMap<Context, Map<string, boolean>>();
-export function journalProject(ctx: Context, project: Doc<'hostedProjects'>) {
-  let entries = configured.get(ctx);
-  if (!entries) configured.set(ctx, (entries = new Map()));
-  // Narrow finish projections intentionally omit unrelated project fields. They cannot establish
-  // that no journal exists. A full canonical row can keep the pre-rollout zero-read fast path.
-  if (project.journalRevision || typeof project.revision === 'number')
-    entries.set(project._id, !!project.journalRevision);
-  else entries.delete(project._id);
-}
 
 const dependencies = new WeakMap<Context, Map<string, unknown>>();
 export function journalDependency(ctx: Context, key: string, value: unknown) {
@@ -103,7 +93,6 @@ export async function journalIndexAt(
   scope: string,
   position: number,
 ) {
-  if (configured.get(ctx)?.get(projectId) === false) return null;
   const [row] = await ctx.db
     .query('projectJournalSegments')
     .withIndex('by_project_and_scope_and_from', q =>
@@ -123,7 +112,6 @@ export async function journalIndexAfter(
 ) {
   const containing = after < 0 ? null : await journalIndexAt(ctx, projectId, scope, after);
   if (containing && containing.through > after) return containing;
-  if (configured.get(ctx)?.get(projectId) === false) return null;
   const [row] = await ctx.db
     .query('projectJournalSegments')
     .withIndex('by_project_and_scope_and_from', q =>
@@ -231,7 +219,7 @@ export async function journalIndexBefore(
   scope: string,
   before: number,
 ) {
-  if (before <= 0 || configured.get(ctx)?.get(projectId) === false) return null;
+  if (before <= 0) return null;
   const [row] = await ctx.db
     .query('projectJournalSegments')
     .withIndex('by_project_and_scope_and_from', q =>
@@ -241,6 +229,3 @@ export async function journalIndexBefore(
     .take(1);
   return row ? (JSON.parse(row.value) as JournalIndex) : null;
 }
-
-export const projectJournalHint = (ctx: Context, projectId: Id<'hostedProjects'>) =>
-  configured.get(ctx)?.get(projectId);

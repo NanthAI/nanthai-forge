@@ -8,6 +8,7 @@ import { internalMutation, type MutationCtx } from './server';
 import type { Id } from './_generated/dataModel';
 import { receiptRow, type JournalRunInput } from './projectJournalMaintenance';
 import { cancelPendingTask } from './schedulerCancel';
+import { bumpJournalState } from './projectJournalState';
 export function journalEligibilityKey(operationId: string) {
   const at = /^eligibility:.*:(\d+)$/.exec(operationId)?.[1];
   return at ? `journal-wake:${at.padStart(16, '0')}:${digest(operationId)}` : null;
@@ -114,7 +115,7 @@ export async function retainJournalRecovery(
   await ctx.db.patch(row._id, { recovery, ...(row.journalSegment ? { journalReadyAt: Date.now() } : {}) });
   if (!row.journalSegment) return;
   const project = await ctx.db.get(row.projectId);
-  if (project) await ctx.db.patch(project._id, { journalRevision: (project.journalRevision ?? 0) + 1 });
+  if (project) await bumpJournalState(ctx, project._id);
   await wakeJournal(
     ctx,
     { projectId: row.projectId, operationId: `recovery:${row._id}:${digest(recovery)}`, phase: 1 },

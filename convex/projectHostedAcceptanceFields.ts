@@ -36,7 +36,24 @@ export const hostedAcceptanceTables = {
     receiptId: v.string(),
     sourceRevision: v.number(),
     head: v.string(),
-  }).index('by_project_and_snapshot', ['projectId', 'snapshotId']),
+    /** Bounded display facts for FYI. Older snapshots fall back to their retained receipt. */
+    fyi: v.optional(
+      v.object({
+        at: v.number(),
+        title: v.union(v.string(), v.null()),
+        actor: v.union(v.string(), v.null()),
+        agent: v.optional(v.literal(true)),
+        checked: v.optional(v.literal(true)),
+        hidden: v.optional(v.literal(true)),
+        intentId: v.union(v.string(), v.null()),
+        redoneWhy: v.optional(v.string()),
+        recheckSubmissionId: v.optional(v.string()),
+      }),
+    ),
+  })
+    .index('by_project_and_snapshot', ['projectId', 'snapshotId'])
+    // index-order: caller: convex/projectFyiLandingWindow.ts#fyiLandingWindow; order: newest snapshot sequence first.
+    .index('by_project_and_revision', ['projectId', 'sourceRevision']),
   projectHostedAcceptanceEvents: defineTable({
     projectId: v.id('hostedProjects'),
     receiptId: v.string(),

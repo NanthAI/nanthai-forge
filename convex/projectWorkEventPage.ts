@@ -52,7 +52,7 @@ export async function retainedEventPage(
         break;
       }
     }
-    if (project.journalRevision) {
+    if (selected.size < end - after) {
       let known = after;
       while (known < end) {
         const index = await journalIndexAfter(ctx, project._id, 'events', known, end);

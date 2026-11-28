@@ -267,7 +267,7 @@ const projectFields = {
       base: v.optional(v.object({ sha256: v.string(), size: v.number() })),
     }),
   ),
-  /** Physical history relocation fence, independent of logical Work revision. */
+  /** Legacy base for the physical history fence. New increments live in projectJournalReceipts. */
   journalRevision: v.optional(v.number()),
   /** Purge selection pins event bytes independently of append-only journal publication. */
   journalEventRewriteRevision: v.optional(v.number()),

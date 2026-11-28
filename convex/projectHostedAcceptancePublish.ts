@@ -3,6 +3,7 @@
 import { attributeCheckTime } from '../src/check-time-added';
 import { queueProjectSnapshots } from './publicSnapshotJobs';
 import { writeLineMain } from './projectLiveLineStore';
+import { fyiLandingFact } from './projectRecentLandingTitles';
 import { projectHasChecks, requireLandingCheck } from './projectHostedCheckEntries';
 import { fixGate } from '../src/culprit-bisect';
 import { earlyPredecessor } from './projectHostedEarlyResolution';
@@ -524,6 +525,7 @@ export async function publishAcceptance(
     receiptId: receipt.id,
     sourceRevision: receipt.snapshot.revision,
     head,
+    fyi: fyiLandingFact(receipt, message, state.request.finish ? candidate.intentId : null),
   });
   await ctx.db.patch(channel._id, {
     operationId: attempt.operations.accept,

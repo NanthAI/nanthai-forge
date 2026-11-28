@@ -84,6 +84,138 @@ function fixture() {
   return { s, projectId, accept, lane, message, read, dismiss };
 }
 
+test('a dogfood-sized FYI receipt window keeps lookahead, links and late recheck evidence under 64,000 read bytes', async t => {
+  const f = fixture();
+  const { canonicalPayload } = await import(moduleUrl('../src/hosted-source-operation.ts'));
+  const { landingObservation, storedLandingStateSchema } = await import(
+    moduleUrl('../src/hosted-landing.ts')
+  );
+  const { default: schema } = await import(moduleUrl('../convex/schema.ts'));
+  // The fail-first run uses main's schema, which can only store the legacy rows.
+  const hasSnapshotFacts = 'fyi' in schema.tables.projectHostedAcceptanceSnapshots.validator.fields;
+  const head = 'f'.repeat(64);
+  const limit = 14;
+  f.s.insert('projectHostedChannels', {
+    projectId: f.projectId,
+    operationId: randomUUID(),
+    name: 'main',
+    selection: canonicalPayload({ sourceRevision: limit }),
+  });
+  let rechecked;
+  for (let sequence = 1; sequence <= limit; sequence++) {
+    const message = `\n  Landing ${sequence}   title\n\nBody`;
+    const isRecheck = sequence === limit;
+    const id = f.accept(sequence, message, {
+      evidence: 'x'.repeat(5600),
+      ...(isRecheck && { firstCheck: { landedOn: 'recheck', reason: 'main-moved' } }),
+    });
+    const stored = [...f.s.tables.projectHostedAcceptances.values()].find(row => row.receiptId === id);
+    const receipt = JSON.parse(stored.value);
+    const intentId = randomUUID();
+    if (isRecheck) {
+      const operationId = randomUUID();
+      const state = {
+        schema: 1,
+        projectId: f.projectId,
+        id: stored.submissionId,
+        operationId,
+        actor: 'owner',
+        at: receipt.at,
+        sequence,
+        version: 2,
+        firstAttemptId: randomUUID(),
+        attemptId: stored.attemptId,
+        phase: 'landed',
+        request: {
+          operationId,
+          authorityEpoch: 1,
+          channel: 'main',
+          expectedMain: { head: 'e'.repeat(64), receiptId: randomUUID() },
+          candidateId: randomUUID(),
+          expectedHead: null,
+          check: null,
+        },
+        counts: { discardedRunnerSeconds: 35 },
+        observation: landingObservation('accepted'),
+        error: null,
+      };
+      rechecked = {
+        state,
+        rowId: f.s.insert('projectHostedLandingRequests', {
+          projectId: f.projectId,
+          submissionId: state.id,
+          actor: state.actor,
+          operationId,
+          channel: 'main',
+          sequence,
+          attemptId: state.attemptId,
+          phase: state.phase,
+          runnable: false,
+          runId: null,
+          value: canonicalPayload(storedLandingStateSchema.parse(state)),
+        }),
+      };
+    }
+    f.s.insert('projectHostedFinishes', {
+      projectId: f.projectId,
+      submissionId: stored.submissionId,
+      composeOperationId: null,
+      parentSubmissionId: null,
+      waiting: false,
+      wake: null,
+      value: canonicalPayload({ source: { intentId }, evidence: 'x'.repeat(3200) }),
+    });
+    f.s.insert('projectHostedRecordHeads', {
+      projectId: f.projectId,
+      kind: 'lane',
+      key: `lane-${sequence}`,
+      parent: intentId,
+      status: 'completed',
+      version: 1,
+      recordId: 'synthetic-lane',
+    });
+    f.s.insert('projectHostedAcceptanceSnapshots', {
+      projectId: f.projectId,
+      snapshotId: id,
+      receiptId: id,
+      previousId: randomUUID(),
+      sourceRevision: sequence,
+      head,
+      ...(hasSnapshotFacts && {
+        fyi: {
+          at: Date.parse(receipt.at),
+          title: `Landing ${sequence} title`,
+          actor: 'owner',
+          agent: true,
+          ...(isRecheck && { redoneWhy: 'main-moved', recheckSubmissionId: stored.submissionId }),
+          intentId,
+        },
+      }),
+    });
+  }
+  const { landings, landingsMore } = await f.read();
+  const meter = f.s.counts.at(-1);
+  assert.deepEqual(
+    landings.map(row => [row.title, row.laneId]),
+    Array.from({ length: 12 }, (_, i) => {
+      const sequence = limit - i;
+      return [`Landing ${sequence} title`, `lane-${sequence}`];
+    }),
+  );
+  assert.equal(landingsMore, true);
+  assert.equal(landings[0]?.thrown, 35);
+  assert.equal(landings[0]?.redoneWhy, 'main-moved');
+  assert(meter.readBytes <= 64_000, `FYI read ${meter.readBytes} database bytes`);
+  t.diagnostic(`FYI read ${meter.readBytes} database bytes for 12 rows and lookahead`);
+
+  const current = f.s.readSet();
+  f.s.patch('projectHostedLandingRequests', rechecked.rowId, {
+    value: canonicalPayload({ ...rechecked.state, counts: { discardedRunnerSeconds: 62 } }),
+  });
+  assert.equal(current(), false, 'late usage still invalidates the FYI row that uses it');
+  assert.equal((await f.read()).landings[0]?.thrown, 62);
+});
+
 test('FYI lists landings newest first and messages that ask nothing; a question goes to Needs you', async () => {
   const f = fixture();
   f.accept(1, 'Adapter: abort on timeout\n\nbody');

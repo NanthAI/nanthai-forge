@@ -4,6 +4,7 @@
 // read; neither writes. Selection pages the project's Work journal in revision order and keeps only the rows that
 // write to the Item (any of its ids), with the digest of the facts each will hold once purged.
 import { v } from 'convex/values';
+import { journalState } from './projectJournalState';
 import { internalQuery, type QueryCtx } from './server';
 import type { Doc, Id } from './_generated/dataModel';
 import { invariant } from '../src/errors';
@@ -123,7 +124,7 @@ export const preflight = internalQuery({
       generationId: target.generation._id,
       // Rows at or before this revision are in the base checkpoint (the stored archive the index is built from).
       initialRevision: baseRevision(target.project, target.generation),
-      journalRevision: target.project.journalRevision ?? 0,
+      journalRevision: (await journalState(ctx, projectId, target.project)).revision,
       pendingArchives: await pendingIntentArchives(
         ctx,
         projectId,

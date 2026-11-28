@@ -269,14 +269,7 @@ export const page = query({
         }
       }
       if (input.stream === 'lanes') {
-        const page = await journalLaneMetricsPage(
-          ctx,
-          input.projectId,
-          context,
-          to,
-          input.cursor,
-          project.journalRecordReceipts,
-        );
+        const page = await journalLaneMetricsPage(ctx, input.projectId, context, to, input.cursor, project);
         if (page) {
           mode = 'compact';
           return canonicalPayload({

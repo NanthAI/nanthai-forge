@@ -46,12 +46,18 @@ export async function saveArchiveCoverage(
   project: Doc<'hostedProjects'>,
   row: Doc<'projectJournalReceipts'> | null,
   state: ArchiveCoverage,
+  preserveLegacy = false,
 ) {
-  const envelope = canonicalPayload({ ...state, indexVersion: planningArchiveIndexVersion });
+  const legacyRevision = preserveLegacy ? (project.planningArchiveEventRevision ?? 0) : 0;
+  const envelope = canonicalPayload({
+    ...state,
+    eventRevision: state.eventRevision - legacyRevision,
+    indexVersion: planningArchiveIndexVersion,
+  });
   const fields = { projectId: project._id, operationId, hash: digest(envelope), envelope };
   if (row) await ctx.db.replace(row._id, fields);
   else await ctx.db.insert('projectJournalReceipts', fields);
-  if (hasProjectArchiveCoverage(project))
+  if (!preserveLegacy && hasProjectArchiveCoverage(project))
     await ctx.db.patch(project._id, {
       planningArchiveBackfill: undefined,
       planningArchiveEventRevision: undefined,

@@ -288,12 +288,17 @@ export async function journalRecoveryRead(
     const project = await recoveryOwned(ctx, input.projectId);
     const expected = recoverySelectionSchema.parse(JSON.parse(input.selection));
     invariant(
-      expected.projectId === input.projectId &&
-        sameRecoveryPins(await recoverySelection(ctx, project), expected),
+      expected.projectId === input.projectId,
       'WORK_STALE',
       'Hosted recovery pins changed; retain the original staging and request.',
     );
-    const usesArchives = !!(expected.capsuleRevision || project.journalRevision);
+    const { selection, archiveRevision } = await recoverySelection(ctx, project);
+    invariant(
+      sameRecoveryPins(selection, expected),
+      'WORK_STALE',
+      'Hosted recovery pins changed; retain the original staging and request.',
+    );
+    const usesArchives = !!(expected.capsuleRevision || archiveRevision);
     invariant(
       !usesArchives || input.capsuleProtocol === 1,
       'CLI_UPGRADE_REQUIRED',
@@ -303,7 +308,7 @@ export async function journalRecoveryRead(
     const selected = readRecoveryCapsuleCursor(table, input.cursor);
     if (selected.phase === 'journal') return await journalRecoveryPage(ctx, project, table, selected);
     if (selected.phase === 'capsules')
-      return recoveryCapsulePage(ctx, project, table, selected, input.capsuleProtocol);
+      return recoveryCapsulePage(ctx, project, table, selected, input.capsuleProtocol, archiveRevision !== 0);
     const result = await readPage(ctx, input.projectId, table, selected.cursor);
     const skip = selected.offset ?? 0;
     invariant(skip <= result.page.length, 'EVIDENCE_CHANGED', 'Continue the original recovery table page.');

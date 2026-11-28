@@ -2438,6 +2438,14 @@ Source and logs stay in R2; upkeep shares existing mutations and adds no RPC,
 poll, server timer or delay. Synthetic guards measure dependency parity and
 bounded I/O; live billed savings need matched-load deployment evidence.
 
+Acceptance adds typed FYI display facts to its existing snapshot row so titles are
+escaped once. The signed-in FYI read takes up to thirteen snapshots and checks current
+Lane heads for links.
+A gap or older snapshot loads the uncovered canonical receipts.
+Titles come from the evidence acceptance already holds. The FYI read checks
+discarded runner time on rechecked landings so late usage reports still reach
+the reader. The window adds no landing query, mutation or scheduled task.
+
 ### Hosted project feed
 
 Ask for `feed` in the existing capability request to discover the reactive
@@ -2909,12 +2917,13 @@ Work journal history readers accept verified private R2 segments alongside live
 rows. A dedicated `projectJournalSegments` index retains revision ranges, scoped
 coordination positions, immutable record hashes, Lane source pins and metric
 facts. Exact versions, planning history, provenance, Lane history, event replay
-and recovery use the same logical readers through a server action; current access
-is checked again after IO and public identity mapping remains at the boundary.
+and recovery use the same logical readers through a server action. Journal publication and late
+archive-ledger updates advance a project-scoped receipt in the same transaction as their writes.
+Recovery adds its increments to the legacy project counter. Live project views avoid that receipt.
+The server checks current access again after IO and maps public identities at the boundary.
 Reactive page clients keep live subscriptions and hydrate only selected cold
 pages. Legacy provider cursors require the existing format upgrade when archived
-rows exist, rather than silently omitting history. No journal writer is installed
-by this reader expansion. Larger existing documents can use verified transport
+rows exist. Larger existing documents can use verified transport
 fragments without changing their original row bytes or record limits.
 
 Early-resolution record readers accept optional exact predecessor pins, Lane resolution metadata,

@@ -1691,6 +1691,8 @@ test('storage per landing ratchets every table on fresh and dogfood-shaped check
   // request, and 22 B fresh and 14 B dogfood to the immediate observation projection. The S2
   // dogfood journal keeps another 7 B of timing on the retained request, as before.
   // Item 686ecdde: the dogfood recompose record stores its 24 B cause field for the spend meter.
+  // Item e92b8dd4: typed FYI facts add 157 B to the existing hot acceptance snapshot in both scenarios.
+  // They move to the capsule with the snapshot and add no landing-path read or document write.
   for (const [name, scenario] of Object.entries(scenarios)) {
     const indexBudget = storageBudgets[name].indexes;
     const aliasBudget = storageBudgets[name].metricAliases;

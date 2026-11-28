@@ -4,8 +4,8 @@
 // first, from one bounded subscription, plus the one write that dismisses rows or clears the list. The held Lanes
 // that wait on no person (an agent's conflict, a refusal, a withdrawn landing) come from projectNeedsMe:read, which
 // the page already holds; this read adds what is not state on the line:
-//   - landings, newest FYI_LANDINGS above the clear line (the receipt, plus two small rows for its Lane, plus the
-//     landing row only when it was checked again, for the CI time thrown away);
+//   - landings above the clear line (the bounded acceptance display window and one head row per distinct Intent).
+//     Older receipts outside the display window use their original evidence;
 //   - main breaking (main-audit red verdicts and the culprit named after one, newest FYI_EVENTS);
 //   - settings and access changes, for the owner only (newest FYI_EVENTS policy edits and invitations, no address);
 //   - coordination messages addressed to the reader that ask nothing (one receipt and one presence row each, so an
@@ -22,28 +22,24 @@ import { landingReadState } from './projectLandingReadFields';
 import { accessibleProject, coordinationAccess } from './projectAuthority';
 import { requireLandingReadWrite } from './projectLandingReads';
 import { shareQueryRoles } from './projectRole';
-import { finishRow } from './projectHostedFinishWake';
+import { fyiLandingWindow } from './projectFyiLandingWindow';
+import { fyiOneLine } from './projectRecentLandingTitles';
 import { culpritOf } from './projectMainRed';
-import { landingRow } from './projectHostedLandingStore';
 import { coordinationLanePresence, receipt, recipientLabel, session } from './coordinationWrite';
 import { DECLINE_HAND_BACK, handBackChoices } from '../src/coordination-hand-back';
 import { currentHandBack, handBackLanes, handBackWorkOf } from './coordinationLaneSummary';
 import { laneSession } from './projectLaneHolder';
-import { storedLandingStateSchema } from '../src/hosted-landing';
-import { discardedRunnerSeconds } from '../src/cost-budgets';
 import { report } from './errors';
 import { invariant } from '../src/errors';
-import { landingMessageText } from './projectHostedLandingMessageBody';
 import { canReadConversation } from './coordinationFeed';
 
-export const FYI_LANDINGS = 12;
+export { FYI_LANDINGS } from './projectRecentLandingTitles';
 export const FYI_EVENTS = 6;
 export const FYI_MESSAGES = 12;
 /** Dismissed row versions kept per reader and project; the oldest fall off (their rows are long gone by then). */
 export const FYI_DISMISSED = 200;
 /** One dismiss call names at most this many rows; more is "Clear all". */
 export const FYI_DISMISS_BATCH = 50;
-const TEXT = 280;
 const KEY = /^[a-z]{2,12}:[A-Za-z0-9._:-]{1,100}@[A-Za-z0-9._:-]{1,40}$/;
 
 export type FyiState = { clearedAt: number | null; clearedSequence: number | null; dismissed: string[] };
@@ -52,15 +48,6 @@ const stateOf = (row: Doc<'projectLandingReads'> | null): FyiState => ({
   clearedSequence: row?.fyi?.clearedSequence ?? null,
   dismissed: row?.fyi?.dismissed ?? [],
 });
-const oneLine = (text: unknown) =>
-  typeof text === 'string'
-    ? (text
-        .split('\n')
-        .find(line => line.trim())
-        ?.replace(/\s+/g, ' ')
-        .trim()
-        .slice(0, TEXT) ?? null)
-    : null;
 
 /** Account-scoped messages and hand-backs. Decisions share the existing Needs read and receipt authority. */
 export async function messagesTo(
@@ -142,7 +129,7 @@ export async function messagesTo(
       actor: row.actor,
       agent: sender && sender.kind !== 'person' ? sender.name : null,
       text:
-        command.kind === 'handoff' ? command.summary : asks ? command.text : (oneLine(command.text) ?? ''),
+        command.kind === 'handoff' ? command.summary : asks ? command.text : (fyiOneLine(command.text) ?? ''),
       choices:
         command.kind === 'message'
           ? (command.choices ?? [])
@@ -196,12 +183,8 @@ export const read = query({
       const state = stateOf(row);
       const setup = row?.setup;
       const since = state.clearedSequence ?? -1;
-      const [accepted, audits, messages] = await Promise.all([
-        ctx.db
-          .query('projectHostedAcceptances')
-          .withIndex('by_project_and_sequence', q => q.eq('projectId', projectId).gt('sequence', since))
-          .order('desc')
-          .take(FYI_LANDINGS + 1),
+      const [{ landings, landingsMore }, audits, messages] = await Promise.all([
+        fyiLandingWindow(ctx, projectId, since),
         ctx.db
           .query('projectHostedMainAuditEvents')
           .withIndex('by_project_and_sequence', q => q.eq('projectId', projectId))
@@ -212,62 +195,12 @@ export const read = query({
       const verdict = audits.find(row => row.kind === 'green' || row.kind === 'red');
       let mainCheckedAt =
         verdict?.kind === 'green' && verdict.reverted === undefined ? Date.parse(verdict.at) : NaN;
-      const landings = [];
-      const checkedWindow = accepted
-        .map(row => ({
-          row,
-          receipt: JSON.parse(row.value) as {
-            id: string;
-            at: string;
-            message?: string;
-            messageRef?: string;
-            actor?: { id: string; kind: string };
-            automatic?: boolean;
-            check?: unknown;
-            checked?: false;
-            firstCheck?: { landedOn: string; reason?: string };
-          },
-        }))
-        .filter(({ receipt }) => receipt.checked !== false);
-      for (const { row, receipt } of checkedWindow.slice(0, FYI_LANDINGS)) {
-        // A full-gated landing that turns main green stamps the event with its
-        // acceptance time. A different time proves this recovery came from an audit.
-        if (verdict?.kind === 'green' && verdict.sequence === row.sequence && verdict.at !== receipt.at)
-          mainCheckedAt = Date.parse(verdict.at);
-        const finish = await finishRow(ctx, { projectId, submissionId: row.submissionId });
-        const intentId = finish
-          ? ((JSON.parse(finish.value) as { source?: { intentId?: string } }).source?.intentId ?? null)
-          : null;
-        const lane = intentId
-          ? await ctx.db
-              .query('projectHostedRecordHeads')
-              .withIndex('by_project_and_kind_and_parent', q =>
-                q.eq('projectId', projectId).eq('kind', 'lane').eq('parent', intentId),
-              )
-              .first()
-          : null;
-        // Checked again after main moved: the earlier check's runner time was thrown away. Read only then.
-        const redone = receipt.firstCheck?.landedOn === 'recheck';
-        let thrown: number | null = 0;
-        if (redone) {
-          const landing = await landingRow(ctx, { projectId, submissionId: row.submissionId });
-          const parsed = landing ? storedLandingStateSchema.safeParse(JSON.parse(landing.value)) : null;
-          thrown = parsed?.success ? discardedRunnerSeconds(parsed.data) : null;
-        }
-        landings.push({
-          receiptId: receipt.id,
-          sequence: row.sequence,
-          at: Date.parse(receipt.at),
-          title: oneLine(await landingMessageText(ctx, projectId, receipt)),
-          actor: receipt.actor?.id ?? null,
-          agent: receipt.actor?.kind === 'agent',
-          checked: receipt.check !== null && receipt.check !== undefined,
-          redone,
-          redoneWhy: redone ? (receipt.firstCheck?.reason ?? null) : null,
-          thrown,
-          laneId: lane?.key ?? null,
-        });
-      }
+      // A different timestamp proves that this green came from an audit of the landing.
+      if (
+        verdict?.kind === 'green' &&
+        landings.some(row => row.sequence === verdict.sequence && row.at !== Date.parse(verdict.at))
+      )
+        mainCheckedAt = Date.parse(verdict.at);
       // The culprit the bisect named after a red is its own event in the same page (convex/projectMainRed.ts reads
       // the whole episode on open); named here from the rows in hand, never with another read. A culprit event sorts
       // below its red, so a red at the edge of this page can show here without the culprit its view names.
@@ -326,7 +259,7 @@ export const read = query({
           ? { setup: { visibility: setup.visibility, skipped: setup.skipped, revision: setup.revision } }
           : {}),
         landings,
-        landingsMore: checkedWindow.length > FYI_LANDINGS,
+        landingsMore,
         broke,
         ...(Number.isFinite(mainCheckedAt) ? { mainCheckedAt } : {}),
         settings,

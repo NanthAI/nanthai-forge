@@ -8,7 +8,6 @@ import {
   handBackChoices,
 } from '../src/coordination-hand-back';
 import { wakeJournal } from './projectJournalWake';
-import { projectJournalHint } from './projectJournalStore';
 import { digest } from '../src/state/hash';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
@@ -41,7 +40,7 @@ export async function eventByOperation(
     .query('projectCoordinationEvents')
     .withIndex('by_project_and_operation', q => q.eq('projectId', projectId).eq('operationId', operationId))
     .unique();
-  if (row || projectJournalHint(ctx, projectId) === false) return row;
+  if (row) return row;
   const receipt = await ctx.db
     .query('projectJournalReceipts')
     .withIndex('by_project_and_operation', q => q.eq('projectId', projectId).eq('operationId', operationId))

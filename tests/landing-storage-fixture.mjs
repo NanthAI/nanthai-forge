@@ -32,6 +32,7 @@ export function inflateDogfoodChecks(f) {
 // Net retained JSON document bytes, rather than cumulative write traffic. Identities retain their
 // lengths; normalize only the synthetic creation clock. Index/system/R2 bytes are separate costs.
 const fixedJournalControl = row => /^journal-control:[0-4]:(existing|live)$/.test(row.operationId);
+const archiveState = row => row.operationId === 'journal-archive-state';
 function storedBytes(f) {
   return Object.fromEntries(
     Object.entries(f.tables)
@@ -45,7 +46,7 @@ function storedBytes(f) {
               ['projectLandingCapsuleIndex', 'projectLiveLineSummary', 'projectPlanProjects'].includes(
                 row.kind,
               )) ||
-            (name === 'projectJournalReceipts' && fixedJournalControl(row))
+            (name === 'projectJournalReceipts' && (fixedJournalControl(row) || archiveState(row)))
               ? 0
               : Buffer.byteLength(
                   JSON.stringify({ ...row, _creationTime: 0 }, (_, value) =>
@@ -84,6 +85,15 @@ export function fixedProjectStorage(f) {
         rows: [...f.tables.projectJournalReceipts.values()].filter(fixedJournalControl).length,
         bytes: [...f.tables.projectJournalReceipts.values()]
           .filter(fixedJournalControl)
+          .reduce((n, row) => n + Buffer.byteLength(JSON.stringify({ ...row, _creationTime: 0 })), 0),
+      },
+    ],
+    [
+      'projectJournalArchiveState',
+      {
+        rows: [...f.tables.projectJournalReceipts.values()].filter(archiveState).length,
+        bytes: [...f.tables.projectJournalReceipts.values()]
+          .filter(archiveState)
           .reduce((n, row) => n + Buffer.byteLength(JSON.stringify({ ...row, _creationTime: 0 })), 0),
       },
     ],

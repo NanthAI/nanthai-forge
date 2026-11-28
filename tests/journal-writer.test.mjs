@@ -296,21 +296,20 @@ test('expired operations retain latest archived ownership and an updated recover
   const row = [...w.f.tables.projectHostedOperations.values()].find(row => row.journalSegment);
   const ledger = JSON.stringify({ stage: 'done', evidence: 'late ledger' });
   const wake = await import(moduleUrl('../convex/projectJournalWake.ts'));
-  const beforeRevision = w.f.tables.hostedProjects.get(w.f.projectId).journalRevision;
+  const { journalState } = await import(moduleUrl('../convex/projectJournalState.ts'));
+  const revision = () =>
+    w.mutate(async ctx => (await journalState(ctx, w.f.projectId, await ctx.db.get(w.f.projectId))).revision);
+  const beforeRevision = await revision();
   await w.mutate(ctx => wake.retainJournalRecovery(ctx, row, ledger));
   assert.equal(
-    w.f.tables.hostedProjects.get(w.f.projectId).journalRevision,
+    await revision(),
     beforeRevision + 1,
     'an in-flight export cannot cross a changed archived ledger',
   );
   await w.mutate(ctx =>
     wake.retainJournalRecovery(ctx, w.f.tables.projectHostedOperations.get(row._id), ledger),
   );
-  assert.equal(
-    w.f.tables.hostedProjects.get(w.f.projectId).journalRevision,
-    beforeRevision + 1,
-    'identical retry preserves the recovery fence',
-  );
+  assert.equal(await revision(), beforeRevision + 1, 'identical retry preserves the recovery fence');
   await w.drain({ ...w.input, operationId: w.input.operationId, existing: false, phase: 1 });
   const updated = w.f.tables.projectHostedOperations.get(row._id);
   assert.equal(updated.recovery, ledger);

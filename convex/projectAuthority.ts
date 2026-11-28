@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-import { journalProject } from './projectJournalStore';
 import type { QueryCtx, MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { currentCredential, deviceApprovalExpired } from './deviceFields';
@@ -178,7 +177,6 @@ export async function ownedProject(ctx: QueryCtx | MutationCtx, id: Id<'hostedPr
       'This Forge project is unavailable with the current account.',
     );
     authorized = true;
-    journalProject(ctx, project);
     rememberReadProject(ctx, project);
     return project;
   } finally {
@@ -242,7 +240,6 @@ export async function accessibleProject(
         'This Forge project is unavailable with the current account.',
       );
     authorized = true;
-    journalProject(ctx, project);
     rememberReadProject(ctx, project);
     return project;
   } finally {
@@ -334,7 +331,6 @@ export async function memberProject(ctx: QueryCtx | MutationCtx, id: Id<'hostedP
     'PROJECT_UNAVAILABLE',
     'Project membership is required to read full Work archives.',
   );
-  journalProject(ctx, project);
   rememberReadProject(ctx, project);
   projectExecution(ctx, id, project.name, project.key);
   return project;

@@ -105,16 +105,15 @@ export async function recoveryCapsulePage(
   table: RecoveryTable,
   cursor: Cursor,
   protocol: 1 | undefined,
+  hasJournal: boolean,
 ) {
   invariant(cursor.phase === 'capsules', 'EVIDENCE_CHANGED', 'Select the capsule recovery phase.');
   if (!LANDING_CAPSULE_TABLES.includes(table as never))
     return canonicalPayload({
       table,
       rows: [],
-      cursor: project.journalRevision
-        ? recoveryCapsuleCursor({ table, phase: 'journal', cursor: null })
-        : null,
-      done: !project.journalRevision,
+      cursor: hasJournal ? recoveryCapsuleCursor({ table, phase: 'journal', cursor: null }) : null,
+      done: !hasJournal,
     });
   const query = ctx.db.query('projectFinishReadRows').withIndex('by_kind_and_project_and_submission', q => {
     const selected = q.eq('kind', capsuleKind).eq('projectId', project._id);
@@ -129,10 +128,8 @@ export async function recoveryCapsulePage(
     return canonicalPayload({
       table,
       rows: [],
-      cursor: project.journalRevision
-        ? recoveryCapsuleCursor({ table, phase: 'journal', cursor: null })
-        : null,
-      done: !project.journalRevision,
+      cursor: hasJournal ? recoveryCapsuleCursor({ table, phase: 'journal', cursor: null }) : null,
+      done: !hasJournal,
     });
   const pointer = JSON.parse(row.value),
     submissionId = row.submissionId!;

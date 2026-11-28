@@ -53,7 +53,7 @@ test('205 included Lanes and 10,050 retained receipts keep final CAS constant; c
   // Writes 19 -> 20 (b149b16b): the always-on S1 writer schedules the landing's terminal-plus-seven-day capsule
   // wake (one scheduled-function write); no read or call. Still constant in history.
   assert(source.ranges <= 41 && source.documents <= 41 && source.writes <= 20, JSON.stringify(final));
-  assert(source.readBytes < 40 * 1024 && source.writeBytes < 16 * 1024);
+  assert(source.readBytes < 40 * 1024 && source.writeBytes < 16 * 1024, JSON.stringify(source));
   assert(!final.touched.includes('projectHostedAcceptancePages'));
   assert(!final.touched.includes('projectFeedEvents'), 'wide publication leaves Lane events to completion');
   // 41 = 39 plus the one submission-order read before claiming main (incident e4aee4fe) and the

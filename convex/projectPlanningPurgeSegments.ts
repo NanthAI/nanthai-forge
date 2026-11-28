@@ -13,6 +13,7 @@ import { recordHead } from './projectHostedRecords';
 import { intentBelongsToItem } from './projectItemIntentHeads';
 import { indexedSweepPage } from './projectPlanningArchiveSweep';
 import { archiveSegmentRow } from './projectPlanningArchiveIndex';
+import { bumpJournalState } from './projectJournalState';
 
 export const purgeSegmentIdentity = {
   projectId: v.id('hostedProjects'),
@@ -34,14 +35,15 @@ async function sweepEntry(ctx: MutationCtx, input: Identity) {
     purge,
     purges,
     sweep,
-    save: (next: Sweep, rewrite?: 'events' | 'record') =>
-      ctx.db.patch(input.projectId, {
+    save: async (next: Sweep, rewrite?: 'events' | 'record') => {
+      if (rewrite) await bumpJournalState(ctx, input.projectId);
+      await ctx.db.patch(input.projectId, {
         itemPurges: purges.map(entry => (entry === purge ? { ...purge, segmentSweep: next } : entry)),
-        ...(rewrite ? { journalRevision: (project.journalRevision ?? 0) + 1 } : {}),
         ...(rewrite === 'events'
           ? { journalEventRewriteRevision: (project.journalEventRewriteRevision ?? 0) + 1 }
           : {}),
-      }),
+      });
+    },
   };
 }
 

@@ -80,7 +80,7 @@ export async function archiveSelectionCurrent(
       pin.indexedRevision === coverage.eventRevision
     );
   }
-  const [last] = project.journalRevision ? await eventSegments(ctx, project._id).order('desc').take(1) : [];
+  const [last] = await eventSegments(ctx, project._id).order('desc').take(1);
   const current = last ? segmentEntry(last).pin : null;
   const selected = pin?.frontier ?? null;
   if (canonicalPayload(current) === canonicalPayload(selected)) return true;

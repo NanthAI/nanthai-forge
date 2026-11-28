@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
-import { projectJournalHint } from './projectJournalStore';
+import { journalState } from './projectJournalState';
 import { journalCoordinationRows } from './projectJournalCoordinationRows';
 import { withActorName } from './projectActorNames';
 import { getPage } from 'convex-helpers/server/pagination';
@@ -89,9 +89,8 @@ export async function feedRows(
     targetMaxRows: maxRows,
     absoluteMaxRows: maxRows,
   });
-  const enabled = projectJournalHint(ctx, projectId);
   // Only messages and their replies have an Item scope. Those records are kept in the live table.
-  if (scope?.field !== 'planningItemId' && (enabled ?? !!(await ctx.db.get(projectId))?.journalRevision)) {
+  if (scope?.field !== 'planningItemId') {
     const archived = await journalCoordinationRows(
       ctx,
       projectId,
@@ -143,9 +142,9 @@ export async function coordinationRecent(
   feedPageSize(numItems);
   // Retain provider cursor support for pages opened before this reader expansion.
   if (cursor && !cursor.startsWith(recentPrefix)) {
-    const archived = projectJournalHint(ctx, projectId) ?? !!(await ctx.db.get(projectId))?.journalRevision;
+    const archive = await journalState(ctx, projectId, await ctx.db.get(projectId));
     invariant(
-      !archived,
+      !archive.revision,
       'CLI_UPGRADE_REQUIRED',
       'This history cursor predates journal support. Run nforge update and retry.',
     );
@@ -171,15 +170,15 @@ export async function coordinationRecent(
     targetMaxRows: numItems,
     absoluteMaxRows: numItems,
   });
-  const enabled = projectJournalHint(ctx, projectId);
-  const result =
-    (enabled ?? !!(await ctx.db.get(projectId))?.journalRevision)
-      ? await journalCoordinationRows(ctx, projectId, position, numItems, live.page, undefined, true)
-      : {
-          rows: live.page,
-          positions: live.indexKeys.map(key => (key as (string | number)[]).slice(1)),
-          hasMore: live.hasMore,
-        };
+  const result = await journalCoordinationRows(
+    ctx,
+    projectId,
+    position,
+    numItems,
+    live.page,
+    undefined,
+    true,
+  );
   const last = result.positions.at(-1) ?? position;
   return {
     page: await Promise.all(result.rows.map(row => withActorName(ctx, projectId, row))),

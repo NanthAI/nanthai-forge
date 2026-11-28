@@ -431,10 +431,11 @@ test('incident replay 70a9bd2f: global-risk A/C overtake meets the unchanged 1.5
   // 6,358 fewer write bytes in this canonical document meter.
   // Item e1d90605: the recent receipt titles on the existing live-line summary add 276 read
   // and 441 write bytes per pair. The number of calls and documents stays the same.
+  // Item e92b8dd4: FYI facts add 314 write bytes across the two existing acceptance snapshots.
   const pair = await guardReplayCost(t, '70a9bd2f pair', pairInput, {
     calls: 103,
     readBytes: 1_667_552,
-    writeBytes: 564_501,
+    writeBytes: 564_815,
   });
   assert.equal(pair.idle, 0, 'the settled pair has no idle queue work');
   assert.equal(pair.runs[0], 1);
@@ -501,10 +502,11 @@ test('70a9bd2f: admission pipeline calls and metadata bytes stay bounded at 4000
   // Item 686ecdde: the same 560 read and 112 write bytes for the direct-storage delta marker.
   // Item ab9766f3: the same in-place binding saves 2,542 read and 6,366 write bytes at 4,000 files.
   // Item e1d90605: the same recent title projection adds 276 read and 441 write bytes at 4,000 files.
+  // Item e92b8dd4: the same 314 write bytes add FYI facts to the existing snapshots at 4,000 files.
   const after = await guardReplayCost(t, '70a9bd2f 4,000-file pair', input, {
     calls: 103,
     readBytes: 1_672_064,
-    writeBytes: 566_686,
+    writeBytes: 567_000,
   });
   assert(after.landedAt[1] <= 1500, 'one check duration plus bounded source/queue progress');
   assert.deepEqual(after.runs, [1, 1]);

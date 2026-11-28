@@ -22,6 +22,7 @@ import {
   type Control,
 } from './projectJournalMaintenance';
 import { applyJournal } from './projectJournalEffects';
+import { bumpJournalState } from './projectJournalState';
 import { readArchiveCoverage, saveArchiveCoverage } from './projectPlanningArchiveCoverage';
 export const page = internalMutation({
   args: {
@@ -203,13 +204,15 @@ export const page = internalMutation({
       invariant(project && !project.removal, 'WORK_STALE', 'Archive project changed.');
       if (indexedEvents) {
         const { row, state } = await readArchiveCoverage(ctx, project);
-        await saveArchiveCoverage(ctx, project, row, { ...state, eventRevision: state.eventRevision + 1 });
+        await saveArchiveCoverage(
+          ctx,
+          project,
+          row,
+          { ...state, eventRevision: state.eventRevision + 1 },
+          true,
+        );
       }
-      if (rows.length)
-        await ctx.db.patch(project._id, {
-          journalRevision: (project.journalRevision ?? 0) + 1,
-          journalRecordReceipts: true,
-        });
+      if (rows.length) await bumpJournalState(ctx, project._id, true);
       if (pending.input.laneId && pending.done) await putControl(ctx, pending.input, null, row, claimRow);
       else
         await putControl(

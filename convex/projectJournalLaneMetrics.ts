@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import type { QueryCtx } from './_generated/server';
-import type { Id } from './_generated/dataModel';
-import { projectJournalHint } from './projectJournalStore';
+import type { Doc, Id } from './_generated/dataModel';
+import { journalState } from './projectJournalState';
 import { coordinationJournalKey } from './projectJournalCoordinationRows';
 import type { JournalIndex } from '../src/journal-segment';
 import { getPage } from 'convex-helpers/server/pagination';
@@ -17,11 +17,10 @@ export async function journalLaneMetricsPage(
   from: number,
   to: number,
   cursor: string | null,
-  recordReceipts = false,
+  project: Doc<'hostedProjects'>,
 ) {
-  if (projectJournalHint(ctx, projectId) === false) return null;
-  if (projectJournalHint(ctx, projectId) === undefined && !(await ctx.db.get(projectId))?.journalRevision)
-    return null;
+  const { revision, recordReceipts } = await journalState(ctx, projectId, project);
+  if (!revision) return null;
   invariant(
     cursor === null || cursor.startsWith(prefix),
     'CLI_UPGRADE_REQUIRED',

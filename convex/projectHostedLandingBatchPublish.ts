@@ -39,6 +39,7 @@ import { landingPublisher } from './projectIntentLandingNotes';
 import { coverageLanding, noteMainLanding } from './projectHostedMainAuditState';
 import { queueProjectSnapshots } from './publicSnapshotJobs';
 import { writeLineMain } from './projectLiveLineStore';
+import { fyiLandingFact } from './projectRecentLandingTitles';
 import { enqueueGithubMirror } from './projectGithubMirrorQueue';
 import { hostedMainV2Schema } from '../src/hosted-main';
 import { hostedRecordSchema } from '../src/hosted-records';
@@ -206,6 +207,7 @@ export async function publishLandingBatch(
   const mainChanged = candidate.base.head !== main.head || candidate.base.receiptId !== main.receipt.id;
   let retry = false;
   const memberPaths: BatchMemberPaths[] = [];
+  const memberIntents = new Map<string, string>();
   // A member whose Lane waits on an owner approval request lands alone, where it holds (fe5bea80).
   const approvals = await liveApprovals(ctx, claim.projectId);
   const granted: Awaited<ReturnType<typeof attemptApprovals>> = [];
@@ -230,6 +232,7 @@ export async function publishLandingBatch(
       'A batch member Candidate changed.',
     );
     const originalCandidate = hostedRecordSchema.options[3].parse(JSON.parse(own.value));
+    memberIntents.set(member.state.id, originalCandidate.intentId);
     for (const early of originalCandidate.earlyResolutions ?? [])
       invariant(
         (await earlyPredecessor(ctx, claim.projectId, early.predecessor)).landed,
@@ -465,6 +468,11 @@ export async function publishLandingBatch(
       receiptId: receipt.id,
       sourceRevision: receipt.snapshot.revision,
       head,
+      fyi: fyiLandingFact(
+        receipt,
+        message,
+        member.state.request.finish ? memberIntents.get(member.state.id)! : null,
+      ),
     });
     previousSnapshot = receipt.snapshot.id;
     const next = {

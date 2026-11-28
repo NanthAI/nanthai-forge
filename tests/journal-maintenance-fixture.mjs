@@ -16,7 +16,7 @@ const modules = Object.fromEntries(
     ]),
   ),
 );
-export async function journalMaintenanceFixture(t, { f: provided, advance = true } = {}) {
+export async function journalMaintenanceFixture(t, { f: provided, advance = true, message } = {}) {
   const settings = { ...synthetic, FORGE_JOURNAL_SEGMENTS: '1' },
     prior = Object.fromEntries(Object.keys(settings).map(key => [key, process.env[key]]));
   // Build the baseline with ordinary production defaults. The one operator run must move existing rows.
@@ -24,7 +24,7 @@ export async function journalMaintenanceFixture(t, { f: provided, advance = true
   Object.assign(process.env, synthetic);
   const f = provided ?? (await finishFixture(t));
   if (!provided) {
-    const state = await f.enqueue(f.request());
+    const state = await f.enqueue(f.request({ message }));
     await f.drain();
     await f.passChecks();
     await f.drain();
