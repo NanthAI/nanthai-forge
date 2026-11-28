@@ -7,7 +7,7 @@
 <meta name="theme-color" content="#0b0e13" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" content="#f4f6f9" media="(prefers-color-scheme: light)">
 <title>Forge: source control built for coding agents</title>
-<meta name="description" content="Forge is source control for many coding agents on one codebase. Ten agents reached main 35% sooner, on 59% fewer CI minutes. Phase 7 benchmark against GitHub. Forge is in open development before public launch.">
+<meta name="description" content="Forge is source control for many coding agents on one codebase. Ten agents reached main 35% sooner, on 59% fewer CI minutes. Measured against GitHub, 27–28 Nov 2026. Forge is in open development before public launch.">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Forge by NanthAi">
 <meta property="og:title" content="Forge: source control built for coding agents">
@@ -25,7 +25,7 @@
 <body>
 <a class="skip" href="#main">Skip to content</a>
 <!--
-  Headline and savings are from docs/research/p7-close-bench-results.md. The dated Phase 6 race and per-size charts
+  Headline and savings are from docs/research/p7-close-bench-results.md. The earlier replay and charts by agent count
   use docs/research/p6-exit-bench-results.md. tests/landing-page.test.mjs checks figures against both reports.
   The terminal lines and Lane titles are illustrations: command names are real, result wording is shortened.
 -->
@@ -41,7 +41,7 @@
     <div class="w lead" data-crisp>
       <h1 class="disp" id="h1"><span>Git was built for people.</span> <span>Forge is built for agents.</span></h1>
       <div class="row">
-        <p class="sub">Source control for many coding agents on one codebase. Ten agents reached main <b>35% sooner</b>, on <b>59% fewer CI minutes</b>. Measured against GitHub in the Phase 7 benchmark.</p>
+        <p class="sub">Source control for many coding agents on one codebase. Ten agents reached main <b>35% sooner</b>, on <b>59% fewer CI minutes</b>. Measured against GitHub, 27–28 Nov 2026.</p>
         <div class="go">
           <button class="key" type="button" data-copy><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><rect x="7" y="7" width="10" height="10"/><path d="M13 7V3H3v10h4"/></svg><span data-label>Give this to your agent</span></button>
           <p class="fine">Copies a short prompt. Your agent reads one public file and tells you what would change in your repository before it sets anything up. <a class="lk" href="/new/import">Or import a repository yourself</a>.</p>
@@ -92,7 +92,7 @@
   <section class="sec wide" id="cost" data-live>
     <div class="w gr">
       <div class="claim">
-        <h2 class="disp">Phase 7 benchmark results.</h2>
+        <h2 class="disp">Benchmark results.</h2>
         <p>Forge savings against GitHub.</p>
       </div>
       <div class="proof">
@@ -106,8 +106,8 @@
         <p class="note">Paired runs of 10 tasks, 27–28 Nov 2026. <a class="lk" href="/docs/research/p7-close-bench-results/">Full results</a></p>
 
         <div class="sizes">
-          <h3 class="h3">Phase 6 by agent count, measured 13–15 Nov 2026.</h3>
-          <p class="note">The ten-agent results use a separate rerun. The <a class="lk" href="/docs/research/p6-exit-bench-results/">Phase 6 report</a> covers strict correctness, recovery turns and task flags.</p>
+          <h3 class="h3">By number of agents, 13–15 Nov 2026.</h3>
+          <p class="note">The ten-agent figures come from a separate run. The <a class="lk" href="/docs/research/p6-exit-bench-results/">earlier benchmark report</a> explains how we checked the work and where agents ran into trouble.</p>
           <div class="multi">
             <div class="chart"><h4>CI minutes</h4><small>billed for the ten tasks</small>
               <div class="cols">
@@ -151,9 +151,9 @@
   <section class="sec" id="speed" data-live>
     <div class="w gr">
       <div class="claim">
-        <h2 class="disp">The Phase 6 benchmark replay.</h2>
-        <p>The Phase 6 N=10 rerun was measured 14–15 Nov 2026. Ten agents took ten real tasks on one repository through Forge and through a GitHub flow.</p>
-        <p class="note">Medians of three runs each way. <a class="lk" href="/docs/research/p6-exit-bench-results/">Phase 6 results and limitations</a></p>
+        <h2 class="disp">Replay of a ten-agent run.</h2>
+        <p>On 14–15 Nov 2026, ten agents tackled ten real tasks on the same repository with Forge and with GitHub.</p>
+        <p class="note">Medians from three runs per workflow. <a class="lk" href="/docs/research/p6-exit-bench-results/">Full results and limitations</a></p>
       </div>
       <div class="proof">
         <div class="race" data-race>
@@ -243,9 +243,9 @@
         <div id="limits">
           <h3 class="h3">What the benchmark does not show</h3>
           <ul class="limits">
-            <li><b>One repository.</b> The Phase 7 results describe six paired runs on one workload. Your repository may see different results.</li>
+            <li><b>One repository.</b> The benchmark compares Forge and GitHub across six pairs of runs on one workload. Your repository may see different results.</li>
             <li><b>Run-to-run variation.</b> Both final-release Forge runs billed 29 CI minutes. The target for those runs was 27 minutes.</li>
-            <li><b>Overlap.</b> The report includes a separate Phase 7 overlap run where eight tasks edit the same files.</li>
+            <li><b>Overlapping edits.</b> The report includes a separate run where eight tasks edit the same files.</li>
           </ul>
           <p class="note"><a class="lk" href="/docs/research/p7-close-bench-results/">Method, raw runs and every table</a></p>
         </div>

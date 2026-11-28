@@ -12,8 +12,8 @@ const html = read('web/index.html');
 const css = read('web/src/landing/landing.css');
 const tokens = read('web/src/ds/tokens.css');
 const scripts = ['page.ts', 'frames.ts', 'hero.ts'].map(name => [name, read(`web/src/landing/${name}`)]);
-const text = html
-  .replace(/<script>[\s\S]*?<\/script>/g, '')
+const copyMarkup = html.replace(/<!--[\s\S]*?-->|<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, ' ');
+const text = copyMarkup
   .replace(/<[^>]+>/g, ' ')
   .replace(/\s+/g, ' ')
   .replace(/ ([.,;:])/g, '$1');
@@ -32,6 +32,31 @@ const bench = Object.fromEntries(
   ]),
 );
 const close = read('docs/research/p7-close-bench-results.md');
+
+test('public homepage copy uses plain benchmark terms in page text, links and descriptions', () => {
+  const descriptionNames = ['description', 'og:description', 'twitter:description'];
+  const descriptions = [...copyMarkup.matchAll(/<meta\b((?:"[^"]*"|'[^']*'|[^'">])*)>/gi)].flatMap(
+    ([, tag]) => {
+      const attributes = new Map(
+        [...tag.matchAll(/([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>]+))/g)].map(
+          ([, name, doubleQuoted, singleQuoted, unquoted]) => [
+            name.toLowerCase(),
+            doubleQuoted ?? singleQuoted ?? unquoted,
+          ],
+        ),
+      );
+      const isDescription = ['name', 'property'].some(key =>
+        descriptionNames.includes(attributes.get(key)?.toLowerCase()),
+      );
+      return isDescription ? [attributes.get('content') ?? ''] : [];
+    },
+  );
+  const jargon = /\b(?:phase\s*\d+|p[67]|n\s*=\s*\d+|arms?)\b/gi;
+  const matches = [text, ...descriptions].flatMap(
+    copy => copy.replace(/&nbsp;|&#0*160;|&#x0*a0;/gi, ' ').match(jargon) ?? [],
+  );
+  assert.deepEqual(matches, [], 'use dates and plain descriptions of the benchmark');
+});
 
 test('P7 headline medians and best paired savings agree with the published ledger', () => {
   const arms = new Map(
@@ -84,7 +109,7 @@ test('the dated P6 race preserves the original timings', () => {
   assert.equal(Object.keys(bench).length, 8, 'the report headline table has both arms at N=1, 3, 5 and 10');
   const f = bench.forge10,
     g = bench.github10;
-  assert.match(text, /The Phase 6 benchmark replay\. The Phase 6 N=10 rerun was measured 14–15 Nov 2026/);
+  assert.match(text, /Replay of a ten-agent run\. On 14–15 Nov 2026/);
   for (const at of [f.ttm, f.wall, g.ttm, g.wall]) assert.ok(html.includes(`data-at="${at}"`), String(at));
   for (const [s, x] of [
     [f.ttm, ((f.ttm / g.wall) * 100).toFixed(2)],
@@ -100,7 +125,7 @@ test('the dated P6 race preserves the original timings', () => {
 });
 
 test('the dated P6 per-size charts and table match the report at 1, 3, 5 and 10 agents', () => {
-  assert.match(text, /Phase 6 by agent count, measured 13–15 Nov 2026/);
+  assert.match(text, /By number of agents, 13–15 Nov 2026/);
   const rows = [
     ...html.matchAll(
       /<tr><td>(\d+)<\/td><td>(\d+)<\/td><td>(\d+)<\/td><td>(\d+) s<\/td><td>(\d+) s<\/td><td>([\d.]+) M<\/td><td>([\d.]+) M<\/td><\/tr>/g,
@@ -149,10 +174,10 @@ test('the dated P6 per-size charts and table match the report at 1, 3, 5 and 10 
 });
 
 test('the limits section names the workload, CI gate miss and separate overlap run', () => {
-  assert.match(text, /six paired runs on one workload/);
+  assert.match(text, /six pairs of runs on one workload/);
   assert.match(text, /29 CI minutes\. The target for those runs was 27 minutes/);
   assert.doesNotMatch(text, /9 CI jobs against 29 on the release run/);
-  assert.match(text, /separate Phase 7 overlap run/);
+  assert.match(text, /separate run where eight tasks edit the same files/);
   assert.match(html, /docs\/research\/p7-close-bench-results\/">Method, raw runs and every table/);
 });
 
