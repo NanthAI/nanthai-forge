@@ -5,20 +5,25 @@
 import test from 'node:test';
 import { temporaryDirectory } from '../scripts/test-temp.mjs';
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { agentFixture } from './hosted-agent-fixture.mjs';
 import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
 import { recordLane } from '../dist/lane-registry.js';
 import { clientCacheRoot } from '../dist/root-paths.js';
 import { landSummary } from '../dist/hosted-land-summary.js';
-import { finishResubmitContinuation, normalizeObservedFinish } from '../dist/hosted-agent-finish-result.js';
+import {
+  finishResubmitContinuation,
+  normalizeHostedFinishResult,
+  normalizeObservedFinish,
+} from '../dist/hosted-agent-finish-result.js';
 import { hostedAgentCli } from '../dist/hosted-agent-cli.js';
 import { submitHostedLand } from '../dist/hosted-land-cli.js';
 import { synthetic } from './hosted-revert-fixture.mjs';
 import { ConvexError } from 'convex/values';
 import { getFunctionName } from 'convex/server';
 import { digest } from '../dist/hash.js';
+import { selectHostedFinish } from '../dist/hosted-agent-finish-identity.js';
 
 const priorEnv = Object.fromEntries(
   [...Object.keys(synthetic), 'XDG_STATE_HOME'].map(key => [key, process.env[key]]),
@@ -247,6 +252,99 @@ test('a queued no-op ends with a Lane diff command and no resubmission command',
     implicit.recovery.command,
     `nforge agent '/workspace/lane with spaces' diff '{"summary":true}'`,
   );
+});
+
+for (const explicit of [false, true])
+  test(`wait on a dirty checkout’s ${explicit ? 'explicit-input' : 'implicit'} landing names the Lane folder for empty and cancelled outcomes`, async t => {
+    const s = agentFixture(t);
+    const oldExit = process.exitCode;
+    t.after(() => {
+      process.exitCode = oldExit;
+    });
+    t.mock.method(process.stderr, 'write', () => true);
+    await s.transport().dispatch('open', { laneId: s.lane.laneId });
+    const first = await submitHostedLand(
+      s.root,
+      { message: 'First landing' },
+      s.address,
+      s.transport(),
+      0,
+      true,
+    );
+    const observed = s.operations.get(first.operationId);
+
+    writeFileSync(join(s.root, 'dirty.txt'), 'Unsaved when land started\n');
+    const command = {
+      message: 'Dirty checkout landing',
+      ...(explicit ? { inputs: [{ laneId: s.lane.laneId }] } : {}),
+    };
+    const journal = await selectHostedFinish(s.root, s.address, 'owner', command, undefined, async () => {
+      assert.fail('a new implicit selection has no original operation to observe');
+    });
+    assert.equal(journal.get('finish-context').clean, null);
+    const operationId = journal.operationId;
+    const checkout = realpathSync(s.root);
+    for (const code of ['NOTHING_TO_LAND', 'LANDING_CANCELLED'])
+      await t.test(code, async () => {
+        s.operations.set(operationId, {
+          ...observed,
+          operationId,
+          version: observed.version + 1,
+          phase: 'terminal-failed',
+          observation: { state: 'terminal-failed', pendingReason: null, cause: 'rejected' },
+          error: { code, message: 'The submission ended.' },
+        });
+        const waited = await hostedAgentCli(
+          s.root,
+          'wait',
+          { operationIds: [operationId], until: 'acceptance' },
+          s.address,
+          s.transport(),
+        );
+        assert.equal(process.exitCode, 2);
+        assert.equal(waited.result.submission.error.code, code);
+        const { recovery } = waited.result;
+        if (code === 'NOTHING_TO_LAND') {
+          assert.equal(
+            recovery.command,
+            `nforge agent '${checkout}' diff '{"laneId":"${s.lane.laneId}","summary":true}'`,
+          );
+        } else {
+          assert.equal(
+            recovery.choices.sync.command,
+            `nforge agent '${checkout}' save --sync '{"laneId":"${s.lane.laneId}"}'`,
+          );
+          assert(recovery.choices.resubmit.command.startsWith(`nforge agent '${checkout}' land --save `));
+          assert.deepEqual(recovery.choices.resubmit.next.inputs, command.inputs);
+          assert.equal(recovery.choices.resubmit.next.laneId, undefined);
+        }
+      });
+  });
+
+test('foreground terminal recovery follows the single input even with another Lane checked out', () => {
+  const selected = '22222222-2222-4222-8222-222222222222';
+  const checkoutLane = '33333333-3333-4333-8333-333333333333';
+  const command = { inputs: [{ laneId: selected }] };
+  const root = '/workspace/checkout';
+  const outcome = code =>
+    normalizeHostedFinishResult(
+      root,
+      command,
+      {
+        submission: { phase: 'terminal-failed', error: { code, message: 'The submission ended.' } },
+      },
+      checkoutLane,
+    );
+  const empty = outcome('NOTHING_TO_LAND');
+  assert.deepEqual(empty.recovery.next, { action: 'diff', parameters: { laneId: selected, summary: true } });
+  const cancelled = outcome('LANDING_CANCELLED');
+  assert.deepEqual(cancelled.recovery.choices.sync.next, { action: 'sync', laneId: selected });
+  assert.deepEqual(cancelled.recovery.choices.resubmit.next, {
+    action: 'finish',
+    ...command,
+    retry: true,
+    reason: 'other',
+  });
 });
 
 test('the LANDED line states the number of changed paths', () => {

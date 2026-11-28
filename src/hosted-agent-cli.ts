@@ -26,6 +26,7 @@ import {
   cancelledLandingRecovery,
   causeNextStep,
   emptyLandingRecovery,
+  finishRecoveryLaneId,
   finishResubmitContinuation,
   landingWaitProgress,
   pendingLandingPresentation,
@@ -660,19 +661,16 @@ async function dispatchHostedAgentCli(
               const empty = code === 'NOTHING_TO_LAND';
               const original =
                 (stopped || empty) && (waitedOn ? retained : retainedHostedOperation(root, operationId));
-              const retry =
-                stopped && original && original.action === 'finish'
-                  ? finishResubmitContinuation(root, original.command)
-                  : undefined;
-              const originalLane =
-                original &&
-                (original.command.laneId ??
-                  (
-                    retainedHostedValues(root, operationId, 'finish')?.['finish-context'] as
-                      | FinishContext
-                      | undefined
-                  )?.clean?.laneId);
-              const selectedLane = typeof originalLane === 'string' ? originalLane : undefined;
+              const finish = original && original.action === 'finish' ? original : undefined;
+              const retry = stopped && finish ? finishResubmitContinuation(root, finish.command) : undefined;
+              const context = finish
+                ? (retainedHostedValues(root, operationId, 'finish')?.['finish-context'] as
+                    | FinishContext
+                    | undefined)
+                : undefined;
+              const selectedLane = finish
+                ? finishRecoveryLaneId(finish.command, context?.clean?.laneId ?? laneId)
+                : undefined;
               const emptyRecovery = empty
                 ? emptyLandingRecovery(selectedLane ? root : '.', selectedLane)
                 : undefined;

@@ -12,6 +12,7 @@ import {
   compose,
 } from './hosted-finish-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
+import { batchesFixture } from './hosted-landing-batches-fixture.mjs';
 import { policyPreset } from '../dist/autonomy-policy.js';
 const synthetic = {
   FORGE_HOSTED_CHECK_KEY_ID: 'SYNTHETIC',
@@ -1230,4 +1231,126 @@ test('df06081d: a stable device whose grant ends while its land --save is queued
   assert.equal(submission.error.code, 'AUTH_EXPIRED');
   assert.equal(f.tables.projectHostedAcceptances.size, 0);
   assert.equal([...f.tables.projectHostedChannels.values()][0].selection, main);
+});
+
+test('incident 20aee2e4: an empty desired landing recomposes before it can join a shared check', async t => {
+  for (const scenario of ['reverted', 'replacement main', 'still empty', 'outside grant', 'expired grant']) {
+    await t.test(scenario, async t => {
+      const f = await batchesFixture(t, {
+        count: 0,
+        fileCount: 3,
+        baselineFiles: [['selected.txt', 'original\n']],
+        startAt: GRANT_NOW,
+      });
+      for (const table of ['projectHostedRecords', 'projectHostedRecordHeads'])
+        for (const row of f.tables[table].values())
+          if (row.kind === 'lane' && row.key === f.lane.laneId) f.patch(table, row._id, { ownerOnly: true });
+      const filesAt = head => JSON.parse(f.c.objects.get(head)).files;
+      const staleOnly = f.c.file('stale-only.txt', 'accepted only on the first main\n');
+      const earlier = f.c.state([...filesAt(f.lane.head), staleOnly], [f.lane.head]);
+      f.c.register(earlier);
+      f.c.moveMain(earlier.sha256, randomUUID());
+      const main = f.currentMain();
+      const expectedMain = { head: main.head, receiptId: main.receipt.id };
+      const selection = f.c.selection([f.lane], [], { expectedMain });
+      const candidate = await compose(f.c, selection);
+      assert.equal(candidate.result.head, main.head, 'the requested change is already on the first main');
+      assert.equal(candidate.governance.ownerInputs, true);
+
+      const command = { ...request(f), composeOperationId: selection.request.operationId };
+      const actor =
+        scenario === 'outside grant'
+          ? grantDevice(f, ['other/'])
+          : scenario === 'expired grant'
+            ? grantDevice(f, ['selected.txt'], true)
+            : 'owner';
+      const resume = pauseSource(f, selection.request.operationId);
+      const submitted = JSON.parse(
+        await f.tx(
+          'desiredSubmit',
+          desired.submit,
+          {
+            projectId: f.projectId,
+            request: JSON.stringify(command),
+          },
+          actor,
+        ),
+      );
+      const later = f.c.file('later.txt', 'another accepted change\n');
+      const content = scenario === 'still empty' ? main.head : f.c.baseline.sha256;
+      // A compensation keeps the accepted ancestry. For the replacement-base cases,
+      // simulate a main pin from a different history, where the input can apply again.
+      const parent = ['reverted', 'still empty'].includes(scenario) ? main.head : f.c.baseline.sha256;
+      const next = f.c.state([...filesAt(content), later], [parent]);
+      f.c.register(next);
+      f.c.moveMain(next.sha256, randomUUID());
+      resume();
+      await f.execute(f.pending()[0]); // Admit the desired landing, leaving its queue wake pending.
+      const row = () =>
+        [...f.tables.projectHostedLandingRequests.values()].find(r => r.submissionId === submitted.id);
+      const admitted = row();
+      assert(admitted, 'the stale admission retains the original desired identity');
+      const peer = await f.add(0);
+      const peerRow = [...f.tables.projectHostedLandingRequests.values()].find(
+        r => r.submissionId === peer.id,
+      );
+      assert.equal(peerRow.batchable, true, 'an eligible peer is queued at the same time');
+      if (scenario === 'expired grant') {
+        const [device] = f.tables.cliCredentials.values();
+        f.patch('cliCredentials', device._id, {
+          grant: { at: GRANT_NOW - 31 * 86400000, usedAt: GRANT_NOW },
+        });
+      }
+      await f.drain();
+      for (let i = 0; i < 3 && f.runs().some(run => run.status === 'queued'); i++) {
+        await f.passChecks();
+        await f.drain();
+      }
+      const { submission } = await read(f, command.operationId);
+      assert.equal((await f.current(peer.id)).submission.phase, 'landed', 'the real peer lands');
+      const receipts = [...f.tables.projectHostedAcceptances.values()].map(r => JSON.parse(r.value));
+      const ownReceipt = receipts.find(receipt => receipt.submissionId === submitted.id);
+      const files = filesAt(f.currentMain().head);
+      const selected = files.find(file => file.path === 'selected.txt');
+      if (scenario === 'replacement main') {
+        assert.equal(
+          selected.blob,
+          f.c.file('selected.txt', 'selected\n').blob,
+          'restore the reverted change',
+        );
+        assert.equal(submission.phase, 'landed', JSON.stringify(submission.error));
+        assert(ownReceipt, 'the recomposed change has its own receipt');
+        assert(
+          !files.some(file => file.path === staleOnly.path),
+          'apply the Lane delta without restoring other stale files',
+        );
+      } else {
+        const error =
+          scenario === 'outside grant'
+            ? 'AUTH_SCOPE_DENIED'
+            : scenario === 'expired grant'
+              ? 'AUTH_EXPIRED'
+              : 'NOTHING_TO_LAND';
+        assert.equal(submission.error?.code, error);
+        assert.equal(ownReceipt, undefined);
+        assert.equal(selected.blob, filesAt(next.sha256).find(file => file.path === 'selected.txt').blob);
+        assert.equal(
+          (await f.readLane(f.lane.laneId)).state,
+          'active',
+          'no false receipt closes the saved Lane',
+        );
+      }
+      assert(files.some(file => file.path === 'later.txt'));
+      assert.equal(
+        f.runs().some(run => run.request.expectedHead === candidate.result.head),
+        false,
+      );
+      assert.equal(Boolean(admitted.batchable), false);
+      assert.equal(admitted.batchSelection, undefined);
+      for (const { value } of f.tables.projectHostedLandingBatches.values())
+        assert(!JSON.parse(value).members.some(member => member.candidate.id === candidate.id));
+      if (scenario !== 'replacement main') assert.equal(row().batchSelection, undefined);
+      assert.equal(f.pending().length, 0);
+    });
+  }
 });

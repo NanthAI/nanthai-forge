@@ -513,6 +513,9 @@ export async function writeLanding(
       ? row.orderWait
       : undefined;
   const ownerDecision = reviewState(row, state);
+  // An attempt that was empty on its own base must recompose before it can supply a batch selection.
+  const selectsBatchCandidate =
+    attempt.candidate.head !== attempt.main.head && Boolean(attempt.deferredCheck || row.batchSelection);
   await ctx.db.patch(row._id, {
     ...(options?.landedPathCount === undefined ? {} : { landedPathCount: options.landedPathCount }),
     ...(options?.reservedCause ? { reservedCause: options.reservedCause } : {}),
@@ -548,9 +551,7 @@ export async function writeLanding(
     admitting: admitting ? true : undefined,
     deciding,
     batchSelection:
-      !row.earlyReview && !state.batchSolo && (attempt.deferredCheck || row.batchSelection)
-        ? canonicalPayload(attempt)
-        : undefined,
+      !row.earlyReview && !state.batchSolo && selectsBatchCandidate ? canonicalPayload(attempt) : undefined,
     batchable: row.earlyReview
       ? undefined
       : Boolean(
@@ -561,7 +562,7 @@ export async function writeLanding(
           row.admission?.status !== 'failed' &&
           // Pre-queue: an admitted change tries its own Lane run once before any cohort.
           !(row.admission?.full && row.admission.status === 'passed' && !row.admission.reuse) &&
-          (attempt.deferredCheck || row.batchSelection) &&
+          selectsBatchCandidate &&
           state.phase === 'queued' &&
           !runId,
         ),

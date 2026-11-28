@@ -441,12 +441,12 @@ export async function hostedLandCli(
     ...command,
     operationId: submitted.operationId,
   };
-  const laneId =
-    typeof selection.laneId === 'string'
-      ? selection.laneId
-      : selected?.submission.error?.code === 'LANDING_CANCELLED'
-        ? (markerIdentity(transport.root ?? root)?.laneId ?? undefined)
-        : undefined;
+  const errorCode = selected?.submission.error?.code;
+  const laneId = typeof selection.laneId === 'string' ? selection.laneId : undefined;
+  const checkoutLaneId =
+    errorCode === 'LANDING_CANCELLED' || errorCode === 'NOTHING_TO_LAND'
+      ? (markerIdentity(transport.root ?? root)?.laneId ?? undefined)
+      : undefined;
   const pending =
     observation?.status === 'timeout' && selected
       ? { ...selected.submission, orderWait: orderWaitOf(selected.orderWait) }
@@ -464,7 +464,7 @@ export async function hostedLandCli(
       : selected?.submission;
   const result = normalizeHostedFinishResult(
     transport.root ?? root,
-    laneId ? { ...selection, laneId } : selection,
+    selection,
     {
       ...(submitted.result as Record<string, unknown>),
       ...(observation?.run ? { run: observation.run } : {}),
@@ -475,6 +475,7 @@ export async function hostedLandCli(
         ? { waitStatus: observation.status, inProgress: true }
         : {}),
     },
+    checkoutLaneId,
   );
   // An older observer can omit the accepted count. Drop any estimate inherited from submission.
   if (selected?.submission.phase === 'landed' && selected.changedPaths === undefined)

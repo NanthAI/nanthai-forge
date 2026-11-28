@@ -32,6 +32,20 @@ for (const situation of BRIEF_SITUATIONS)
       );
     });
   }
+test('the recovery guide names the current-context actions emitted by agent briefings', () => {
+  // test-signal: allow The guide's command contract is compared to actual rendered commands.
+  const guide = readFileSync(new URL('../docs/agents/recovery.md', import.meta.url), 'utf8');
+  const row = guide.split('\n').find(line => /^\| I need current context for an agent briefing\./.test(line));
+  assert(row, 'the guide covers selecting current briefing context');
+  const advice = row.split('|')[3];
+  for (const situation of ['start-intent', 'continue-lane']) {
+    const { full } = fixtureBrief(situation, 'codex');
+    const action = /Run `nforge agent \/forge\/demo (\S+) .*?` for current context\./.exec(full)?.[1];
+    assert(action, `${situation} names a current-context command`);
+    assert.match(advice, new RegExp(`\\b${action}\\b`), `the guide should name the ${situation} command`);
+  }
+});
+
 test('instruction detection names exact paths, handles case variants/nesting and excludes similar names', () => {
   const names = [
     'AGENTS.md',

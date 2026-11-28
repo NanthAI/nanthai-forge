@@ -158,6 +158,7 @@ removed, skipped or moved out of `tests/*.test.mjs`, or when this page stops nam
 | `ab9766f3` | Admission adoption and deferred solo checks each keep one immutable attempt; a main-race carry adds only its recomposition. |
 | `b7f93deb` | A landing supersedes quiet same-Intent Lanes using the overlap row activity while active or pinned siblings remain visible. |
 | `f081111a` | A reopened Lane with a new landing message and a composed head already on main refuses before any hosted check or landing is created. |
+| `20aee2e4` | Desired landing admission races a main move with a real queue peer. A compensation or unchanged result earns no receipt, a replacement base reapplies only the selected Lane, and folder grants are rechecked. |
 
 A new core-claim incident adds its replay to the registry and a row here in the Lane that fixes
 it.

@@ -637,7 +637,8 @@ export async function enqueueHostedLanding(
           ...(input.preflightRan === undefined ? {} : { preflightRan: input.preflightRan }),
           ...(input.preflightRuns === undefined ? {} : { preflightRuns: input.preflightRuns }),
         }),
-    ...(attempt.deferredCheck
+    // An empty Candidate on an earlier main defers the check for recomposition, not grouping.
+    ...(attempt.deferredCheck && attempt.candidate.head !== attempt.main.head
       ? { batchSelection: canonicalPayload(attempt), batchable: !admission && !noCarry }
       : {}),
     ...(noCarry

@@ -309,6 +309,29 @@ test('active search hides settled Items and an explicit Closed search finds both
   assert.ok(more.items.every(item => item.status === 'closed' || item.status === 'abandoned'));
 });
 
+test('a search cursor rejected by the server restarts with the current search filters', async t => {
+  const s = await setup(t);
+  const p = port(s);
+  await put(p, { kind: 'issue', title: 'Parser fixture one' });
+  await put(p, { kind: 'issue', title: 'Parser fixture two' });
+  const selection = { search: 'parser', status: 'open', limit: 1, reconcile: false };
+  const first = await list(p, selection);
+  assert.ok(first.nextCursor);
+
+  const restart = { ...selection, status: 'all' };
+  let recovery;
+  await assert.rejects(list(p, { ...restart, cursor: first.nextCursor }), error => {
+    assert.equal(error.code ?? error.data?.code, 'WORK_STALE');
+    assert.deepEqual(error.recovery?.next, { action: 'planning', ...restart });
+    recovery = error.recovery.next;
+    return true;
+  });
+  const { action, ...filters } = recovery;
+  const { result } = await run(p, action, filters);
+  assert.equal(result.items.length, 1);
+  assert.ok(result.nextCursor);
+});
+
 test('the worker closes an Item from its completed hosted Intent; planning reads report open lines without writing', async t => {
   const s = await setup(t);
   const p = port(s, new Map(), workerFeatures, true);

@@ -2627,7 +2627,12 @@ accept identities before source IO. The driver yields with exponential backoff,
 recomposes the original H08-validated manifests on the newly observed main and
 checks the new Candidate when its original pass cannot carry under the
 [hosted reuse contract](#hosted-check-reuse-across-main-moves). It retains the
-original Lane heads and selection order. A queue lease grants scheduling authority
+original Lane heads and selection order. A desired landing whose Candidate was
+empty on an earlier main enters the queue without a batch selection. It
+recomposes its original inputs on current main before shared-check eligibility
+is evaluated, then either follows the resulting check and grant requirements or
+ends with `NOTHING_TO_LAND` when the new composition is still empty.
+A queue lease grants scheduling authority
 only. A merge conflict retains a conflicted Candidate with the exact H09
 resolution root; the existing explicit resolution path remains available.
 

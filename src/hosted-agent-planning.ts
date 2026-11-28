@@ -118,6 +118,7 @@ const changedPlanningSelection = [
   stale,
   'Waiting selection changed. Restart this planning read.',
   'Filter selection changed. Restart this planning read.',
+  'Search selection or Work generation changed. Restart this search.',
 ];
 
 function planningCursorRefusal(root: string, input: Record<string, unknown>, error: unknown) {

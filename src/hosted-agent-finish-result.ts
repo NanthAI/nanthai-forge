@@ -9,6 +9,7 @@ import { shellQuote } from './shell-quote.js';
 import { operationWait, stalledLandingContinuation } from './agent-operation-wait.js';
 import { landingHold, type LandingReview } from './hosted-landing-hold.js';
 import { syncRequiredAdvice, syncRequiredContinuation } from './hosted-would-conflict.js';
+import { finishCommandLaneIds } from './hosted-agent-journal.js';
 
 type Reply = Record<string, unknown>;
 
@@ -144,6 +145,11 @@ export function finishRetryContinuation(root: string, selection: Reply) {
   return { ...continuation, retry };
 }
 
+export function finishRecoveryLaneId(selection: Reply, checkoutLaneId?: string) {
+  const lanes = finishCommandLaneIds(selection, checkoutLaneId);
+  return lanes.length === 1 ? lanes[0] : typeof selection.laneId === 'string' ? selection.laneId : undefined;
+}
+
 export function emptyLandingRecovery(root: string, laneId?: string) {
   const parameters = { ...(laneId ? { laneId } : {}), summary: true };
   const command = `nforge agent ${shellQuote(root)} diff ${shellQuote(JSON.stringify(parameters))}`;
@@ -271,8 +277,13 @@ export function hostedObservationContinuation(root: string, result: Reply, opera
 
 /** Normalize only already-observed outcomes. No source, journal, transport or clock access. A
  * normalized reply with a submission gains `landingState` {state, label, nextStep} (src/landing-state.ts). */
-export function normalizeHostedFinishResult(root: string, selection: Reply, result: Reply): Reply {
-  const normalized = normalizeObservedFinish(root, selection, result);
+export function normalizeHostedFinishResult(
+  root: string,
+  selection: Reply,
+  result: Reply,
+  checkoutLaneId?: string,
+): Reply {
+  const normalized = normalizeObservedFinish(root, selection, result, checkoutLaneId);
   // A reply left untouched (a source step still being retried) keeps its identity: callers use it
   // to tell source recovery from wait advice, and add the field themselves.
   return normalized === result ? result : withFinishLandingState(selection, normalized);
@@ -309,7 +320,12 @@ export function withFinishLandingState(selection: Reply, result: Reply): Reply {
   };
 }
 /** Identity-preserving: returns `result` itself when nothing was observed to normalize. */
-export function normalizeObservedFinish(root: string, selection: Reply, result: Reply): Reply {
+export function normalizeObservedFinish(
+  root: string,
+  selection: Reply,
+  result: Reply,
+  checkoutLaneId?: string,
+): Reply {
   const submission = result.submission as
     | { phase?: string; observation?: { state?: string }; error?: { code?: string } }
     | undefined;
@@ -390,14 +406,12 @@ export function normalizeObservedFinish(root: string, selection: Reply, result: 
     result.error ??
     (progress as { error?: unknown; outcome?: { error?: unknown } } | undefined)?.error ??
     (progress as { outcome?: { error?: unknown } } | undefined)?.outcome?.error;
-  if ((error as { code?: string } | undefined)?.code === 'NOTHING_TO_LAND') {
-    const laneId = typeof selection.laneId === 'string' ? selection.laneId : undefined;
-    const recovery = emptyLandingRecovery(root, laneId);
+  const code = (error as { code?: string } | undefined)?.code;
+  if (code === 'NOTHING_TO_LAND') {
+    const recovery = emptyLandingRecovery(root, finishRecoveryLaneId(selection, checkoutLaneId));
     return { ...clean, status: 'failed', terminal: true, recovery, instruction: recovery.instruction };
   }
-  if ((error as { code?: string } | undefined)?.code === 'SOURCE_STATE_TOO_LARGE')
-    return { ...clean, status: 'failed', terminal: true };
-  const code = (error as { code?: string } | undefined)?.code;
+  if (code === 'SOURCE_STATE_TOO_LARGE') return { ...clean, status: 'failed', terminal: true };
   if (code === 'LANDING_CANCELLED')
     return {
       ...clean,
@@ -405,7 +419,7 @@ export function normalizeObservedFinish(root: string, selection: Reply, result: 
       terminal: true,
       ...cancelledLandingRecovery(
         root,
-        typeof selection.laneId === 'string' ? selection.laneId : undefined,
+        finishRecoveryLaneId(selection, checkoutLaneId),
         finishResubmitContinuation(root, selection),
         result.wouldConflict,
       ),
