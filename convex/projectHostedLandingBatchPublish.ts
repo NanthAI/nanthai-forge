@@ -520,6 +520,7 @@ export async function publishLandingBatch(
     toMain.push(landingToMainSeconds(receipt.at, member.state));
   }
   const last = receipts.at(-1)!;
+  const resolvedMessages: readonly (string | undefined)[] = messages;
   // The line's main snapshot moves with main, as a single landing's publish moves it (Item 85f456c1): one summary
   // write per batch, counting every member's receipt.
   await writeLineMain(
@@ -530,6 +531,7 @@ export async function publishLandingBatch(
     main.receipt.kind === 'server' && main.receipt.previousReceiptId !== null,
     receipts[0]!.snapshot.revision,
     toMain,
+    receipts.map((receipt, index) => ({ id: receipt.id, message: resolvedMessages[index] })),
   );
   await queueProjectSnapshots(ctx, project, false);
   await ctx.db.patch(channel._id, {

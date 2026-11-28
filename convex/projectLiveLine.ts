@@ -5,6 +5,7 @@ import { finishQuery } from './cliServer';
 import { accessibleProject, publicSourceAvailable } from './projectAuthority';
 import { lineSummary } from './projectLiveLineStore';
 import { recentLandings, type RecentRevert } from './projectRecentLandings';
+import type { RecentLandingTitle } from './projectRecentLandingTitles';
 import { retainedMainVerdict } from './projectLiveLineRecovery';
 import { legacyLineMain } from './projectLiveLineLegacy';
 import { finishReadSourceDb } from './projectFinishReadReader';
@@ -97,6 +98,7 @@ export const read = finishQuery({
         exit?: import('convex/values').Infer<typeof liveLineResult>['exit'];
         flow?: unknown;
         recentReverts?: RecentRevert[];
+        recentTitles?: RecentLandingTitle[];
       } = summary ? JSON.parse(summary.value) : {};
       let main = value.main ?? null;
       // An untouched pre-upgrade project still shows its accepted main. This is an
@@ -145,7 +147,7 @@ export const read = finishQuery({
       const [checks, recent] = await Promise.all([
         includeChecks ? lineChecks(finishReadSourceDb(ctx), project, marks) : undefined,
         includeChecks && (await publicSourceAvailable(ctx, project, user.subject))
-          ? recentLandings(ctx, project, value.recentReverts)
+          ? recentLandings(ctx, project, value.recentReverts, value.recentTitles)
           : undefined,
       ]);
       return {

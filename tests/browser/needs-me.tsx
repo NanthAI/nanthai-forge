@@ -220,19 +220,22 @@ const fyi: FyiRead = first
     }
   : {
       owner: true,
-      state: { clearedAt: null, clearedSequence: null, dismissed: [] },
-      landings: [
-        ...(variant === 'manual-revert'
-          ? [landing(32224, manualRevertTitle, 20, { receiptId: uuid(902) })]
-          : []),
-        landing(4, 'Types: narrow ReadResult', 62),
-        landing(3, 'Adapter: abort on timeout', 89),
-        landing(2, 'Stream parser: flush on close', 133, { redone: true, thrown: 240 }),
-        landing(1, 'Bump the lockfile', 170, { checked: false }),
-        ...(cardHistory
-          ? Array.from({ length: 8 }, (_, i) => landing(70 + i, `Earlier landing ${i}`, 175 + i))
-          : []),
-      ],
+      state:
+        variant === 'manual-revert'
+          ? { clearedAt: NOW, clearedSequence: 32224, dismissed: [] }
+          : { clearedAt: null, clearedSequence: null, dismissed: [] },
+      landings:
+        variant === 'manual-revert'
+          ? []
+          : [
+              landing(4, 'Types: narrow ReadResult', 62),
+              landing(3, 'Adapter: abort on timeout', 89),
+              landing(2, 'Stream parser: flush on close', 133, { redone: true, thrown: 240 }),
+              landing(1, 'Bump the lockfile', 170, { checked: false }),
+              ...(cardHistory
+                ? Array.from({ length: 8 }, (_, i) => landing(70 + i, `Earlier landing ${i}`, 175 + i))
+                : []),
+            ],
       landingsMore: false,
       broke: [],
       mainCheckedAt: ago(12),
@@ -821,7 +824,7 @@ const fixtureFeed: LineFeed = {
             receiptId: uuid(902),
             sequence: 32224,
             at: new Date(ago(20)).toISOString(),
-            title: null,
+            title: manualRevertTitle,
             revert: true,
           },
           {

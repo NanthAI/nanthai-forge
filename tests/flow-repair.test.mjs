@@ -108,6 +108,37 @@ test('the recent receipt strip retains a manual revert after its notice clears, 
   );
 });
 
+test('the recent title repair fills the visible legacy window once', async t => {
+  const { page } = await import(moduleUrl('../convex/projectRecentLandingTitleBackfill.ts'));
+  const at = Date.parse('2026-11-25T12:00:00Z');
+  t.mock.method(Date, 'now', () => at);
+  const f = await finishFixture(t);
+  await publish(f, at);
+  for (let i = 1; i <= 6; i++) {
+    receipt(f, i, at + i);
+    const row = f.tables.projectHostedAcceptances.get(`receipt-${i}`);
+    const messageRef = f.insert('projectHostedLandingBodies', {
+      messageProjectId: f.projectId,
+      value: `Old title ${i}\n\nOld body`,
+    });
+    row.value = JSON.stringify({ at: new Date(row._creationTime).toISOString(), messageRef });
+  }
+  const repair = () => f.tx('repairRecentTitles', page, { cursor: null });
+  const first = await repair();
+  assert.equal(first.receipts, 5);
+  assert.equal(first.titled, 5);
+  assert.equal(first.messageReads, 5);
+  assert.equal(first.patched, true);
+  const feed = await f.tx('readRecent', read, { projectId: f.projectId }, 'owner');
+  assert.deepEqual(
+    feed.recentLandings.map(row => row.title),
+    [6, 5, 4, 3, 2].map(i => `Old title ${i}`),
+  );
+  const second = await repair();
+  assert.equal(second.patched, false);
+  assert.equal(second.messageReads, 0);
+});
+
 test('a UTC-day rebuild replaces the live landing count once across tied receipt pages and keeps measured figures', async t => {
   const f = await finishFixture(t);
   const now = Date.now();

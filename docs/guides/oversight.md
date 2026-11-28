@@ -8,7 +8,7 @@ Open the project's **Needs me** page. **Needs you** shows decisions addressed to
 
 Check **FYI** for news such as a failed check another Lane owner can fix. Open that Lane, then choose **Checks** for its landing check. When a landing is held for approval, the Lane shows why, and the owner can add a reason with **Approve and land**. **Loose ends** lists work that was started and left open. The project line shows editing, saved, in queue, checking and main.
 
-Open a row in **Recent landings** under Flow to see its receipt in Code History. The title, when available, fits on one line beside its ID, such as `#32224`.
+Open a row in **Recent landings** under Flow to see its receipt in Code History. A saved title fits on one line beside its ID, such as `#32224`. Acceptance saves the title for Flow, so **Clear all** in FYI leaves it visible. A landing submitted without a message shows its ID.
 
 ```sh
 nforge agent ROOT queue '{}'

@@ -514,6 +514,7 @@ export async function publishAcceptance(
     main.receipt.kind === 'server' && main.receipt.previousReceiptId !== null,
     receipt.snapshot.revision,
     [landingToMainSeconds(receipt.at, state)],
+    [{ id: receipt.id, message }],
   );
   await queueProjectSnapshots(ctx, project, false);
   await ctx.db.insert('projectHostedAcceptanceSnapshots', {

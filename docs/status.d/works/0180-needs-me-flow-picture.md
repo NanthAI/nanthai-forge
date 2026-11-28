@@ -22,8 +22,9 @@
   enter or leave the count at its known deadline in the browser without a request. Home and Flow use the latest
   recorded main-audit verdict rather than the check on a Candidate. Without a verdict they distinguish no
   configured check from health not reported.
-- Flow links up to five recent receipts to Code History, with their landing IDs and the titles available
-  in the existing live-line and FYI responses. A retained revert is marked separately from a landing taken out of main.
+- Flow links up to five recent receipts to Code History by title, with their landing IDs beside them.
+  Acceptance keeps the titles on the live-line summary, so clearing FYI leaves them visible.
+  A retained revert is marked separately from a landing taken out of main.
   A manual revert leaves its receipt link in the live-line summary even when its Needs you notice clears.
   The audit recovery count still covers main-audit recoveries only.
 

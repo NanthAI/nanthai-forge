@@ -10,6 +10,11 @@ import { readFlowLandings } from './projectLiveLineRecovery';
 import { recordDay, type WeekDay } from '../src/public-time-to-main';
 import { flowDay, flowMain, HOUR_MS, stepFlow, utcDayStart, type FlowStep } from '../src/flow-day';
 import { metricAliasGeneration } from '../src/self-metrics-context';
+import {
+  RECENT_LANDING_COUNT,
+  recentLandingTitle,
+  type RecentLandingTitle,
+} from './projectRecentLandingTitles';
 
 type Db = MutationCtx['db'];
 type Mark = Doc<'projectLiveLineLanes'>;
@@ -236,6 +241,8 @@ export async function writeLineMain(
   firstSequence?: number,
   /** Each landing's save-to-main seconds (null: not recorded), for the week's median time to main (8947a779). */
   toMain: readonly (number | null)[] = [],
+  /** Already-resolved messages for the receipts published here, oldest first. */
+  recent: readonly { id: string; message: string | undefined }[] = [],
 ) {
   const old = await lineSummary(ctx.db, projectId);
   const value = old ? JSON.parse(old.value) : {};
@@ -299,6 +306,14 @@ export async function writeLineMain(
       };
     else delete value.metricContinuity;
   } else if (value.main?.head !== main.head) delete value.metricContinuity;
+  if (recent.length) {
+    const newest = recent
+      .slice(-RECENT_LANDING_COUNT)
+      .reverse()
+      .map(({ id, message }): RecentLandingTitle => [id, recentLandingTitle(message)]);
+    const earlier: RecentLandingTitle[] = value.recentTitles ?? [];
+    value.recentTitles = [...newest, ...earlier].slice(0, RECENT_LANDING_COUNT);
+  }
   value.main = main;
   const at = main.at ? Date.parse(main.at) : NaN;
   const hour = ctx.scheduler && Number.isFinite(at) ? nextActivityHour(value, at) : null;

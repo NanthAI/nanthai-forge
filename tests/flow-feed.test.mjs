@@ -15,6 +15,7 @@ const store = await import(moduleUrl('../convex/projectLiveLineStore.ts'));
 const { policyPreset } = await import(moduleUrl('../src/autonomy-policy.ts'));
 const day = await import(moduleUrl('../src/flow-day.ts'));
 const sub = await import(moduleUrl('../convex/projectLiveLineSubmission.ts'));
+const fyi = await import(moduleUrl('../convex/projectNeedsFyi.ts'));
 const previousEnvironment = Object.fromEntries(Object.keys(synthetic).map(key => [key, process.env[key]]));
 test.beforeEach(t => storageClock(t));
 test.before(() => Object.assign(process.env, synthetic));
@@ -76,6 +77,24 @@ test('a landing steps the Flow day inside the summary write its exit already mak
       summaryBytes: feed.flow ? JSON.stringify(feed.flow).length : 0,
     }),
   );
+});
+
+test('Recent landings keeps a reference-backed title after Clear all in FYI', async t => {
+  const f = await finishFixture(t);
+  const title = 'Keep the recent landing title when FYI is cleared';
+  await f.enqueue(f.request({ message: `${title}\n\nThe full message stays with the receipt.` }));
+  while (f.pending().length) await f.execute();
+  await f.passChecks();
+  while (f.pending().length) await f.execute();
+  const [stored] = f.tables.projectHostedAcceptances.values();
+  assert.ok(JSON.parse(stored.value).messageRef, 'the receipt stores a message reference');
+  const args = { projectId: f.projectId };
+  await f.tx('clearFyi', fyi.dismiss, { ...args, clearAll: true }, 'owner');
+  const cleared = JSON.parse(await f.tx('readClearedFyi', fyi.read, args, 'owner'));
+  assert.deepEqual(cleared.landings, []);
+  const latest = (await read(f)).recentLandings[0];
+  assert.equal(latest.receiptId, stored.receiptId);
+  assert.equal(latest.title, title);
 });
 
 test('the live line reports running checks, grouped Lane counts and configured queue room in one reply', async t => {
@@ -447,7 +466,10 @@ test('main’s verdict reaches the summary only when it flips; a red ended witho
 });
 
 test('a batch landing moves the line’s main snapshot and counts every member, as a single landing does (85f456c1)', async t => {
-  const f = await batchesFixture(t);
+  const titles = ['Change the parser', 'Speed up loading', 'Repair the toolbar', '界'.repeat(33)];
+  const f = await batchesFixture(t, {
+    memberMessages: titles.map((title, index) => `${title}${index === 3 ? '🌍' : ''}\n\nDetails`),
+  });
   const summary = countSummaryWrites(f);
   const before = (await read(f)).main?.head;
   await f.drain();
@@ -462,6 +484,11 @@ test('a batch landing moves the line’s main snapshot and counts every member, 
     'the top bar and Flow view show the batch’s main, not the one before it',
   );
   assert.equal(feed.main.check, 'passed');
+  for (const [index, entry] of f.entries.entries()) {
+    const { submission } = await f.current(entry.state.id);
+    const row = feed.recentLandings.find(row => row.receiptId === submission.acceptance.receiptId);
+    assert.equal(row.title, titles[index], 'each batch member keeps its own title within the byte cap');
+  }
   const row = [...f.tables.projectFinishReadRows.values()].find(r => r.kind === 'projectLiveLineSummary');
   const week = JSON.parse(row.value).publicWeek;
   assert.equal(
