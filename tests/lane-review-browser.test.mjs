@@ -100,6 +100,8 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
           await sections.getByRole('link', { name: 'Checks' }).click();
           await page.waitForURL(url => url.pathname === `${lane}/check` && url.search === pin);
           await page.getByText('parser-check.test.ts', { exact: true }).waitFor();
+          const facts = page.getByRole('region', { name: 'Facts' }).locator('dl');
+          assert.match(await facts.textContent(), /Shards\s*1\s*Took\s*12 s\s*CI used\s*4 min 0 s/);
           assert.equal(
             await page.getByRole('link', { name: 'What was checked' }).getAttribute('href'),
             `${lane}/checked?run=c4ea9854-508d-4650-afc6-2c50460e5bbb`,
@@ -107,6 +109,19 @@ test('the Lane review screen: order, lazy bodies, ticks, line origin, axe and wi
         }
       },
     );
+
+    await t.test('a failed check without test detail links to the CI run from the page summary', async t => {
+      const path = '/sample-owner/tide-pool/lanes/7a2b4c6d-8e9f-4a1b-8c3d-5e6f7a8b9c0d/check';
+      const query = 'routes&s=failed-check&empty-failure&checkAttempt=b1c2d3e4-f5a6-4b7c-8d9e-0f1a2b3c4d5e';
+      for (const viewport of [DESK, PHONE]) {
+        const page = await open(t, viewport, query, path);
+        await page
+          .getByText('The check failed. CI reported no failing test or step.', { exact: true })
+          .waitFor();
+        const next = page.getByRole('link', { name: 'Read the log in your CI.' });
+        assert.equal(await next.getAttribute('href'), 'https://ci.example/runs/48');
+      }
+    });
 
     await t.test(
       'History shows check evidence and takes the exact automatic landing out through a new checked landing',

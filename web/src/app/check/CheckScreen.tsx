@@ -132,6 +132,14 @@ export function CheckView({
         </h1>
         <p className="sit" aria-live="polite">
           <b>{sentence.lead}</b> {sentence.rest}
+          {sentence.link ? (
+            <>
+              {' '}
+              <a className="lk" href={sentence.link.href}>
+                {sentence.link.label}
+              </a>
+            </>
+          ) : null}
         </p>
         <div className="tools">
           <span className="btns">
@@ -286,7 +294,11 @@ function Suspects({ read }: { read: CheckRead }) {
   if (!read.cause)
     return (
       <Region title="Four suspects" hint="the change, the test, main, your CI">
-        <p className="quietline">Nothing failed, so there is nothing to explain.</p>
+        <p className="quietline">
+          {read.run?.status === 'failed'
+            ? 'A cause was unavailable for this check.'
+            : 'Nothing failed, so there is nothing to explain.'}
+        </p>
       </Region>
     );
   return (

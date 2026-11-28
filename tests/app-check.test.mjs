@@ -65,6 +65,44 @@ test('main failing names the time it went red, in the reader clock', () => {
   assert.equal(verdictState(page).st, 'waiting');
 });
 
+test('a failed CI verdict without diagnostics states what CI reported and points to its run', () => {
+  const providerUrl = 'https://ci.example/runs/48';
+  const page = read(
+    'check-failed',
+    { run: { status: 'failed', failed: [] } },
+    { run: { ...run([]), providerUrl } },
+  );
+  assert.deepEqual(checkSentence(page, at), {
+    lead: 'The check failed. CI reported no failing test or step.',
+    rest: '',
+    link: { href: providerUrl, label: 'Read the log in your CI.' },
+  });
+  assert.deepEqual(checkSentence({ ...page, run: run([]) }, at), {
+    lead: 'The check failed. CI reported no failing test or step.',
+    rest: 'Read the check log.',
+  });
+});
+
+test('a pinned earlier failed check points to its own CI run', () => {
+  const providerUrl = 'https://ci.example/runs/48';
+  const page = {
+    laneId,
+    pinned: true,
+    landing: null,
+    cause: null,
+    run: { ...run([]), providerUrl },
+  };
+  assert.deepEqual(checkSentence(page, at), {
+    lead: 'The earlier check failed.',
+    rest: '',
+    link: { href: providerUrl, label: 'Read the log in your CI.' },
+  });
+  assert.deepEqual(checkSentence({ ...page, run: run([]) }, at), {
+    lead: 'The earlier check failed.',
+    rest: 'Read the check log.',
+  });
+});
+
 test('a runner that never started says not started, not failed', () => {
   const page = read('waiting-for-runner', { main: { result: 'passed', redSince: null } });
   assert.deepEqual(verdictState(page), { st: 'stale', word: 'Not started' });

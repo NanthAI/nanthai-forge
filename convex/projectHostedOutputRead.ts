@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import { isMachineRunner } from '../src/hosted-machine-runner';
-import { httpsLink } from '../src/check-log-policy';
+import { hostedCheckRunLink } from '../src/check-log-policy';
 import { v } from 'convex/values';
 import { query, mutation, type QueryCtx, type MutationCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
@@ -52,11 +52,8 @@ export const manifest = query({
             : 'local-only'
           : 'provider-held',
         providerUrl:
-          run.configuration.provider === 'github-actions'
-            ? `https://github.com/${run.configuration.repository}/actions/runs/${run.executionId ?? ''}`
-            : run.configuration.provider === 'modal'
-              ? 'https://modal.com/apps'
-              : httpsLink(run.ci?.link),
+          hostedCheckRunLink(run) ??
+          (run.configuration.provider === 'modal' ? 'https://modal.com/apps' : null),
         complete: head?.final !== null && head?.final !== undefined,
         // What Forge knows of a run that has published nothing yet (Item 0d14c456); the run is already loaded.
         progress: {

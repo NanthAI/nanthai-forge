@@ -178,6 +178,10 @@ test('the full log links to the CI’s own page when the runner has one, and to 
     red.runLink({ configuration: { provider: 'ci-status' }, ci: { link: 'https://ci.example/run/9' } }),
     'https://ci.example/run/9',
   );
+  assert.equal(
+    red.runLink({ configuration: { provider: 'ci-status' }, ci: { link: 'javascript:alert(1)' } }),
+    null,
+  );
   assert.equal(red.runLink({ configuration: { provider: 'modal' }, executionId: 'x' }), null);
 });
 

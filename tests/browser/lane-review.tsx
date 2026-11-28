@@ -24,6 +24,7 @@ import { ReviewPage } from '../../web/src/app/lane/LaneReview';
 import type { Reply } from '../../web/src/app/lane/review-model';
 import { laneHistoryFixture } from './lane-history';
 import { historyRevertFixture } from './landing-history-revert';
+import { failureCause } from '../../src/check-failure-cause';
 
 const params = new URLSearchParams(location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'dark';
@@ -621,7 +622,20 @@ void reply().then(data => {
     reads.set('projectLaneReview:read', JSON.stringify(data));
     if (scenario === 'history-revert')
       reads.set('projectLandingReads:list', JSON.stringify(historyRevert.page));
-    if (scenario === 'failed-check')
+    if (scenario === 'failed-check') {
+      const failed = params.has('empty-failure')
+        ? []
+        : [{ file: 'parser-check.test.ts', firstError: 'An incomplete byte sequence was accepted.' }];
+      const run = {
+        runId: 'c4ea9854-508d-4650-afc6-2c50460e5bbb',
+        status: 'failed',
+        files: { total: failed.length, failed: failed.length, flaky: 0 },
+        failed,
+        flaky: [],
+        timings: { wallSeconds: 12, shards: 1 },
+        cost: { seconds: 240, usd: null },
+        providerUrl: 'https://ci.example/runs/48',
+      };
       reads.set(
         'projectFailureCause:forLane',
         JSON.stringify({
@@ -629,22 +643,13 @@ void reply().then(data => {
           title: TITLE,
           candidateId: null,
           landing: { state: 'check-failed', label: 'Held: its check failed', at: '2026-11-17T09:02:03.000Z' },
-          run: {
-            runId: 'c4ea9854-508d-4650-afc6-2c50460e5bbb',
-            status: 'failed',
-            files: { total: 1, failed: 1, flaky: 0 },
-            failed: [
-              { file: 'parser-check.test.ts', firstError: 'An incomplete byte sequence was accepted.' },
-            ],
-            flaky: [],
-            timings: { wallSeconds: 12, shards: 1 },
-            cost: null,
-          },
-          cause: null,
+          run,
+          cause: failureCause({ landing: { state: 'check-failed' }, run }),
           main: null,
           lane: null,
         }),
       );
+    }
     reads.set('projectDiscussionThread:read', {
       canRead: scenario !== 'thread-reader',
       before: null,

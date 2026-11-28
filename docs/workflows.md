@@ -80,6 +80,11 @@ nothing yet answers with what Forge knows (since when, how many shards reported)
 link, not an empty log; the check summary of a passed run quotes the failure each flaky file retried
 (`retried`, at most five), so the provider's log is not needed for it.
 
+For a failed check, the Landing check page shows the failing files, shard count,
+elapsed time and CI time from the retained run, including a check that failed
+before entering the landing queue. When CI reports only a failed verdict, the
+page states that result and points to the CI run's log when there is a run link.
+
 ## Who can land without a check
 
 In a new project with no check definition, `land --save` still runs local preflight.

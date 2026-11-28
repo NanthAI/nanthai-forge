@@ -16,7 +16,8 @@ import { query, type QueryCtx } from './cliServer';
 import type { Doc, Id } from './_generated/dataModel';
 import { accessibleProject } from './projectAuthority';
 import { landingRow } from './projectHostedLandingStore';
-import { hostedCheckRunSchema, type HostedCheckRun } from '../src/hosted-check';
+import { hostedCheckRunSchema } from '../src/hosted-check';
+import { hostedCheckRunLink as runLink } from '../src/check-log-policy';
 import { summarizeCheckRun } from '../src/hosted-check-summary';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
@@ -79,13 +80,7 @@ async function landingOf(ctx: QueryCtx, row: Doc<'projectHostedAcceptances'>): P
     agent: receipt.actor?.kind === 'agent',
   };
 }
-/** The provider's page for the whole run, when the runner has one; null otherwise (the log tail is read in Forge). */
-export function runLink(run: HostedCheckRun) {
-  if (run.ci?.link) return run.ci.link;
-  if (run.configuration.provider === 'github-actions' && run.executionId)
-    return `https://github.com/${run.configuration.repository}/actions/runs/${encodeURIComponent(run.executionId)}`;
-  return null;
-}
+export { runLink };
 
 const oldest = (rows: Event[]) => rows.sort((a, b) => Date.parse(a.at) - Date.parse(b.at))[0] ?? null;
 /** How one red ended: the first green or flake written after it, at or after its sequence (pure). */

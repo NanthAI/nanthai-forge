@@ -111,8 +111,7 @@ export const recoveryText: Record<FailureRecovery, { label: string; agent: strin
   wait: { label: 'Keep waiting', agent: 'Wait; Forge checks again by itself.' },
   'read-log': {
     label: 'Read the log',
-    agent:
-      'Forge could not tell the cause; read the check log, then fix in this Lane or retry with a reason.',
+    agent: 'Read the check log.',
   },
 };
 
@@ -259,7 +258,7 @@ export function failureCause(evidence: FailureEvidence): FailureCause | null {
     ? `${first.file} fails`
     : run?.step
       ? `${run.step.job}: ${clip(run.step.excerpt, 120)}`
-      : 'no failing test or step was reported';
+      : null;
   const more = failingCount > 1 ? `; ${plural(failingCount - 1, 'more failing file')}` : '';
 
   if (explained.length || stepExplained) {
@@ -318,7 +317,14 @@ export function failureCause(evidence: FailureEvidence): FailureCause | null {
       ],
       'flake',
     );
-  return build('unknown', `Forge could not tell the cause: ${firstLine}${more}.`, 'read-log', [
+  const detail = firstLine
+    ? `${firstLine}${more}.`
+    : failingCount
+      ? `CI reported ${plural(failingCount, 'failing file')}.`
+      : run
+        ? 'CI reported no failing test or step.'
+        : 'Run details are unavailable.';
+  return build('unknown', `The check failed. ${detail}`, 'read-log', [
     member
       ? {
           suspect: 'change',

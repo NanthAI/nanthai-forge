@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026 Ferdinando Valsecchi
 import { z } from 'zod';
+import type { HostedCheckRun } from './hosted-check.js';
 import type { CheckRun, WorkData } from './work-types.js';
 
 export type LogRun = Pick<CheckRun, 'id' | 'backend' | 'startedAt' | 'endedAt' | 'artifacts'>;
@@ -26,6 +27,15 @@ export const providerLinkSchema = z.url({ protocol: /^https$/ }).max(2048);
 /** The link when it is an https URL, otherwise none. */
 export const httpsLink = (url: string | null | undefined): string | null =>
   url && providerLinkSchema.safeParse(url).success ? url : null;
+
+/** The CI's exact run page, using only the already retained execution and provider link. */
+export function hostedCheckRunLink(run: Pick<HostedCheckRun, 'ci' | 'configuration' | 'executionId'>) {
+  if (run.configuration.provider === 'github-actions' && run.executionId)
+    return httpsLink(
+      `https://github.com/${run.configuration.repository}/actions/runs/${encodeURIComponent(run.executionId)}`,
+    );
+  return httpsLink(run.ci?.link);
+}
 export const logRecordSchema = z.object({
   runId: z.string().uuid(),
   status: z.enum(['provider-held', 'local-only', 'included', 'expired']),

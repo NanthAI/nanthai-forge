@@ -7,6 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { compose, finishFixture, desired, api } from './hosted-finish-fixture.mjs';
+import { batchesFixture, states } from './hosted-landing-batches-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { synthetic } from './hosted-revert-fixture.mjs';
 
@@ -81,6 +82,62 @@ test('a failed check names the same cause and next step in status and the land w
   assert.deepEqual(page.events.at(-1).failureCause, expected, 'the wait event an agent receives carries it');
   assert.equal(Object.keys(expected.suspects).join(), 'change,test,main,ci');
   assert.equal(read.expected, null, 'a settled check states no expected answer time');
+});
+
+test('a failed admission check exposes the original CI result on the live and pinned landing check', async t => {
+  const f = await batchesFixture(t, { batchMaxSize: null, admissionCheck: 'full', count: 1 });
+  const [{ lane }] = f.entries;
+  const [{ id: runId }] = f.runs();
+  const active = await f.rawChecks.activate(runId);
+  const files = ['tests/admission.test.mjs', 'tests/fixture.test.mjs'];
+  for (let i = 0; i < active.plan.shardCount; i++)
+    await f.rawChecks.callback(f.rawChecks.shard(active, i, i === 0 ? 'failed' : 'passed'));
+  await f.rawChecks.callback(
+    f.rawChecks.complete(active, 'failed', {
+      contractReports: Object.fromEntries(
+        files.map(file => [file, { failed: true, durationMs: 80, firstError: 'expected true' }]),
+      ),
+      cost: {
+        status: 'observed',
+        seconds: 240,
+        estimatedCostUsd: null,
+        receipt: f.rawChecks.put('synthetic CI usage'),
+      },
+    }),
+  );
+  await f.drain();
+  const [failed] = states(f);
+  assert.equal(failed.phase, 'terminal-failed');
+  assert.match(failed.error.message, /admission check/);
+  const current = JSON.parse(
+    await f.tx('currentAdmission', screen.forLane, { projectId: f.projectId, laneId: lane.laneId }),
+  );
+  const pinned = JSON.parse(
+    await f.tx('pinnedAdmission', screen.forLane, {
+      projectId: f.projectId,
+      laneId: lane.laneId,
+      attemptId: failed.attemptId,
+    }),
+  );
+  for (const read of [current, pinned]) {
+    assert.equal(read.run?.runId, runId);
+    assert.deepEqual(
+      read.cause?.failing.map(({ file }) => file),
+      files,
+    );
+    assert.equal(read.run.timings.shards, active.plan.shardCount);
+    assert.equal(typeof read.run.timings.wallSeconds, 'number');
+    assert.equal(read.run.cost.seconds, 240);
+    assert.equal(
+      read.run.providerUrl,
+      `https://github.com/${active.configuration.repository}/actions/runs/${active.executionId}`,
+    );
+  }
+  const status = JSON.parse(
+    await f.tx('admissionStatus', api.status, { projectId: f.projectId, submissionId: failed.id }),
+  );
+  assert.equal(status.checkRunId, runId);
+  assert.deepEqual(status.failureCause, failureCauseField(current.cause));
 });
 
 test('a pinned Lane check still reads the failed attempt after another Candidate is composed', async t => {

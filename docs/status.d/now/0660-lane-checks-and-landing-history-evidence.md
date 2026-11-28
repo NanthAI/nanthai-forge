@@ -1,6 +1,8 @@
 A Lane’s **Checks** link opens its landing check, including when the Lane is held
 by a failed check. A held Lane’s Facts show the recorded approval reason when
 available. The changed-file groups and Facts use the same exact Candidate scope.
+A failure before the queue shows its own run's failing files and timings when
+reported. A verdict without failure details points to the CI run when linked.
 The owner can add an optional reason to an exact-attempt approval. The Lane
 Thread's acceptance notice shows that reason to the team.
 

@@ -14,6 +14,7 @@ import { loadHostedCheck } from './projectHostedCheckStore';
 import { checkFailureStep } from './projectHostedCheckFailure';
 import { auditRow, parkExactOnMainRed, parkOnMainRed } from './projectHostedMainAuditState';
 import { summarizeCheckRun } from '../src/hosted-check-summary';
+import { hostedCheckRunLink } from '../src/check-log-policy';
 import { failureCause, failureCauseField } from '../src/check-failure-cause';
 import { landingStateOf } from '../src/landing-state';
 import type { HostedLandingAttempt, HostedLandingState } from '../src/hosted-landing';
@@ -121,7 +122,8 @@ export async function pinnedLaneLanding(
 }
 
 /** The check run summary and failing step of one landing attempt: attempt (1-2), run (1), and only for a
- * failed run that names no test file its job summaries (at most 64). */
+ * failed run that names no test file its job summaries (at most 64). Failed admissions follow the same
+ * budget. The summary uses the run already stored and adds only its bounded CI link to the reply. */
 export async function landingRun(
   ctx: QueryCtx,
   projectId: Project,
@@ -132,10 +134,17 @@ export async function landingRun(
   const attemptKey = { projectId, attemptId: state.attemptId };
   const live = pinned ? null : await landingAttemptRow(ctx, attemptKey);
   const attempt = pinned ?? (row.capsule && !live ? null : await loadLandingAttempt(ctx, attemptKey, live));
-  const loaded = attempt?.check
-    ? await loadHostedCheck(ctx, { projectId, runId: attempt.check.runId })
+  const attemptId = pinned?.id ?? state.attemptId;
+  // A failed admission never gets an attempt check pin. Its settled run remains on the
+  // submission's admission field, scoped to the first attempt just as in attempt history.
+  const runId =
+    attempt?.check?.runId ??
+    (attemptId === state.attemptId ? row.runId : null) ??
+    (attemptId === state.firstAttemptId && row.admission?.status === 'failed' ? row.admission.runId : null);
+  const loaded = runId ? await loadHostedCheck(ctx, { projectId, runId }) : null;
+  const summary = loaded
+    ? { ...summarizeCheckRun(loaded.run), providerUrl: hostedCheckRunLink(loaded.run) }
     : null;
-  const summary = loaded ? summarizeCheckRun(loaded.run) : null;
   if (pinned && pinned.id !== state.attemptId) return { summary, step: null, reDefers: false };
   const step =
     loaded && loaded.run.status === 'failed' ? await checkFailureStep(ctx, projectId, loaded.run) : null;

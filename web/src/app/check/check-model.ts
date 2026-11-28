@@ -38,6 +38,7 @@ export type CheckRead = {
     flaky: string[];
     timings: { wallSeconds: number | null; shards: number | null };
     cost: { seconds: number; usd: number } | null;
+    providerUrl?: string | null;
     failureReason?: string;
   } | null;
   cause: FailureCause | null;
@@ -97,8 +98,16 @@ export function verdictState(read: CheckRead): { st: StateKind; word: string } {
 export function checkSentence(
   read: CheckRead,
   time: (iso: string) => string,
-): { lead: string; rest: string } {
-  if (read.pinned)
+): { lead: string; rest: string; link?: { href: string; label: string } } {
+  const providerUrl = read.run?.providerUrl;
+  const logLink = providerUrl ? { href: providerUrl, label: 'Read the log in your CI.' } : null;
+  if (read.pinned) {
+    if (read.run?.status === 'failed')
+      return {
+        lead: 'The earlier check failed.',
+        rest: logLink ? '' : nextLine('read-log'),
+        ...(logLink ? { link: logLink } : {}),
+      };
     return read.run
       ? {
           lead: 'This is the check from the earlier attempt.',
@@ -108,6 +117,7 @@ export function checkSentence(
           lead: 'The check linked from this Lane is not available.',
           rest: 'Forge has not substituted a different check.',
         };
+  }
   const cause = read.cause;
   if (cause) {
     const since = cause.mainFailingSince
@@ -117,7 +127,12 @@ export function checkSentence(
       read.landing?.state === 'waiting-for-runner' && read.expected !== undefined
         ? ` ${expectedLine(read)}`
         : '';
-    return { lead: cause.sentence, rest: `${since} ${nextLine(cause.next.recovery)}${usual}`.trim() };
+    const link = cause.next.recovery === 'read-log' ? logLink : null;
+    return {
+      lead: cause.sentence,
+      rest: `${since} ${link ? '' : nextLine(cause.next.recovery)}${usual}`.trim(),
+      ...(link ? { link } : {}),
+    };
   }
   if (!read.landing)
     return { lead: 'This Lane has not asked to land yet.', rest: 'Its check runs when it does.' };
@@ -167,7 +182,7 @@ const nextLines: Record<FailureRecovery, string> = {
   retry: 'Retry the check; the code does not change.',
   'wait-for-main': 'Nothing to do in this Lane; it is checked again when main passes.',
   wait: 'Nothing to do yet; Forge checks again by itself.',
-  'read-log': 'Read the log to decide: fix it in this Lane, or retry.',
+  'read-log': 'Read the check log.',
 };
 export const nextLine = (recovery: FailureRecovery) => nextLines[recovery];
 
