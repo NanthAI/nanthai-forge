@@ -165,6 +165,8 @@ test('authorized hosted query returns current structured context, paths, instruc
     messageId: ids.handoff,
   });
   assert.equal(handoff.context.laneId, ids.lane);
+  assert(handoff.copyText.includes(`nforge agent . board '{"laneId":"${ids.lane}"}'`));
+  assert(handoff.full.includes(`nforge agent . status '{"laneId":"${ids.lane}"}'`));
   assert.equal(s.reads(), 0, 'warm briefing queries never fetch source blobs');
 });
 test('briefing authorization is checked on every read: non-member and source-only reader cannot access a Lane', async () => {
@@ -336,8 +338,7 @@ test('hosted ancestry reads parent headers without loading ancestor file payload
     laneId: ids.lane,
   });
   assert.equal(result.context.main.merged, true);
-  assert.match(result.copyText, /FORGE_PROJECT_ID='project'/);
-  assert.match(result.full, /FORGE_AUTH_TOKEN/);
+  assert(result.copyText.includes(`nforge agent . status '{"laneId":"${ids.lane}"}'`));
 });
 
 test('owner-assigned maintainers can edit project guidance; ordinary members cannot and retries preserve newer assignments', async () => {
@@ -442,7 +443,8 @@ test('briefing and guidance registrations enforce current CLI credential scope a
 });
 
 test('hosted add-lane and land-together briefings include indexed sibling tracks and retain authority checks', async () => {
-  const s = await setup();
+  const draft = { ...records.lanes[0], id: randomUUID(), name: 'Unselected draft' };
+  const s = await setup([draft]);
   for (const situation of ['add-lane', 'land-together']) {
     const result = await briefs.brief._handler(s.ctx, {
       projectId: s.projectId,
@@ -451,7 +453,19 @@ test('hosted add-lane and land-together briefings include indexed sibling tracks
     });
     assert.equal(result.context.siblingLanes[0].laneId, ids.lane);
     assert.match(result.copyText, /Sibling Lanes/);
-    assert.match(result.full, situation === 'add-lane' ? /start.*intentId/ : /with:\[siblingLaneId/);
+    if (situation === 'add-lane') assert.match(result.full, /start.*intentId/);
+    else {
+      assert.match(result.full, /Choose which Lanes to land together.*inputs/);
+      assert.doesNotMatch(result.full, /land --save/);
+      const selected = await briefs.brief._handler(s.ctx, {
+        projectId: s.projectId,
+        situation,
+        viewId: ids.view,
+      });
+      const inputs = records.views[0].inputs.map(({ laneId }) => ({ laneId }));
+      assert(selected.full.includes(`land --save '${JSON.stringify({ laneId: inputs[0].laneId, inputs })}'`));
+      assert.match(selected.full, /Unselected draft/);
+    }
     s.caller('stranger');
     await assert.rejects(
       briefs.brief._handler(s.ctx, { projectId: s.projectId, situation, intentId: ids.intent }),

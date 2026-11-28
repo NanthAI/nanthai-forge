@@ -59,6 +59,24 @@ const quote = (text: string) => `'${text.replaceAll("'", "'\\''")}'`;
 export function hostedRecoveryCommand(root: string, action: string, command: object) {
   return `nforge agent ${quote(root)} ${cliVerb(action, command as Record<string, unknown>)} ${quote(JSON.stringify(command))}`;
 }
+function noPendingResolution(
+  root: string,
+  laneId: string,
+  error: { code?: unknown; message?: unknown } | undefined,
+) {
+  if (error?.code !== 'WORK_STALE' || error.message !== 'Select the pending resolution Lane.')
+    return undefined;
+  const parameters = { laneId };
+  return new ForgeError(
+    'WORK_STALE',
+    `Lane ${laneId} has no pending resolution. Read its status.`,
+    undefined,
+    {
+      next: { action: 'status', ...parameters },
+      command: hostedRecoveryCommand(root, 'status', parameters),
+    },
+  );
+}
 const completed = (value: unknown) => {
   const parsed = z
     .object({ outcome: z.object({ status: z.string(), result: z.unknown().optional() }) })
@@ -542,6 +560,11 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
     if (error instanceof ForgeError && error.code === UNCHANGED_SIDE)
       throw unchangedSideRefusal(session.root, marker.selection.laneId, command, error.recovery);
     const safe = hostedActionError(error, 'resolution');
+    const ended = noPendingResolution(session.root, marker.selection.laneId, safe);
+    if (ended) {
+      clearSyncHandoff(session.root, session.journal.operationId);
+      throw ended;
+    }
     // The resolve sync began at an older epoch: every later write to it is refused, so only a new
     // operation can finish (N3). Name it; a replay of this one would be refused the same way.
     if (sent !== epoch && authorityPinRefusal(safe, 'resolution')) {
@@ -567,6 +590,15 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
   }
   if (failedCode(progress) === UNCHANGED_SIDE)
     throw unchangedSideRefusal(session.root, marker.selection.laneId, command);
+  const ended = noPendingResolution(
+    session.root,
+    marker.selection.laneId,
+    (progress as { outcome?: { error?: { code?: unknown; message?: unknown } } } | undefined)?.outcome?.error,
+  );
+  if (ended) {
+    clearSyncHandoff(session.root, session.journal.operationId);
+    throw ended;
+  }
   const parsed = syncResultSchema.safeParse(completed(progress));
   if (!parsed.success || parsed.data.status !== 'resolved' || !parsed.data.from)
     return { ...(progress as object), ...continuation };

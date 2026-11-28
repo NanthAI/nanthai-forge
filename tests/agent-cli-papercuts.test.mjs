@@ -17,6 +17,9 @@ import { validateHostedCliCommand } from '../dist/hosted-cli-validation.js';
 import { normalizeHostedFinishResult } from '../dist/hosted-agent-finish-result.js';
 import { landSummary } from '../dist/hosted-land-summary.js';
 import { helpTopics } from '../dist/help-topics.js';
+import { shellQuote } from '../dist/shell-quote.js';
+import { canonicalRoot } from '../dist/root-paths.js';
+import { withTeaching } from '../dist/error-teaching.js';
 
 test('ad80e037: land takes the retry reason as reason or retryReason; two different values are refused before any call', async t => {
   const s = agentFixture(t);
@@ -160,8 +163,11 @@ test('593fc2d7: a withdrawn landing says its operationId is spent and gives a la
   assert.equal(result.wake, undefined, 'the terminal receipt replaces its earlier background wake');
   assert.equal(result.retry, undefined, 'a withdraw is not a failed check to retry');
   // retry:true selects a new operation for the same source (the shorthand would replay the cancelled one).
+  assert.equal(result.command, undefined, 'the reply has no unconditional command when overlap is unknown');
+  assert.equal(result.next, undefined);
+  const resubmit = result.recovery.choices.resubmit;
   assert.equal(
-    result.command,
+    resubmit.command,
     `nforge agent '/repo' land --save '${JSON.stringify({ laneId, message: 'fix', retry: true, reason: 'other' })}'`,
   );
   const [first, second] = landSummary({ operationId, result });
@@ -171,7 +177,28 @@ test('593fc2d7: a withdrawn landing says its operationId is spent and gives a la
       `^CANCELLED: this landing was withdrawn; nothing landed\\. Its operationId ${operationId} is spent`,
     ),
   );
-  assert.equal(second, `Submit again as a new operation: ${result.command}`);
+  const sync = `nforge agent '/repo' save --sync '{"laneId":"${laneId}"}'`;
+  assert.match(second, /^If main changed files this Lane touches/);
+  assert(second.includes(sync));
+  assert(second.includes(resubmit.command));
+  assert.equal(result.recovery.choices.sync.command, sync);
+  assert.equal(result.instruction, second);
+  assert.equal(result.landingState.nextStep, second);
+  const known = normalizeHostedFinishResult('/repo', selection, {
+    phase: 'finish',
+    submission: result.submission,
+    wouldConflict: {
+      landedSubmissionId: randomUUID(),
+      laneId,
+      paths: ['README.md'],
+      more: 0,
+      at: '2026-01-01T00:00:00.000Z',
+      next: 'Sync',
+    },
+  });
+  assert.equal(known.command, sync);
+  assert.deepEqual(known.next, { action: 'sync', laneId });
+  assert.equal(known.recovery.choices.resubmit.command, resubmit.command);
 });
 
 test('593fc2d7: an agent action typed as a top-level command names the agent command', t => {
@@ -194,6 +221,20 @@ test('593fc2d7: an agent action typed as a top-level command names the agent com
   }
 });
 
+test('an unknown help topic points to the working agent overview', t => {
+  const root = mkdtempSync(join(tmpdir(), 'forge unknown help '));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const cli = join(process.cwd(), 'dist', 'cli-entry.js');
+  const run = (...args) =>
+    spawnSync(process.execPath, [cli, 'agent', root, 'help', ...args], { encoding: 'utf8' });
+  const refusal = run('missing-topic');
+  assert.equal(refusal.status, 1);
+  assert.equal(JSON.parse(refusal.stderr).error.next, `nforge agent ${shellQuote(root)} help`);
+  const overview = run();
+  assert.equal(overview.status, 0, overview.stderr);
+  assert.match(overview.stdout, /Forge hosted agent workflow/);
+});
+
 test("593fc2d7: observe with no id names the ids it takes and lists this machine's landings in flight", async t => {
   const state = mkdtempSync(join(tmpdir(), 'forge-observe-state-')),
     previous = process.env.XDG_STATE_HOME;
@@ -210,7 +251,7 @@ test("593fc2d7: observe with no id names the ids it takes and lists this machine
     assert.match(error.message, /^observe needs one id: operationId .* submissionId or runId/);
     assert.match(
       error.message,
-      /no landing in flight for this project: nforge agent ROOT lanes '\{\}' .* queue '\{\}'/,
+      /no landing in flight for this project: nforge agent .* lanes '\{\}' .* queue '\{\}'/,
     );
     return true;
   });
@@ -232,13 +273,39 @@ test("593fc2d7: observe with no id names the ids it takes and lists this machine
     landing: { operationId: randomUUID(), at: Date.now() + 1 },
   });
   await assert.rejects(observe, error => {
-    assert.match(
-      error.message,
-      new RegExp(
-        `Lane ${s.lane.laneId.slice(0, 8)} operationId ${operationId}\\. Next: nforge agent ROOT observe '\\{"operationId":"${operationId}"\\}'`,
-      ),
+    assert.match(error.message, new RegExp(`Lane ${s.lane.laneId.slice(0, 8)} operationId ${operationId}`));
+    assert.deepEqual(error.recovery.candidates, [{ laneId: s.lane.laneId, operationId }]);
+    assert.equal(
+      error.recovery.command,
+      `nforge agent ${shellQuote(canonicalRoot(s.root))} observe '{"operationId":"${operationId}"}'`,
     );
-    assert.deepEqual(error.recovery, { candidates: [{ laneId: s.lane.laneId, operationId }] });
+    return true;
+  });
+  const own = randomUUID();
+  await s.transport().dispatch('open', { laneId: s.lane.laneId });
+  recordLane({ laneId: s.lane.laneId, landing: { operationId: own, at: 1 } });
+  for (let index = 0; index < 6; index++)
+    recordLane({
+      laneId: randomUUID(),
+      root: join(state, `other-${index}`),
+      url: 'https://fixture.invalid',
+      projectId: 'project',
+      landing: { operationId: randomUUID(), at: index + 2 },
+    });
+  await assert.rejects(observe, error => {
+    assert.equal(error.recovery.candidates[0].operationId, own);
+    assert.equal(
+      error.recovery.command,
+      `nforge agent ${shellQuote(canonicalRoot(s.root))} observe '{"operationId":"${own}"}'`,
+    );
+    return true;
+  });
+  recordLane({ laneId: s.lane.laneId, landing: null });
+  await assert.rejects(observe, error => {
+    assert.ok(error.recovery.candidates.length > 0);
+    assert.equal(error.recovery.command, undefined);
+    assert.match(error.message, /Choose an operation ID/);
+    assert.equal(withTeaching(error, { root: s.root, command: 'nforge agent . observe' }).next, undefined);
     return true;
   });
 });

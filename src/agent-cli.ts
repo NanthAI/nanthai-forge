@@ -4,7 +4,7 @@ import { hostedRootRequired } from './agent-root.js';
 import { validateHostedCliCommand } from './hosted-cli-validation.js';
 import { actionableNotFound, isShortLaneId, resolveShortLaneId } from './argument-errors.js';
 import { join, resolve } from 'node:path';
-import { helpTopicIndex, helpTopicText, isHelpTopic } from './help-topics.js';
+import { helpTopics, helpTopicText, isHelpTopic } from './help-topics.js';
 import { addressOnlyRoot, hostedAgentAddress } from './hosted-agent-address.js';
 import {
   FOLDER_ACTIONS,
@@ -179,6 +179,7 @@ export async function agentCli(args: string[], options: AgentCliOptions = {}): P
             waitCommand?: string;
             next?: Record<string, unknown>;
             wake?: unknown;
+            stall?: unknown;
             phase?: unknown;
           };
         }
@@ -190,6 +191,7 @@ export async function agentCli(args: string[], options: AgentCliOptions = {}): P
     args[1] !== 'wait' &&
     pending?.inProgress &&
     pending.waitCommand &&
+    !pending.stall &&
     !pending.wake &&
     process.env[LAND_CHILD_ENV] !== '1'
   )
@@ -198,6 +200,7 @@ export async function agentCli(args: string[], options: AgentCliOptions = {}): P
   if (
     options.process &&
     pending?.inProgress &&
+    !pending.stall &&
     pending.phase !== 'preflight' &&
     args[0] &&
     ['land', 'finish', 'wait'].includes(args[1] ?? '')
@@ -208,15 +211,17 @@ export async function agentCli(args: string[], options: AgentCliOptions = {}): P
 
 /** `help` with no topic prints the command overview; `help TOPIC` prints one topic or one hosted action's
  * help (Issue 0a7d6f56). Local only: no network, no Convex call. */
-async function helpText(topic: string | undefined) {
+async function helpText(topic: string | undefined, root = '.') {
   const { hostedAgentHelp, hostedHelpFor } = await import('./hosted-agent-help.js');
-  if (!topic) return hostedAgentHelp();
+  if (!topic || topic === '--help' || topic === '-h') return hostedAgentHelp();
   const text = isHelpTopic(topic) ? helpTopicText(topic) : hostedHelpFor(topic);
-  invariant(
-    text,
-    'BAD_ARGUMENT',
-    `No help topic ${topic}. ${helpTopicIndex()} For an action's parameters run nforge agent ROOT ACTION --help.`,
-  );
+  if (!text)
+    throw new ForgeError(
+      'BAD_ARGUMENT',
+      `No help topic ${topic}. Open the agent help overview to choose a topic or action. Topics (one section each): ${Object.keys(helpTopics).join(', ')}.`,
+      undefined,
+      { command: commandLine(['agent', root, 'help']) },
+    );
   return text;
 }
 
@@ -246,7 +251,7 @@ async function runAgentCli(
     tail = client.rest;
   if (requestedAction === 'help' || requestedAction === '--help') {
     await options.beforeLocal?.();
-    process.stdout.write(await helpText(rawTail[0]));
+    process.stdout.write(await helpText(rawTail[0], root));
     return undefined;
   }
   const [form, rest] = requestedAction

@@ -3,6 +3,7 @@
 import type { z } from 'zod';
 import { ForgeError } from './errors.js';
 import { listLanes } from './lane-registry.js';
+import { shellQuote } from './shell-quote.js';
 
 const uuidShape = 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx';
 const fullIdHint = (field: string) =>
@@ -85,27 +86,33 @@ export function actionableNotFound(error: unknown, action: string, command: Reco
 
 /** observe or status named no id (593fc2d7: from the project folder it was a dead end). Names the ids
  * it takes and lists the landings this machine submitted for the project and has not seen settle,
- * newest first, from the local Lane registry. No network. */
-export function missingObserveId(address: { url: string; projectId: string }) {
+ * preferring the checkout's Lane, from the local Lane registry. No network. */
+export function missingObserveId(root: string, address: { url: string; projectId: string }, laneId?: string) {
   const live = listLanes()
     .flatMap(entry =>
       entry.landing && entry.projectId === address.projectId && (!entry.url || entry.url === address.url)
         ? [{ laneId: entry.laneId, operationId: entry.landing.operationId, at: entry.landing.at }]
         : [],
     )
-    .sort((a, b) => b.at - a.at)
+    .sort((a, b) => Number(b.laneId === laneId) - Number(a.laneId === laneId) || b.at - a.at)
     .slice(0, 5);
   const ids =
     'observe needs one id: operationId (the original landing or source operation), submissionId or runId; status also accepts laneId.';
+  const agent = `nforge agent ${shellQuote(root)}`;
+  const selected = live[0] && (!laneId || live[0].laneId === laneId) ? live[0] : undefined;
+  const command = selected
+    ? `${agent} observe ${shellQuote(JSON.stringify({ operationId: selected.operationId }))}`
+    : !live.length
+      ? `${agent} queue '{}'`
+      : undefined;
+  const candidates = live.map(({ laneId, operationId }) => ({ laneId, operationId }));
   return new ForgeError(
     'BAD_ARGUMENT',
     live.length
-      ? `${ids} Landings this machine submitted and has not seen settle: ${live.map(item => `Lane ${item.laneId.slice(0, 8)} operationId ${item.operationId}`).join('; ')}. Next: nforge agent ROOT observe '{"operationId":"${live[0]!.operationId}"}'.`
-      : `${ids} This machine has no landing in flight for this project: nforge agent ROOT lanes '{}' lists your Lanes, and nforge agent ROOT queue '{}' the project's landings with their ids.`,
+      ? `${ids} Landings this machine submitted and has not seen settle: ${live.map(item => `Lane ${item.laneId.slice(0, 8)} operationId ${item.operationId}`).join('; ')}. ${command ? `Next: ${command}` : 'Choose an operation ID from the list or from the original landing receipt.'}`
+      : `${ids} This machine has no landing in flight for this project: ${agent} lanes '{}' lists your Lanes, and ${command} lists the project's landings with their IDs.`,
     undefined,
-    live.length
-      ? { candidates: live.map(({ laneId, operationId }) => ({ laneId, operationId })) }
-      : undefined,
+    { ...(candidates.length ? { candidates } : {}), ...(command ? { command } : {}) },
   );
 }
 

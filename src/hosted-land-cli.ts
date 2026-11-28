@@ -40,7 +40,11 @@ import { landAnnouncement, landResumeCommand, landWaitContinuation } from './hos
 import { recordTurnWait, settleTurnWork } from './agent-turn-work.js';
 import { exactConflictBannerOnce, type ExactConflictNotice } from './hosted-conflict-notice.js';
 import { LAND_INVOKED_ENV, landTiming, landTimingLine, startLandTiming } from './land-timing.js';
-import { AGENT_WAIT_SECONDS, landingWaitBudgetReply } from './agent-operation-wait.js';
+import {
+  AGENT_WAIT_SECONDS,
+  landingWaitBudgetReply,
+  stalledLandingContinuation,
+} from './agent-operation-wait.js';
 import { waitFailure } from './wait-failure.js';
 import { withLandWaitMetrics } from './land-wait-metrics.js';
 import { backgroundWake, wakeContinuation } from './agent-wake.js';
@@ -437,21 +441,41 @@ export async function hostedLandCli(
     ...command,
     operationId: submitted.operationId,
   };
-  const laneId = typeof selection.laneId === 'string' ? selection.laneId : undefined;
+  const laneId =
+    typeof selection.laneId === 'string'
+      ? selection.laneId
+      : selected?.submission.error?.code === 'LANDING_CANCELLED'
+        ? (markerIdentity(transport.root ?? root)?.laneId ?? undefined)
+        : undefined;
   const pending =
     observation?.status === 'timeout' && selected
       ? { ...selected.submission, orderWait: orderWaitOf(selected.orderWait) }
       : undefined;
   const current = pendingLandingPresentation(pending, observation?.pendingProgress, laneId);
-  const result = normalizeHostedFinishResult(transport.root ?? root, selection, {
-    ...(submitted.result as Record<string, unknown>),
-    ...(observation?.run ? { run: observation.run } : {}),
-    ...selected,
-    ...(current ? { orderWait: selected?.orderWait } : {}),
-    ...(observation?.status && observation.status !== 'terminal'
-      ? { waitStatus: observation.status, inProgress: true }
-      : {}),
-  });
+  const progress = await landingWaitProgress(
+    pending,
+    observation?.pendingProgress,
+    current?.submission ?? pending,
+    laneId,
+  );
+  const observedSubmission =
+    selected?.submission.observation?.state === 'pending' && progress
+      ? { ...selected.submission, observation: { ...selected.submission.observation, stall: progress.stall } }
+      : selected?.submission;
+  const result = normalizeHostedFinishResult(
+    transport.root ?? root,
+    laneId ? { ...selection, laneId } : selection,
+    {
+      ...(submitted.result as Record<string, unknown>),
+      ...(observation?.run ? { run: observation.run } : {}),
+      ...selected,
+      ...(observedSubmission ? { submission: observedSubmission } : {}),
+      ...(current ? { orderWait: selected?.orderWait } : {}),
+      ...(observation?.status && observation.status !== 'terminal'
+        ? { waitStatus: observation.status, inProgress: true }
+        : {}),
+    },
+  );
   // An older observer can omit the accepted count. Drop any estimate inherited from submission.
   if (selected?.submission.phase === 'landed' && selected.changedPaths === undefined)
     delete result.changedPaths;
@@ -470,15 +494,16 @@ export async function hostedLandCli(
     result,
   };
   if (final.budget && Date.parse(final.budget.resetAt) <= Date.now()) delete final.budget;
-  const progress = await landingWaitProgress(
-    pending,
-    observation?.pendingProgress,
-    current?.submission ?? pending,
-    laneId,
-  );
   const resume = landWaitContinuation(transport.root ?? root, final);
-  const budget = progress && resume ? landingWaitBudgetReply(progress, resume.waitCommand) : undefined;
+  const stallAdvice =
+    progress?.stall && resume && submitted.operationId
+      ? stalledLandingContinuation(transport.root ?? root, submitted.operationId, resume.waitCommand)
+      : undefined;
+  const budget =
+    progress && resume ? landingWaitBudgetReply(progress, resume.waitCommand, stallAdvice) : undefined;
   if (budget) Object.assign(result, budget);
+  if (stallAdvice && result.landingState)
+    result.landingState = { ...(result.landingState as object), nextStep: stallAdvice.instruction };
   const lines = landSummary(final, current?.submission ?? (budget ? pending : undefined));
   for (const line of lines) process.stderr.write(`${line}\n`);
   if (typeof submitted.operationId === 'string')

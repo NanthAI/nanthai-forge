@@ -11,6 +11,7 @@ import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
 import { revertFixture, synthetic } from './hosted-revert-fixture.mjs';
 import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
+import { hostedAgentCommandSchemas } from '../dist/hosted-agent-contract.js';
 import { readTurnLedger, recordTurnWork } from '../dist/agent-turn-work.js';
 const modules = Object.fromEntries(
   await Promise.all(
@@ -79,17 +80,19 @@ test('a late withdraw from a project root names and can reopen the target Lane',
   assert.equal((await s.f.current(first.id)).submission.phase, 'landed');
   const transport = s.transport();
   const laneId = s.f.lane.laneId;
+  const outcome = `Follow up on Lane ${laneId}`;
   await assert.rejects(transport.dispatch('withdraw', { laneId }), error => {
     assert.equal(error.code, 'LANDING_NOT_LIVE');
     assert.match(error.message, /already landed/);
-    assert.doesNotMatch(error.message, /Retry the original|land --save/);
-    assert.equal(
-      error.recovery.command,
-      `nforge agent '${transport.root}' start --reopen '{"laneId":"${laneId}"}'`,
-    );
-    assert.deepEqual(error.recovery.next, { action: 'reopen', laneId });
+    assert.doesNotMatch(error.message, /Retry the original|land --save|start --reopen/);
+    assert.equal(error.recovery.command, `nforge agent '${transport.root}' start '{"outcome":"${outcome}"}'`);
+    const { action, ...parameters } = error.recovery.next;
+    assert.equal(action, 'start');
+    assert.equal(hostedAgentCommandSchemas.start.parse(parameters).outcome, outcome);
     return true;
   });
+  assert.equal((await s.f.readLane(laneId)).state, 'completed');
+  assert.equal((await s.f.current(first.id)).submission.phase, 'landed');
   const reply = await transport.dispatch('reopen', { laneId });
   assert.equal(reply.result.lane.state, 'active');
 });

@@ -6,7 +6,7 @@ import type { HostedLandingState } from './hosted-landing.js';
 import type { LandingStall } from './landing-stall.js';
 import { orderWaitOf } from './hosted-wait-line.js';
 import { shellQuote } from './shell-quote.js';
-import { operationWait } from './agent-operation-wait.js';
+import { operationWait, stalledLandingContinuation } from './agent-operation-wait.js';
 import { landingHold, type LandingReview } from './hosted-landing-hold.js';
 import { syncRequiredAdvice, syncRequiredContinuation } from './hosted-would-conflict.js';
 
@@ -146,9 +146,11 @@ export function finishRetryContinuation(root: string, selection: Reply) {
 
 export function emptyLandingRecovery(root: string, laneId?: string) {
   const parameters = { ...(laneId ? { laneId } : {}), summary: true };
+  const command = `nforge agent ${shellQuote(root)} diff ${shellQuote(JSON.stringify(parameters))}`;
   return {
-    command: `nforge agent ${shellQuote(root)} diff ${shellQuote(JSON.stringify(parameters))}`,
+    command,
     next: { action: 'diff', parameters },
+    instruction: `Inspect the Lane diff${laneId ? '' : ' from its checkout'} with ${command}. Stop if the intended changes are on main.`,
   };
 }
 
@@ -156,6 +158,47 @@ export const stoppedLanding = (code: unknown) => code === 'LANDING_CANCELLED' ||
 
 export const stoppedLandingResubmit =
   'To resubmit from this landing’s Lane checkout, use the original land --save parameters. Keep the inputs and dependencies, remove operationId, and set "retry":true and "reason":"other".';
+
+export function cancelledLandingRecovery(
+  root: string,
+  laneId?: string,
+  resubmit?: ReturnType<typeof finishResubmitContinuation>,
+  observedOverlap?: unknown,
+) {
+  const overlap = syncRequiredAdvice(observedOverlap);
+  const needsSync = Boolean(overlap && 'landedSubmissionId' in overlap);
+  laneId ??= needsSync ? overlap?.laneId : undefined;
+  const parameters = laneId ? { laneId } : {};
+  const sync = {
+    next: { action: 'sync', ...parameters },
+    command: `nforge agent ${laneId ? shellQuote(root) : '.'} save --sync ${shellQuote(JSON.stringify(parameters))}`,
+  };
+  const instruction =
+    `${needsSync ? 'Main changed files this Lane touches. Sync' : 'If main changed files this Lane touches, sync'} the Lane first with ${sync.command}${laneId ? '' : ' from this landing’s Lane checkout'}. ` +
+    (resubmit
+      ? `${needsSync ? 'Once the sync is complete' : 'When main’s changes are disjoint or the sync is complete'}, submit again as a new operation: ${resubmit.command}`
+      : stoppedLandingResubmit);
+  return {
+    instruction,
+    ...(needsSync ? sync : {}),
+    recovery: {
+      instruction,
+      ...(needsSync ? sync : {}),
+      choices: {
+        sync: { when: 'Main changed files this Lane touches.', ...sync },
+        ...(resubmit
+          ? {
+              resubmit: {
+                when: 'Main’s changes are disjoint or the sync is complete.',
+                next: resubmit.next,
+                command: resubmit.command,
+              },
+            }
+          : {}),
+      },
+    },
+  };
+}
 
 function observedFinishState(submission: { phase?: string; observation?: { state?: string } } | undefined) {
   const state = submission?.observation?.state;
@@ -168,7 +211,12 @@ function observedFinishState(submission: { phase?: string; observation?: { state
  * Preparation before admission and retryable source children retain their recovery. */
 export function hostedObservationContinuation(root: string, result: Reply, operationId?: string): Reply {
   const submission = result.submission as
-    | { operationId?: string; error?: { code?: string }; observation?: { state?: string }; phase?: string }
+    | {
+        operationId?: string;
+        error?: { code?: string };
+        observation?: { state?: string; stall?: LandingStall };
+        phase?: string;
+      }
     | undefined;
   const state = observedFinishState(submission);
   if (
@@ -200,6 +248,8 @@ export function hostedObservationContinuation(root: string, result: Reply, opera
     operationId ?? (typeof replayOperation === 'string' ? replayOperation : submission?.operationId);
   if (!submission || !original) return result;
   const continuation = operationWait(root, { operationIds: [original], until: 'acceptance' });
+  const stalled = submission.observation?.stall;
+  const next = stalled ? stalledLandingContinuation(root, original, continuation.waitCommand) : undefined;
   // A held landing names who releases it beside the wait (5c59940b); derived, no read.
   const selected = submission as Parameters<typeof landingHold>[0];
   const approval = Object.hasOwn(result, 'pendingAttempt') ? (result as LandingReview) : undefined;
@@ -208,12 +258,15 @@ export function hostedObservationContinuation(root: string, result: Reply, opera
     approver: approval?.approver ?? selected?.approver,
     url: approval?.url ?? selected?.url,
   });
-  return {
+  const reply = {
     ...result,
     ...(hold ? { hold } : {}),
     ...continuation,
-    ...(result.nextCommand ? { nextCommand: continuation.command } : {}),
+    ...next,
+    ...(stalled || result.stall ? { stall: stalled } : {}),
+    ...(result.nextCommand ? { nextCommand: (next ?? continuation).command } : {}),
   };
+  return stalled ? withFinishLandingState({}, reply) : reply;
 }
 
 /** Normalize only already-observed outcomes. No source, journal, transport or clock access. A
@@ -246,7 +299,12 @@ export function withFinishLandingState(selection: Reply, result: Reply): Reply {
         },
         laneId,
       ),
-      result.failureCause,
+      (result.stall ||
+        stoppedLanding(submission.error?.code) ||
+        submission.error?.code === 'NOTHING_TO_LAND') &&
+        typeof result.instruction === 'string'
+        ? { next: result.instruction }
+        : result.failureCause,
     ),
   };
 }
@@ -292,6 +350,7 @@ export function normalizeObservedFinish(root: string, selection: Reply, result: 
           'inProgress',
           'wake',
           'hold',
+          'stall',
           'instruction',
           'retry',
           'retryCommand',
@@ -333,12 +392,28 @@ export function normalizeObservedFinish(root: string, selection: Reply, result: 
     (progress as { outcome?: { error?: unknown } } | undefined)?.outcome?.error;
   if ((error as { code?: string } | undefined)?.code === 'NOTHING_TO_LAND') {
     const laneId = typeof selection.laneId === 'string' ? selection.laneId : undefined;
-    return { ...clean, status: 'failed', terminal: true, recovery: emptyLandingRecovery(root, laneId) };
+    const recovery = emptyLandingRecovery(root, laneId);
+    return { ...clean, status: 'failed', terminal: true, recovery, instruction: recovery.instruction };
   }
   if ((error as { code?: string } | undefined)?.code === 'SOURCE_STATE_TOO_LARGE')
     return { ...clean, status: 'failed', terminal: true };
-  if (stoppedLanding((error as { code?: string } | undefined)?.code))
-    return { ...clean, status: 'failed', terminal: true, ...finishResubmitContinuation(root, selection) };
+  const code = (error as { code?: string } | undefined)?.code;
+  if (code === 'LANDING_CANCELLED')
+    return {
+      ...clean,
+      status: 'failed',
+      terminal: true,
+      ...cancelledLandingRecovery(
+        root,
+        typeof selection.laneId === 'string' ? selection.laneId : undefined,
+        finishResubmitContinuation(root, selection),
+        result.wouldConflict,
+      ),
+    };
+  if (stoppedLanding(code)) {
+    const retry = finishResubmitContinuation(root, selection);
+    return { ...clean, status: 'failed', terminal: true, ...retry };
+  }
   const retry = finishRetryContinuation(root, selection);
   // Failed only on main's red, and a land now would not wait (review of friction f27065f7): the command
   // is the wait for main; the re-land is retryCommand, for once main is green.

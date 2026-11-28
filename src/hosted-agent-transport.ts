@@ -271,20 +271,6 @@ const quietActions = new Set([
   'start',
   'open',
 ]);
-/** Agent-default refusals carry their own next step. */
-// These messages carry their own next command; a generic replay hint would contradict it.
-const gateCodes = new Set([
-  'BAD_ARGUMENT',
-  'NOT_FOUND', // a missing record: replaying the same request cannot change it (w30)
-  'NOTHING_TO_LAND',
-  'LANDING_NOT_LIVE',
-  'PREFLIGHT_REQUIRED',
-  'SAVE_PENDING',
-  'SAVE_SETTLE_FAILED',
-  'SAVE_REBASE_CONFLICT',
-  'LANE_NOT_ACTIVE',
-  'POLICY_CHANGED',
-]);
 /** Existing CLI mutations that accept deferred caller receipts; no extra calls. */
 const receiptMutations = new Set([
   'projectHostedStart:start',
@@ -2259,13 +2245,6 @@ export class HostedAgentTransport {
       const limited = limitRefusal(safe, this.callerOperationId);
       if (limited) throw limited;
       if (safe instanceof SourceAuthorityStaleError || safe.recovery) throw safe;
-      // Version skew (either side) needs an upgrade, not a replay.
-      if (
-        safe.code === 'HOSTED_ACTION_UNSUPPORTED' ||
-        safe.code === 'CLI_UPGRADE_REQUIRED' ||
-        safe.code === 'HOSTED_SCHEMA_REJECTED'
-      )
-        throw safe;
       // Every HOSTED_ACTION_FAILED names its cause and one next command (Item 3f76a3df).
       if (safe.code === 'HOSTED_ACTION_FAILED')
         throw (await import('./hosted-failure-reply.js')).hostedFailureReply({
@@ -2277,12 +2256,9 @@ export class HostedAgentTransport {
           retained: Boolean(this.callerOperationId && retainedOperation(this.root, this.callerOperationId)),
           input,
         });
-      throw new ForgeError(
-        safe.code,
-        gateCodes.has(safe.code)
-          ? safe.message
-          : `${safe.message} Retry the original hosted agent action and parameters to reconcile its retained operation.`,
-      );
+      // Typed refusals carry their own outcome and recovery. Unknown network outcomes are
+      // reconciled by dispatch's network continuation, and known transient failures above.
+      throw safe;
     }
   }
   /** Seconds-bound for checkout and dependency sharing after the durable start. */
@@ -2726,7 +2702,8 @@ export class HostedAgentTransport {
       throw checkoutRequired(
         { root: this.root, address: this.address },
         laneId,
-        'Run preflight with the Lane folder printed by start as ROOT (not the project folder): it tests the saved files there.',
+        'Preflight tests the files in the Lane checkout.',
+        { action, parameters: command },
       );
     const { preflightPlan, readPreflightReceipt, runPreflight, withPreflightSlot } =
       await import('./agent-preflight.js');
@@ -3196,7 +3173,7 @@ export class HostedAgentTransport {
     );
     const ids = [laneId, operationId, submissionId, runId].filter(Boolean).length;
     // A bare status is the project status (handled before this); an observe with no id lists landings.
-    if (!ids) throw missingObserveId(this.address);
+    if (!ids) throw missingObserveId(this.root, this.address, markerIdentity(this.root)?.laneId);
     invariant(
       ids === 1,
       'BAD_ARGUMENT',

@@ -4090,6 +4090,28 @@ test('the CLI refuses planning model fields, with zero calls, on a server that d
   assert.equal((await put(p, { kind: 'issue', title: 'Plain' })).result.version, 1);
 });
 
+test('a planning cursor rejected by the records index restarts with the requested filters', async t => {
+  const s = await setup(t);
+  const p = port(s);
+  await put(p, { kind: 'issue', title: 'First Issue' });
+  await put(p, { kind: 'issue', title: 'Second Issue' });
+  const filters = { status: 'open', kind: 'issue', limit: 1, reconcile: false };
+  const { nextCursor } = await list(p, filters);
+  assert.ok(nextCursor);
+  const query = p.query;
+  p.query = async (name, args) => {
+    if (name === 'projectWorkIndex:records' && args.paginationOpts.cursor)
+      throw new ConvexError({ paginationError: 'InvalidCursor' });
+    return query(name, args);
+  };
+  await assert.rejects(list(p, { ...filters, status: 'all', cursor: nextCursor }), error => {
+    assert.equal(error.code, 'WORK_STALE');
+    assert.deepEqual(error.recovery.next, { action: 'planning', ...filters, status: 'all' });
+    return true;
+  });
+  assert.equal((await list(p, { ...filters, status: 'all' })).items.length, 1);
+});
+
 test('waiting reasons compose with planning selectors and page without text search or reading unrelated Items', async t => {
   const s = await setup(t);
   const p = port(s, new Map(), [...hostedContractFeatures, planningWaitingFeature]);
@@ -4155,7 +4177,15 @@ test('waiting reasons compose with planning selectors and page without text sear
     ),
   );
   await assert.rejects(list(p, { ...filter, waitingOn: 'owner', cursor }), code('WORK_STALE'));
-  await assert.rejects(list(p, { ...filter, waitingOn: undefined, cursor }), code('WORK_STALE'));
+  const { waitingOn: removedWait, ...restart } = filter;
+  assert.equal(removedWait, 'evidence');
+  await assert.rejects(list(p, { ...restart, cursor }), error => {
+    assert.equal(error.code, 'WORK_STALE');
+    assert.deepEqual(error.recovery.next, { action: 'planning', ...restart });
+    assert.match(error.recovery.command, / planning /);
+    return true;
+  });
+  assert((await list(p, restart)).items.length > 0);
   await assert.rejects(list(p, { ...filter, owner: 'someone-else', cursor }), code('WORK_STALE'));
 
   const generationId = s.tables.hostedProjects.get(s.projectId).work.generationId;

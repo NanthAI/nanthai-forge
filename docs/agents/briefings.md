@@ -8,7 +8,8 @@ before acting. Detected repository instructions win over project guidance, then 
 Hosted `projectBriefings.brief({projectId,...briefInput})` is a separate API surface: it
 checks current access, and source-only grants cannot read Work. It returns `copyText`
 (at most 1,200 characters), Markdown (at most 32,000) and structured context; templates
-make no model calls and include no source contents. `projectWorkIndexActions.ensure` and
+make no model calls and include no source contents. Run its commands from the project checkout.
+See [Agent recovery](recovery.md) for the scenarios those commands address. `projectWorkIndexActions.ensure` and
 `projectBriefingActions.prepare` prepare derived paths from State manifests, not file
 blobs. API support for client preparation is not permission for builders to
 auto-trigger index repair; follow [live-operation rules](lead.md#live-work-and-cost).

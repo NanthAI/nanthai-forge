@@ -364,7 +364,7 @@ test('save prints its operation id and resume command first, before waiting', as
   t.mock.restoreAll();
   assert.equal(
     before.split('\n')[0],
-    `save: operationId ${operationId}; resume with: nforge agent '${realpathSync(root)}' wait '{"operationIds":["${operationId}"]}'`,
+    `save: operationId ${operationId}; if interrupted before an outcome, resume with: nforge agent '${realpathSync(root)}' wait '{"operationIds":["${operationId}"]}'`,
   );
   // Landings keep their own single first line (after submission names the landing).
   const finishTransport = { dispatch: async () => ({ result: {} }) };

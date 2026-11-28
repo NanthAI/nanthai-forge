@@ -193,6 +193,24 @@ test('case 2 (55d39f4e): land from the original Lane after resolution points at 
   assert.equal(new Set(resolutions.map(request => request.operationId)).size, 1, 'one resolve operation');
 });
 
+test('a fresh resolve on a resolved Lane directs the agent to that Lane’s status', async t => {
+  const { s, f, conflict } = await conflicted(t);
+  writeFileSync(join(conflict.root, 'a.txt'), 'chosen\nb\nc\n');
+  const [resolve, parameters] = strip(conflict.next);
+  await s.transport(conflict.root).dispatch(resolve, parameters);
+  await assert.rejects(
+    s.transport(conflict.root).dispatch(resolve, { laneId: conflict.laneId, operationId: randomUUID() }),
+    error => {
+      assert.match(error.message, /no pending resolution/i);
+      assert.deepEqual(error.recovery.next, { action: 'status', laneId: conflict.laneId });
+      assert.match(error.recovery.command, / status /);
+      return true;
+    },
+  );
+  const status = await s.transport(conflict.root).dispatch('status', { laneId: conflict.laneId });
+  assert.equal(status.result.head, (await f.readLane(conflict.laneId)).head);
+});
+
 test('case 2: an abandoned resolution Lane yields one fresh resolution command', async t => {
   const { s, f, root, command, conflict } = await conflicted(t);
   await f.changeLane(conflict.laneId, { state: 'abandoned' });

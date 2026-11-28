@@ -63,6 +63,16 @@ export async function executeHostedWithdraw(session: HostedAgentSession, input: 
     const refusal = hostedActionError(error, 'withdraw');
     if (refusal.code !== 'LANDING_NOT_LIVE' || !refusal.message.startsWith(`Lane ${laneId} has already `))
       throw error;
+    if (refusal.message.startsWith(`Lane ${laneId} has already landed`)) {
+      const parameters = { outcome: `Follow up on Lane ${laneId}` };
+      const followUp = `nforge agent ${shellQuote(session.root)} start ${shellQuote(JSON.stringify(parameters))}`;
+      throw new ForgeError(
+        refusal.code,
+        `Lane ${laneId} already landed. Stop here if the acceptance answers your request. For follow-up edits, start a new Lane with ${followUp}`,
+        undefined,
+        { outcome: 'refused', retryable: false, command: followUp, next: { action: 'start', ...parameters } },
+      );
+    }
     const own = session.marker()?.selection.laneId;
     const registered = readLaneEntry(laneId)?.root;
     const marker = registered ? markerIdentity(registered) : null;
@@ -76,7 +86,11 @@ export async function executeHostedWithdraw(session: HostedAgentSession, input: 
           : undefined;
     // An unopened Lane can be reopened from a project root. From another Lane, open the target first.
     const action = checkout || !own ? 'reopen' : 'open';
-    throw new ForgeError(refusal.code, refusal.message, undefined, {
+    const instruction =
+      action === 'reopen' ? 'Reopen it to continue in its checkout.' : 'Open its checkout to continue there.';
+    throw new ForgeError(refusal.code, `Lane ${laneId} already completed. ${instruction}`, undefined, {
+      outcome: 'refused',
+      retryable: false,
       command: `nforge agent ${shellQuote(checkout ?? session.root)} start --${action} ${shellQuote(JSON.stringify({ laneId }))}`,
       next: { action, laneId },
     });

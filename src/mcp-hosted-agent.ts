@@ -41,7 +41,13 @@ import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import { ForgeError, invariant } from './errors.js';
 import { memberDataNotice } from './member-data-notice.js';
 import { hostedActionError } from './hosted-action-error.js';
-import { AGENT_WAIT_SECONDS, landingWaitBudgetReply, operationWait } from './agent-operation-wait.js';
+import {
+  AGENT_WAIT_SECONDS,
+  landingWaitBudgetReply,
+  operationWait,
+  stalledLandingContinuation,
+} from './agent-operation-wait.js';
+import { landingStateField } from './landing-state.js';
 import {
   hostedSourceSelectionSchema,
   hostedSourceShowSchema,
@@ -555,9 +561,14 @@ export function registerHostedAgentWorkflow(
             const live = 'pendingProgress' in observed.result ? observed.result.pendingProgress : undefined;
             const presentation = pendingLandingPresentation(recorded, live)?.submission ?? recorded;
             const progress = await landingWaitProgress(recorded, live, presentation);
+            const operationId = input.operationIds?.length === 1 ? input.operationIds[0] : undefined;
+            const stallAdvice =
+              observed.result.status === 'timeout' && progress?.stall && operationId
+                ? stalledLandingContinuation(transport.root, operationId, resume.waitCommand)
+                : undefined;
             const budget =
               observed.result.status === 'timeout' && progress
-                ? landingWaitBudgetReply(progress, resume.waitCommand)
+                ? landingWaitBudgetReply(progress, resume.waitCommand, stallAdvice)
                 : undefined;
             return {
               ...observed,
@@ -567,8 +578,13 @@ export function registerHostedAgentWorkflow(
                 budgetSeconds,
                 phase: input.runId ? (run?.status ?? 'unknown') : (presentation?.phase ?? 'pending'),
                 ...('cursor' in observed.result ? { cursor: observed.result.cursor } : {}),
-                ...budget,
                 ...resume,
+                ...budget,
+                ...(stallAdvice && presentation
+                  ? {
+                      landingState: { ...landingStateField(presentation), nextStep: stallAdvice.instruction },
+                    }
+                  : {}),
               },
             };
           }

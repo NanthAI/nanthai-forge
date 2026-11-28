@@ -246,9 +246,11 @@ test('B1.5d n3-r3 t23938: stall alarm remains pending; terminal stall has one su
   const pending = await s.transport().dispatch('finish', { laneId: s.lane.laneId });
   assert.equal(pending.result.submission.observation.state, 'pending');
   assert.equal(pending.result.retryCommand, undefined, 'an alarm is not a terminal failure');
-  assert.equal(pending.result.next.action, 'wait');
-  assert.deepEqual(pending.result.next.operationIds, [original.operationId]);
-  assert.match(pending.result.command, / wait /);
+  assert.equal(pending.result.next.action, 'queue');
+  assert.match(pending.result.command, / queue '\{\}'$/);
+  assert(pending.result.instruction.includes(`observe '{"operationId":"${original.operationId}"}'`));
+  assert.match(pending.result.waitCommand, / wait /);
+  assert(pending.result.waitCommand.includes(original.operationId));
   state.phase = 'terminal-failed';
   state.observation = { state: 'terminal-failed', cause: 'infra', pendingReason: null };
   state.error = { code: 'LANDING_STALLED', message: 'Synthetic controller failure' };

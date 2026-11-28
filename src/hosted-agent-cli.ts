@@ -6,7 +6,13 @@ import { isNetworkPending } from './network-continuation.js';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { HostedAgentAddress } from './hosted-agent-contract.js';
-import { hostedAgentRoot, hostedAgentDirectory, retainedHostedOperation } from './hosted-agent-journal.js';
+import {
+  hostedAgentRoot,
+  hostedAgentDirectory,
+  retainedHostedOperation,
+  retainedHostedValues,
+} from './hosted-agent-journal.js';
+import type { FinishContext } from './hosted-agent-finish-identity.js';
 import { durableReplace } from './state/durability.js';
 import { hostedWaitSchema } from './hosted-wait-schema.js';
 import { ForgeError, invariant } from './errors.js';
@@ -17,7 +23,9 @@ import { syncRequiredAdvice, syncRequiredContinuation } from './hosted-would-con
 import { holdLines, landingHold } from './hosted-landing-hold.js';
 import { landingStateField } from './landing-state.js';
 import {
+  cancelledLandingRecovery,
   causeNextStep,
+  emptyLandingRecovery,
   finishResubmitContinuation,
   landingWaitProgress,
   pendingLandingPresentation,
@@ -31,6 +39,7 @@ import {
   interruptedWait,
   landingWaitBudgetReply,
   operationWait,
+  stalledLandingContinuation,
 } from './agent-operation-wait.js';
 import { recordTurnWait, settleTurnWork } from './agent-turn-work.js';
 import { HostedAgentTransport, type HostedAgentResponse } from './hosted-agent-transport.js';
@@ -477,6 +486,7 @@ async function dispatchHostedAgentCli(
           orderWait?: unknown;
           changedPaths?: number | null;
           sourceFailure?: unknown;
+          wouldConflict?: unknown;
           providerDelay?: string;
           failureCause?: unknown;
         }[];
@@ -521,6 +531,17 @@ async function dispatchHostedAgentCli(
               retained && waitedOn ? { root, ...retained, operationId: waitedOn } : undefined,
             )
           : undefined;
+      const repair =
+        stalled?.stall.replayCommand && retained
+          ? {
+              command: stalled.stall.replayCommand,
+              next: { ...retained.command, action: retained.action, operationId: waitedOn },
+            }
+          : undefined;
+      const stallAdvice =
+        stalled && waitedOn ? stalledLandingContinuation(root, waitedOn, waitCommand, repair) : undefined;
+      if ('landingState' in landing && landing.landingState && stallAdvice)
+        landing.landingState.nextStep = stallAdvice.instruction;
       const held = {
         ...(hold ? { hold, ...landing } : landing),
         ...(stalled ? { stall: stalled.stall } : {}),
@@ -533,6 +554,7 @@ async function dispatchHostedAgentCli(
         // A note reached this Lane: same exit code and resume command as a budget return, so every
         // "repeat on IN PROGRESS" loop keeps working; the Stop hook still sees the unfinished wait.
         process.exitCode = 3;
+        if (stallAdvice) process.stderr.write(`${stallAdvice.instruction}\n`);
         recordTurnWait(root, continuation.next, null);
         const delivered = (response.result as { board: Parameters<typeof boardWakeEnvelope>[2] }).board;
         const { conflictNotice, notice, ...envelope } = boardWakeEnvelope(root, board.laneId, delivered);
@@ -550,6 +572,7 @@ async function dispatchHostedAgentCli(
             ...held,
             board: { ...envelope, ...(!conflictNotice && notice ? { notice } : {}) },
             ...resume,
+            ...stallAdvice,
           },
         };
       }
@@ -587,17 +610,22 @@ async function dispatchHostedAgentCli(
       if (status === 'timeout' || status === 'cancelled') {
         const interrupted = status === 'cancelled' ? interruptedWait(signalled) : undefined;
         const budget =
-          status === 'timeout' && progress ? landingWaitBudgetReply(progress, waitCommand) : undefined;
+          status === 'timeout' && progress
+            ? landingWaitBudgetReply(progress, waitCommand, stallAdvice)
+            : undefined;
         process.exitCode = interrupted?.exitCode ?? 3;
         if (budget) process.stderr.write(`${budget.message}\n`);
-        if (interrupted?.note) process.stderr.write(`${interrupted.note}\n${waitCommand}\n`);
+        if (interrupted?.note)
+          process.stderr.write(
+            stallAdvice ? `${stallAdvice.instruction}\n` : `${interrupted.note}\n${waitCommand}\n`,
+          );
         recordTurnWait(root, continuation.next, null);
         return {
           ...response,
           result: {
             status: 'IN_PROGRESS',
             reason: interrupted?.reason ?? 'budget',
-            ...(interrupted?.note ? { note: interrupted.note } : {}),
+            ...(interrupted?.note && !stallAdvice ? { note: interrupted.note } : {}),
             budgetSeconds,
             ...(selectedWait.runId
               ? { runId: selectedWait.runId, phase: run?.status ?? 'unknown' }
@@ -608,6 +636,7 @@ async function dispatchHostedAgentCli(
                   ...held,
                 }),
             ...resume,
+            ...stallAdvice,
           },
         };
       }
@@ -625,34 +654,66 @@ async function dispatchHostedAgentCli(
         !selectedWait.runId && status === 'terminal'
           ? submissions?.map((entry, index) => {
               const operationId = selectedWait.operationIds?.[index] ?? entry.submission.operationId;
+              const code = entry.submission.error?.code;
               const stopped =
-                entry.submission.observation?.state === 'terminal-failed' &&
-                stoppedLanding(entry.submission.error?.code);
-              const original = stopped && (waitedOn ? retained : retainedHostedOperation(root, operationId));
+                entry.submission.observation?.state === 'terminal-failed' && stoppedLanding(code);
+              const empty = code === 'NOTHING_TO_LAND';
+              const original =
+                (stopped || empty) && (waitedOn ? retained : retainedHostedOperation(root, operationId));
               const retry =
-                original && original.action === 'finish'
+                stopped && original && original.action === 'finish'
                   ? finishResubmitContinuation(root, original.command)
-                  : stopped
-                    ? { recovery: { instruction: stoppedLandingResubmit } }
-                    : undefined;
-              const outcome = { ...response, operationId, result: { phase: 'finish', ...entry, ...retry } };
+                  : undefined;
+              const originalLane =
+                original &&
+                (original.command.laneId ??
+                  (
+                    retainedHostedValues(root, operationId, 'finish')?.['finish-context'] as
+                      | FinishContext
+                      | undefined
+                  )?.clean?.laneId);
+              const selectedLane = typeof originalLane === 'string' ? originalLane : undefined;
+              const emptyRecovery = empty
+                ? emptyLandingRecovery(selectedLane ? root : '.', selectedLane)
+                : undefined;
+              const advice =
+                code === 'LANDING_CANCELLED'
+                  ? cancelledLandingRecovery(root, selectedLane, retry, entry.wouldConflict)
+                  : {
+                      ...retry,
+                      ...(emptyRecovery
+                        ? { recovery: emptyRecovery, instruction: emptyRecovery.instruction }
+                        : !retry && stopped
+                          ? { recovery: { instruction: stoppedLandingResubmit } }
+                          : {}),
+                    };
+              const outcome = {
+                ...response,
+                operationId,
+                result: { phase: 'finish', ...entry, ...advice },
+              };
               // A failed landing exits 2, the same as `land` (SM-C M7); landed and superseded stay 0.
               if (landExitsFailed(outcome)) process.exitCode = 2;
               for (const line of landSummary(outcome)) process.stderr.write(`${line}\n`);
-              return { ...entry, ...retry };
+              return { ...entry, ...advice };
             })
           : undefined;
       if (settled?.length === 1) {
         const { learnFromLanding } = await import('./preflight-learned.js');
         learnFromLanding(root, settled[0]);
       }
+      const onlySettled = settled?.length === 1 ? settled[0] : undefined;
+      const instruction = onlySettled && 'instruction' in onlySettled ? onlySettled.instruction : undefined;
       return {
         ...response,
         result: {
           ...response.result,
           ...(settled ? { submissions: settled } : {}),
-          ...(settled?.length === 1 ? settled[0] : selected),
+          ...(onlySettled ?? selected),
           ...landing,
+          ...('landingState' in landing && landing.landingState && instruction
+            ? { landingState: { ...landing.landingState, nextStep: instruction } }
+            : {}),
         },
       };
     } finally {
@@ -720,6 +781,15 @@ async function dispatchHostedAgentCli(
         },
       };
     }
+  } catch (error) {
+    if (
+      error instanceof ForgeError &&
+      error.recovery?.outcome === 'refused' &&
+      error.recovery.retryable === false &&
+      typeof error.recovery.command === 'string'
+    )
+      process.stderr.write(`${action}: operation refused. Continue with ${error.recovery.command}\n`);
+    throw error;
   } finally {
     process.removeListener('SIGINT', stop);
     process.removeListener('SIGTERM', stop);

@@ -4,11 +4,15 @@ import { githubBranch } from './github-branch.js';
 import { recoverLocalApply } from './hosted-apply-recovery.js';
 import { commandScopeProposal } from './check-command-scope.js';
 import { retainSyncHandoff, clearSyncHandoff } from './hosted-sync-handoff.js';
-import { guideHostedSync, resolveHostedAgent } from './hosted-agent-resolution.js';
+import { guideHostedSync, hostedRecoveryCommand, resolveHostedAgent } from './hosted-agent-resolution.js';
 import { syncTiming, type StepTimer } from './sync-timing.js';
 import { hostedRecordSchema, parkResultSchema } from './hosted-records.js';
 import { executeHostedFinish } from './hosted-agent-finish.js';
-import { stoppedLanding, stoppedLandingResubmit } from './hosted-agent-finish-result.js';
+import {
+  cancelledLandingRecovery,
+  stoppedLanding,
+  stoppedLandingResubmit,
+} from './hosted-agent-finish-result.js';
 import { executeHostedWithdraw } from './hosted-agent-withdraw.js';
 import { settleTurnWork } from './agent-turn-work.js';
 import { isStandardForgeCheck } from './standard-check.js';
@@ -494,14 +498,18 @@ async function configureRunnerRequest(
     },
   };
 }
-function checkLocalLane(session: HostedAgentSession, laneId?: string) {
+function checkLocalLane(
+  session: HostedAgentSession,
+  action: string,
+  parameters: { laneId?: string | undefined },
+) {
   const marker = session.marker();
+  const { laneId } = parameters;
   if (marker && (!laneId || marker.selection.laneId === laneId)) return marker;
-  throw checkoutRequired(
-    session,
-    laneId,
-    'Saving or changing this Lane needs its own folder as ROOT, not the project folder: use the Lane folder printed by start.',
-  );
+  throw checkoutRequired(session, laneId, 'Saving or changing a Lane needs its checkout.', {
+    action,
+    parameters,
+  });
 }
 const CANCEL_COST = 'Cancelling ends this submission and releases its queue place.';
 export async function executeHostedAgent(
@@ -723,7 +731,7 @@ export async function executeHostedAgent(
   }
   if (action === 'save') {
     const command = hostedAgentCommandSchemas.save.parse(input);
-    checkLocalLane(session, command.laneId);
+    checkLocalLane(session, action, command);
     if (command.park !== undefined && !session.capabilities.features?.includes('lane-park'))
       throw unadvertisedActionError('save park');
     // Park (Item e1633718) after the save returns: one call, a repeat with the same holder and reason writes nothing.
@@ -868,6 +876,7 @@ export async function executeHostedAgent(
         session,
         command.laneId,
         'Sync updates the Lane checkout as well as the server Lane.',
+        { action, parameters: command },
       );
     if (command.predecessor && !session.capabilities.features?.includes('early-resolution-v1'))
       throw unadvertisedActionError('sync predecessor');
@@ -1097,7 +1106,18 @@ export async function executeHostedAgent(
       const lane = await selectAgentLane(session, command.laneId);
       if (lane.state === 'completed')
         return { phase: 'lifecycle', noop: true, lane: { laneId: lane.laneId, state: lane.state } };
-      invariant(lane.state === 'active', 'WORK_STALE', `A ${lane.state} Lane cannot be completed.`);
+      if (lane.state !== 'active') {
+        const parameters = { laneId: lane.laneId };
+        throw new ForgeError(
+          'WORK_STALE',
+          `Lane ${lane.laneId} is ${lane.state}. Its status shows how it ended.`,
+          undefined,
+          {
+            next: { action: 'status', ...parameters },
+            command: hostedRecoveryCommand(session.root, 'status', parameters),
+          },
+        );
+      }
     }
     const target = 'target' in command ? command.target : undefined;
     const abandonment = action === 'abandon' ? hostedAgentCommandSchemas.abandon.parse(input) : null;
@@ -1108,7 +1128,7 @@ export async function executeHostedAgent(
       return result;
     };
     if (!target && session.marker()) {
-      checkLocalLane(session, command.laneId);
+      checkLocalLane(session, action, command);
       return applied(
         transitionHostedLane(
           session.root,
@@ -1129,11 +1149,13 @@ export async function executeHostedAgent(
         ),
       );
     }
-    invariant(
-      target || !(abandonment?.saveFirst || abandonment?.keepPatch),
-      'HOSTED_CHECKOUT_REQUIRED',
-      'Saving or keeping local edits first requires an opened Lane checkout.',
-    );
+    if (!target && (abandonment?.saveFirst || abandonment?.keepPatch))
+      throw checkoutRequired(
+        session,
+        command.laneId,
+        'Saving or keeping local edits first requires a Lane checkout.',
+        { action, parameters: command },
+      );
     const build = async () => {
       const lane = !target ? await selectAgentLane(session, command.laneId) : null;
       return hostedLifecycleRequestSchema.parse({
@@ -1256,7 +1278,22 @@ export async function executeHostedAgent(
     };
     return sendAuthorityPinned(session.journal, 'priority-request', epoch, build, request =>
       session.mutation('projectHostedLandingPriority:prioritize', request),
-    );
+    ).catch(error => {
+      const safe = hostedActionError(error, 'priority');
+      if (safe.code !== 'URGENT_NOT_ALLOWED') throw error;
+      const parameters = { submissionId: command.submissionId };
+      throw new ForgeError(
+        safe.code,
+        `${safe.message} The submission keeps its current priority. Inspect it with the observe command.`,
+        undefined,
+        {
+          outcome: 'refused',
+          retryable: false,
+          next: { action: 'observe', ...parameters },
+          command: hostedRecoveryCommand(session.root, 'observe', parameters),
+        },
+      );
+    });
   }
   if (action === 'cancel') {
     const command = hostedAgentCommandSchemas.cancel.parse(input);
@@ -1278,7 +1315,14 @@ export async function executeHostedAgent(
     return {
       ...cancelled,
       cost: CANCEL_COST,
-      ...(stoppedLanding(code) ? { recovery: { instruction: stoppedLandingResubmit } } : {}),
+      ...(stoppedLanding(code)
+        ? {
+            recovery:
+              code === 'LANDING_CANCELLED'
+                ? cancelledLandingRecovery(session.root).recovery
+                : { instruction: stoppedLandingResubmit },
+          }
+        : {}),
     };
   }
   if (action === 'withdraw') return executeHostedWithdraw(session, input);

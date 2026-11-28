@@ -219,7 +219,10 @@ async function printedRevertWait(t, s) {
     process.stderr.write = stderr;
   }
   assert.equal(revert.result.status, 'submitted');
-  const printed = /^revert: .*; resume with: nforge agent '([^']+)' wait '([^']+)'$/m.exec(output);
+  const printed =
+    /^revert: .*; if interrupted before an outcome, resume with: nforge agent '([^']+)' wait '([^']+)'$/m.exec(
+      output,
+    );
   assert(printed, output);
   assert.equal(printed[1], hostedAgentRoot(s.root));
   const input = JSON.parse(printed[2]);
@@ -448,6 +451,12 @@ test('remote Lane abandonment/reopening uses canonical lifecycle API without a c
   const abandoned = await s.transport().dispatch('abandon', { laneId, reason: 'Superseded synthetic work' });
   assert.equal(abandoned.result.status, 'applied');
   assert.equal(abandoned.result.lane.state, 'abandoned');
+  await assert.rejects(s.transport().dispatch('complete', { laneId }), error => {
+    assert.match(error.message, /abandoned/i);
+    assert.deepEqual(error.recovery.next, { action: 'status', laneId });
+    assert.match(error.recovery.command, / status /);
+    return true;
+  });
   const reopened = await s.transport().dispatch('reopen', { laneId });
   assert.equal(reopened.result.lane.state, 'active');
   assert.equal(reopened.result.lane.head, abandoned.result.lane.head);

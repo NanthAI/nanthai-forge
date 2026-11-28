@@ -235,6 +235,18 @@ test('a queued no-op ends with a Lane diff command and no resubmission command',
   assert.equal(result.terminal, true);
   assert.equal(result.retryCommand, undefined);
   assert.deepEqual(result.recovery.next, { action: 'diff', parameters: { laneId, summary: true } });
+  assert.match(result.instruction, /Inspect the Lane diff/);
+  assert(result.instruction.includes(result.recovery.command));
+  assert.match(result.instruction, /Stop if the intended changes are on main/);
+  const implicit = normalizeObservedFinish(
+    '/workspace/lane with spaces',
+    {},
+    { submission: result.submission },
+  );
+  assert.equal(
+    implicit.recovery.command,
+    `nforge agent '/workspace/lane with spaces' diff '{"summary":true}'`,
+  );
 });
 
 test('the LANDED line states the number of changed paths', () => {
@@ -355,7 +367,10 @@ for (const code of ['LANDING_CANCELLED', 'REVIEW_DECLINED'])
     assert(printed, 'the terminal wait prints a runnable resubmission command');
     const next = JSON.parse(printed[1]);
     assert.deepEqual(next, { after: null, dependencies: [], ...selection });
-    assert.deepEqual(waited.result.next, { action: 'finish', ...next });
+    if (code === 'LANDING_CANCELLED') {
+      assert.equal(waited.result.next, undefined);
+      assert.deepEqual(waited.result.recovery.choices.resubmit.next, { action: 'finish', ...next });
+    } else assert.deepEqual(waited.result.next, { action: 'finish', ...next });
 
     const otherRoot = temporaryDirectory(t, 'forge-stop-remote-');
     const elsewhere = await hostedAgentCli(

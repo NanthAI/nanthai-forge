@@ -35,7 +35,7 @@ import {
 } from './hosted-contract-features.js';
 import { retryableCodes } from './exchange-retry.js';
 import { readIndexedWorkDetail } from './hosted-work-client.js';
-import { ForgeError, invariant } from './errors.js';
+import { convexErrorData, ForgeError, invariant } from './errors.js';
 import { isPlanningPrefix, planningIdMaxCandidates } from './planning-id.js';
 import { planningIssueArguments } from './planning-issue-arguments.js';
 import type { HostedAgentSession } from './hosted-agent-transport.js';
@@ -51,6 +51,7 @@ import {
 } from './work-planning-types.js';
 import { issuePaths, SCHEDULE_RULE, suggestSchedule } from './work-schedule.js';
 import { markdownDoc } from './docs-resolution.js';
+import { shellQuote } from './shell-quote.js';
 
 /** Planning is the hosted Work journal's Issues and Initiatives. This file only drives the existing
  * indexed reads and the owner Work command `projectWorkActionsV8:command`; it adds no storage. */
@@ -113,6 +114,31 @@ const maxPages = 5;
 const maxCountPages = 20;
 const maxReconcile = 10;
 const stale = 'Hosted Work changed. Start again from a fresh planning read.';
+const changedPlanningSelection = [
+  stale,
+  'Waiting selection changed. Restart this planning read.',
+  'Filter selection changed. Restart this planning read.',
+];
+
+function planningCursorRefusal(root: string, input: Record<string, unknown>, error: unknown) {
+  const { cursor, ...filters } = input;
+  if (typeof cursor !== 'string' || !(error instanceof Error)) return undefined;
+  const data = error instanceof ForgeError ? error : convexErrorData(error);
+  const changed = data?.code === 'WORK_STALE' && changedPlanningSelection.includes(String(data.message));
+  const invalid =
+    (!(data instanceof ForgeError) && data?.paginationError === 'InvalidCursor') ||
+    /\bInvalidCursor\b|\binvalid pagination cursor\b/i.test(error.message);
+  if (!changed && !invalid) return undefined;
+  return new ForgeError(
+    'WORK_STALE',
+    'The planning cursor no longer matches this read. Restart with these filters and omit the cursor.',
+    undefined,
+    {
+      next: { action: 'planning', ...filters },
+      command: `nforge agent ${shellQuote(root)} planning ${shellQuote(JSON.stringify(filters))}`,
+    },
+  );
+}
 
 const uuidFrom = (seed: string) => {
   const h = createHash('sha256').update(seed).digest('hex');
@@ -1254,7 +1280,11 @@ export async function executeHostedPlanning(
   }
   if (action === 'planning') {
     const read = hostedAgentCommandSchemas.planning.parse(input);
-    const result = marked(await readPlanning(port, read));
+    const result = marked(
+      await readPlanning(port, read).catch(error => {
+        throw planningCursorRefusal(port.root, input, error) ?? error;
+      }),
+    );
     const grouped =
       read.groupBy && 'items' in result && Array.isArray(result.items)
         ? {

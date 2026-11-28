@@ -12,17 +12,18 @@ nforge agent ROOT wait '{"operationIds":["ORIGINAL_UUID"],"until":"acceptance"}'
 exits 2 (the same as `land`), and a landed or superseded result exits 0. An unfinished
 wait returns `status:"IN_PROGRESS"` with exit 3. In agent mode the budget is
 540 s, under the 10-minute tool limit of common agent shells; `--budget 90s` (CLI)
-or `maxWaitMs` (MCP `forge_wait`) sets another. **Never end the turn on a wait timeout.
-Run the exact `waitCommand` again until you have a receipt or a refusal.** Keep the
-same operation and wait in the foreground without sleeping between waits. MCP
-sends progress notifications while it waits.
+or `maxWaitMs` (MCP `forge_wait`) sets another. Never end the turn on a wait timeout.
+While progress continues, run the exact `waitCommand` again until you have a receipt or a refusal.
+MCP sends progress notifications while it waits.
 
 For a single pending landing, a budget reply says `waitOutcome:"still-landing"`,
 with a readable message, `stage` (`composing`, `queued`, `checking`, `accepting` or
 `deploying` for a deploy wait), `lastProgressAt` (UTC or `null` when unavailable)
 and the exact `waitCommand`. A recorded 15-minute stall says
-`waitOutcome:"stalled"` and carries the stall details. Both replies report
-unfinished work. The budget expiry uses the observation it already has.
+`waitOutcome:"stalled"` and carries the stall details. Follow its recovery instruction
+or inspect the queue and the pinned operation. Resume the exact `waitCommand` when
+progress resumes. The budget expiry uses the observation it already has.
+See [Agent recovery](../../recovery.md) for the other refusal scenarios.
 Landings held for approval, dependency, main recovery or check infrastructure
 name the hold in `stage` and include its reason. A ready landing parked behind
 an older submission reports `waiting-for-order` and names the blocker.

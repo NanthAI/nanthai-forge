@@ -74,6 +74,7 @@ type Result = {
   };
   run?: { id?: string; status?: string };
   command?: string;
+  instruction?: string;
   /** Net paths on a landed result, or a Lane estimate while pending. */
   changedPaths?: number | null;
   retryCommand?: string;
@@ -81,6 +82,7 @@ type Result = {
   terminal?: boolean;
   recovery?: {
     command?: string;
+    instruction?: string;
     conflict?: { command?: string; instruction?: string; state?: string; laneId?: string; workIn?: string };
   };
   conflict?: { command?: string; instruction?: string; workIn?: string };
@@ -202,6 +204,8 @@ function classifyLand(
   const lines: string[] = [];
   let failed = false;
   const error = submission?.error;
+  if (phase === 'terminal-failed' && error?.code === 'NOTHING_TO_LAND' && result.recovery?.instruction)
+    return out('failed', [`NOTHING_TO_LAND: ${result.recovery.instruction}`]);
   const resubmit = result.retryCommand
     ? `Submit again as a new operation: ${result.retryCommand}`
     : stoppedLandingResubmit;
@@ -209,7 +213,7 @@ function classifyLand(
   if (phase === 'terminal-failed' && error?.code === 'LANDING_CANCELLED')
     return out('failed', [
       `CANCELLED: this landing was withdrawn; nothing landed${response.operationId ? `. Its operationId ${response.operationId} is spent: replaying it returns this cancelled state` : ''}`,
-      resubmit,
+      result.instruction ?? result.recovery?.instruction ?? resubmit,
     ]);
   const recovery =
     result.recovery?.conflict?.instruction ??

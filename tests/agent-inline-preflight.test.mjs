@@ -221,34 +221,45 @@ test('friction f84ba249: recovering from a failed check requires current main ev
   assert(!s.calls.slice(from).some(call => call.name === 'projectHostedCompose:prepare'));
 });
 
-test('an explicit retry after a cancelled landing still composes a disjoint Lane on current main', async t => {
-  const s = await fixture(t);
-  const mutate = s.exchange.client.mutation;
-  let cancelled = false;
-  s.exchange.client.mutation = async (ref, args) => {
-    const value = await mutate(ref, args);
-    if (cancelled || getFunctionName(ref) !== 'projectHostedLanding:enqueue') return value;
-    cancelled = true;
-    const submission = {
-      ...JSON.parse(value),
-      phase: 'terminal-failed',
-      observation: { state: 'terminal-failed', pendingReason: null, cause: 'rejected' },
-      error: { code: 'LANDING_CANCELLED', message: 'The landing was cancelled.' },
+for (const overlap of [false, true])
+  test(`a cancelled landing gives the sync step when main has ${overlap ? 'overlapping' : 'disjoint'} edits`, async t => {
+    const s = await fixture(t);
+    const mutate = s.exchange.client.mutation;
+    let cancelled = false;
+    s.exchange.client.mutation = async (ref, args) => {
+      const value = await mutate(ref, args);
+      if (cancelled || getFunctionName(ref) !== 'projectHostedLanding:enqueue') return value;
+      cancelled = true;
+      const submission = {
+        ...JSON.parse(value),
+        phase: 'terminal-failed',
+        observation: { state: 'terminal-failed', pendingReason: null, cause: 'rejected' },
+        error: { code: 'LANDING_CANCELLED', message: 'The landing was cancelled.' },
+      };
+      delete submission.acceptance;
+      s.operations.set(submission.operationId, submission);
+      return JSON.stringify(submission);
     };
-    delete submission.acceptance;
-    s.operations.set(submission.operationId, submission);
-    return JSON.stringify(submission);
-  };
-  assert.equal((await land(s)).result.submission.error.code, 'LANDING_CANCELLED');
-  acceptMainFile(s);
-  const reply = await submitHostedLand(
-    s.root,
-    { message: 'Retry cancelled landing', retry: true, reason: 'other' },
-    s.address,
-    s.transport(),
-  );
-  assert.equal(reply.result.submission.phase, 'landed');
-});
+    const stopped = (await land(s)).result;
+    assert.equal(stopped.submission.error.code, 'LANDING_CANCELLED');
+    assert.match(stopped.instruction, /^If main changed files this Lane touches/);
+    acceptMainFile(s, overlap ? 'README.md' : undefined);
+    const retry = () =>
+      submitHostedLand(
+        s.root,
+        { message: 'Retry cancelled landing', retry: true, reason: 'other' },
+        s.address,
+        s.transport(),
+      );
+    if (overlap) {
+      await assert.rejects(retry, error => {
+        assert.equal(error.code, 'WORK_STALE');
+        assert.equal(error.recovery.next.action, 'sync');
+        assert(stopped.instruction.includes(error.recovery.command));
+        return true;
+      });
+    } else assert.equal((await retry()).result.submission.phase, 'landed');
+  });
 
 test('friction f84ba249: a conflicting main move after preflight cannot submit against the new base', async t => {
   const s = await fixture(t);

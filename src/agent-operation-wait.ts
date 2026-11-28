@@ -10,6 +10,27 @@ import type { LandingStall } from './landing-stall.js';
  * with --budget / timeoutSeconds (CLI) or maxWaitMs (MCP). */
 export const AGENT_WAIT_SECONDS = 540;
 
+export function stalledLandingContinuation(
+  root: string,
+  operationId: string,
+  waitCommand: string,
+  repair?: { next: Record<string, unknown>; command: string },
+) {
+  if (repair)
+    return {
+      ...repair,
+      instruction: `Run ${repair.command} to recover the original operation. Once progress resumes, run ${waitCommand}`,
+    };
+  const agent = `nforge agent ${shellQuote(root)}`;
+  const command = `${agent} queue '{}'`;
+  const observe = `${agent} observe ${shellQuote(JSON.stringify({ operationId }))}`;
+  return {
+    next: { action: 'queue' },
+    command,
+    instruction: `Inspect with ${command} and ${observe}. If the same blocker remains, ask its owner for an update. Once progress resumes, run ${waitCommand}`,
+  };
+}
+
 export function landingWaitBudgetReply(
   progress: {
     stage: string;
@@ -18,6 +39,7 @@ export function landingWaitBudgetReply(
     hold?: LandingHold | null;
   },
   waitCommand: string,
+  stallAdvice?: ReturnType<typeof stalledLandingContinuation>,
 ) {
   const { stage, stall, hold } = progress,
     lastProgressAt = progress.lastProgressAt ?? null;
@@ -27,12 +49,14 @@ export function landingWaitBudgetReply(
     : `Wait budget reached. Still landing (${stage}).`;
   const reason = hold ? ` ${hold.reason.replace(/\.$/, '')}.` : '';
   const when = lastProgressAt ? `Last progress at ${lastProgressAt}.` : 'Last progress time is unknown.';
-  const message = `${headline}${reason} ${when} Keep waiting with ${waitCommand}`;
+  const advice = stall && stallAdvice ? stallAdvice : undefined;
+  const message = `${headline}${reason} ${when} ${advice?.instruction ?? `Keep waiting with ${waitCommand}`}`;
   return {
     waitOutcome,
     stage,
     lastProgressAt,
     message,
+    ...advice,
     ...(stall ? { stall } : {}),
     ...(hold ? { hold } : {}),
   };

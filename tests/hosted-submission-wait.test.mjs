@@ -1467,6 +1467,11 @@ test('a stall recorded while waiting is reported at the budget without a fresh r
   assert.equal(result.lastProgressAt, lastProgressAt);
   assert.deepEqual(result.stall, stall);
   assert.match(result.message, /Landing is stalled \(checking\)/);
+  assert.match(result.message, /Inspect.* queue .*observe .*operationId/);
+  assert.match(result.instruction, /Inspect.* queue .*observe .*operationId/);
+  assert.match(result.instruction, /same blocker remains, ask its owner/);
+  assert.equal(result.landingState.nextStep, result.instruction);
+  assert.equal(result.next.action, 'queue');
   assert(result.message.includes(result.waitCommand));
   assert.equal(s.counts().reads, 1);
   assert.equal(s.f.metrics.calls, calls);

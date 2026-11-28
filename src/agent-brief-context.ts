@@ -86,7 +86,9 @@ export function briefingContext(
   const read = (id: string | undefined | null) => {
     const found = id ? state(id) : undefined;
     if (id && !found)
-      coverage.push(`Source paths unavailable for State ${id}; use local brief for source context.`);
+      coverage.push(
+        `Source paths unavailable for State ${id}; inspect that State from the project checkout.`,
+      );
     return found;
   };
   const selected = read(head),

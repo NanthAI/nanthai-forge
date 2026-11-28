@@ -7,6 +7,8 @@ import { laneResolutions, listLanes, readLaneEntry } from './lane-registry.js';
 import { markerIdentity } from './hosted-lane-directory.js';
 import { markerAt } from './hosted-apply-recovery-records.js';
 import { inPlaceResolution } from './hosted-conflict-precheck.js';
+import { cliVerb, operatorActions } from './agent-verbs.js';
+import { shellQuote } from './shell-quote.js';
 
 /** Use a verified checkout or a single open local Lane belonging to the calling session. */
 export function callerPeerLane(caller: {
@@ -180,20 +182,35 @@ export function checkoutRequired(
   session: { root: string; address: { url: string; projectId: string } },
   laneId: string | undefined,
   message: string,
+  resume: { action: string; parameters: Record<string, unknown> },
 ) {
   const root = openLaneRoot(session, laneId);
   const successor = root ? null : resolutionFollow(session, laneId);
-  if (successor)
-    return new ForgeError(
-      'HOSTED_CHECKOUT_REQUIRED',
-      `${message} Lane ${laneId} continues as resolution Lane ${successor.laneId} in its folder ${successor.root} after a sync conflict: run the same command with {"laneId":"${successor.laneId}"} and that path as ROOT.`,
-      undefined,
-      { root: successor.root, laneId: successor.laneId, resolutionOf: laneId },
-    );
+  const checkout = root ?? successor?.root;
+  const selected = successor?.laneId ?? laneId;
+  const action = checkout ? resume.action : selected ? 'open' : 'lanes';
+  const { operationId: _refused, ...original } = resume.parameters;
+  void _refused;
+  const parameters = { ...(checkout ? original : {}), ...(selected ? { laneId: selected } : {}) };
+  const prefix = (operatorActions as readonly string[]).includes(action) ? 'x' : 'agent';
+  const command = `nforge ${prefix} ${shellQuote(checkout ?? session.root)} ${cliVerb(action, parameters)} ${shellQuote(JSON.stringify(parameters))}`;
+  const location = successor
+    ? ` Lane ${laneId} continues as resolution Lane ${successor.laneId} in ${shellQuote(successor.root)}.`
+    : checkout
+      ? ` This Lane is open at ${checkout}.`
+      : '';
   return new ForgeError(
     'HOSTED_CHECKOUT_REQUIRED',
-    root ? `${message} This Lane is open at ${root}: run the same command with that path as ROOT.` : message,
+    `${message}${location} ${checkout ? 'Use that checkout' : selected ? 'Open the selected Lane' : 'Select a Lane'}: ${command}`,
     undefined,
-    root ? { root, laneId } : undefined,
+    {
+      outcome: 'refused',
+      retryable: false,
+      ...(checkout ? { root: checkout } : {}),
+      ...(selected ? { laneId: selected } : {}),
+      ...(successor ? { resolutionOf: laneId } : {}),
+      command,
+      next: { action, ...parameters },
+    },
   );
 }

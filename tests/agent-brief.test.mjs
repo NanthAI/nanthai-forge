@@ -18,15 +18,14 @@ for (const situation of BRIEF_SITUATIONS)
       assert.deepEqual(actual, expected);
       assert.ok(actual.copyText.length <= COPY_TEXT_CAP);
       assert.ok(actual.full.length <= FULL_BRIEF_CAP);
-      assert.match(actual.copyText, /give Forge URLs \(from `link`\), not local paths/);
       assert.match(actual.full, /## Working on Forge, not GitHub/);
       assert.match(actual.full, /Never run the full suite locally/);
       assert.match(actual.full, /combined work of concurrent Lanes/);
       assert.match(actual.full, /failing Lane drops out and the others land after passing/);
       assert.match(actual.full, /Native owners can read peers\/presence/);
       assert.match(actual.full, /Hosted peers\/diff are unavailable/);
-      assert.match(actual.full, /give Forge URLs \(from `link`\), not local paths/);
-      assert.match(actual.copyText, /First run:.* brief /);
+      assert.match(actual.copyText, /Run `nforge agent \/forge\/demo (?:board|records|status) /);
+      assert.doesNotMatch(actual.full, /forge_brief|handoff-read|take with takeover|from `link`/);
       assert.match(
         actual.full,
         /repository agent instruction files first; project guidance second; personal guidance third; Forge workflow steps last/,
@@ -57,7 +56,7 @@ test('instruction detection names exact paths, handles case variants/nesting and
     names.sort(),
   );
 });
-test('agent variants change only the agent tool/setup line and the variant passed to fresh brief', () => {
+test('agent variants change only the agent tool/setup line', () => {
   const a = fixtureBrief('resolve-conflict', 'claude-code'),
     b = fixtureBrief('resolve-conflict', 'codex');
   assert.deepEqual(a.context, b.context);

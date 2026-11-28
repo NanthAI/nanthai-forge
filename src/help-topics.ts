@@ -47,7 +47,7 @@ More: help wait, help conflict, help check, help overlap.`,
     title: 'Waiting for an outcome',
     text: `Keep the turn active while your work is unfinished. Resume with the receipt command: wait '{"operationIds":["ORIGINAL_UUID"],"until":"acceptance"}'; check-only work uses wait '{"runId":"RUN_ID"}'.
 - wait blocks up to 540 s (--budget SECONDS); transient observation failures retry inside it.
-- Exit 3 means the wait returned with work outstanding. A landing budget reply uses waitOutcome "still-landing" or "stalled", with the stage, lastProgressAt and the exact waitCommand. Never end your turn on a wait timeout. Run waitCommand again until you have a receipt or a refusal.
+- Exit 3 means work is outstanding. Never end the turn on a wait timeout. For waitOutcome "still-landing", run waitCommand again until you have a receipt or a refusal. For "stalled", follow the repair or inspect the queue and pinned operation. Resume waitCommand when progress resumes.
 - land --save {"maxChecks":N} waits for queue room (submits when fewer than N checks run or wait); use it, not polling, under a dev-check cap.
 - Terminal failure follows its recovery command; LANDED is acceptance, CHECK PASSED alone is not.
 - wait takes exactly one of runId, operationIds, peer, approval or main, or a standalone deploy selection. wait {main:"green"} waits for a passing main check. wait {approval:LANE_ID} returns the owner's decision. wait {peer:LANE_ID} returns when the peer lands, its latest landing fails or is cancelled, or its Lane closes (exit 0). A note to your Lane returns exit 3.

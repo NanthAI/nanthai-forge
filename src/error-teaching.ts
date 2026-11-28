@@ -126,6 +126,7 @@ export const teachingFamilies: readonly (readonly [RegExp, string])[] = [
 
 /** A refusal whose code is generic but whose message pins the one right command (5a22ee20). */
 const teachingByMessage: readonly (readonly [RegExp, Entry])[] = [
+  [/^observe needs one id:/, { learn: 'wait' }],
   [
     /^Select a configured hosted check\b|^No (?:hosted )?runner is set\b/,
     { learn: 'check', next: "nforge agent <root> check-settings '{}'", setupSection: checksSetup },

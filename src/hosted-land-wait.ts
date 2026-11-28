@@ -101,5 +101,5 @@ export function landResumeCommand(
  * and the wait that resumes it by exact replay. Formatting only; no reads. */
 export function operationLine(root: string, action: string, operationId: string) {
   const { waitCommand } = operationWait(root, { operationIds: [operationId] });
-  return `${action}: operationId ${operationId}; resume with: ${waitCommand}`;
+  return `${action}: operationId ${operationId}; if interrupted before an outcome, resume with: ${waitCommand}`;
 }

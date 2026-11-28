@@ -28,11 +28,17 @@ export async function withSourceRecovery(
   value: unknown,
 ) {
   const finish = action === 'finish' && !!value && typeof value === 'object';
+  const submission = (value as { submission?: { error?: { code?: string } } } | null)?.submission;
+  const parameters = command as Reply;
+  const cancelledLane =
+    finish && submission?.error?.code === 'LANDING_CANCELLED' && typeof parameters.laneId !== 'string'
+      ? session.marker()?.selection.laneId
+      : undefined;
+  const selection = cancelledLane ? { ...parameters, laneId: cancelledLane } : parameters;
   // Additive `landingState` on every finish reply that carries a submission (Issue 68361cd5).
-  const landing = (reply: unknown) =>
-    finish ? withFinishLandingState(command as Reply, reply as Reply) : reply;
+  const landing = (reply: unknown) => (finish ? withFinishLandingState(selection, reply as Reply) : reply);
   if (finish) {
-    const normalized = normalizeObservedFinish(session.root, command as Reply, value as Reply);
+    const normalized = normalizeObservedFinish(session.root, selection, value as Reply);
     if (normalized !== value) return landing(normalized);
   }
   const source = sourceReply(value);

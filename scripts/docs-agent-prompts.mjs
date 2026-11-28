@@ -73,6 +73,7 @@ const firstChecks = {
   'docs/agents.md': 'Check my agent client, the project address and the access it already has first.',
   'docs/agents/hooks.md': 'Check the installed CLI and current hook settings first.',
   'docs/agents/lead.md': 'Check active Items, ownership, checks and any benchmark hold first.',
+  'docs/agents/recovery.md': 'Check the current reply, its Lane or operation ID and the checkout first.',
   'docs/agents/review-api.md': 'Check the saved Lane, review route and available budget first.',
   'docs/agents/workflow.md': 'Check the hosted checkout, the current Item or Lane and its status first.',
   'docs/development.md': 'Check the Forge checkout, Node version and target environment first.',

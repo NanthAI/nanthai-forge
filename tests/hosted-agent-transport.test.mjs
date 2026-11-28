@@ -634,11 +634,62 @@ test('unavailable capability entry point fails explicitly without creating a loc
 
 test('save-first without local source fails clearly instead of silently abandoning unsaved work', async t => {
   const s = agentFixture(t);
+  let stderr = '';
+  t.mock.method(process.stderr, 'write', value => {
+    stderr += String(value);
+    return true;
+  });
   await assert.rejects(
-    s.transport().dispatch('abandon', { laneId: s.lane.laneId, reason: 'Synthetic', saveFirst: true }),
-    errorCode('HOSTED_CHECKOUT_REQUIRED'),
+    hostedAgentCli(
+      s.root,
+      'abandon',
+      { laneId: s.lane.laneId, reason: 'Synthetic', saveFirst: true },
+      s.address,
+      s.transport(),
+    ),
+    error => {
+      assert.equal(error.code, 'HOSTED_CHECKOUT_REQUIRED');
+      assert.doesNotMatch(error.message, /Retry the original|as ROOT/);
+      assert.deepEqual(error.recovery.next, { action: 'open', laneId: s.lane.laneId });
+      assert(error.recovery.command.includes(s.lane.laneId));
+      return true;
+    },
   );
+  assert.match(stderr, /resume with:.*wait/);
+  assert.match(stderr, /refused.*start --open/);
   assert(!s.calls.some(call => call.name === 'projectHostedLifecycle:transition'));
+});
+
+test('a refused urgent priority request directs the caller to the current submission', async t => {
+  const { ConvexError } = await import('convex/values');
+  const s = agentFixture(t);
+  const submissionId = randomUUID();
+  const mutate = s.exchange.client.mutation;
+  s.exchange.client.mutation = async (reference, input) => {
+    if (getFunctionName(reference) === 'projectHostedLandingPriority:prioritize')
+      throw new ConvexError({
+        code: 'URGENT_NOT_ALLOWED',
+        message: 'Urgent priority is limited to the owner.',
+      });
+    return mutate(reference, input);
+  };
+  let stderr = '';
+  t.mock.method(process.stderr, 'write', value => {
+    stderr += String(value);
+    return true;
+  });
+  await assert.rejects(
+    hostedAgentCli(s.root, 'prioritize', { submissionId, priority: 'urgent' }, s.address, s.transport()),
+    error => {
+      assert.equal(error.code, 'URGENT_NOT_ALLOWED');
+      assert.doesNotMatch(error.message, /Retry the original/);
+      assert.deepEqual(error.recovery.next, { action: 'observe', submissionId });
+      assert(error.recovery.command.includes(submissionId));
+      return true;
+    },
+  );
+  assert.match(stderr, /resume with:.*wait/);
+  assert.match(stderr, /refused.*observe/);
 });
 
 test('save from the project folder names the open Lane checkout (friction fa11c1bc, d05335ff, cb3ce3e4)', async t => {
@@ -660,10 +711,11 @@ test('save from the project folder names the open Lane checkout (friction fa11c1
     assert(error.message.includes(s.root));
     return true;
   });
-  // A Lane this machine has not opened keeps the plain message and names no path.
-  await assert.rejects(other.dispatch('save', { laneId: randomUUID() }), error => {
+  // A Lane this machine has not opened gets an open command from the project folder.
+  const unopened = randomUUID();
+  await assert.rejects(other.dispatch('save', { laneId: unopened }), error => {
     assert.equal(error.code, 'HOSTED_CHECKOUT_REQUIRED');
-    assert.equal(error.recovery, undefined);
+    assert.deepEqual(error.recovery.next, { action: 'open', laneId: unopened });
     return true;
   });
 });
@@ -732,7 +784,10 @@ test('an old Lane id finds the resolution Lane that took over its folder in plac
     new HostedAgentTransport(folder, s.address, s.exchange).dispatch('save', { laneId: origin }),
     error => {
       assert.equal(error.code, 'HOSTED_CHECKOUT_REQUIRED');
-      assert.deepEqual(error.recovery, { root: s.root, laneId: s.lane.laneId, resolutionOf: origin });
+      assert.equal(error.recovery.root, s.root);
+      assert.equal(error.recovery.resolutionOf, origin);
+      assert.equal(error.recovery.next.action, 'save');
+      assert.equal(error.recovery.next.laneId, s.lane.laneId);
       assert(error.message.includes(s.lane.laneId) && error.message.includes(s.root));
       return true;
     },
