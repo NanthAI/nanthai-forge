@@ -7,7 +7,7 @@
 <meta name="theme-color" content="#0b0e13" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" content="#f4f6f9" media="(prefers-color-scheme: light)">
 <title>Forge: source control built for coding agents</title>
-<meta name="description" content="Forge is source control for many coding agents on one codebase. Ten agents reached main 35% sooner, on 59% fewer CI minutes. Measured against GitHub, 27–28 Nov 2026. Forge is in open development before public launch.">
+<meta name="description" content="Forge is source control for many coding agents on one codebase. Ten agents reached main 35% sooner, on 59% fewer CI minutes. Measured against GitHub. Forge is in open development before public launch.">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Forge by NanthAi">
 <meta property="og:title" content="Forge: source control built for coding agents">
@@ -25,8 +25,8 @@
 <body>
 <a class="skip" href="#main">Skip to content</a>
 <!--
-  Headline and savings are from docs/research/p7-close-bench-results.md. The earlier replay and charts by agent count
-  use docs/research/p6-exit-bench-results.md. tests/landing-page.test.mjs checks figures against both reports.
+  Ten-agent savings and the replay are from docs/research/p7-close-bench-results.md. Sizes 1, 3 and 5 use the paired
+  data linked from docs/research/p6-exit-bench-results.md. tests/landing-page.test.mjs checks both sources.
   The terminal lines and Lane titles are illustrations: command names are real, result wording is shortened.
 -->
 <main id="main">
@@ -41,7 +41,7 @@
     <div class="w lead" data-crisp>
       <h1 class="disp" id="h1"><span>Git was built for people.</span> <span>Forge is built for agents.</span></h1>
       <div class="row">
-        <p class="sub">Source control for many coding agents on one codebase. Ten agents reached main <b>35% sooner</b>, on <b>59% fewer CI minutes</b>. Measured against GitHub, 27–28 Nov 2026.</p>
+        <p class="sub">Source control for many coding agents on one codebase. Ten agents reached main <b>35% sooner</b>, on <b>59% fewer CI minutes</b>. Measured against GitHub.</p>
         <div class="go">
           <button class="key" type="button" data-copy><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square" aria-hidden="true"><rect x="7" y="7" width="10" height="10"/><path d="M13 7V3H3v10h4"/></svg><span data-label>Give this to your agent</span></button>
           <p class="fine">Copies a short prompt. Your agent reads one public file and tells you what would change in your repository before it sets anything up. <a class="lk" href="/new/import">Or import a repository yourself</a>.</p>
@@ -103,44 +103,99 @@
           <div class="r"><div class="nm">CI minutes<small>billed for the run</small></div><div aria-hidden="true"><div class="bb"><span>Forge</span><i class="f" style="--v:36%"></i><span>36%</span></div><div class="bb"><span>GitHub flow</span><i class="g" style="--v:100%"></i><span>100%</span></div></div><div class="pct"><small>up to</small>64%<span class="sr"> lower</span><small>median 59%</small></div></div>
           <div class="r"><div class="nm">Cached input tokens<small>read by the agents</small></div><div aria-hidden="true"><div class="bb"><span>Forge</span><i class="f" style="--v:57%"></i><span>57%</span></div><div class="bb"><span>GitHub flow</span><i class="g" style="--v:100%"></i><span>100%</span></div></div><div class="pct"><small>up to</small>43%<span class="sr"> lower</span><small>median 38%</small></div></div>
         </div>
-        <p class="note">Paired runs of 10 tasks, 27–28 Nov 2026. <a class="lk" href="/docs/research/p7-close-bench-results/">Full results</a></p>
+        <p class="note">Paired runs of ten tasks. <a class="lk" href="/docs/research/p7-close-bench-results/">Full results</a></p>
 
         <div class="sizes">
-          <h3 class="h3">By number of agents, 13–15 Nov 2026.</h3>
-          <p class="note">The ten-agent figures come from a separate run. The <a class="lk" href="/docs/research/p6-exit-bench-results/">earlier benchmark report</a> explains how we checked the work and where agents ran into trouble.</p>
+          <h3 class="h3">By number of agents.</h3>
+          <p class="note">Ten agents use the same paired runs as above. The <a class="lk" href="/docs/research/p6-exit-bench-results/">earlier results</a> cover one, three and five agents.</p>
+          <div class="legend range-key"><span><i aria-hidden="true"></i>Solid to best run</span><span><i class="range-stripe" aria-hidden="true"></i>Striped to worst run</span><span><i class="range-tick" aria-hidden="true"></i>Tick at median</span></div>
           <div class="multi">
             <div class="chart"><h4>CI minutes</h4><small>billed for the ten tasks</small>
               <div class="cols">
-                <div class="grp" tabindex="0" style="--top:90.1%"><i class="c f" style="--v:37%"></i><i class="c g" style="--v:90.1%"></i><span class="d">59% lower</span><span class="tip">1 agent: 30 min against 73</span></div>
-                <div class="grp" tabindex="0" style="--top:100%"><i class="c f" style="--v:37%"></i><i class="c g" style="--v:100%"></i><span class="d">63%</span><span class="tip">3 agents: 30 min against 81</span></div>
-                <div class="grp" tabindex="0" style="--top:98.8%"><i class="c f" style="--v:37%"></i><i class="c g" style="--v:98.8%"></i><span class="d">63%</span><span class="tip">5 agents: 30 min against 80</span></div>
-                <div class="grp" tabindex="0" style="--top:85.2%"><i class="c f" style="--v:29.6%"></i><i class="c g" style="--v:85.2%"></i><span class="d">65%</span><span class="tip">10 agents: 24 min against 69</span></div>
+                <div class="grp" tabindex="0">
+                  <i class="c f" aria-hidden="true" style="--best:38.16%;--median:42.47%;--worst:44.12%"><span></span></i><i class="c g" aria-hidden="true"></i>
+                  <span class="d"><small>up to</small>62%<span class="sr"> lower</span><small>median 58%</small></span>
+                  <span class="tip">1 agent · Forge savings<br>Min 56% · Median 58% · Max 62%</span>
+                </div>
+                <div class="grp" tabindex="0">
+                  <i class="c f" aria-hidden="true" style="--best:36.14%;--median:37.04%;--worst:40.54%"><span></span></i><i class="c g" aria-hidden="true"></i>
+                  <span class="d"><small>up to</small>64%<span class="sr"> lower</span><small>median 63%</small></span>
+                  <span class="tip">3 agents · Forge savings<br>Min 59% · Median 63% · Max 64%</span>
+                </div>
+                <div class="grp" tabindex="0">
+                  <i class="c f" aria-hidden="true" style="--best:34.94%;--median:38.96%;--worst:40.00%"><span></span></i><i class="c g" aria-hidden="true"></i>
+                  <span class="d"><small>up to</small>65%<span class="sr"> lower</span><small>median 61%</small></span>
+                  <span class="tip">5 agents · Forge savings<br>Min 60% · Median 61% · Max 65%</span>
+                </div>
+                <div class="grp" tabindex="0">
+                  <i class="c f" aria-hidden="true" style="--best:36.11%;--median:40.85%;--worst:43.94%"><span></span></i><i class="c g" aria-hidden="true"></i>
+                  <span class="d"><small>up to</small>64%<span class="sr"> lower</span><small>median 59%</small></span>
+                  <span class="tip">10 agents · Forge savings<br>Min 56% · Median 59% · Max 64%</span>
+                </div>
               </div>
               <div class="xs"><span>1 agent</span><span>3</span><span>5</span><span>10</span></div>
             </div>
-            <div class="chart"><h4>Time to main</h4><small>median task, in seconds</small>
+            <div class="chart"><h4>Median task time</h4><small>from handoff to main</small>
               <div class="cols">
-                <div class="grp" tabindex="0" style="--top:88.4%"><i class="c f" style="--v:59.9%"></i><i class="c g" style="--v:88.4%"></i><span class="d">32% lower</span><span class="tip">1 agent: 338 s against 500 s</span></div>
-                <div class="grp" tabindex="0" style="--top:95.2%"><i class="c f" style="--v:66.7%"></i><i class="c g" style="--v:95.2%"></i><span class="d">30%</span><span class="tip">3 agents: 377 s against 538 s</span></div>
-                <div class="grp" tabindex="0" style="--top:93.2%"><i class="c f" style="--v:62.5%"></i><i class="c g" style="--v:93.2%"></i><span class="d">33%</span><span class="tip">5 agents: 354 s against 527 s</span></div>
-                <div class="grp" tabindex="0" style="--top:100%"><i class="c f" style="--v:63.6%"></i><i class="c g" style="--v:100%"></i><span class="d">36%</span><span class="tip">10 agents: 360 s against 566 s</span></div>
+                <div class="grp" tabindex="0">
+                  <i class="c f" aria-hidden="true" style="--best:63.40%;--median:67.58%;--worst:68.35%"><span></span></i><i class="c g" aria-hidden="true"></i>
+                  <span class="d"><small>up to</small>37%<span class="sr"> lower</span><small>median 32%</small></span>
+                  <span class="tip">1 agent · Forge savings<br>Min 32% · Median 32% · Max 37%</span>
+                </div>
+                <div class="grp" tabindex="0">
+                  <i class="c f" aria-hidden="true" style="--best:59.44%;--median:70.08%;--worst:70.18%"><span></span></i><i class="c g" aria-hidden="true"></i>
+                  <span class="d"><small>up to</small>41%<span class="sr"> lower</span><small>median 30%</small></span>
+                  <span class="tip">3 agents · Forge savings<br>Min 30% · Median 30% · Max 41%</span>
+                </div>
+                <div class="grp" tabindex="0">
+                  <i class="c f" aria-hidden="true" style="--best:63.57%;--median:66.47%;--worst:81.44%"><span></span></i><i class="c g" aria-hidden="true"></i>
+                  <span class="d"><small>up to</small>36%<span class="sr"> lower</span><small>median 34%</small></span>
+                  <span class="tip">5 agents · Forge savings<br>Min 19% · Median 34% · Max 36%</span>
+                </div>
+                <div class="grp" tabindex="0">
+                  <i class="c f" aria-hidden="true" style="--best:63.07%;--median:71.68%;--worst:80.06%"><span></span></i><i class="c g" aria-hidden="true"></i>
+                  <span class="d"><small>up to</small>37%<span class="sr"> lower</span><small>median 28%</small></span>
+                  <span class="tip">10 agents · Forge savings<br>Min 20% · Median 28% · Max 37%</span>
+                </div>
               </div>
               <div class="xs"><span>1 agent</span><span>3</span><span>5</span><span>10</span></div>
             </div>
-            <div class="chart"><h4>Cached input tokens</h4><small>read by the agents, in millions</small>
+            <div class="chart"><h4>Cached input tokens</h4><small>read by the agents</small>
               <div class="cols">
-                <div class="grp" tabindex="0" style="--top:81.9%"><i class="c f" style="--v:43.3%"></i><i class="c g" style="--v:81.9%"></i><span class="d">47% lower</span><span class="tip">1 agent: 16.5 M against 31.3 M</span></div>
-                <div class="grp" tabindex="0" style="--top:92.3%"><i class="c f" style="--v:48.2%"></i><i class="c g" style="--v:92.3%"></i><span class="d">48%</span><span class="tip">3 agents: 18.4 M against 35.3 M</span></div>
-                <div class="grp" tabindex="0" style="--top:100%"><i class="c f" style="--v:49.6%"></i><i class="c g" style="--v:100%"></i><span class="d">50%</span><span class="tip">5 agents: 19.0 M against 38.3 M</span></div>
-                <div class="grp" tabindex="0" style="--top:98.1%"><i class="c f" style="--v:50%"></i><i class="c g" style="--v:98.1%"></i><span class="d">49%</span><span class="tip">10 agents: 19.1 M against 37.6 M</span></div>
+                <div class="grp" tabindex="0">
+                  <i class="c f" aria-hidden="true" style="--best:52.80%;--median:57.16%;--worst:57.43%"><span></span></i><i class="c g" aria-hidden="true"></i>
+                  <span class="d"><small>up to</small>47%<span class="sr"> lower</span><small>median 43%</small></span>
+                  <span class="tip">1 agent · Forge savings<br>Min 43% · Median 43% · Max 47%</span>
+                </div>
+                <div class="grp" tabindex="0">
+                  <i class="c f" aria-hidden="true" style="--best:38.48%;--median:52.41%;--worst:67.40%"><span></span></i><i class="c g" aria-hidden="true"></i>
+                  <span class="d"><small>up to</small>62%<span class="sr"> lower</span><small>median 48%</small></span>
+                  <span class="tip">3 agents · Forge savings<br>Min 33% · Median 48% · Max 62%</span>
+                </div>
+                <div class="grp" tabindex="0">
+                  <i class="c f" aria-hidden="true" style="--best:48.19%;--median:52.11%;--worst:53.23%"><span></span></i><i class="c g" aria-hidden="true"></i>
+                  <span class="d"><small>up to</small>52%<span class="sr"> lower</span><small>median 48%</small></span>
+                  <span class="tip">5 agents · Forge savings<br>Min 47% · Median 48% · Max 52%</span>
+                </div>
+                <div class="grp" tabindex="0">
+                  <i class="c f" aria-hidden="true" style="--best:57.19%;--median:62.29%;--worst:71.23%"><span></span></i><i class="c g" aria-hidden="true"></i>
+                  <span class="d"><small>up to</small>43%<span class="sr"> lower</span><small>median 38%</small></span>
+                  <span class="tip">10 agents · Forge savings<br>Min 29% · Median 38% · Max 43%</span>
+                </div>
               </div>
               <div class="xs"><span>1 agent</span><span>3</span><span>5</span><span>10</span></div>
             </div>
           </div>
           <details class="tbl"><summary>The same numbers as a table</summary>
             <div class="scrollx"><table data-figures>
-              <thead><tr><th scope="col">Agents at once</th><th scope="col">CI min, Forge</th><th scope="col">GitHub flow</th><th scope="col">Time to main, Forge</th><th scope="col">GitHub flow</th><th scope="col">Cached input, Forge</th><th scope="col">GitHub flow</th></tr></thead>
-              <tbody><tr><td>1</td><td>30</td><td>73</td><td>338 s</td><td>500 s</td><td>16.5 M</td><td>31.3 M</td></tr><tr><td>3</td><td>30</td><td>81</td><td>377 s</td><td>538 s</td><td>18.4 M</td><td>35.3 M</td></tr><tr><td>5</td><td>30</td><td>80</td><td>354 s</td><td>527 s</td><td>19.0 M</td><td>38.3 M</td></tr><tr><td>10</td><td>24</td><td>69</td><td>360 s</td><td>566 s</td><td>19.1 M</td><td>37.6 M</td></tr></tbody>
+              <caption>Forge savings against GitHub (min / median / max)</caption>
+              <thead><tr><th scope="col">Agents at once</th><th scope="col">CI minutes</th><th scope="col">Median task time</th><th scope="col">Cached input tokens</th></tr></thead>
+              <tbody>
+                <tr><th scope="row">1</th><td>56% / 58% / 62%</td><td>32% / 32% / 37%</td><td>43% / 43% / 47%</td></tr>
+                <tr><th scope="row">3</th><td>59% / 63% / 64%</td><td>30% / 30% / 41%</td><td>33% / 48% / 62%</td></tr>
+                <tr><th scope="row">5</th><td>60% / 61% / 65%</td><td>19% / 34% / 36%</td><td>47% / 48% / 52%</td></tr>
+                <tr><th scope="row">10</th><td>56% / 59% / 64%</td><td>20% / 28% / 37%</td><td>29% / 38% / 43%</td></tr>
+              </tbody>
             </table></div>
           </details>
         </div>
@@ -152,24 +207,24 @@
     <div class="w gr">
       <div class="claim">
         <h2 class="disp">Replay of a ten-agent run.</h2>
-        <p>On 14–15 Nov 2026, ten agents tackled ten real tasks on the same repository with Forge and with GitHub.</p>
-        <p class="note">Medians from three runs per workflow. <a class="lk" href="/docs/research/p6-exit-bench-results/">Full results and limitations</a></p>
+        <p>Ten agents tackled the same ten tasks using Forge and using GitHub.</p>
+        <p class="note">This pair had time and CI savings closest to the headline medians. The headline summarizes all eligible pairs. <a class="lk" href="/docs/research/p7-close-bench-results/">Full results and limitations</a></p>
       </div>
       <div class="proof">
         <div class="race" data-race>
-          <div class="clock"><span class="num" data-clock>19:42</span><small>since the ten tasks were handed out, replayed at 120 times speed</small></div>
+          <div class="clock"><span class="num" data-clock>18:29</span><small>since the ten tasks were handed out, replayed at 120 times speed</small></div>
           <div class="rl">
             <b>Forge <em data-fs>all ten on main</em></b>
-            <div class="trk"><i class="run" data-run="f"></i><i class="mk on" style="--x:30.43%" data-at="359.633"></i><i class="mk last on" style="--x:64.54%" data-at="762.705"></i></div>
-            <div class="mkl"><span class="on" style="--x:30.43%" data-at="359.633"><b>6:00</b>median<u> task on main</u></span><span class="on" style="--x:64.54%" data-at="762.705"><b>12:43</b>all ten<u> on main</u></span></div>
+            <div class="trk"><i class="run" data-run="f" style="clip-path:inset(0 33.07% 0 0)"></i><i class="mk on" style="--x:34.25%" data-at="379.709"></i><i class="mk last on" style="--x:66.93%" data-at="742.060"></i></div>
+            <div class="mkl"><span class="on" style="--x:34.25%" data-at="379.709"><b>6:20</b>median<u> task on main</u></span><span class="on" style="--x:66.93%" data-at="742.060"><b>12:22</b>all ten<u> on main</u></span></div>
           </div>
           <div class="rl gh">
             <b>GitHub flow <em data-gs>all ten on main</em></b>
-            <div class="trk"><i class="run" data-run="g"></i><i class="mk on" style="--x:47.86%" data-at="565.508"></i><i class="mk last on" style="--x:100%" data-at="1181.678"></i></div>
-            <div class="mkl"><span class="on" style="--x:47.86%" data-at="565.508"><b>9:26</b>median<u> task on main</u></span><span class="r on" style="--x:100%" data-at="1181.678"><b>19:42</b>all ten<u> on main</u></span></div>
+            <div class="trk"><i class="run" data-run="g"></i><i class="mk on" style="--x:49.27%" data-at="546.279"></i><i class="mk last on" style="--x:100%" data-at="1108.749"></i></div>
+            <div class="mkl"><span class="on" style="--x:49.27%" data-at="546.279"><b>9:06</b>median<u> task on main</u></span><span class="r on" style="--x:100%" data-at="1108.749"><b>18:29</b>all ten<u> on main</u></span></div>
           </div>
-          <p class="readout" data-readout aria-hidden="true">Forge finished 6 min 59 s earlier. <span>The same ten tasks, the same agents, the same CI.</span></p>
-          <p class="sr">Forge: median task on main at 6 minutes 0 seconds, all ten on main at 12 minutes 43 seconds. GitHub flow: median at 9 minutes 26 seconds, all ten at 19 minutes 42 seconds.</p>
+          <p class="readout" data-readout aria-hidden="true">Forge finished 6 min 7 s earlier. <span>The same ten tasks, the same agents, the same CI.</span></p>
+          <p class="sr">Forge median task on main at 6 minutes 20 seconds, all ten on main at 12 minutes 22 seconds. GitHub flow median at 9 minutes 6 seconds, all ten at 18 minutes 29 seconds.</p>
         </div>
       </div>
     </div>

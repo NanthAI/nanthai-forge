@@ -5,7 +5,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
+import { runInNewContext } from 'node:vm';
 import { gzipSync } from 'node:zlib';
+import ts from 'typescript';
 
 const read = path => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 const html = read('web/index.html');
@@ -17,159 +19,239 @@ const text = copyMarkup
   .replace(/<[^>]+>/g, ' ')
   .replace(/\s+/g, ' ')
   .replace(/ ([.,;:])/g, '$1');
-const pct = (forge, github) => `${Math.round((1 - forge / github) * 100)}%`;
 const mmss = s => `${Math.floor(Math.round(s) / 60)}:${String(Math.round(s) % 60).padStart(2, '0')}`;
-
-// The headline table of the P6 exit report: N, arm, source, cells, TTM, TTM excl. flags, wall, CI min, cached input, …
-const bench = Object.fromEntries(
-  [
-    ...read('docs/research/p6-exit-bench-results.md').matchAll(
-      /^\| (\d+) \| (forge|github) \| (?:tuned|rerun) \| 3 \| ([\d.]+) \| [\d.]+ \| ([\d.]+) \| (\d+) \| (\d+) \| \d+ \| \d+ \|$/gm,
-    ),
-  ].map(([, n, arm, ttm, wall, ci, cached]) => [
-    `${arm}${n}`,
-    { ttm: +ttm, wall: +wall, ci: +ci, cached: +cached },
-  ]),
-);
+const saving = (forge, github) => ((github - forge) / github) * 100;
+const pct = value => `${Math.round(value)}%`;
+const share = value => `${(100 - value).toFixed(2)}%`;
+const median = sorted => {
+  const middle = (sorted.length - 1) / 2;
+  return (sorted[Math.floor(middle)] + sorted[Math.ceil(middle)]) / 2;
+};
 const close = read('docs/research/p7-close-bench-results.md');
+const arms = new Map(
+  [
+    ...close.matchAll(
+      /^\| (forge|github)-n10-r1-(a\d+)-\d+T\d+ \| .*? \| .*? \| .*? \| 10 \| ([\d.]+) \| ([\d.]+) \| (\d+) \| ([\d.]+) \| .*? \| Valid scored \|/gm,
+    ),
+  ].map(([, arm, attempt, ...metrics]) => [`${arm}/${attempt}`, metrics.map(Number)]),
+);
+const pool = ['a7', 'a9', 'a10', 'a11', 'a12', 'a13'];
+const exclusions = [['a13'], [], ['a10'], ['a10']];
+const pooled = poolMetric =>
+  pool
+    .filter(attempt => !exclusions[poolMetric].includes(attempt))
+    .map(attempt =>
+      saving(arms.get(`forge/${attempt}`)[poolMetric], arms.get(`github/${attempt}`)[poolMetric]),
+    )
+    .sort((a, b) => a - b);
 
-test('public homepage copy uses plain benchmark terms in page text, links and descriptions', () => {
-  const descriptionNames = ['description', 'og:description', 'twitter:description'];
-  const descriptions = [...copyMarkup.matchAll(/<meta\b((?:"[^"]*"|'[^']*'|[^'">])*)>/gi)].flatMap(
-    ([, tag]) => {
-      const attributes = new Map(
-        [...tag.matchAll(/([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>]+))/g)].map(
-          ([, name, doubleQuoted, singleQuoted, unquoted]) => [
-            name.toLowerCase(),
-            doubleQuoted ?? singleQuoted ?? unquoted,
-          ],
-        ),
-      );
-      const isDescription = ['name', 'property'].some(key =>
-        descriptionNames.includes(attributes.get(key)?.toLowerCase()),
-      );
-      return isDescription ? [attributes.get('content') ?? ''] : [];
-    },
-  );
+const descriptionNames = ['description', 'og:description', 'twitter:description'];
+const descriptions = [...copyMarkup.matchAll(/<meta\b((?:"[^"]*"|'[^']*'|[^'">])*)>/gi)].flatMap(
+  ([, tag]) => {
+    const attributes = new Map(
+      [...tag.matchAll(/([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>]+))/g)].map(
+        ([, name, doubleQuoted, singleQuoted, unquoted]) => [
+          name.toLowerCase(),
+          doubleQuoted ?? singleQuoted ?? unquoted,
+        ],
+      ),
+    );
+    const isDescription = ['name', 'property'].some(key =>
+      descriptionNames.includes(attributes.get(key)?.toLowerCase()),
+    );
+    return isDescription ? [attributes.get('content') ?? ''] : [];
+  },
+);
+const publicCopy = [
+  text,
+  ...descriptions,
+  ...[...copyMarkup.matchAll(/\b(?:alt|title|aria-label)="([^"]*)"/gi)].map(([, label]) => label),
+].map(copy => copy.replace(/&nbsp;|&#0*160;|&#x0*a0;/gi, ' '));
+
+test('public homepage copy uses plain terms for measured results', () => {
   const jargon = /\b(?:phase\s*\d+|p[67]|n\s*=\s*\d+|arms?)\b/gi;
-  const matches = [text, ...descriptions].flatMap(
-    copy => copy.replace(/&nbsp;|&#0*160;|&#x0*a0;/gi, ' ').match(jargon) ?? [],
+  assert.deepEqual(
+    publicCopy.flatMap(copy => copy.match(jargon) ?? []),
+    [],
   );
-  assert.deepEqual(matches, [], 'use dates and plain descriptions of the benchmark');
 });
 
-test('P7 headline medians and best paired savings agree with the published ledger', () => {
-  const arms = new Map(
-    [
-      ...close.matchAll(
-        /^\| (forge|github)-n10-r1-(a\d+)-\d+T\d+ \| .*? \| .*? \| .*? \| 10 \| ([\d.]+) \| ([\d.]+) \| (\d+) \| ([\d.]+) \| .*? \| Valid scored \|/gm,
-      ),
-    ].map(([, arm, attempt, ...metrics]) => [`${arm}/${attempt}`, metrics.map(Number)]),
+test('homepage text and descriptions leave calendar dates to the linked results', () => {
+  const month =
+    'Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?';
+  const day = '\\d{1,2}(?:st|nd|rd|th)?';
+  const dates = new RegExp(
+    `\\b(?:(?:19|20)\\d{2}|${day}[ .\\/-]+(?:${month})|(?:${month})[ .\\/-]+${day}|\\d{1,2}\\/\\d{1,2})\\b`,
+    'gi',
   );
-  const pool = ['a7', 'a9', 'a10', 'a11', 'a12', 'a13'];
-  const exclusions = [['a13'], [], ['a10'], ['a10']];
+  assert.deepEqual(
+    publicCopy.flatMap(copy => copy.match(dates) ?? []),
+    [],
+  );
+});
+
+test('headline and top bars agree with eligible paired ten-agent results', () => {
+  assert.match(close, /The a13 .* excludes that pair from wall time only\./);
+  assert.match(close, /The a10 .* excludes that pair from CI and cached input only\./);
   const names = ['Wall time', 'Median task time', 'CI minutes', 'Cached input tokens'];
   const rows = html.split('\n');
   const medians = names.map((name, metric) => {
-    const values = pool
-      .filter(attempt => !exclusions[metric].includes(attempt))
-      .map(attempt => {
-        const forge = arms.get(`forge/${attempt}`)[metric];
-        const github = arms.get(`github/${attempt}`)[metric];
-        return (1 - forge / github) * 100;
-      })
-      .sort((a, b) => a - b);
-    const middle = (values.length - 1) / 2;
-    const median = Math.round((values[Math.floor(middle)] + values[Math.ceil(middle)]) / 2);
-    const best = Math.round(values.at(-1));
-    const forgeShare = 100 - best;
+    const values = pooled(metric);
+    const best = values.at(-1);
+    const forgeShare = 100 - Math.round(best);
     const row = rows.find(line => line.includes(`<div class="nm">${name}<`));
-    assert.ok(row, `${name} has a benchmark row`);
+    assert.ok(row, `${name} has a results row`);
     assert.ok(row.includes(`<i class="f" style="--v:${forgeShare}%"></i><span>${forgeShare}%</span>`), name);
     assert.ok(
       row.includes(
-        `<div class="pct"><small>up to</small>${best}%<span class="sr"> lower</span><small>median ${median}%</small>`,
+        `<small>up to</small>${pct(best)}<span class="sr"> lower</span><small>median ${pct(median(values))}</small>`,
       ),
       name,
     );
-    return median;
+    return pct(median(values));
   });
-  const headline = `Ten agents reached main ${medians[0]}% sooner, on ${medians[2]}% fewer CI minutes.`;
+  const headline = `Ten agents reached main ${medians[0]} sooner, on ${medians[2]} fewer CI minutes.`;
   assert.ok(text.includes(headline));
-  assert.match(html, new RegExp(`<meta name="description" content="[^"]*${headline}`));
+  assert.ok(descriptions[0].includes(headline));
   assert.match(
     html,
-    /<p class="note">Paired runs of 10 tasks, 27–28 Nov 2026\. <a class="lk" href="\/docs\/research\/p7-close-bench-results\/">Full results<\/a><\/p>/,
-  );
-  assert.match(close, /a13 wall only/);
-  assert.match(close, /A10 contributes to wall and median task time only/);
-});
-
-test('the dated P6 race preserves the original timings', () => {
-  assert.equal(Object.keys(bench).length, 8, 'the report headline table has both arms at N=1, 3, 5 and 10');
-  const f = bench.forge10,
-    g = bench.github10;
-  assert.match(text, /Replay of a ten-agent run\. On 14–15 Nov 2026/);
-  for (const at of [f.ttm, f.wall, g.ttm, g.wall]) assert.ok(html.includes(`data-at="${at}"`), String(at));
-  for (const [s, x] of [
-    [f.ttm, ((f.ttm / g.wall) * 100).toFixed(2)],
-    [f.wall, ((f.wall / g.wall) * 100).toFixed(2)],
-    [g.ttm, ((g.ttm / g.wall) * 100).toFixed(2)],
-  ])
-    assert.ok(html.includes(`--x:${x}%" data-at="${s}"`), `${s} sits at ${x}%`);
-  for (const s of [f.ttm, f.wall, g.ttm, g.wall]) assert.ok(html.includes(`<b>${mmss(s)}</b>`), mmss(s));
-  assert.ok(
-    css.includes(`clip-path: inset(0 ${(100 - (f.wall / g.wall) * 100).toFixed(2)}% 0 0)`),
-    'the Forge run ends at its wall time',
+    /Paired runs of ten tasks\. <a class="lk" href="\/docs\/research\/p7-close-bench-results\/">Full results/,
   );
 });
 
-test('the dated P6 per-size charts and table match the report at 1, 3, 5 and 10 agents', () => {
-  assert.match(text, /By number of agents, 13–15 Nov 2026/);
-  const rows = [
-    ...html.matchAll(
-      /<tr><td>(\d+)<\/td><td>(\d+)<\/td><td>(\d+)<\/td><td>(\d+) s<\/td><td>(\d+) s<\/td><td>([\d.]+) M<\/td><td>([\d.]+) M<\/td><\/tr>/g,
-    ),
+test('the replay uses the eligible pair closest to the headline wall and CI medians', () => {
+  const metrics = [0, 2];
+  const distance = attempt =>
+    Math.hypot(
+      ...metrics.map(
+        metric =>
+          saving(arms.get(`forge/${attempt}`)[metric], arms.get(`github/${attempt}`)[metric]) -
+          median(pooled(metric)),
+      ),
+    );
+  const attempt = pool
+    .filter(attempt => metrics.every(metric => !exclusions[metric].includes(attempt)))
+    .sort((a, b) => distance(a) - distance(b))[0];
+  const [fAll, fMedian] = arms.get(`forge/${attempt}`);
+  const [gAll, gMedian] = arms.get(`github/${attempt}`);
+  const replay = html.split('<section class="sec" id="speed"')[1].split('</section>')[0];
+  assert.ok(replay.includes('The headline summarizes all eligible pairs.'));
+  for (const at of [fMedian, fAll, gMedian, gAll]) {
+    const x = at === gAll ? '100' : ((at / gAll) * 100).toFixed(2);
+    assert.ok(
+      replay.match(new RegExp(`--x:${x}%\" data-at=\"${at.toFixed(3)}\"`, 'g'))?.length === 2,
+      `${at} sits at ${x}% in marker and label`,
+    );
+    assert.ok(replay.includes(`<b>${mmss(at)}</b>`));
+  }
+  assert.ok(replay.includes(`clip-path:inset(0 ${saving(fAll, gAll).toFixed(2)}% 0 0)`));
+  assert.ok(replay.includes(`data-clock>${mmss(gAll)}</span>`));
+  const gap = Math.round(gAll - fAll);
+  assert.ok(replay.includes(`Forge finished ${Math.floor(gap / 60)} min ${gap % 60} s earlier.`));
+});
+
+test('animated replay takes its clock, progress and captions from the markup timings', () => {
+  const page = scripts[0][1];
+  const replay = page.slice(page.indexOf('const race ='), page.indexOf('/* The hero signature'));
+  const { outputText } = ts.transpileModule(replay, { compilerOptions: { target: ts.ScriptTarget.ESNext } });
+  const marks = [60, 180, 132, 240].map(at => ({
+    dataset: { at: String(at) },
+    matches: selector => selector === '.mk',
+    classList: { toggle() {} },
+  }));
+  const readout = {
+    innerHTML: 'Final readout',
+    append(_space, span) {
+      this.textContent += ' ' + span.textContent;
+    },
+  };
+  const forgeRun = { style: {} };
+  const clock = {};
+  const nodes = {
+    '[data-race]': {},
+    '[data-clock]': clock,
+    '[data-readout]': readout,
+    '[data-run="f"]': forgeRun,
+  };
+  let step;
+  runInNewContext(outputText, {
+    $: selector => nodes[selector],
+    $$: () => marks,
+    RM: { matches: false },
+    doc: { addEventListener() {}, createElement: () => ({}) },
+    awake: () => true,
+    stats: {},
+    performance: { now: () => 0 },
+    onLive: (_node, callback) => callback(true),
+    runFrames: frame => {
+      step = frame;
+    },
+  });
+  let now = 0;
+  const advance = frames => {
+    for (let i = 0; i < frames; i++) step((now += 50));
+  };
+  advance(10);
+  assert.equal(clock.textContent, '1:00');
+  assert.match(readout.textContent, /median is 1 min 12 s after Forge’s/);
+  advance(12);
+  assert.match(readout.textContent, /on main, 1 min 12 s after Forge’s/);
+  advance(18);
+  assert.equal(clock.textContent, '4:00');
+  assert.equal(forgeRun.style.clipPath, 'inset(0 25.00% 0 0)');
+});
+
+test('per-size marks, tooltips and table report the same min, median and max paired savings', () => {
+  const older = JSON.parse(read('docs/research/p6-exit-bench-results.json')).series.find(
+    s => s.name === 'tuned',
+  );
+  const sizes = [1, 3, 5, 10];
+  const metrics = [
+    ['CI minutes', 'ciBilledMinutes', 2],
+    ['Median task time', 'observedTimeToMainMedianSeconds', 1],
+    ['Cached input tokens', 'cachedInputTokens', 3],
   ];
+  const chartMarkup = [...html.matchAll(/<div class="chart"><h4>([^<]+)<\/h4>([\s\S]+?)<div class="xs">/g)];
   assert.deepEqual(
-    rows.map(r => r[1]),
-    ['1', '3', '5', '10'],
+    chartMarkup.map(([, name]) => name),
+    metrics.map(([name]) => name),
   );
-  for (const [, n, ciF, ciG, tF, tG, cF, cG] of rows) {
-    const f = bench[`forge${n}`],
-      g = bench[`github${n}`];
-    assert.deepEqual(
-      [+ciF, +ciG, +tF, +tG, cF, cG],
-      [
-        f.ci,
-        g.ci,
-        Math.round(f.ttm),
-        Math.round(g.ttm),
-        (f.cached / 1e6).toFixed(1),
-        (g.cached / 1e6).toFixed(1),
-      ],
-      `N=${n}`,
-    );
-    const agents = n === '1' ? '1 agent' : `${n} agents`;
-    assert.ok(html.includes(`${agents}: ${f.ci} min against ${g.ci}<`), `CI tip N=${n}`);
-    assert.ok(
-      html.includes(`${agents}: ${Math.round(f.ttm)} s against ${Math.round(g.ttm)} s<`),
-      `TTM tip N=${n}`,
-    );
-    assert.ok(
-      html.includes(`${agents}: ${(f.cached / 1e6).toFixed(1)} M against ${(g.cached / 1e6).toFixed(1)} M<`),
-      `cached tip N=${n}`,
-    );
-    for (const [forge, github] of [
-      [f.ci, g.ci],
-      [f.ttm, g.ttm],
-      [f.cached, g.cached],
-    ])
-      assert.match(
-        html,
-        new RegExp(`<span class="d">${pct(forge, github)}( lower)?</span><span class="tip">${agents}:`),
-        `${agents} ${pct(forge, github)}`,
+  const tableMarkup = html.split('<table data-figures>')[1].split('</table>')[0];
+  for (const size of sizes) {
+    const cells = older.cells.filter(c => c.kind === 'scored' && c.N === size);
+    const row = metrics.map(([name, key, metric], index) => {
+      const values =
+        size === 10
+          ? pooled(metric)
+          : [1, 2, 3]
+              .map(rep => {
+                const get = arm => cells.find(c => c.arm === arm && c.rep === rep).perCell[key];
+                return saving(get('forge'), get('github'));
+              })
+              .sort((a, b) => a - b);
+      const low = values[0],
+        middle = median(values),
+        high = values.at(-1);
+      const groups = chartMarkup[index][2].split('<div class="grp"').slice(1);
+      assert.equal(groups.length, sizes.length);
+      const group = groups[sizes.indexOf(size)];
+      const id = `${size} agents, ${name}`;
+      assert.ok(group.includes(`--best:${share(high)};--median:${share(middle)};--worst:${share(low)}`), id);
+      assert.ok(
+        group.includes(
+          `<small>up to</small>${pct(high)}<span class="sr"> lower</span><small>median ${pct(middle)}</small>`,
+        ),
+        id,
       );
+      assert.ok(
+        group.includes(
+          `${size} ${size === 1 ? 'agent' : 'agents'} · Forge savings<br>Min ${pct(low)} · Median ${pct(middle)} · Max ${pct(high)}`,
+        ),
+        id,
+      );
+      return `<td>${[low, middle, high].map(pct).join(' / ')}</td>`;
+    });
+    assert.ok(tableMarkup.includes(`<tr><th scope="row">${size}</th>${row.join('')}</tr>`));
   }
 });
 
@@ -315,7 +397,7 @@ test('the hero runs one loop that pauses off screen, in a hidden tab and under r
 });
 
 test('the page works without JavaScript: hidden-until-animated states apply only under .js', () => {
-  assert.match(html, /<span class="num" data-clock>19:42<\/span>/);
+  assert.match(html, /<span class="num" data-clock>\d+:\d{2}<\/span>/);
   assert.equal((html.match(/class="mk(?: last)? on"/g) ?? []).length, 4);
   for (const rule of css
     .split('\n')

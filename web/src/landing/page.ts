@@ -144,17 +144,20 @@ if (term) {
 
 /* The race: both runs to scale at 120 times speed, played once on first view, then it rests on its end state. */
 const race = $('[data-race]');
-if (race && !RM.matches) {
-  const F = { med: 359.633, all: 762.705 },
-    G = { med: 565.508, all: 1181.678 },
-    SPEED = 120;
+const marks = race ? $$('[data-at]', race).map(n => ({ n, at: Number(n.dataset.at) })) : [];
+const [fMedian, fFinish, gMedian, gFinish] = marks.filter(({ n }) => n.matches('.mk'));
+if (race && !RM.matches && fMedian && fFinish && gMedian && gFinish) {
+  const SPEED = 120;
   const clock = $('[data-clock]', race),
     rf = $('[data-run="f"]', race),
     rg = $('[data-run="g"]', race),
     out = $('[data-readout]', race),
     fs = $('[data-fs]', race),
     gs = $('[data-gs]', race);
-  const marks = $$('[data-at]', race).map(n => ({ n, at: Number(n.dataset.at) }));
+  const F = { med: fMedian.at, all: fFinish.at };
+  const G = { med: gMedian.at, all: gFinish.at };
+  const gap = Math.round(G.med - F.med);
+  const medianGap = `${Math.floor(gap / 60)} min ${gap % 60} s`;
   const finalReadout = out?.innerHTML ?? '';
   const mmss = (s: number) => {
     s = Math.round(s);
@@ -185,9 +188,14 @@ if (race && !RM.matches) {
     if (s >= G.all) say('end', '');
     else if (s >= F.all)
       say('c', 'Forge: all ten on main.', `The GitHub flow still has ${mmss(G.all - s)} to go.`);
-    else if (s >= G.med) say('b2', 'Half of the GitHub flow’s tasks are on main, 3 min 26 s after Forge’s.');
+    else if (s >= G.med)
+      say('b2', `Half of the GitHub flow’s tasks are on main, ${medianGap} after Forge’s.`);
     else if (s >= F.med)
-      say('b', 'Half of Forge’s tasks are on main.', 'The GitHub flow’s median is still 3 min 26 s away.');
+      say(
+        'b',
+        'Half of Forge’s tasks are on main.',
+        `The GitHub flow’s median is ${medianGap} after Forge’s.`,
+      );
     else say('a', 'Both runs start with the same ten tasks.');
   };
   let t = 0,
